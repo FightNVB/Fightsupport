@@ -60,7 +60,7 @@ const NVB_ORANGE = "#ff4d00";
 
 // ✅ UI toggles (handig tijdens finetunen)
 // Zet op false als je alleen de FIGHTSUPPORT-letters in de header wilt (meer focus op de VS).
-const SHOW_HEADER_LOGO = false;
+const SHOW_HEADER_LOGO = true;
 
 // ✅ Heldere (meer wit + NVB-oranje) 3D titel voor de header
 function fightSupportTitleText(): CSSProperties {
@@ -414,6 +414,7 @@ function BruteHeaderA({
   onBack?: () => void;
 }) {
   const logo = useLogoFallback([
+    "/branding/fightsupport/excel-logo.png",
     "/branding/fightsupport/logo-dark.png",
     "/branding/fightsupport/logo-dark.webp",
     "/branding/fightsupport/logo-dark.jpg",
@@ -494,89 +495,36 @@ function BruteHeaderA({
         {/* MIDDEN — Titel */}
         <div className="order-1 md:order-2 flex justify-center items-center">
           <div className="text-center">
-            <div
-              className={`${bebas.className} text-[48px] md:text-[60px] leading-none tracking-[0.22em]`}
-              style={{
-                // ✅ Duidelijker: meer wit + NVB-oranje highlight + 3D/emboss
-                ...fightSupportTitleText(),
-                filter:
-                  "drop-shadow(0 18px 28px rgba(0,0,0,0.75)) drop-shadow(0 0 14px rgba(255,255,255,0.35))",
-                textShadow:
-                  // top highlight
-                  "0 1px 0 rgba(255,255,255,0.30)," +
-                  // emboss rim
-                  "0 2px 0 rgba(0,0,0,0.72)," +
-                  "0 3px 0 rgba(0,0,0,0.78)," +
-                  // extra depth
-                  "0 8px 16px rgba(0,0,0,0.62)," +
-                  "0 16px 30px rgba(0,0,0,0.70)," +
-                  // subtle orange edge glow
-                  "0 0 18px rgba(255,255,255,0.45)",
-              }}
-            >
-              FIGHTSUPPORT
-            </div>
-
             {SHOW_HEADER_LOGO ? (
-              <div className="mt-2 flex justify-center">
-                {/* logo as SHIELD (no circular crop) */}
-                <div className="relative flex items-center justify-center" style={{ width: 92, height: 92 }}>
-                {/* metal backplate */}
-                <div
-                  className="absolute inset-0 rounded-[18px]"
-                  style={{
-                    background:
-                      "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.06) 35%, rgba(0,0,0,0.55) 100%)," +
-                      " linear-gradient(135deg, #8f949d 0%, #3a3d44 38%, #121318 100%)",
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    boxShadow:
-                      "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -12px 22px rgba(0,0,0,0.55), 0 12px 26px rgba(0,0,0,0.55)",
-                  }}
+              <div className="flex justify-center">
+                <Image
+                  src={typeof logo === "string" ? logo : (logo as any)?.src ?? "/branding/fightsupport/excel-logo.png"}
+                  alt="FightSupport"
+                  width={200}
+                  height={134}
+                  priority
+                  className="drop-shadow-[0_10px_20px_rgba(0,0,0,0.70)]"
+                  style={{ objectFit: "contain" }}
                 />
-                {/* inner rim */}
-                <div
-                  className="absolute inset-[6px] rounded-[14px]"
-                  style={{
-                    border: "1px solid rgba(0,0,0,0.55)",
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
-                    background:
-                      "radial-gradient(circle at 50% 18%, rgba(255,77,0,0.18), transparent 60%), linear-gradient(180deg, rgba(20,20,22,0.92), rgba(8,8,10,0.98))",
-                  }}
-                />
-                {/* tiny studs */}
-                {(["tl","tr","bl","br"] as const).map((p) => (
-                  <div
-                    key={p}
-                    className="pointer-events-none absolute"
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 999,
-                      background:
-                        "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.60), rgba(120,120,120,0.22) 45%, rgba(0,0,0,0.60) 100%)",
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22), 0 2px 6px rgba(0,0,0,0.45)",
-                      left: p.endsWith("l") ? 8 : "auto",
-                      right: p.endsWith("r") ? 8 : "auto",
-                      top: p.startsWith("t") ? 8 : "auto",
-                      bottom: p.startsWith("b") ? 8 : "auto",
-                    }}
-                  />
-                ))}
-                <div className="relative z-10">
-                  <Image
-                    // Next/Image: object src alleen toegestaan bij static import. useLogoFallback kan {src: string} teruggeven.
-                    src={typeof logo === "string" ? logo : (logo as any)?.src ?? "/branding/fightsupport/logo-dark.png"}
-                    alt="FightSupport"
-                    width={66}
-                    height={66}
-                    priority
-                    className="drop-shadow-[0_14px_18px_rgba(0,0,0,0.65)]"
-                  />
-                </div>
-                </div>
               </div>
             ) : (
-              <div className="mt-3" />
+              <div
+                className={`${bebas.className} text-[48px] md:text-[60px] leading-none tracking-[0.22em]`}
+                style={{
+                  ...fightSupportTitleText(),
+                  filter:
+                    "drop-shadow(0 18px 28px rgba(0,0,0,0.75)) drop-shadow(0 0 14px rgba(255,255,255,0.35))",
+                  textShadow:
+                    "0 1px 0 rgba(255,255,255,0.30)," +
+                    "0 2px 0 rgba(0,0,0,0.72)," +
+                    "0 3px 0 rgba(0,0,0,0.78)," +
+                    "0 8px 16px rgba(0,0,0,0.62)," +
+                    "0 16px 30px rgba(0,0,0,0.70)," +
+                    "0 0 18px rgba(255,255,255,0.45)",
+                }}
+              >
+                FIGHTSUPPORT
+              </div>
             )}
 
             <div className="mt-2 text-[11px] tracking-[0.35em] text-white/60 font-semibold">
@@ -927,6 +875,7 @@ function displayResultaat(row: ControleResultaatRow): {
   }
 
   const r = normResultaat(row.resultaat);
+  if (r === "verbod") return { label: "VERBOD", tone: "err" };
   if (r === "afgekeurd") return { label: "AFKEUR", tone: "err" };
   if (r === "dispensatie") return { label: "DISPENSATIE", tone: "disp" };
   if (r === "actie") return { label: "ACTIE", tone: "warn" };
@@ -1538,8 +1487,26 @@ export default function PartijDetailPage() {
     const roodDemo = toInt(ctx?.rood_demo_totaal) ?? countDemo(uitslagenRood);
     const blauwDemo = toInt(ctx?.blauw_demo_totaal) ?? countDemo(uitslagenBlauw);
 
-    const roodEffectief = roodPartijen != null ? roodPartijen - (roodDemo ?? 0) + Math.floor((roodDemo ?? 0) / 3) : null;
-    const blauwEffectief = blauwPartijen != null ? blauwPartijen - (blauwDemo ?? 0) + Math.floor((blauwDemo ?? 0) / 3) : null;
+    // Jeugd = onder 18 jaar (leeftijd bij event) of klasse bevat "jeugd"
+    const klasse = String(ctx?.klasse_mm ?? ctx?.klasse ?? "").toLowerCase();
+    const roodLeeftijdJaar = eventDate && rBirth ? calcAgeYearsOnDate(eventDate, rBirth) : null;
+    const blauwLeeftijdJaar = eventDate && bBirth ? calcAgeYearsOnDate(eventDate, bBirth) : null;
+    const isJeugd =
+      klasse.includes("jeugd") ||
+      (roodLeeftijdJaar != null && roodLeeftijdJaar < 18) ||
+      (blauwLeeftijdJaar != null && blauwLeeftijdJaar < 18);
+
+    // Demo-omrekening (3=1) alleen voor Jeugd; volwassenen: gewone telstand
+    const roodEffectief = roodPartijen != null
+      ? isJeugd
+        ? roodPartijen - (roodDemo ?? 0) + Math.floor((roodDemo ?? 0) / 3)
+        : roodPartijen
+      : null;
+    const blauwEffectief = blauwPartijen != null
+      ? isJeugd
+        ? blauwPartijen - (blauwDemo ?? 0) + Math.floor((blauwDemo ?? 0) / 3)
+        : blauwPartijen
+      : null;
 
     const partijenVerschil = roodEffectief != null && blauwEffectief != null ? Math.abs(roodEffectief - blauwEffectief) : null;
 
