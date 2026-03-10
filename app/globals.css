@@ -1,0 +1,415 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === NVB BASISVARIABELEN === */
+:root {
+  /* Brand kleuren */
+  --brand-orange: #ff4d00; /* NVB Oranje */
+  --brand-bg: #000000;
+  --brand-card: #111111;
+
+  /* Metaal / zilver tones (bewust géén puur wit) */
+  --silver-90: #d0d0d0;
+  --silver-70: #b5b5b5;
+  --silver-55: #9b9b9b;
+  --silver-40: #7a7a7a;
+  --silver-25: #5e5e5e;
+
+  /* Legacy / app variabelen */
+  --nvb-orange: var(--brand-orange);
+  --nvb-dark: #111;
+  --nvb-radius: 12px;
+  --nvb-font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* === BASIS OPMAAK === */
+
+/* =========================================================
+   Fightsupport achtergrond + frame helpers
+   ========================================================= */
+
+.fs-appbg {
+  background:
+    radial-gradient(1200px 520px at 50% 0%, rgba(255,77,0,0.10) 0%, rgba(0,0,0,0) 55%),
+    radial-gradient(900px 420px at 10% 20%, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0) 60%),
+    linear-gradient(180deg, #060606 0%, #000 100%);
+}
+
+/* Strak & stoer: dubbel frame, donker zilver, brushed-metal */
+.fs-shell,
+.fs-wrapper {
+  position: relative;
+  border-radius: 26px;
+  padding: 24px;
+  background: #0b0b0b;
+  overflow: hidden;
+}
+
+/* Buitenste dikke zilveren rand (donker metaal, geen wit) */
+.fs-shell::before,
+.fs-wrapper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  padding: 8px; /* dikte rand */
+
+  /* brushed metal: fijne horizontale 'brush' + metaal gradient */
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255,255,255,0.06) 0px,
+      rgba(255,255,255,0.02) 1px,
+      rgba(0,0,0,0.04) 2px
+    ),
+    linear-gradient(
+      180deg,
+      var(--silver-70) 0%,
+      var(--silver-40) 22%,
+      var(--silver-25) 38%,
+      var(--silver-55) 50%,
+      var(--silver-25) 62%,
+      var(--silver-40) 80%,
+      var(--silver-70) 100%
+    );
+  background-blend-mode: overlay;
+
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+
+  pointer-events: none;
+}
+
+/* Binnenste rand + minimale reflectie (boven NIET overdreven) */
+.fs-shell::after,
+.fs-wrapper::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: 20px;
+  pointer-events: none;
+
+  border: 1px solid rgba(185,185,185,0.28);
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.10),
+    inset 0 -2px 3px rgba(0,0,0,0.70);
+}
+
+html,
+body,
+#__next {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--nvb-dark);
+  color: #fff;
+  font-family: var(--nvb-font);
+}
+
+/* === LINKS === */
+a {
+  color: #fff;
+  text-decoration: none;
+  transition: color 0.25s ease;
+}
+a:hover {
+  color: var(--nvb-orange);
+  text-decoration: underline;
+}
+a:visited {
+  color: #ccc;
+}
+
+/* === ANIMATIES === */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.8s ease-out both;
+}
+
+/* === LOGIN & DASHBOARD BACKGROUND === */
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(
+      ellipse at center,
+      rgba(255, 77, 0, 0.14) 0%,
+      rgba(0, 0, 0, 1) 70%
+    ),
+    #000;
+}
+
+/* =========================================================
+   🟧 DONKERE KAARTEN (Dashboards, Menu's, etc.)
+   ========================================================= */
+.card {
+  width: 380px;
+  min-height: 520px;
+  background: var(--nvb-dark);
+  border: 1px solid var(--nvb-orange);
+  border-radius: var(--nvb-radius);
+  box-shadow:
+    0 0 90px 25px rgba(255, 77, 0, 0.18),
+    0 0 22px 8px rgba(255, 77, 0, 0.22),
+    inset 0 0 15px 2px rgba(255, 77, 0, 0.15);
+  padding: 40px 28px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  transition: box-shadow 0.4s ease, transform 0.2s ease;
+}
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 110px 30px rgba(255, 77, 0, 0.22),
+    0 0 26px 10px rgba(255, 77, 0, 0.26),
+    inset 0 0 18px 3px rgba(255, 77, 0, 0.18);
+}
+.card-logo {
+  width: 180px;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 0 16px rgba(255, 77, 0, 0.45));
+}
+.card-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* =========================================================
+   ⚪ LICHTE KAARTEN (Invoer, Beheer, Controle)
+   ========================================================= */
+.light-section {
+  min-height: 100vh;
+  background-color: #000; /* zwarte achtergrond */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.light-card {
+  width: 420px;
+  min-height: 520px;
+  background: #fff;
+  border: 1px solid var(--nvb-orange);
+  border-radius: var(--nvb-radius);
+  box-shadow:
+    0 0 50px rgba(255, 77, 0, 0.25),
+    inset 0 0 12px rgba(255, 77, 0, 0.08);
+  padding: 40px 28px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  transition: box-shadow 0.4s ease, transform 0.2s ease;
+  color: #000;
+}
+.light-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 80px rgba(255, 77, 0, 0.35),
+    inset 0 0 14px rgba(255, 77, 0, 0.1);
+}
+.light-card h1,
+.light-card h2 {
+  color: var(--nvb-orange);
+  font-weight: 700;
+  text-align: center;
+}
+
+/* =========================================================
+   🟧 KNOPPEN (Dashboardstijl)
+   ========================================================= */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 46px;
+  border-radius: 4px; /* rechte hoeken */
+  border: 1px solid var(--nvb-orange);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  margin-top: 10px;
+  text-decoration: none;
+}
+.btn:active {
+  transform: translateY(0.5px);
+}
+
+/* Oranje knoppen met witte tekst */
+.btn-primary {
+  background: var(--nvb-orange);
+  color: #fff;
+  box-shadow: 0 0 10px 3px rgba(255, 77, 0, 0.25);
+}
+.btn-primary:hover {
+  background: #ff5c1a;
+  color: #fff;
+  box-shadow: 0 0 16px 5px rgba(255, 77, 0, 0.33);
+  transform: translateY(-1px);
+}
+
+/* Outline variant (terugknop) */
+.btn-outline {
+  background: transparent;
+  color: #fff;
+  border: 1px solid var(--nvb-orange);
+}
+.btn-outline:hover {
+  background: var(--nvb-orange);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(255, 77, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+/* SUPERADMIN KNOP */
+.btn-superadmin {
+  background: #000 !important;
+  color: var(--nvb-orange) !important;
+  border: 2px solid var(--nvb-orange) !important;
+  border-radius: 4px;
+  font-weight: 700;
+  padding: 10px 18px;
+  transition: all 0.25s ease;
+  width: 100%;
+  text-align: center;
+  box-shadow: inset 0 0 8px rgba(255, 77, 0, 0.15);
+  margin-top: 14px;
+}
+.btn-superadmin:hover {
+  background: var(--nvb-orange) !important;
+  color: #fff !important;
+  box-shadow: 0 0 15px rgba(255, 77, 0, 0.5);
+}
+
+/* =========================================================
+   🟧 INVOERVELDEN
+   ========================================================= */
+input,
+select,
+textarea {
+  border: 1px solid #000;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 15px;
+  width: 100%;
+  color: #000;
+  background: #fff;
+  transition: all 0.3s ease;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow: 0 0 10px 2px rgba(255, 77, 0, 0.35);
+  border-color: var(--nvb-orange);
+}
+
+/* =========================================================
+   🟧 TABELLEN (zoals Beheer Matchmaking)
+   ========================================================= */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 15px;
+}
+th,
+td {
+  border: 1px solid #ddd;
+  padding: 10px 12px;
+  text-align: left;
+}
+th {
+  background-color: var(--nvb-orange);
+  color: #fff;
+  font-weight: bold;
+}
+tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+/* =========================================================
+   🟧 FOOTER / TEKSTKLEUREN
+   ========================================================= */
+footer,
+.small-text {
+  font-size: 13px;
+  color: #aaa;
+  margin-top: 10px;
+  text-align: center;
+}
+/* === UNIVERSAL NVB TABLE STYLE === */
+
+.nvb-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+  font-size: 15px;
+}
+
+/* Header */
+.nvb-table thead {
+  background: var(--brand-orange);
+  color: white;
+  text-align: left;
+}
+
+.nvb-table thead th {
+  padding: 10px 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* Rijen */
+.nvb-table tbody tr:nth-child(odd) {
+  background: #111; /* Donker */
+  color: white;
+}
+
+.nvb-table tbody tr:nth-child(even) {
+  background: #ffffff; /* Licht */
+  color: #000000;       /* ✔ zwarte tekst */
+}
+
+/* Cellen spacing */
+.nvb-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 77, 0, 0.25);
+}
+
+/* Hover effect */
+.nvb-table tbody tr:hover {
+  background: rgba(255, 77, 0, 0.15);
+  transition: 0.2s ease-in-out;
+}
+
+
+/* =========================================================
+   Kleine NVB-oranje accenten (subtiel, strak)
+   ========================================================= */
+.fs-accent-title {
+  color: rgba(255, 77, 0, 0.92); /* NVB oranje, net iets gedempt */
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}

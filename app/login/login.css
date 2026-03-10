@@ -1,0 +1,76 @@
+/* --- UNIVERSELE LOGIN LAYOUT --- */
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #000;
+}
+
+/* DONKER KAARTJE */
+.login-card {
+  width: 420px;
+  padding: 32px;
+  border-radius: 16px;
+  background: #111;
+  border: 1px solid var(--brand-orange);
+  box-shadow: 
+    0 0 35px rgba(253,120,3,0.35),
+    0 0 60px rgba(253,120,3,0.25),
+    inset 0 0 12px rgba(253,120,3,0.15);
+  text-align: center;
+}
+
+/* VELDEN */
+.login-field {
+  width: 100%;
+  padding: 12px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #fff;
+  margin-bottom: 14px;
+}
+
+/* PRIMAIRE ORANJE KNOP */
+.btn-primary {
+  width: 100%;
+  background: var(--brand-orange);
+  padding: 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  color: #fff;
+  margin-top: 8px;
+  transition: 0.2s;
+}
+
+.btn-primary:hover {
+  background: #ff5e17;
+}
+
+/* SECONDARY / OUTLINE buttons */
+.btn-outline {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  color: var(--brand-orange);
+  border: 1px solid var(--brand-orange);
+  border-radius: 6px;
+  background: transparent;
+  transition: 0.2s;
+}
+
+.btn-outline:hover {
+  background: rgba(253,120,3,0.1);
+}
+
+/* Extra kleine links */
+.login-link {
+  display: block;
+  margin-top: 12px;
+  color: var(--brand-orange);
+  font-size: 0.9rem;
+  text-decoration: underline;
+  cursor: pointer;
+}

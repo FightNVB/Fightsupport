@@ -1,0 +1,357 @@
+// scrapers/sportscholen/scraper_sportscholen.js
+
+import { loginFightPassport } from "../utils/loginFightPassport.js";
+import supabase from "../utils/supabaseClient.js";
+import fs from "fs";
+import path from "path";
+import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+//////////////////////////////////////////////////////////////
+// Helpers
+//////////////////////////////////////////////////////////////
+function parseDate(raw) {
+  if (!raw) return null;
+
+  // Format DD-MM-YYYY
+  if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) {
+    const [dd, mm, yyyy] = raw.split("-");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  // Format YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  // Excel date number
+  if (!isNaN(raw)) {
+    const d = XLSX.SSF.parse_date_code(raw);
+    if (d) {
+      const mm = String(d.m).padStart(2, "0");
+      const dd = String(d.d).padStart(2, "0");
+      return `${d.y}-${mm}-${dd}`;
+    }
+  }
+
+  return null;
+}
+
+function detectColumn(columns, possibleNames) {
+  return columns.find((col) =>
+    possibleNames.some((p) => col.toLowerCase().includes(p))
+  );
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function listExcelFiles(downloadDir) {
+  return fs
+    .readdirSync(downloadDir)
+    .filter((f) => {
+      const low = f.toLowerCase();
+      return low.endsWith(".xlsx") || low.endsWith(".xls");
+    })
+    .map((f) => path.join(downloadDir, f));
+}
+
+async function waitForNewExcel(downloadDir, timeoutMs = 60000) {
+  const start = Date.now();
+  const before = new Set(listExcelFiles(downloadDir));
+
+  while (Date.now() - start < timeoutMs) {
+    const now = listExcelFiles(downloadDir);
+
+    // nieuw bestand = niet in before
+    const newly = now.find((p) => !before.has(p));
+    if (newly) {
+      // wacht tot file “stabiel” is (niet meer groeit)
+      let lastSize = -1;
+      let stable = 0;
+
+      for (let i = 0; i < 80; i++) {
+        if (!fs.existsSync(newly)) break;
+        const s = fs.statSync(newly).size;
+
+        if (s > 0 && s === lastSize) {
+          stable++;
+          if (stable >= 3) return newly;
+        } else {
+          stable = 0;
+          lastSize = s;
+        }
+        await sleep(250);
+      }
+
+      return newly;
+    }
+
+    await sleep(300);
+  }
+
+  // debug
+  const after = listExcelFiles(downloadDir);
+  throw new Error(
+    `Geen nieuwe Excel gevonden in ${downloadDir} binnen ${Math.round(
+      timeoutMs / 1000
+    )}s. After=${JSON.stringify(after)}`
+  );
+}
+
+//////////////////////////////////////////////////////////////
+// 1. FightPassport navigatie
+//////////////////////////////////////////////////////////////
+async function waitForDashboard(page) {
+  // jouw originele manier (werkt meestal)
+  for (let i = 0; i < 15; i++) {
+    const ok = await page.evaluate(() => !!document.querySelector(".tileHeader"));
+    if (ok) return true;
+    await page.waitForTimeout(500);
+  }
+
+  // fallback: titles bestaan (jij ziet ze ook in debug)
+  for (let i = 0; i < 20; i++) {
+    const ok = await page.evaluate(() => !!document.querySelector('[title="SPORTSCHOLEN"]'));
+    if (ok) return true;
+    await page.waitForTimeout(500);
+  }
+
+  throw new Error("Dashboard niet gevonden");
+}
+
+async function clickSportscholenTile(page) {
+  console.log("🔍 Tile 'SPORTSCHOLEN' zoeken…");
+
+  // 1) Eerst jouw originele aanpak
+  const clickedOld = await page.evaluate(() => {
+    const tiles = [...document.querySelectorAll(".tileHeader")];
+    const tile = tiles.find((t) => (t.innerText || "").trim().toUpperCase() === "SPORTSCHOLEN");
+    if (tile) {
+      tile.closest(".tile")?.click();
+      return true;
+    }
+    return false;
+  });
+
+  if (clickedOld) {
+    await page.waitForTimeout(800);
+    return;
+  }
+
+  // 2) Fallback: click op title="SPORTSCHOLEN" (jij ziet dit letterlijk in je titles list)
+  const clickedTitle = await page.evaluate(() => {
+    const el =
+      document.querySelector('[title="SPORTSCHOLEN"]') ||
+      document.querySelector('div[title="SPORTSCHOLEN"]') ||
+      document.querySelector('a[title="SPORTSCHOLEN"]') ||
+      document.querySelector('button[title="SPORTSCHOLEN"]');
+
+    if (el) {
+      (el).click();
+      return true;
+    }
+    return false;
+  });
+
+  if (!clickedTitle) {
+    const titles = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("div[title],a[title],button[title]"))
+        .map((x) => x.getAttribute("title"))
+        .filter(Boolean)
+        .slice(0, 80)
+    );
+    throw new Error("SPORTSCHOLEN tile niet gevonden. titles=" + JSON.stringify(titles));
+  }
+
+  await page.waitForTimeout(800);
+}
+
+async function downloadExcel(page, browser) {
+  console.log("📥 Excel downloaden…");
+
+  // ✅ precies zoals je origineel: vaste map
+  const downloadDir = path.resolve(__dirname, "downloads");
+  if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
+
+  // ✅ precies zoals je origineel: oude excel opruimen
+  const existing = fs.readdirSync(downloadDir);
+  for (const f of existing) {
+    if (f.toLowerCase().endsWith(".xlsx") || f.toLowerCase().endsWith(".xls")) {
+      try {
+        fs.unlinkSync(path.join(downloadDir, f));
+      } catch {}
+    }
+  }
+
+  // ✅ download behavior zetten (2 lagen)
+  // 1) Page.setDownloadBehavior (jouw origineel)
+  try {
+    const client = await page.target().createCDPSession();
+    await client.send("Page.setDownloadBehavior", {
+      behavior: "allow",
+      downloadPath: downloadDir,
+    });
+  } catch (e) {
+    console.log("⚠️ Page.setDownloadBehavior faalde:", e?.message ?? e);
+  }
+
+  // 2) Browser.setDownloadBehavior (extra zekerheid)
+  try {
+    const bClient = await browser.target().createCDPSession();
+    await bClient.send("Browser.setDownloadBehavior", {
+      behavior: "allow",
+      downloadPath: downloadDir,
+      eventsEnabled: true,
+    });
+  } catch (e) {
+    // niet elke Chromium build ondersteunt dit; geen probleem
+  }
+
+  // ✅ selectors: eerst jouw originele IMG (exact), daarna jouw echte DIV
+  const excelSelImg = 'img[title="download als excel"]';
+  const excelSelDiv = 'div[title="download als excel"]';
+
+  // wachten tot view klaar is (knop verschijnt)
+  // probeer img, anders div
+  const hasImg = await page.$(excelSelImg);
+  const hasDiv = await page.$(excelSelDiv);
+
+  if (!hasImg && !hasDiv) {
+    // wacht op één van beide
+    try {
+      await page.waitForSelector(excelSelImg, { timeout: 8000 });
+    } catch {
+      await page.waitForSelector(excelSelDiv, { timeout: 25000 });
+    }
+  }
+
+  // klik
+  const btnImg = await page.$(excelSelImg);
+  if (btnImg) {
+    await page.click(excelSelImg);
+  } else {
+    await page.click(excelSelDiv);
+  }
+
+  // ✅ wacht op nieuwe excel (geen vaste 6s)
+  const file = await waitForNewExcel(downloadDir, 60000);
+  return file;
+}
+
+//////////////////////////////////////////////////////////////
+// 2. Excel-parser — headers op rij 5, data vanaf rij 6
+//////////////////////////////////////////////////////////////
+async function parseExcel(filePath) {
+  console.log("📊 Excel verwerken…", filePath);
+
+  // ✅ Vervangt XLSX.readFile + sheet_to_json
+  // Geeft array-of-arrays terug, net als header:1
+  const aoaRaw = await readXlsxToRows(filePath, { sheetIndex: 0 });
+
+  // defval: null gedrag nadoen: lege strings -> null
+  const aoa = (aoaRaw || []).map((row) =>
+    (row || []).map((v) => {
+      const s = typeof v === "string" ? v.trim() : v;
+      return s === "" ? null : s;
+    })
+  );
+
+  if (!aoa || aoa.length < 6) {
+    console.log("❌ Excel bevat te weinig rijen");
+    return [];
+  }
+
+  const headerRowIndex = 4; // rij 5
+  const dataStartIndex = 5; // rij 6
+
+  const headers = (aoa[headerRowIndex] || []).map((h) => String(h || "").trim());
+  console.log("🔍 Headers (rij 5):", headers);
+
+  const dataRows = aoa.slice(dataStartIndex);
+  if (!dataRows.length) {
+    console.log("❌ Geen data rijen gevonden");
+    return [];
+  }
+
+  const colNaam = detectColumn(headers, ["naam"]);
+  const colPlaats = detectColumn(headers, ["plaats"]);
+  const colLand = detectColumn(headers, ["land"]);
+  const colStart = detectColumn(headers, ["start"]);
+  const colEinde = detectColumn(headers, ["einde"]);
+  const colKey = detectColumn(headers, ["key"]);
+
+  if (!colNaam || !colKey) {
+    console.log("❌ Vereiste kolommen ontbreken (Naam / Key)");
+    return [];
+  }
+
+  const idx = (col) => headers.indexOf(col);
+
+  const cleaned = dataRows
+    .filter((row) => row && row[idx(colKey)] != null)
+    .map((row) => ({
+      sportschool_id: Number(row[idx(colKey)]),
+      naam: row[idx(colNaam)] || null,
+      plaats: colPlaats ? row[idx(colPlaats)] || null : null,
+      land: colLand ? row[idx(colLand)] || null : null,
+      keurmerk_start: colStart ? parseDate(row[idx(colStart)]) : null,
+      keurmerk_einde: colEinde ? parseDate(row[idx(colEinde)]) : null,
+      updated_at: new Date().toISOString(),
+    }));
+
+  console.log(`📌 ${cleaned.length} sportscholen gevonden`);
+  return cleaned;
+}
+
+//////////////////////////////////////////////////////////////
+// 3. Save to Supabase → juiste tabel
+//////////////////////////////////////////////////////////////
+async function saveToSupabase(data) {
+  const { error } = await supabase.from("sportscholen").upsert(data, {
+    onConflict: "sportschool_id",
+  });
+
+  if (error) {
+    console.log("❌ Supabase fout:", error.message);
+    return false;
+  }
+
+  console.log("✅ Sportscholen opgeslagen in Supabase");
+  return true;
+}
+
+//////////////////////////////////////////////////////////////
+// 4. MAIN SCRAPER
+//////////////////////////////////////////////////////////////
+export async function scraperSportscholen() {
+  console.log("🏁 START: Sportscholen-scraper");
+
+  const { browser, page } = await loginFightPassport();
+
+  try {
+    await waitForDashboard(page);
+    await clickSportscholenTile(page);
+
+    const file = await downloadExcel(page, browser);
+    const parsed = await parseExcel(file);
+
+    await saveToSupabase(parsed);
+
+    console.log("🎉 Sportscholen scrape compleet!");
+  } catch (err) {
+    console.log("❌ Fout:", err.message);
+    // laat hem falen zodat je API route 500 kan geven
+    throw err;
+  } finally {
+    await browser.close();
+  }
+}
+
+if (process.argv[2] === "run") {
+  scraperSportscholen()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
+}

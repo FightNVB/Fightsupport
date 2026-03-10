@@ -1,0 +1,12 @@
+# Supabase config - minimal version for Edge Function serving
+
+[functions.fetch_fightpassport]
+verify_jwt = false
+
+
+
+
+
+
+
+

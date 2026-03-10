@@ -1,0 +1,24 @@
+{
+  "name": "matchcontrol_scrapers",
+  "version": "1.0.0",
+  "description": "MatchControl scrapers voor FightPassport en keurmerkcontrole",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test:login": "node test_login.js",
+    "scrape:nvb": "node scraper_nvb_official.js",
+    "scrape:keurmerk": "node scraper_keurmerk.js",
+    "scrape:sportschool": "node scraper_sportschool.js",
+    "scrape:matchmaker": "node scraper_matchmaker.js",
+    "test:full_fighter": "node test_full_fighter.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "fastest-levenshtein": "^1.0.16",
+    "puppeteer": "19.11.1",
+    "xlsx": "^0.18.5"
+  }
+}
