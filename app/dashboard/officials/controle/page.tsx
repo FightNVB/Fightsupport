@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -49,6 +50,11 @@ function formatDate(v: string | null) {
   return new Date(v).toLocaleDateString("nl-NL");
 }
 
+function isSuperadminRole(role: any) {
+  const r = String(role ?? "").trim().toLowerCase();
+  return r === "superadmin" || r === "super admin" || r === "super_admin";
+}
+
 function Small({
   children,
   origin = "left center",
@@ -69,6 +75,8 @@ function Small({
 }
 
 export default function ControleOverzichtPage() {
+  const { user } = useAuth();
+
   const [rows, setRows] = useState<UploadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -83,17 +91,50 @@ export default function ControleOverzichtPage() {
   const [editBondteam, setEditBondteam] = useState("");
   const [saveMsg, setSaveMsg] = useState<string>("");
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [profileRole, setProfileRole] = useState<string | null>(null);
+  const [profileBondteam, setProfileBondteam] = useState<string | null>(null);
 
-  async function load() {
+  useEffect(() => {
+    boot();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  async function boot() {
+    setLoading(true);
+    setRows([]);
+    setProfileRole(null);
+    setProfileBondteam(null);
+
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+
+    const { data: prof, error: profErr } = await supabase
+      .from("user_profiles")
+      .select("role, bondteam")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profErr) console.warn("profile load error:", profErr);
+
+    const role = (prof as any)?.role ?? null;
+    const bondteam = String((prof as any)?.bondteam ?? "").trim() || null;
+    setProfileRole(role);
+    setProfileBondteam(bondteam);
+
+    await load(role, bondteam);
+  }
+
+  async function load(roleMaybe?: any, bondteamMaybe?: any) {
     setLoading(true);
     setSaveMsg("");
     setSportsMsg("");
 
-    const { data: uploads, error: uploadError } = await supabase
+    const isSuper = isSuperadminRole(roleMaybe ?? profileRole);
+    const bondteam = bondteamMaybe !== undefined ? bondteamMaybe : profileBondteam;
+
+    let uploadsQuery = supabase
       .from("matchmaking_uploads")
       .select(
         `
@@ -110,6 +151,13 @@ export default function ControleOverzichtPage() {
       `
       )
       .order("uploaded_at", { ascending: false });
+
+    // Officials only see their bondteam's matchmakings; superadmins see all
+    if (!isSuper && bondteam) {
+      uploadsQuery = uploadsQuery.eq("bondteam", bondteam);
+    }
+
+    const { data: uploads, error: uploadError } = await uploadsQuery;
 
     if (uploadError) {
       console.error("Fout bij laden uploads:", uploadError);
@@ -192,7 +240,7 @@ export default function ControleOverzichtPage() {
         return;
       }
 
-      await load();
+      await load(profileRole, profileBondteam);
     } finally {
       setBusyId(null);
       setIsBusy(false);
@@ -221,7 +269,7 @@ export default function ControleOverzichtPage() {
         return;
       }
 
-      await load();
+      await load(profileRole, profileBondteam);
     } finally {
       setBusyId(null);
     }
@@ -266,7 +314,7 @@ export default function ControleOverzichtPage() {
       }
 
       setSaveMsg("✅ Opgeslagen.");
-      await load();
+      await load(profileRole, profileBondteam);
       closeEdit();
     } catch (e) {
       console.error(e);
