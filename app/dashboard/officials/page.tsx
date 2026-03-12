@@ -158,9 +158,9 @@ export default function OfficialsDashboardPage() {
                   }
                 />
                 <NvbDarkButton
-                  label="Weeglijsten"
+                  label="Weegstation"
                   onClick={() =>
-                    router.push("/dashboard/officials/weeglijst")
+                    router.push("/dashboard/officials/weegstation")
                   }
                 />
                 <NvbDarkButton
