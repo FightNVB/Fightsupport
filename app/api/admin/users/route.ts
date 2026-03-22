@@ -14,6 +14,24 @@ function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+function getBaseUrl(req: Request) {
+  const envUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.SITE_URL;
+
+  if (envUrl) return envUrl.replace(/\/$/, "");
+
+  const url = new URL(req.url);
+  const proto =
+    req.headers.get("x-forwarded-proto") ||
+    (url.protocol ? url.protocol.replace(":", "") : "https");
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+
+  if (host) return `${proto}://${host}`.replace(/\/$/, "");
+  return url.origin.replace(/\/$/, "");
+}
+
 export async function GET(req: Request) {
   await requireAdmin(req);
 
@@ -71,8 +89,17 @@ export async function POST(req: Request) {
     if (!email) return jsonError("Email is verplicht", 400);
     if (!role) return jsonError("Role is verplicht", 400);
 
+    const redirectTo = `${getBaseUrl(req)}/login/set`;
+
     const { data: invite, error: inviteErr } =
-      await supabaseAdmin.auth.admin.inviteUserByEmail(email);
+      await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        redirectTo,
+        data: {
+          full_name: full_name || null,
+          role,
+          bondteam,
+        },
+      });
 
     if (inviteErr) return jsonError(inviteErr.message, 500);
 
@@ -96,7 +123,12 @@ export async function POST(req: Request) {
 
     if (upErr) return jsonError(upErr.message, 500);
 
-    return NextResponse.json({ user: up, invited: true });
+    return NextResponse.json({
+      user: up,
+      invited: true,
+      redirectTo,
+      message: "Uitnodiging verzonden.",
+    });
   } catch (e: any) {
     if (e instanceof Response) return e;
     return jsonError(e?.message ?? "Server error", 500);
@@ -111,11 +143,12 @@ export async function DELETE(req: Request) {
     const id = String(body?.id ?? "").trim();
     if (!id) return jsonError("Missing id", 400);
 
-    // 1) delete profile
-    const { error: pErr } = await supabaseAdmin.from("user_profiles").delete().eq("id", id);
+    const { error: pErr } = await supabaseAdmin
+      .from("user_profiles")
+      .delete()
+      .eq("id", id);
     if (pErr) return jsonError(pErr.message, 500);
 
-    // 2) delete auth user
     const { error: aErr } = await supabaseAdmin.auth.admin.deleteUser(id);
     if (aErr) return jsonError(aErr.message, 500);
 

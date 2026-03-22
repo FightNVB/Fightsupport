@@ -19,60 +19,6 @@ const inter = Inter({
 
 const NVB_ORANGE = "#ff4d00";
 
-function metalText(): CSSProperties {
-  return {
-    background: "linear-gradient(180deg, #ffffff 0%, #d6d6d6 45%, #9a9a9a 100%)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-  };
-}
-
-// ✅ Match met de "heilige" detail pagina: dikke metalen frame + lichte (silver) binnenplaat
-function metalFrameStyle(accent: "none" | "orange" = "orange"): CSSProperties {
-  const accentGlow =
-    accent === "orange"
-      ? "radial-gradient(640px 320px at 50% 0%, rgba(255,77,0,0.18), transparent 62%)"
-      : "radial-gradient(640px 320px at 50% 0%, rgba(255,255,255,0.06), transparent 62%)";
-
-  const brushed =
-    "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, rgba(255,255,255,0.02) 1px, rgba(255,255,255,0.02) 4px)";
-
-  const sheen =
-    "linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 24%, rgba(255,255,255,0) 48%, rgba(255,255,255,0.10) 70%, rgba(255,255,255,0) 100%)";
-
-  return {
-    border: "5px solid rgba(10,10,12,0.92)",
-    borderRadius: 22,
-    background: `${accentGlow}, ${sheen}, ${brushed}, linear-gradient(180deg, #3a3d44 0%, #1f2025 52%, #0a0b0e 100%)`,
-    boxShadow:
-      "0 26px 70px rgba(0,0,0,0.70)," +
-      " inset 0 0 0 2px rgba(255,255,255,0.14)," +
-      " inset 0 0 0 4px rgba(180,180,190,0.18)," +
-      " inset 0 0 0 7px rgba(0,0,0,0.55)," +
-      " inset 0 1px 0 rgba(255,255,255,0.22)," +
-      " inset 0 -18px 24px rgba(0,0,0,0.65)",
-  };
-}
-
-function metalInnerStyle(): CSSProperties {
-  return {
-    border: "3px solid rgba(0,0,0,0.45)",
-    borderRadius: 16,
-    background:
-      "repeating-linear-gradient(90deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, rgba(255,255,255,0.025) 1px, rgba(255,255,255,0.025) 6px)," +
-      " linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(233,236,240,0.98) 100%)",
-    boxShadow:
-      "inset 0 0 0 2px rgba(255,255,255,0.70)," +
-      " inset 0 0 0 6px rgba(0,0,0,0.10)," +
-      " inset 0 -12px 22px rgba(0,0,0,0.12)",
-  };
-}
-
-const silverBackplate: CSSProperties = {
-  background:
-    "radial-gradient(circle at 50% 0%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.16) 38%, rgba(0,0,0,0.08) 72%, rgba(0,0,0,0.22) 100%), linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(236,238,242,0.98) 100%)",
-};
-
 type AnyRow = Record<string, any>;
 
 type ControleRun = {
@@ -115,8 +61,7 @@ function parseISODateOnly(d?: any): Date | null {
 function calcAgeYearsOnDate(eventDate: Date, birthDate: Date): number | null {
   let years = eventDate.getFullYear() - birthDate.getFullYear();
   const m = eventDate.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && eventDate.getDate() < birthDate.getDate()))
-    years -= 1;
+  if (m < 0 || (m === 0 && eventDate.getDate() < birthDate.getDate())) years -= 1;
   if (years < 0 || !Number.isFinite(years)) return null;
   return years;
 }
@@ -145,7 +90,6 @@ function licenseValueToOk(v: any): boolean | null {
   if (["ja", "yes", "true", "geldig", "ok", "actief", "active"].includes(s)) return true;
   if (["nee", "no", "false", "ongeldig", "verlopen", "niet", "inactive", "inactief"].includes(s))
     return false;
-  // some systems store statuses like "VALID"/"INVALID"
   if (s.includes("valid") || s.includes("geldig") || s.includes("ok")) return true;
   if (s.includes("invalid") || s.includes("ongeldig") || s.includes("verlop")) return false;
   return null;
@@ -171,12 +115,11 @@ function isMissingLicentie(ctx: AnyRow, side: "rood" | "blauw"): boolean {
 
   if (keys.length === 0) return false;
 
-  // If any field explicitly says OK -> not missing
   for (const k of keys) {
     const ok = licenseValueToOk((ctx as any)[k]);
     if (ok === true) return false;
   }
-  // If any field explicitly says NOT OK, or is empty/null -> missing
+
   for (const k of keys) {
     const v = (ctx as any)[k];
     const ok = licenseValueToOk(v);
@@ -187,8 +130,6 @@ function isMissingLicentie(ctx: AnyRow, side: "rood" | "blauw"): boolean {
 
   return false;
 }
-
-
 
 function isContextCompleet(ctx: AnyRow): boolean {
   if (!ctx) return false;
@@ -206,45 +147,10 @@ function isContextCompleet(ctx: AnyRow): boolean {
   return required.every((v) => v != null && String(v).trim() !== "");
 }
 
-function isBelgischeGymInfoRow(r: Partial<ResRow> | null | undefined): boolean {
-  const code = String((r as any)?.rule_code ?? "").toUpperCase();
-  const rule = String((r as any)?.rule ?? "").toUpperCase();
-  const msg = String((r as any)?.boodschap ?? "").toUpperCase();
-
-  // Belgische keurmerk-check is GEEN afkeur: het is een "Let op" / info-punt.
-  // We herkennen dit primair op rule_code, maar vallen terug op tekst in rule/boodschap.
-  if (code.includes("KEURMERK_BE")) return true;
-  if (code.includes("BELG") && code.includes("INFO")) return true;
-
-  // fallback (voor oudere data / afwijkende codes)
-  if (rule.includes("BELGI") && (rule.includes("KEURMERK") || rule.includes("SPORTSCHOOL"))) return true;
-  if (msg.includes("BELGI") && (msg.includes("BKBMO") || msg.includes("BKMO") || msg.includes("BOKSBOEKJE"))) return true;
-
-  return false;
-}
-
-function displayResultaatLabel(r: ResRow): string {
-  if (isBelgischeGymInfoRow(r)) return "LET OP";
-  const s = String(r.resultaat ?? "").trim();
-  return s ? s.toUpperCase() : "";
-}
-
-function normResultaatRow(r: ResRow): string {
-  // Belgische gyms: altijd als INFO/LET OP behandelen, nooit als AFKEUR.
-  if (isBelgischeGymInfoRow(r)) return "ok";
-  return normResultaat(r?.resultaat);
-}
-
 function normResultaat(v: any): string {
   const s = String(v ?? "").trim().toLowerCase();
   if (!s) return "";
-  if (
-    s === "afkeur" ||
-    s === "afgekeur" ||
-    s === "afgekeurd" ||
-    s === "afkeuren"
-  )
-    return "afgekeurd";
+  if (s === "afkeur" || s === "afgekeur" || s === "afgekeurd" || s === "afkeuren") return "afgekeurd";
   if (s === "actie" || s === "waarschuwing") return "actie";
   if (s === "dispensatie" || s === "disp") return "dispensatie";
   if (s === "ok" || s === "goedgekeurd") return "ok";
@@ -252,14 +158,17 @@ function normResultaat(v: any): string {
   return s;
 }
 
+function hasDispensatieResultaat(resultaten: ResRow[]): boolean {
+  return resultaten.some((r) => normResultaat(r?.resultaat) === "dispensatie");
+}
+
 function statusFromResultaten(resultaten: ResRow[]): PartijStatus {
   let s: PartijStatus = "geen_info";
   for (const r of resultaten) {
-    const res = normResultaatRow(r);
+    const res = normResultaat(r?.resultaat);
     if (res === "afgekeurd") return "afgekeurd";
-    if (res === "dispensatie" || res === "actie") {
-      s = s === "geen_info" || s === "ok" ? "actie" : s;
-    }
+    if (res === "dispensatie") s = s === "geen_info" || s === "ok" ? "dispensatie" : s;
+    if (res === "actie") s = s === "geen_info" || s === "ok" ? "actie" : s;
     if (res === "ok") s = s === "geen_info" ? "ok" : s;
   }
   return s;
@@ -274,7 +183,6 @@ function statusFromResultatenOrOk(
   return statusFromResultaten(resultaten);
 }
 
-/** ===== UI badges ===== */
 function HeaderBadge({
   label,
   value,
@@ -282,15 +190,7 @@ function HeaderBadge({
 }: {
   label: string;
   value: number;
-  tone:
-    | "red"
-    | "yellow"
-    | "orange"
-    | "gray"
-    | "green"
-    | "white"
-    | "blue"
-    | "purple";
+  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "blue" | "purple";
 }) {
   const cls =
     tone === "red"
@@ -302,17 +202,15 @@ function HeaderBadge({
       : tone === "green"
       ? "bg-green-500 text-zinc-900"
       : tone === "blue"
-      ? "bg-blue-700 text-zinc-900"
+      ? "bg-blue-700 text-white"
       : tone === "purple"
-      ? "bg-purple-700 text-zinc-900"
+      ? "bg-purple-700 text-white"
       : tone === "white"
       ? "bg-white/90 text-black"
       : "bg-gray-500 text-zinc-900";
 
   return (
-    <span
-      className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${cls}`}
-    >
+    <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${cls}`}>
       <span>{label}</span>
       <span className="tabular-nums">{value}</span>
     </span>
@@ -324,7 +222,7 @@ function Chip({
   tone,
 }: {
   label: string;
-  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "purple";
+  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "purple" | "blue";
 }) {
   const cls =
     tone === "red"
@@ -336,7 +234,9 @@ function Chip({
       : tone === "green"
       ? "bg-green-500 text-zinc-900"
       : tone === "purple"
-      ? "bg-purple-700 text-zinc-900"
+      ? "bg-purple-700 text-white"
+      : tone === "blue"
+      ? "bg-blue-700 text-white"
       : tone === "white"
       ? "bg-white/90 text-black"
       : "bg-gray-500 text-zinc-900";
@@ -356,7 +256,6 @@ function StatusBadge({ status }: { status: PartijStatus }) {
   return <Chip label="GEEN INFO" tone="white" />;
 }
 
-/** ===== Filter button ===== */
 function FilterButton({
   label,
   active,
@@ -368,15 +267,7 @@ function FilterButton({
   active: boolean;
   onClick: () => void;
   count: number;
-  tone:
-    | "red"
-    | "yellow"
-    | "orange"
-    | "gray"
-    | "green"
-    | "white"
-    | "neutral"
-    | "purple";
+  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "neutral" | "purple" | "blue";
 }) {
   const base =
     "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-extrabold border transition";
@@ -391,7 +282,9 @@ function FilterButton({
       : tone === "green"
       ? "bg-green-500 text-zinc-900 border-green-500"
       : tone === "purple"
-      ? "bg-purple-700 text-zinc-900 border-purple-700"
+      ? "bg-purple-700 text-white border-purple-700"
+      : tone === "blue"
+      ? "bg-blue-700 text-white border-blue-700"
       : tone === "white"
       ? "bg-white text-black border-white"
       : tone === "gray"
@@ -408,7 +301,9 @@ function FilterButton({
       : tone === "green"
       ? "bg-white text-green-800 border-green-500/60 hover:bg-green-500/15"
       : tone === "purple"
-      ? "bg-white text-purple-200 border-purple-700/60 hover:bg-purple-700/15"
+      ? "bg-white text-purple-700 border-purple-700/60 hover:bg-purple-700/15"
+      : tone === "blue"
+      ? "bg-white text-blue-700 border-blue-500/60 hover:bg-blue-500/15"
       : tone === "white"
       ? "bg-white text-zinc-900 border-zinc-400 hover:bg-zinc-100"
       : tone === "gray"
@@ -422,18 +317,13 @@ function FilterButton({
       className={`${base} ${active ? activeCls : inactiveCls}`}
     >
       <span>{label}</span>
-      <span
-        className={`tabular-nums px-2 py-0.5 rounded-full ${
-          active ? "bg-white" : "bg-zinc-100"
-        }`}
-      >
+      <span className={`tabular-nums px-2 py-0.5 rounded-full ${active ? "bg-white" : "bg-zinc-100"}`}>
         {count}
       </span>
     </button>
   );
 }
 
-/** ===== Verbod detectie ===== */
 function isVerbodRow(r: ResRow) {
   const code = String(r.rule_code ?? "").toUpperCase();
   const rule = String(r.rule ?? "").toUpperCase();
@@ -459,7 +349,6 @@ function isGeenTegenstander(ctx: AnyRow): boolean {
   return (heeftRood && !heeftBlauw) || (!heeftRood && heeftBlauw);
 }
 
-/** ===== Gala duur helpers ===== */
 function parseMinutesFromText(text: string): number | null {
   const m = String(text).match(/(\d+)\s*min/i);
   if (!m) return null;
@@ -473,13 +362,7 @@ function formatQuarterHoursFromMinutes(mins: number): string {
   const m = rounded % 60;
   const quarters = Math.round(m / 15);
   const frac =
-    quarters === 0
-      ? ""
-      : quarters === 1
-      ? " 1/4"
-      : quarters === 2
-      ? " 1/2"
-      : " 3/4";
+    quarters === 0 ? "" : quarters === 1 ? " 1/4" : quarters === 2 ? " 1/2" : " 3/4";
   const prettyFrac = `${h}${frac} uur`;
   const hhmm = `${h}u ${String(m).padStart(2, "0")}m`;
   return `${prettyFrac} (${hhmm}, kwartier-afronding)`;
@@ -508,8 +391,8 @@ function buildGalaDuurSamenvatting(runMeldingen: ResRow[]) {
   if (!hit?.boodschap) return null;
 
   const mins = parseMinutesFromText(hit.boodschap);
-  const approvalMin = 390; // 6.5u
-  const maxMin = 510; // 8.5u
+  const approvalMin = 390;
+  const maxMin = 510;
 
   if (!mins) {
     return {
@@ -524,9 +407,9 @@ function buildGalaDuurSamenvatting(runMeldingen: ResRow[]) {
   const overMax = mins > maxMin;
 
   let extra = "";
-  if (overMax) extra = `⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.`;
-  else if (needsApproval) extra = `⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.`;
-  else extra = `Binnen 6.5 uur (geen goedkeuring nodig).`;
+  if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
+  else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
+  else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
 
   const q = formatQuarterHoursFromMinutes(mins);
   return { mins, needsApproval, overMax, text: `Tijdsduur evenement: ${q}. ${extra}` };
@@ -540,15 +423,14 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[]): ResRow[] {
 
   if (galaRows.length === 0) return runMeldingen;
 
-  // ✅ Combineer alle gala-duur meldingen tot 1 compacte boodschap
   const sum = buildGalaDuurSamenvatting(galaRows);
   const mins =
     sum?.mins ??
     parseMinutesFromText(galaRows.find((r) => r?.boodschap)?.boodschap ?? "") ??
     null;
 
-  const approvalMin = 390; // 6.5u
-  const maxMin = 510; // 8.5u
+  const approvalMin = 390;
+  const maxMin = 510;
   const needsApproval = mins != null ? mins > approvalMin : true;
   const overMax = mins != null ? mins > maxMin : false;
 
@@ -556,7 +438,13 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[]): ResRow[] {
   const q = mins != null ? formatQuarterHoursFromMinutes(mins) : null;
 
   const compactMsg = q
-    ? `Geschatte gala-duur: ${q}. ${overMax ? "Overschrijdt max 8.5 uur — AFKEUR." : needsApproval ? "Boven 6.5 uur — Hoofdofficial nodig / actie." : "Binnen 6.5 uur (geen goedkeuring nodig)."}`
+    ? `Geschatte gala-duur: ${q}. ${
+        overMax
+          ? "Overschrijdt max 8.5 uur — AFKEUR."
+          : needsApproval
+          ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
+          : "Binnen 6.5 uur (geen goedkeuring nodig)."
+      }`
     : sum?.text ?? galaRows.find((r) => r?.boodschap)?.boodschap ?? "";
 
   const merged: ResRow = {
@@ -568,7 +456,6 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[]): ResRow[] {
     boodschap: compactMsg,
   };
 
-  // behoud overige run-meldingen eronder
   return [merged, ...rest];
 }
 
@@ -624,7 +511,6 @@ function DarkActionButton({
   );
 }
 
-/** ===== Modal input ===== */
 function Field({
   label,
   value,
@@ -675,30 +561,26 @@ export default function ControleMatchmakingPage() {
 
   const [hasDispByPartij, setHasDispByPartij] = useState<Record<number, boolean>>({});
   const [dispRequestByPartij, setDispRequestByPartij] = useState<Record<number, boolean>>({});
+  const [dispResultaatByPartij, setDispResultaatByPartij] = useState<Record<number, boolean>>({});
   const [countByPartij, setCountByPartij] = useState<Record<number, number>>({});
 
   const [verbodByPartij, setVerbodByPartij] = useState<Record<number, boolean>>({});
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
 
-
-  // ✅ Add partij modal
   const [showAdd, setShowAdd] = useState(false);
   const [addBusy, setAddBusy] = useState(false);
 
   const [fDiscipline, setFDiscipline] = useState("");
   const [fKlasse, setFKlasse] = useState("");
-
   const [fRoodNaam, setFRoodNaam] = useState("");
   const [fRoodGym, setFRoodGym] = useState("");
   const [fRoodVa, setFRoodVa] = useState("");
   const [fRoodKg, setFRoodKg] = useState("");
-
   const [fBlauwNaam, setFBlauwNaam] = useState("");
   const [fBlauwGym, setFBlauwGym] = useState("");
   const [fBlauwVa, setFBlauwVa] = useState("");
   const [fBlauwKg, setFBlauwKg] = useState("");
-
   const [fMaxKg, setFMaxKg] = useState("");
 
   async function getAccessToken(): Promise<string | null> {
@@ -726,18 +608,15 @@ export default function ControleMatchmakingPage() {
   );
 
   function openReportHtml() {
-    const url = `/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/rapport`;
-    router.push(url);
+    router.push(`/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/rapport`);
   }
 
   function openExcel() {
-    const url = `/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`;
-    window.open(url, "_blank");
+    window.open(`/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
   }
 
   function openSportdataCsv() {
-    const url = `/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`;
-    window.open(url, "_blank");
+    window.open(`/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
   }
 
   async function addPartijSubmit() {
@@ -774,39 +653,35 @@ export default function ControleMatchmakingPage() {
       return Number.isFinite(n) ? n : null;
     };
 
-const payload = {
-  matchmaking_id: matchmakingId,
-  discipline: fDiscipline.trim(),
-  klasse: fKlasse.trim(),
+    const payload = {
+      matchmaking_id: matchmakingId,
+      discipline: fDiscipline.trim(),
+      klasse: fKlasse.trim(),
+      rood_naam: fRoodNaam.trim(),
+      rood_gym: fRoodGym.trim(),
+      va_rood: fRoodVa.trim(),
+      rood_gewicht: toNum(fRoodKg),
+      blauw_naam: fBlauwNaam.trim(),
+      blauw_gym: fBlauwGym.trim(),
+      va_blauw: fBlauwVa.trim(),
+      blauw_gewicht: toNum(fBlauwKg),
+      max_gewicht: toNum(fMaxKg),
+    };
 
-  rood_naam: fRoodNaam.trim(),
-  rood_gym: fRoodGym.trim(),
-  va_rood: fRoodVa.trim(),
-  rood_gewicht: toNum(fRoodKg),
-
-  blauw_naam: fBlauwNaam.trim(),
-  blauw_gym: fBlauwGym.trim(),
-  va_blauw: fBlauwVa.trim(),
-  blauw_gewicht: toNum(fBlauwKg),
-
-  max_gewicht: toNum(fMaxKg),
-};
-
-if (
-  payload.rood_gewicht == null ||
-  payload.blauw_gewicht == null ||
-  payload.max_gewicht == null
-) {
-  setError("KG velden moeten een geldig getal zijn (bijv. 71.5).");
-  return;
-}
+    if (
+      payload.rood_gewicht == null ||
+      payload.blauw_gewicht == null ||
+      payload.max_gewicht == null
+    ) {
+      setError("KG velden moeten een geldig getal zijn (bijv. 71.5).");
+      return;
+    }
 
     setAddBusy(true);
     try {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      // ✅ PAS DIT AAN ALS JIJ EEN ANDERE ROUTE HEBT
       const resp = await authedFetch("/api/matchmaking/add-bout", {
         method: "POST",
         headers: {
@@ -822,7 +697,6 @@ if (
       setMsg("✅ Partij toegevoegd.");
       setShowAdd(false);
 
-      // reset form
       setFDiscipline("");
       setFKlasse("");
       setFRoodNaam("");
@@ -843,6 +717,44 @@ if (
     }
   }
 
+  async function deletePartij(partijNr: number) {
+    if (!confirm(`Partij ${partijNr} verwijderen?`)) return;
+
+    setBusyPartij((prev) => ({ ...prev, [partijNr]: "delete" }));
+    setError(null);
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaking/delete-partij", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          partij_nr: partijNr,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Verwijderen mislukt.");
+
+      setMsg(`✅ Partij ${partijNr} verwijderd.`);
+      setReloadTick((x) => x + 1);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setBusyPartij((prev) => {
+        const next = { ...prev };
+        delete next[partijNr];
+        return next;
+      });
+    }
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -858,12 +770,12 @@ if (
         setRunMeldingen([]);
         setHasDispByPartij({});
         setDispRequestByPartij({});
+        setDispResultaatByPartij({});
         setCountByPartij({});
         setVerbodByPartij({});
         return;
       }
 
-      // event info
       try {
         const { data: ups, error: upErr } = await supabase
           .from("matchmaking_uploads")
@@ -897,7 +809,6 @@ if (
         setEvenementDatum(null);
       }
 
-      // latest controle_run_id
       const { data: lastCtxRows, error: lastErr } = await supabase
         .from("controle_bout_context")
         .select("controle_run_id, created_at")
@@ -924,11 +835,11 @@ if (
           : null
       );
 
-      // context rows
       let ctxQuery = supabase
         .from("controle_bout_context")
         .select("*")
         .eq("matchmaking_id", matchmakingId);
+
       if (latestControleRunId) ctxQuery = ctxQuery.eq("controle_run_id", latestControleRunId);
 
       const { data: ctxRows, error: ctxErr } = await ctxQuery.order("partij_nr", { ascending: true });
@@ -952,12 +863,12 @@ if (
         setRunMeldingen([]);
         setHasDispByPartij({});
         setDispRequestByPartij({});
+        setDispResultaatByPartij({});
         setCountByPartij({});
         setVerbodByPartij({});
         return;
       }
 
-      // resultaten
       const { data: resRows, error: resErr } = await supabase
         .from("controle_resultaten")
         .select("partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap")
@@ -986,6 +897,7 @@ if (
       const statusMap: Record<number, PartijStatus> = { ...map };
       const verbodMap: Record<number, boolean> = {};
       const countMap: Record<number, number> = {};
+      const dispResultMap: Record<number, boolean> = {};
 
       for (const pnStr of Object.keys(ctxByPn)) {
         const pn = Number(pnStr);
@@ -995,13 +907,14 @@ if (
         statusMap[pn] = statusFromResultatenOrOk(rr, ctx);
         verbodMap[pn] = rr.some(isVerbodRow);
         countMap[pn] = rr.length;
+        dispResultMap[pn] = hasDispensatieResultaat(rr);
       }
 
       setStatusByPartij(statusMap);
       setVerbodByPartij(verbodMap);
       setCountByPartij(countMap);
+      setDispResultaatByPartij(dispResultMap);
 
-      // dispensatie hits
       try {
         const { data: dispHits } = await supabase
           .from("dispensatie_hits")
@@ -1018,7 +931,6 @@ if (
         setHasDispByPartij({});
       }
 
-      // dispensatie requests
       try {
         const { data: dispReq } = await supabase
           .from("dispensatie_requests")
@@ -1056,18 +968,31 @@ if (
     return [...rows].sort((a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0));
   }, [rows]);
 
+  const missingLicentieByPartij = useMemo(() => {
+    const m: Record<number, boolean> = {};
+    for (const r of rows) {
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+      const rood = isMissingLicentie(r, "rood");
+      const blauw = isMissingLicentie(r, "blauw");
+      if (rood || blauw) m[pn] = true;
+    }
+    return m;
+  }, [rows]);
 
-const missingLicentieByPartij = useMemo(() => {
-  const m: Record<number, boolean> = {};
-  for (const r of rows) {
-    const pn = Number(r.partij_nr);
-    if (!Number.isFinite(pn)) continue;
-    const rood = isMissingLicentie(r, "rood");
-    const blauw = isMissingLicentie(r, "blauw");
-    if (rood || blauw) m[pn] = true;
-  }
-  return m;
-}, [rows]);
+  const anyDispensatieByPartij = useMemo(() => {
+    const m: Record<number, boolean> = {};
+    for (const r of rows) {
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+      m[pn] =
+        !!dispResultaatByPartij[pn] ||
+        !!hasDispByPartij[pn] ||
+        !!dispRequestByPartij[pn] ||
+        statusByPartij[pn] === "dispensatie";
+    }
+    return m;
+  }, [rows, dispResultaatByPartij, hasDispByPartij, dispRequestByPartij, statusByPartij]);
 
   const totals = useMemo(() => {
     let meldingen_totaal = 0;
@@ -1086,11 +1011,15 @@ const missingLicentieByPartij = useMemo(() => {
 
       const s = statusByPartij[pn] ?? "geen_info";
       if (s === "afgekeurd") afk++;
+      else if (s === "dispensatie") disp++;
       else if (s === "actie") actie++;
       else if (s === "ok") ok++;
       else geen++;
 
-      if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
+      if (anyDispensatieByPartij[pn] && s !== "dispensatie") {
+        disp++;
+      }
+
       if (verbodByPartij[pn]) verbod++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
 
@@ -1111,7 +1040,7 @@ const missingLicentieByPartij = useMemo(() => {
       geen,
       geen_licentie,
     };
-  }, [rows, statusByPartij, hasDispByPartij, dispRequestByPartij, verbodByPartij, countByPartij, missingLicentieByPartij]);
+  }, [rows, statusByPartij, anyDispensatieByPartij, verbodByPartij, countByPartij, missingLicentieByPartij]);
 
   const filterCounts = useMemo(() => {
     let afk = 0,
@@ -1128,11 +1057,12 @@ const missingLicentieByPartij = useMemo(() => {
 
       const s = statusByPartij[pn] ?? "geen_info";
       if (s === "afgekeurd") afk++;
+      else if (s === "dispensatie") disp++;
       else if (s === "actie") actie++;
       else if (s === "ok") ok++;
       else geen++;
 
-      if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
+      if (anyDispensatieByPartij[pn] && s !== "dispensatie") disp++;
       if (verbodByPartij[pn]) verbod++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
     }
@@ -1147,74 +1077,105 @@ const missingLicentieByPartij = useMemo(() => {
       geen_info: geen,
       geen_licentie,
     };
-  }, [rows, statusByPartij, hasDispByPartij, dispRequestByPartij, verbodByPartij, missingLicentieByPartij]);
+  }, [rows, statusByPartij, anyDispensatieByPartij, verbodByPartij, missingLicentieByPartij]);
 
-  
-const filteredRows = useMemo(() => {
-  const q = search.trim().toLowerCase();
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
 
-  const base = rowsByPartijNr.filter((r) => {
-    const pn = Number(r.partij_nr);
-    if (!Number.isFinite(pn)) return false;
+    const base = rowsByPartijNr.filter((r) => {
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn)) return false;
 
-    if (filter === "dispensatie") return !!hasDispByPartij[pn] || !!dispRequestByPartij[pn];
-    if (filter === "verbod") return !!verbodByPartij[pn];
-    if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
+      if (filter === "dispensatie") {
+        return !!anyDispensatieByPartij[pn];
+      }
+      if (filter === "verbod") return !!verbodByPartij[pn];
+      if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
 
-    if (filter !== "all") {
-      const s = statusByPartij[pn] ?? "geen_info";
-      if (s !== filter) return false;
-    }
+      if (filter !== "all") {
+        const s = statusByPartij[pn] ?? "geen_info";
+        if (s !== filter) return false;
+      }
 
-    return true;
-  });
+      return true;
+    });
 
-  if (!q) return base;
+    if (!q) return base;
 
-  const hay = (r: AnyRow) => {
-    const parts = [
-      r.rood_naam_fp,
-      r.rood_naam_mm,
-      r.rood_naam,
-      r.rood_gym_fp,
-      r.rood_gym_mm,
-      r.rood_va_mm,
-      r.blauw_naam_fp,
-      r.blauw_naam_mm,
-      r.blauw_naam,
-      r.blauw_gym_fp,
-      r.blauw_gym_mm,
-      r.blauw_va_mm,
-    ]
-      .map((v) => String(v ?? "").trim().toLowerCase())
-      .filter(Boolean);
-    return parts.join(" ");
-  };
+    const hay = (r: AnyRow) => {
+      const parts = [
+        r.rood_naam_fp,
+        r.rood_naam_mm,
+        r.rood_naam,
+        r.rood_gym_fp,
+        r.rood_gym_mm,
+        r.rood_va_mm,
+        r.blauw_naam_fp,
+        r.blauw_naam_mm,
+        r.blauw_naam,
+        r.blauw_gym_fp,
+        r.blauw_gym_mm,
+        r.blauw_va_mm,
+      ]
+        .map((v) => String(v ?? "").trim().toLowerCase())
+        .filter(Boolean);
+      return parts.join(" ");
+    };
 
-  return base.filter((r) => hay(r).includes(q));
-}, [
-  rowsByPartijNr,
-  filter,
-  statusByPartij,
-  hasDispByPartij,
-  dispRequestByPartij,
-  verbodByPartij,
-  missingLicentieByPartij,
-  search,
-]);
-
-
-  const Shell = ({ children }: { children: any }) => (
-    <div className={`${inter.className} min-h-screen bg-zinc-100 text-zinc-900`}>
-      <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6 py-6">{children}</div>
-    </div>
-  );
+    return base.filter((r) => hay(r).includes(q));
+  }, [
+    rowsByPartijNr,
+    filter,
+    statusByPartij,
+    anyDispensatieByPartij,
+    verbodByPartij,
+    missingLicentieByPartij,
+    search,
+  ]);
 
   return (
-    <Shell>
-      <div style={metalFrameStyle("orange")} className="p-3 md:p-4">
-        <div style={metalInnerStyle()} className="p-4 md:p-5">
-              {/* TOP BAR */}
+    <main
+      className="flex items-center justify-center min-h-screen px-4 py-8"
+      style={{ background: "#eef0f3" }}
+    >
+      <div className="relative w-full max-w-[1280px]">
+        <div
+          className="pointer-events-none absolute -inset-10 rounded-[48px]"
+          style={{
+            boxShadow:
+              "0 0 110px rgba(220,220,220,0.26), 0 0 180px rgba(220,220,220,0.16), 0 0 140px rgba(255,77,0,0.04)",
+          }}
+        />
+
+        <div className="relative rounded-[42px] p-[10px]">
+          <div
+            className="absolute inset-0 rounded-[42px]"
+            style={{
+              background: "linear-gradient(180deg, #d0d0d0 0%, #8f8f8f 50%, #2a2a2a 100%)",
+              boxShadow: `
+                0 0 0 1px rgba(255,255,255,0.35),
+                0 0 0 2px rgba(120,120,120,0.20),
+                0 30px 80px rgba(0,0,0,0.70)
+              `,
+            }}
+          />
+
+          <div
+            className="relative rounded-[34px] p-[2px]"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(245,245,245,0.95) 0%, rgba(200,200,200,0.65) 40%, rgba(150,150,150,0.45) 70%, rgba(255,77,0,0.10) 100%)",
+            }}
+          >
+            <div
+              className="rounded-[32px] px-6 py-5"
+              style={{
+                background: "linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)",
+                border: "2px solid rgba(63,63,70,0.30)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.95)",
+                color: "#111827",
+              }}
+            >
               <div
                 className="flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3"
                 style={{
@@ -1250,7 +1211,6 @@ const filteredRows = useMemo(() => {
                   </div>
                 </div>
 
-                {/* ✅ klein lightbutton */}
                 <div className="shrink-0">
                   <NvbLightButton
                     label="← Terug naar Overzicht"
@@ -1258,7 +1218,6 @@ const filteredRows = useMemo(() => {
                   />
                 </div>
 
-                {/* ✅ groter logo */}
                 <div className="flex-1 flex justify-center">
                   <div
                     className="rounded-[22px] p-[4px]"
@@ -1282,9 +1241,9 @@ const filteredRows = useMemo(() => {
                       }}
                     >
                       <Image
-                        src="/branding/fightsupport/logo-dark.png"
-                        width={92}
-                        height={92}
+                        src="/branding/fightsupport/excel-logo.png"
+                        width={380}
+                        height={150}
                         alt="FightSupport"
                         priority
                       />
@@ -1293,11 +1252,22 @@ const filteredRows = useMemo(() => {
                 </div>
 
                 <div className="flex flex-wrap gap-2 justify-end min-w-[320px]">
-                  <DarkActionButton label="CSV Sportdata" tone="purple" onClick={openSportdataCsv} />
-                  <DarkActionButton label="Excel" tone="green" onClick={openExcel} />
-                  <DarkActionButton label="Rapportage" tone="orange" onClick={openReportHtml} />
+                  <DarkActionButton
+                    label="CSV Sportdata"
+                    tone="purple"
+                    onClick={openSportdataCsv}
+                  />
+                  <DarkActionButton
+                    label="Excel"
+                    tone="green"
+                    onClick={openExcel}
+                  />
+                  <DarkActionButton
+                    label="Rapportage"
+                    tone="orange"
+                    onClick={openReportHtml}
+                  />
 
-                  {/* ✅ nieuwe NVB darkbutton */}
                   <div className="ml-2">
                     <NvbDarkButton
                       label="Partij toevoegen"
@@ -1309,7 +1279,6 @@ const filteredRows = useMemo(() => {
 
               <div className="my-3" style={separator} />
 
-              {/* ✅ TITEL BLOK (controle overzicht weg) */}
               <div className="text-center">
                 <div
                   className={inter.className}
@@ -1325,7 +1294,19 @@ const filteredRows = useMemo(() => {
 
                 <div
                   className={inter.className}
-                  style={{ marginTop: 10, fontSize: 24, fontWeight: 900, letterSpacing: "0.02em", color: "#1f1f23", display: "inline-block", padding: "8px 14px", borderRadius: 14, background: "rgba(255,255,255,0.72)", border: "2px solid rgba(42,42,46,0.25)", boxShadow: "0 10px 24px rgba(0,0,0,0.08)" }}
+                  style={{
+                    marginTop: 10,
+                    fontSize: 24,
+                    fontWeight: 900,
+                    letterSpacing: "0.02em",
+                    color: "#1f1f23",
+                    display: "inline-block",
+                    padding: "8px 14px",
+                    borderRadius: 14,
+                    background: "rgba(255,255,255,0.72)",
+                    border: "2px solid rgba(42,42,46,0.25)",
+                    boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+                  }}
                 >
                   {safeText(subtitle, "Onbekend evenement")}
                 </div>
@@ -1345,21 +1326,16 @@ const filteredRows = useMemo(() => {
 
               <div className="my-3" style={separator} />
 
-              {/* CONTENT */}
-              <div
-                className="rounded-3xl border-2 border-zinc-500/60 p-4 md:p-5 shadow-[0_22px_60px_rgba(24,24,27,0.12)] ring-1 ring-white/50"
-                style={silverBackplate}
-              >
-                {loading ? (
-                  <div className="text-zinc-700">Laden…</div>
-                ) : error ? (
-                  <div className="text-red-700">{error}</div>
-                ) : rows.length === 0 ? (
-                  <div className="text-zinc-700">
-                    Geen context gevonden (context nog niet gevuld?).
-                  </div>
-                ) : (
-                  <div className="space-y-3">
+              {loading ? (
+                <div className="text-zinc-700">Laden…</div>
+              ) : error ? (
+                <div className="text-red-700">{error}</div>
+              ) : rows.length === 0 ? (
+                <div className="text-zinc-700">
+                  Geen context gevonden (context nog niet gevuld?).
+                </div>
+              ) : (
+                <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="text-sm text-zinc-800">
                       Partijen:{" "}
@@ -1377,7 +1353,6 @@ const filteredRows = useMemo(() => {
                     <HeaderBadge label="Geen info" value={totals.geen} tone="white" />
                   </div>
 
-                  {/* ✅ Gala duur wordt compact weergegeven in Run meldingen (voorkomt dubbele boodschap) */}
                   {galaDuur?.text && compactRunMeldingen.length === 0 ? (
                     <div className="rounded-xl border border-zinc-300 bg-white/5 p-3 text-sm">
                       <span className="font-semibold text-zinc-900">Gala duur:</span>{" "}
@@ -1422,13 +1397,15 @@ const filteredRows = useMemo(() => {
                                   <div className="text-zinc-900 font-semibold leading-tight">
                                     {r.rule ?? "(run)"}
                                     {r.rule_code ? (
-                                      <span className="ml-2 text-xs text-zinc-600 font-semibold">({r.rule_code})</span>
+                                      <span className="ml-2 text-xs text-zinc-600 font-semibold">
+                                        ({r.rule_code})
+                                      </span>
                                     ) : null}
                                   </div>
                                 </div>
 
                                 <span className="ml-auto text-xs font-extrabold tracking-wide text-zinc-700">
-                                  {displayResultaatLabel(r)}
+                                  {String(r.resultaat ?? "").toUpperCase()}
                                 </span>
                               </div>
 
@@ -1447,21 +1424,21 @@ const filteredRows = useMemo(() => {
                   <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-300 bg-white/5 p-3">
                     <div className="text-sm font-semibold text-zinc-800 mr-2">Filter:</div>
 
-
-<div className="flex-1 min-w-[220px]">
-  <input
-    value={search}
-    onChange={(e) => setSearch(e.target.value)}
-    placeholder="Zoek op naam, sportschool of VA…"
-    className="w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500"
-    style={{
-      background: "linear-gradient(180deg, #ffffff 0%, #f4f6f9 100%)",
-      border: "2px solid rgba(63,63,70,0.35)",
-      color: "#111827",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.90), 0 8px 18px rgba(0,0,0,0.10)",
-    }}
-  />
-</div>
+                    <div className="flex-1 min-w-[220px]">
+                      <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Zoek op naam, sportschool of VA…"
+                        className="w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500"
+                        style={{
+                          background: "linear-gradient(180deg, #ffffff 0%, #f4f6f9 100%)",
+                          border: "2px solid rgba(63,63,70,0.35)",
+                          color: "#111827",
+                          boxShadow:
+                            "inset 0 1px 0 rgba(255,255,255,0.90), 0 8px 18px rgba(0,0,0,0.10)",
+                        }}
+                      />
+                    </div>
 
                     <FilterButton label="Alle" count={filterCounts.all} tone="neutral" active={filter === "all"} onClick={() => setFilter("all")} />
                     <FilterButton label="Verbod" count={filterCounts.verbod} tone="purple" active={filter === "verbod"} onClick={() => setFilter("verbod")} />
@@ -1479,7 +1456,13 @@ const filteredRows = useMemo(() => {
 
                   <div className="overflow-auto rounded-xl border border-zinc-300">
                     <table className="min-w-full border-collapse">
-                      <thead style={{ background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)", color: "#fff", borderBottom: "3px solid rgba(255,77,0,0.55)" }}>
+                      <thead
+                        style={{
+                          background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
+                          color: "#fff",
+                          borderBottom: "3px solid rgba(255,77,0,0.55)",
+                        }}
+                      >
                         <tr>
                           <th className="py-3 px-4 text-left w-24">#</th>
                           <th className="py-3 px-4 text-left">Vechters</th>
@@ -1518,8 +1501,8 @@ const filteredRows = useMemo(() => {
                             : "border-t border-zinc-300";
 
                           const heeftVerbod = Number.isFinite(pn) ? !!verbodByPartij[pn] : false;
+                          const heeftDispensatie = Number.isFinite(pn) ? !!anyDispensatieByPartij[pn] : false;
                           const geenTegenstander = isGeenTegenstander(r);
-
                           const busy = Number.isFinite(pn) ? busyPartij[pn] : null;
 
                           return (
@@ -1534,14 +1517,22 @@ const filteredRows = useMemo(() => {
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="tabular-nums">{r.partij_nr ?? "-"}</span>
                                   <StatusBadge status={status} />
+                                  {heeftDispensatie && status !== "dispensatie" ? (
+                                    <Chip label="DISPENSATIE" tone="orange" />
+                                  ) : null}
                                   {heeftVerbod ? <Chip label="VERBOD" tone="purple" /> : null}
-                                  {Number.isFinite(pn) && missingLicentieByPartij[pn] ? <Chip label="GEEN LICENTIE" tone="blue" /> : null}
+                                  {Number.isFinite(pn) && missingLicentieByPartij[pn] ? (
+                                    <Chip label="GEEN LICENTIE" tone="blue" />
+                                  ) : null}
                                 </div>
                               </td>
 
                               <td className="py-3 px-4 align-top">
                                 <div className="flex items-center gap-3 min-w-0">
-                                  <span className="inline-block w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: "#ef4444" }} />
+                                  <span
+                                    className="inline-block w-3 h-3 rounded-full shrink-0"
+                                    style={{ backgroundColor: "#ef4444" }}
+                                  />
                                   <div className="min-w-0 text-sm">
                                     <span className="font-semibold">{roodNaam}</span>{" "}
                                     <span className="opacity-80">({roodAge} jaar)</span>{" "}
@@ -1553,7 +1544,10 @@ const filteredRows = useMemo(() => {
                                 <div className={`my-2 ${dividerClass}`} />
 
                                 <div className="flex items-center gap-3 min-w-0">
-                                  <span className="inline-block w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: "#3b82f6" }} />
+                                  <span
+                                    className="inline-block w-3 h-3 rounded-full shrink-0"
+                                    style={{ backgroundColor: "#3b82f6" }}
+                                  />
                                   <div className="min-w-0 text-sm">
                                     <span className="font-semibold">{blauwNaam}</span>{" "}
                                     <span className="opacity-80">({blauwAge} jaar)</span>{" "}
@@ -1612,7 +1606,7 @@ const filteredRows = useMemo(() => {
                                     label={busy === "delete" ? "… Verwijderen" : "Verwijderen"}
                                     tone="red"
                                     disabled={busy === "delete"}
-                                    onClick={() => alert("Verwijderen blijft zoals jij het al had.")}
+                                    onClick={() => Number.isFinite(pn) && deletePartij(pn)}
                                   />
                                 </div>
                               </td>
@@ -1623,12 +1617,10 @@ const filteredRows = useMemo(() => {
                     </table>
                   </div>
 
-                    <div className="pt-2 text-xs text-zinc-500 text-center">© FightSupport</div>
-                  </div>
-                )}
-              </div>
+                  <div className="pt-2 text-xs text-zinc-500 text-center">© FightSupport</div>
+                </div>
+              )}
 
-              {/* ✅ MODAL: Partij toevoegen */}
               {showAdd && (
                 <div className="fixed inset-0 z-[999] flex items-center justify-center px-4">
                   <div
@@ -1637,7 +1629,13 @@ const filteredRows = useMemo(() => {
                     onClick={() => !addBusy && setShowAdd(false)}
                   />
                   <div className="relative w-full max-w-[980px] rounded-2xl border-[3px] border-zinc-700/40 bg-white shadow-2xl overflow-hidden">
-                    <div className="px-6 py-4 flex items-center justify-between" style={{ background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)", borderBottom: "3px solid rgba(255,77,0,0.55)" }}>
+                    <div
+                      className="px-6 py-4 flex items-center justify-between"
+                      style={{
+                        background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
+                        borderBottom: "3px solid rgba(255,77,0,0.55)",
+                      }}
+                    >
                       <div>
                         <div className="text-white font-extrabold text-lg">Partij toevoegen</div>
                         <div className="text-white/75 text-xs">
@@ -1657,8 +1655,18 @@ const filteredRows = useMemo(() => {
                       {error ? <div className="text-red-700 text-sm">{error}</div> : null}
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <Field label="Discipline" value={fDiscipline} onChange={setFDiscipline} placeholder="Kickboksen / Muay Thai / MMA..." />
-                        <Field label="Klasse" value={fKlasse} onChange={setFKlasse} placeholder="N / C / B / A..." />
+                        <Field
+                          label="Discipline"
+                          value={fDiscipline}
+                          onChange={setFDiscipline}
+                          placeholder="Kickboksen / Muay Thai / MMA..."
+                        />
+                        <Field
+                          label="Klasse"
+                          value={fKlasse}
+                          onChange={setFKlasse}
+                          placeholder="N / C / B / A..."
+                        />
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1684,9 +1692,16 @@ const filteredRows = useMemo(() => {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <Field label="Max gewicht (KG)" value={fMaxKg} onChange={setFMaxKg} type="number" placeholder="bijv. 72.0" />
+                        <Field
+                          label="Max gewicht (KG)"
+                          value={fMaxKg}
+                          onChange={setFMaxKg}
+                          type="number"
+                          placeholder="bijv. 72.0"
+                        />
                         <div className="md:col-span-2 text-xs text-zinc-700 flex items-center">
-                          Tip: als je “max gewicht” als tolerantie bedoelt (bv 3kg), zeg het even — dan maak ik er 2 velden van: “gewichtsklasse” + “max afwijking”.
+                          Tip: als je “max gewicht” als tolerantie bedoelt (bv 3kg), zeg het even —
+                          dan maak ik er 2 velden van: “gewichtsklasse” + “max afwijking”.
                         </div>
                       </div>
                     </div>
@@ -1704,9 +1719,10 @@ const filteredRows = useMemo(() => {
                   </div>
                 </div>
               )}
-
+            </div>
+          </div>
         </div>
       </div>
-    </Shell>
+    </main>
   );
 }

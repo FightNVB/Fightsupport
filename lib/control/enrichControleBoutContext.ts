@@ -5,12 +5,6 @@
 import dayjs from "dayjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-/**
- * ============================================================
- * 🔎 NORMALISATIE & MATCHING HELPERS — SPORTSCHOOL ZOEKER
- * ============================================================
- */
-
 function norm(s: any) {
   let x = String(s ?? "")
     .toLowerCase()
@@ -76,15 +70,29 @@ function norm(s: any) {
   return toks.join(" ").trim();
 }
 
+function normStrictName(s: any) {
+  return String(s ?? "")
+    .toLowerCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/['’`]/g, "'")
+    .replace(/[()]/g, " ")
+    .replace(/[\/|,-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactStrictName(s: any) {
+  return normStrictName(s).replace(/\s+/g, "");
+}
+
 function normPlaats(s: any) {
-  const x = String(s ?? "")
+  return String(s ?? "")
     .toLowerCase()
     .replace(/\u00a0/g, " ")
     .replace(/\(.*?\)/g, " ")
     .replace(/[^a-z0-9à-ÿ\s]/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return x;
 }
 
 function compactNorm(s: any) {
@@ -95,12 +103,13 @@ function normLand(v: any) {
   return String(v ?? "")
     .trim()
     .toLowerCase()
-    .replace(/\./g, "");
+    .replace(/\./g, "")
+    .replace(/\s+/g, " ");
 }
 
 function isNL(v: any) {
   const s = normLand(v);
-  return s === "nl" || s === "nederland" || s === "the netherlands";
+  return s === "nl" || s === "nederland" || s === "the netherlands" || s === "netherlands";
 }
 
 function isBE(v: any) {
@@ -113,19 +122,79 @@ function isDE(v: any) {
   return s === "de" || s === "duitsland" || s === "germany" || s === "deutschland";
 }
 
-function detectLandHintFromGymText(rawGym: string): "BE" | "DE" | "NL" | null {
-  const s = String(rawGym ?? "")
-    .toLowerCase()
-    .replace(/\u00a0/g, " ")
-    .replace(/\(.*?\)/g, " ")
-    .replace(/[^a-z0-9à-ÿ\s]/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function isFR(v: any) {
+  const s = normLand(v);
+  return s === "fr" || s === "frankrijk" || s === "france";
+}
 
-  if (s.includes("belgie") || s.includes("belgië") || s.includes("belgium") || /\bbe\b/.test(s)) return "BE";
-  if (s.includes("duitsland") || s.includes("germany") || s.includes("deutschland") || /\bde\b/.test(s)) return "DE";
-  if (s.includes("nederland") || /\bnl\b/.test(s)) return "NL";
+function isES(v: any) {
+  const s = normLand(v);
+  return s === "es" || s === "spanje" || s === "spain" || s === "españa" || s === "espana";
+}
+
+type LandHint = "NL" | "BE" | "DE" | "FR" | "ES";
+
+function normalizeCountryCodeOrName(raw: string): LandHint | null {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return null;
+
+  if (["nl", "nederland", "netherlands", "the netherlands"].includes(s)) return "NL";
+  if (["be", "belgie", "belgië", "belgium"].includes(s)) return "BE";
+  if (["de", "duitsland", "deutschland", "germany"].includes(s)) return "DE";
+  if (["fr", "frankrijk", "france"].includes(s)) return "FR";
+  if (["es", "spanje", "spain", "españa", "espana"].includes(s)) return "ES";
+
   return null;
+}
+
+function detectLandHintFromGymText(rawGym: string): LandHint | null {
+  const raw = String(rawGym ?? "").trim();
+  if (!raw) return null;
+
+  const s = raw.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  const lower = s.toLowerCase();
+
+  const parenMatches = [...s.matchAll(/\(([^)]+)\)/g)];
+  for (const m of parenMatches) {
+    const inside = String(m[1] ?? "").trim();
+    const hint = normalizeCountryCodeOrName(inside);
+    if (hint) return hint;
+  }
+
+  const upperTokens = s.match(/\b[A-Z]{2}\b/g) ?? [];
+  for (const tok of upperTokens) {
+    const hint = normalizeCountryCodeOrName(tok);
+    if (hint) return hint;
+  }
+
+  if (lower.includes("belgie") || lower.includes("belgië") || lower.includes("belgium")) return "BE";
+  if (lower.includes("duitsland") || lower.includes("deutschland") || lower.includes("germany")) return "DE";
+  if (lower.includes("nederland") || lower.includes("the netherlands") || lower.includes("netherlands")) return "NL";
+  if (lower.includes("frankrijk") || lower.includes("france")) return "FR";
+  if (lower.includes("spanje") || lower.includes("spain") || lower.includes("españa") || lower.includes("espana")) {
+    return "ES";
+  }
+
+  return null;
+}
+
+function landHintToLabel(hint: LandHint | null): string | null {
+  if (hint === "NL") return "Nederland";
+  if (hint === "BE") return "België";
+  if (hint === "DE") return "Duitsland";
+  if (hint === "FR") return "Frankrijk";
+  if (hint === "ES") return "Spanje";
+  return null;
+}
+
+function landMatchesHint(landValue: any, hint: LandHint | null) {
+  if (!hint) return false;
+  if (hint === "NL") return isNL(landValue);
+  if (hint === "BE") return isBE(landValue);
+  if (hint === "DE") return isDE(landValue);
+  if (hint === "FR") return isFR(landValue);
+  if (hint === "ES") return isES(landValue);
+  return false;
 }
 
 function toIsoDateOnly(d: any): string | null {
@@ -181,6 +250,7 @@ async function fetchAllSportschoolAliases() {
 type AliasMaps = {
   aliasNormToId: Map<string, string>;
   aliasCompactToId: Map<string, string>;
+  aliasRows: { alias_text: string; sportschool_id: string }[];
 };
 
 function levenshtein(a: string, b: string) {
@@ -243,69 +313,299 @@ function findSportschoolBySportschoolId(list: any[], sid: any) {
   return list.find((x) => String(x?.sportschool_id) === s) ?? null;
 }
 
-function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMaps): GymMatch {
-  const gRaw = String(gymNaam ?? "").trim();
-  const g = norm(gRaw);
-  if (!g) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
+function hasPlaatsHint(gRaw: string, plaatsValue: any) {
+  const input = normPlaats(gRaw);
+  const p = normPlaats(plaatsValue);
+  return !!p && !!input && input.includes(p);
+}
 
-  const list = sportscholen ?? [];
-  const inputPlaatsHint = normPlaats(gRaw);
+function extractKnownPlaces(sportscholen: any[]) {
+  const set = new Set<string>();
+  for (const s of sportscholen ?? []) {
+    const p1 = normPlaats(s?.plaats ?? "");
+    const p2 = normPlaats(s?.stad ?? "");
+    if (p1) set.add(p1);
+    if (p2) set.add(p2);
+  }
+  return Array.from(set).sort((a, b) => b.length - a.length);
+}
 
-  if (aliasMaps) {
-    const gNorm = g;
-    const gCompact = compactNorm(gNorm);
+function escapeRegex(s: string) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-    const id1 = aliasMaps.aliasNormToId.get(gNorm);
-    const id2 = aliasMaps.aliasCompactToId.get(gCompact);
-    const sid = id1 ?? id2;
+function stripCountryHintsFromRaw(raw: string) {
+  let s = String(raw ?? "").trim();
+  if (!s) return s;
 
-    if (sid) {
-      const hit = findSportschoolBySportschoolId(list, sid);
-      if (hit) return { row: hit, reason: null };
+  s = s.replace(/\((NL|BE|DE|FR|ES)\)/gi, " ");
+  s = s.replace(
+    /\((Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España)\)/gi,
+    " "
+  );
+  s = s.replace(/\b(NL|BE|DE|FR|ES)\b/g, " ");
+  s = s.replace(
+    /\b(Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España)\b/gi,
+    " "
+  );
+  s = s.replace(/\s+/g, " ").trim();
 
-      return {
-        row: null,
-        reason: `Alias gevonden maar sportschool_id ${String(
-          sid
-        )} bestaat niet in sportscholen.sportschool_id (controleer data).`,
-      };
+  return s;
+}
+
+function stripKnownPlaceSuffixes(raw: string, knownPlaces: string[]) {
+  let s = String(raw ?? "").trim();
+  if (!s) return s;
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+
+    for (const place of knownPlaces) {
+      if (!place) continue;
+
+      const patterns = [
+        new RegExp(`\\b${escapeRegex(place)}\\b$`, "i"),
+        new RegExp(`[\\-/,]\\s*${escapeRegex(place)}$`, "i"),
+      ];
+
+      for (const rx of patterns) {
+        if (rx.test(s)) {
+          s = s.replace(rx, " ").replace(/\s+/g, " ").trim();
+          changed = true;
+        }
+      }
     }
   }
 
+  return s.trim();
+}
+
+function buildAliasLookupVariants(rawGym: string, knownPlaces: string[]) {
+  const raw = String(rawGym ?? "").trim();
+  const out = new Set<string>();
+
+  const addVariant = (v: string) => {
+    const n = norm(v);
+    if (n) out.add(n);
+    const c = compactNorm(n);
+    if (c) out.add(`__compact__:${c}`);
+  };
+
+  if (!raw) return out;
+
+  const noCountry = stripCountryHintsFromRaw(raw);
+  const noPlace = stripKnownPlaceSuffixes(noCountry, knownPlaces);
+
+  addVariant(raw);
+  addVariant(noCountry);
+  addVariant(noPlace);
+
+  const slashParts = noPlace
+    .split(/[\/|,-]/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  for (const part of slashParts) addVariant(part);
+
+  const words = noPlace.split(/\s+/).filter(Boolean);
+  for (let i = words.length; i >= 2; i--) {
+    addVariant(words.slice(0, i).join(" "));
+  }
+
+  return out;
+}
+
+function tryAliasMatch(
+  sportscholen: any[],
+  gymNaam: string,
+  aliasMaps: AliasMaps | undefined,
+  knownPlaces: string[]
+): GymMatch | null {
+  if (!aliasMaps) return null;
+
+  const variants = buildAliasLookupVariants(gymNaam, knownPlaces);
+
+  for (const key of variants) {
+    if (key.startsWith("__compact__:")) {
+      const c = key.replace("__compact__:", "");
+      const sid = aliasMaps.aliasCompactToId.get(c);
+      if (sid) {
+        const hit = findSportschoolBySportschoolId(sportscholen, sid);
+        if (hit) return { row: hit, reason: null };
+      }
+    } else {
+      const sid = aliasMaps.aliasNormToId.get(key);
+      if (sid) {
+        const hit = findSportschoolBySportschoolId(sportscholen, sid);
+        if (hit) return { row: hit, reason: null };
+      }
+    }
+  }
+
+  return null;
+}
+
+function scoreCandidate(x: any, g: string, gRaw: string, key: string, landHint: LandHint | null) {
+  const nameN = norm(x?.naam);
+  if (!nameN) return -1;
+
+  const ov = overlapScore(g, nameN);
+  const d = levenshtein(compactNorm(g), compactNorm(nameN));
+  const len = Math.max(1, Math.max(compactNorm(g).length, compactNorm(nameN).length));
+  const distScore = 1 - Math.min(1, d / len);
+
+  let score = ov * 0.72 + distScore * 0.28;
+
+  const plaats = x?.plaats ?? x?.stad ?? "";
+  if (hasPlaatsHint(gRaw, plaats)) score += 0.22;
+
+  const land = x?.land ?? x?.country ?? null;
+  if (landMatchesHint(land, landHint)) score += 0.18;
+
+  if (key && nameN.includes(key)) score += 0.06;
+
+  return score;
+}
+
+function chooseBestFromCandidates(
+  candidates: any[],
+  g: string,
+  gRaw: string,
+  key: string,
+  landHint: LandHint | null
+): GymMatch {
+  if (candidates.length === 0) return { row: null, reason: "Geen match gevonden." };
+  if (candidates.length === 1) return { row: candidates[0], reason: null };
+
+  const withPlaats = candidates.filter((x) => hasPlaatsHint(gRaw, x?.plaats ?? x?.stad ?? ""));
+  if (withPlaats.length === 1) return { row: withPlaats[0], reason: null };
+
+  const withLand = candidates.filter((x) => landMatchesHint(x?.land ?? x?.country, landHint));
+  if (withLand.length === 1) return { row: withLand[0], reason: null };
+
+  if (withPlaats.length > 1) {
+    const withPlaatsAndLand = withPlaats.filter((x) => landMatchesHint(x?.land ?? x?.country, landHint));
+    if (withPlaatsAndLand.length === 1) return { row: withPlaatsAndLand[0], reason: null };
+  }
+
+  let best: any = null;
+  let bestScore = -1;
+  let secondScore = -1;
+
+  for (const x of candidates) {
+    const score = scoreCandidate(x, g, gRaw, key, landHint);
+    if (score > bestScore) {
+      secondScore = bestScore;
+      bestScore = score;
+      best = x;
+    } else if (score > secondScore) {
+      secondScore = score;
+    }
+  }
+
+  if (best && bestScore >= 0.72 && bestScore - secondScore >= 0.04) {
+    return { row: best, reason: null };
+  }
+
+  return { row: null, reason: "Meerdere matches (ambigue) — maak alias aan." };
+}
+
+function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMaps): GymMatch {
+  const gRaw = String(gymNaam ?? "").trim();
+  if (!gRaw) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
+
+  const list = sportscholen ?? [];
+  const landHint = detectLandHintFromGymText(gRaw);
+  const knownPlaces = extractKnownPlaces(list);
+
+  // 1) ECHTE letterlijke/raw-strict match eerst
+  const rawStrict = normStrictName(gRaw);
+  const rawCompactStrict = compactStrictName(gRaw);
+
+  const rawExactHits = list.filter((x) => normStrictName(x?.naam) === rawStrict);
+  if (rawExactHits.length > 0) {
+    const gLoose = norm(gRaw);
+    const key = gLoose.split(" ").filter(Boolean).sort((a, b) => b.length - a.length)[0] ?? "";
+    return chooseBestFromCandidates(rawExactHits, gLoose || rawStrict, gRaw, key, landHint);
+  }
+
+  const rawCompactHits = list.filter((x) => compactStrictName(x?.naam) === rawCompactStrict);
+  if (rawCompactHits.length > 0) {
+    const gLoose = norm(gRaw);
+    const key = gLoose.split(" ").filter(Boolean).sort((a, b) => b.length - a.length)[0] ?? "";
+    return chooseBestFromCandidates(rawCompactHits, gLoose || rawStrict, gRaw, key, landHint);
+  }
+
+  // 2) Alias lookup op hele string en basisvarianten
+  const aliasHit = tryAliasMatch(list, gRaw, aliasMaps, knownPlaces);
+  if (aliasHit?.row) return aliasHit;
+
+  // 3) Loose normalisatie pas daarna
+  const g = norm(gRaw);
+  if (!g) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
+
+  const inputPlaatsHint = normPlaats(gRaw);
   const toks = g.split(" ").filter(Boolean).sort((a, b) => b.length - a.length);
   const key = toks[0] ?? "";
 
+  // 4) Loose exact
   const exactHits = list.filter((x) => norm(x?.naam) === g);
-  if (exactHits.length === 1) return { row: exactHits[0], reason: null };
-  if (exactHits.length > 1) {
-    const withPlaats = exactHits.filter((x) => {
-      const p = normPlaats(x?.plaats ?? x?.stad ?? "");
-      return p && inputPlaatsHint.includes(p);
-    });
-    if (withPlaats.length === 1) return { row: withPlaats[0], reason: null };
-
-    const nl = exactHits.find((x) => isNL(x?.land ?? x?.country));
-    return { row: nl ?? exactHits[0], reason: null };
-  }
+  if (exactHits.length > 0) return chooseBestFromCandidates(exactHits, g, gRaw, key, landHint);
 
   const gCompact = compactNorm(g);
   const exactCompactHits = list.filter((x) => compactNorm(norm(x?.naam)) === gCompact);
-  if (exactCompactHits.length === 1) return { row: exactCompactHits[0], reason: null };
-  if (exactCompactHits.length > 1) {
-    const nl = exactCompactHits.find((x) => isNL(x?.land ?? x?.country));
-    return { row: nl ?? exactCompactHits[0], reason: null };
+  if (exactCompactHits.length > 0) return chooseBestFromCandidates(exactCompactHits, g, gRaw, key, landHint);
+
+  // 5) Basisnaam zonder plaats/land suffixes
+  const strippedRaw = stripKnownPlaceSuffixes(stripCountryHintsFromRaw(gRaw), knownPlaces);
+  const strippedStrict = normStrictName(strippedRaw);
+  const strippedCompactStrict = compactStrictName(strippedRaw);
+  const strippedNorm = norm(strippedRaw);
+  const strippedCompact = compactNorm(strippedNorm);
+
+  if (strippedStrict && strippedStrict !== rawStrict) {
+    const strictBaseHits = list.filter((x) => normStrictName(x?.naam) === strippedStrict);
+    if (strictBaseHits.length > 0) {
+      return chooseBestFromCandidates(strictBaseHits, strippedNorm || strippedStrict, gRaw, key, landHint);
+    }
+
+    const strictBaseCompactHits = list.filter((x) => compactStrictName(x?.naam) === strippedCompactStrict);
+    if (strictBaseCompactHits.length > 0) {
+      return chooseBestFromCandidates(strictBaseCompactHits, strippedNorm || strippedStrict, gRaw, key, landHint);
+    }
   }
 
+  if (strippedNorm && strippedNorm !== g) {
+    const exactBaseHits = list.filter((x) => norm(x?.naam) === strippedNorm);
+    if (exactBaseHits.length > 0) {
+      return chooseBestFromCandidates(exactBaseHits, strippedNorm, gRaw, key, landHint);
+    }
+
+    const compactBaseHits = list.filter((x) => compactNorm(norm(x?.naam)) === strippedCompact);
+    if (compactBaseHits.length > 0) {
+      return chooseBestFromCandidates(compactBaseHits, strippedNorm, gRaw, key, landHint);
+    }
+  }
+
+  // 6) Subset
   const subsetHits = list.filter((x) => {
     const n = norm(x?.naam);
     if (!n) return false;
 
-    const ok = isTokenSubset(n, g) || isTokenSubset(g, n);
+    const ok =
+      isTokenSubset(n, g) ||
+      isTokenSubset(g, n) ||
+      (strippedNorm ? isTokenSubset(n, strippedNorm) || isTokenSubset(strippedNorm, n) : false);
+
     if (!ok) return false;
 
     const gTokCount = tokenSet(g).size;
-    if (gTokCount >= 2) {
-      const inter = intersectionCount(g, n);
+    const sTokCount = strippedNorm ? tokenSet(strippedNorm).size : 0;
+    const tokCount = Math.max(gTokCount, sTokCount);
+
+    if (tokCount >= 2) {
+      const inter = Math.max(intersectionCount(g, n), strippedNorm ? intersectionCount(strippedNorm, n) : 0);
       if (inter < 2) return false;
     }
 
@@ -313,31 +613,22 @@ function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMap
     return true;
   });
 
-  if (subsetHits.length === 1) return { row: subsetHits[0], reason: null };
-  if (subsetHits.length > 1) {
-    const nl = subsetHits.find((x) => isNL(x?.land ?? x?.country));
-    return { row: nl ?? subsetHits[0], reason: null };
+  if (subsetHits.length > 0) {
+    const chosen = chooseBestFromCandidates(subsetHits, strippedNorm || g, gRaw, key, landHint);
+    if (chosen.row) return chosen;
   }
 
+  // 7) Fuzzy fallback
   let best: any = null;
   let bestScore = -1;
   let bestSecond: any = null;
   let bestSecondScore = -1;
 
+  const scoreBase = strippedNorm || g;
+
   for (const x of list) {
-    const nameN = norm(x?.naam);
-    if (!nameN) continue;
-
-    const ov = overlapScore(g, nameN);
-    const d = levenshtein(compactNorm(g), compactNorm(nameN));
-    const len = Math.max(1, Math.max(compactNorm(g).length, compactNorm(nameN).length));
-    const distScore = 1 - Math.min(1, d / len);
-
-    let score = ov * 0.75 + distScore * 0.25;
-
-    const p = normPlaats(x?.plaats ?? x?.stad ?? "");
-    if (p && inputPlaatsHint.includes(p)) score += 0.12;
-    if (key && nameN.includes(key)) score += 0.06;
+    const score = scoreCandidate(x, scoreBase, gRaw, key, landHint);
+    if (score < 0) continue;
 
     if (score > bestScore) {
       bestSecond = best;
@@ -350,7 +641,7 @@ function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMap
     }
   }
 
-  if (best && bestScore >= 0.68) {
+  if (best && bestScore >= 0.7) {
     if (bestSecond && bestSecondScore >= bestScore - 0.03) {
       return { row: null, reason: "Meerdere matches (ambigue) — maak alias aan." };
     }
@@ -378,16 +669,35 @@ function unwrapUuid(v: any): string | null {
   return null;
 }
 
-export async function enrichControleBoutContext(matchmaking_id: string, controle_run_id: string) {
+function isForeignNonNL(landValue: any) {
+  if (!landValue) return false;
+  return !isNL(landValue);
+}
+
+export async function enrichControleBoutContext(
+  matchmaking_id: string,
+  controle_run_id: string,
+  opts?: { partij_nr?: number | null; bout_id?: string | null }
+) {
   if (!matchmaking_id) throw new Error("matchmaking_id ontbreekt");
   if (!controle_run_id) throw new Error("controle_run_id ontbreekt");
 
-  const { data: ctxRows, error: cErr } = await supabaseAdmin
+  const scopedPartijNr =
+    opts?.partij_nr != null && Number.isFinite(Number(opts.partij_nr))
+      ? Number(opts.partij_nr)
+      : null;
+  const scopedBoutId = unwrapUuid(opts?.bout_id);
+
+  let ctxQ = supabaseAdmin
     .from("controle_bout_context")
-    .select("bout_id, rood_gym_mm, blauw_gym_mm, evenement_datum")
+    .select("partij_nr, bout_id, rood_gym_mm, blauw_gym_mm, evenement_datum")
     .eq("matchmaking_id", matchmaking_id)
     .eq("controle_run_id", controle_run_id);
 
+  if (scopedPartijNr != null) ctxQ = ctxQ.eq("partij_nr", scopedPartijNr);
+  if (scopedBoutId) ctxQ = ctxQ.eq("bout_id", scopedBoutId);
+
+  const { data: ctxRows, error: cErr } = await ctxQ;
   if (cErr) throw cErr;
   if (!ctxRows || ctxRows.length === 0) return;
 
@@ -396,6 +706,7 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
   const aliases = await fetchAllSportschoolAliases();
   const aliasNormToId = new Map<string, string>();
   const aliasCompactToId = new Map<string, string>();
+  const aliasRows: { alias_text: string; sportschool_id: string }[] = [];
 
   for (const a of aliases ?? []) {
     const raw = String((a as any)?.alias_text ?? "").trim();
@@ -408,12 +719,25 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
 
     if (!aliasNormToId.has(n)) aliasNormToId.set(n, String(sid));
     if (!aliasCompactToId.has(c)) aliasCompactToId.set(c, String(sid));
+
+    aliasRows.push({
+      alias_text: raw,
+      sportschool_id: String(sid),
+    });
   }
 
-  const aliasMaps: AliasMaps = { aliasNormToId, aliasCompactToId };
+  const aliasMaps: AliasMaps = { aliasNormToId, aliasCompactToId, aliasRows };
+
   console.log("[enrichControleBoutContext] sportscholen loaded:", sportscholen.length);
   console.log("[enrichControleBoutContext] aliases loaded:", aliases.length);
   console.log("[enrichControleBoutContext] alias keys:", aliasNormToId.size);
+  console.log("[enrichControleBoutContext] scope", {
+    matchmaking_id,
+    controle_run_id,
+    partij_nr: scopedPartijNr,
+    bout_id: scopedBoutId,
+    rows: ctxRows.length,
+  });
 
   for (const row of ctxRows) {
     const bout_id = unwrapUuid((row as any).bout_id);
@@ -429,11 +753,8 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
     const blauw = blauwMatch.row;
 
     const patch: any = {};
-
-    // ✅ altijd MM sportschool in tekst, met marker om in UI oranje te maken
     const mmLine = (gym: string) => (gym ? `↳ [MM sportschool:] "${gym}"` : `↳ [MM sportschool:] -`);
 
-    // ---- ROOD ----
     if (!rood) {
       patch.keurmerk_rood = null;
       patch.keurmerk_reden_rood = roodGym
@@ -441,54 +762,38 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
         : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
     } else {
       const hint = detectLandHintFromGymText(roodGym);
-
       const landDb = rood?.land ?? rood?.country ?? null;
-      const land =
-        landDb ??
-        (hint === "BE" ? "België" : hint === "DE" ? "Duitsland" : hint === "NL" ? "Nederland" : null);
-
+      const land = landDb ?? landHintToLabel(hint);
       const eindeIso = toIsoDateOnly(rood?.keurmerk_eind ?? rood?.keurmerk_einde ?? rood?.einde_keurmerk);
 
       const matchInfo =
         `${mmLine(roodGym)}\n` +
         `↳ gematcht met "${rood.naam}" (${rood.plaats ?? rood.stad ?? "?"}, ${land ?? "?"})`;
 
-      const isForeign = (land && !isNL(land)) || hint === "BE" || hint === "DE";
+      const isForeign = landDb ? isForeignNonNL(landDb) : hint !== null && hint !== "NL";
 
       if (isForeign) {
         patch.keurmerk_rood = true;
 
-        const be = (land && isBE(land)) || hint === "BE";
-        if (be) {
+        if (landDb ? isBE(landDb) : hint === "BE") {
           patch.keurmerk_reden_rood =
-            `⚠️ België — controleer sportschool op BKMO/BKBMO site + boksboekje. Land: ${land ?? "België"}.\n` +
-            matchInfo;
+            `⚠️ België — controleer sportschool op BKBMO site + boksboekje. Land: ${land ?? "België"}.\n${matchInfo}`;
+        } else if (landDb ? isDE(landDb) : hint === "DE") {
+          patch.keurmerk_reden_rood =
+            `ℹ️ Buitenland (Duitsland) — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
         } else {
-          patch.keurmerk_reden_rood = `✅ Buitenland (${land ?? "onbekend"}) — NL keurmerk niet vereist.\n` + matchInfo;
+          patch.keurmerk_reden_rood =
+            `ℹ️ Buitenland — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
         }
       } else {
-        const eventDate = toIsoDateOnly((row as any).evenement_datum);
-
-        if (!eindeIso) {
-          patch.keurmerk_rood = false;
-          patch.keurmerk_reden_rood = `❌ Geen keurmerk data.\n${matchInfo}`;
-        } else if (!eventDate) {
-          patch.keurmerk_rood = false;
-          patch.keurmerk_reden_rood =
-            `❌ Geen evenement datum bekend om keurmerk te valideren. Keurmerk eindigt op ${eindeIso}.\n${matchInfo}`;
-        } else if (dayjs(eindeIso).isBefore(dayjs(eventDate), "day")) {
-          patch.keurmerk_rood = false;
-          patch.keurmerk_reden_rood =
-            `❌ Geen geldig keurmerk op evenement (einde ${eindeIso}, event ${eventDate}).\n${matchInfo}`;
-        } else {
-          patch.keurmerk_rood = true;
-          patch.keurmerk_reden_rood =
-            `✅ Geldig keurmerk op evenement (einde ${eindeIso}, event ${eventDate}).\n${matchInfo}`;
-        }
+        const geldig = !!eindeIso && eindeIso >= String((row as any)?.evenement_datum ?? "");
+        patch.keurmerk_rood = geldig;
+        patch.keurmerk_reden_rood = geldig
+          ? `${matchInfo}\nKeurmerk geldig t/m ${eindeIso}.`
+          : `${matchInfo}\nGeen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`;
       }
     }
 
-    // ---- BLAUW ----
     if (!blauw) {
       patch.keurmerk_blauw = null;
       patch.keurmerk_reden_blauw = blauwGym
@@ -496,50 +801,35 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
         : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
     } else {
       const hint = detectLandHintFromGymText(blauwGym);
-
       const landDb = blauw?.land ?? blauw?.country ?? null;
-      const land =
-        landDb ??
-        (hint === "BE" ? "België" : hint === "DE" ? "Duitsland" : hint === "NL" ? "Nederland" : null);
-
+      const land = landDb ?? landHintToLabel(hint);
       const eindeIso = toIsoDateOnly(blauw?.keurmerk_eind ?? blauw?.keurmerk_einde ?? blauw?.einde_keurmerk);
 
       const matchInfo =
         `${mmLine(blauwGym)}\n` +
         `↳ gematcht met "${blauw.naam}" (${blauw.plaats ?? blauw.stad ?? "?"}, ${land ?? "?"})`;
 
-      const isForeign = (land && !isNL(land)) || hint === "BE" || hint === "DE";
+      const isForeign = landDb ? isForeignNonNL(landDb) : hint !== null && hint !== "NL";
 
       if (isForeign) {
         patch.keurmerk_blauw = true;
 
-        const be = (land && isBE(land)) || hint === "BE";
-        if (be) {
+        if (landDb ? isBE(landDb) : hint === "BE") {
           patch.keurmerk_reden_blauw =
-            `⚠️ België — controleer sportschool op BKBMO site + boksboekje. Land: ${land ?? "België"}.\n` +
-            matchInfo;
+            `⚠️ België — controleer sportschool op BKBMO site + boksboekje. Land: ${land ?? "België"}.\n${matchInfo}`;
+        } else if (landDb ? isDE(landDb) : hint === "DE") {
+          patch.keurmerk_reden_blauw =
+            `ℹ️ Buitenland (Duitsland) — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
         } else {
-          patch.keurmerk_reden_blauw = `✅ Buitenland (${land ?? "onbekend"}) — NL keurmerk niet vereist.\n` + matchInfo;
+          patch.keurmerk_reden_blauw =
+            `ℹ️ Buitenland — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
         }
       } else {
-        const eventDate = toIsoDateOnly((row as any).evenement_datum);
-
-        if (!eindeIso) {
-          patch.keurmerk_blauw = false;
-          patch.keurmerk_reden_blauw = `❌ Geen keurmerk data.\n${matchInfo}`;
-        } else if (!eventDate) {
-          patch.keurmerk_blauw = false;
-          patch.keurmerk_reden_blauw =
-            `❌ Geen evenement datum bekend om keurmerk te valideren. Keurmerk eindigt op ${eindeIso}.\n${matchInfo}`;
-        } else if (dayjs(eindeIso).isBefore(dayjs(eventDate), "day")) {
-          patch.keurmerk_blauw = false;
-          patch.keurmerk_reden_blauw =
-            `❌ Geen geldig keurmerk op evenement (einde ${eindeIso}, event ${eventDate}).\n${matchInfo}`;
-        } else {
-          patch.keurmerk_blauw = true;
-          patch.keurmerk_reden_blauw =
-            `✅ Geldig keurmerk op evenement (einde ${eindeIso}, event ${eventDate}).\n${matchInfo}`;
-        }
+        const geldig = !!eindeIso && eindeIso >= String((row as any)?.evenement_datum ?? "");
+        patch.keurmerk_blauw = geldig;
+        patch.keurmerk_reden_blauw = geldig
+          ? `${matchInfo}\nKeurmerk geldig t/m ${eindeIso}.`
+          : `${matchInfo}\nGeen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`;
       }
     }
 

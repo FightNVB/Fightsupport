@@ -282,40 +282,23 @@ var _s = __turbopack_context__.k.signature();
 ;
 ;
 const NVB_ORANGE = "#ff4d00";
-function metalText() {
-    return {
-        background: "linear-gradient(180deg, #ffffff 0%, #d6d6d6 45%, #9a9a9a 100%)",
-        WebkitBackgroundClip: "text",
-        WebkitTextFillColor: "transparent"
-    };
-}
-function metalFrameStyle(accent = "orange") {
-    const accentGlow = accent === "orange" ? "radial-gradient(640px 320px at 50% 0%, rgba(255,77,0,0.18), transparent 62%)" : "radial-gradient(640px 320px at 50% 0%, rgba(255,255,255,0.06), transparent 62%)";
-    const brushed = "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, rgba(255,255,255,0.02) 1px, rgba(255,255,255,0.02) 4px)";
-    const sheen = "linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 24%, rgba(255,255,255,0) 48%, rgba(255,255,255,0.10) 70%, rgba(255,255,255,0) 100%)";
-    return {
-        border: "5px solid rgba(10,10,12,0.92)",
-        borderRadius: 22,
-        background: `${accentGlow}, ${sheen}, ${brushed}, linear-gradient(180deg, #3a3d44 0%, #1f2025 52%, #0a0b0e 100%)`,
-        boxShadow: "0 26px 70px rgba(0,0,0,0.70)," + " inset 0 0 0 2px rgba(255,255,255,0.14)," + " inset 0 0 0 4px rgba(180,180,190,0.18)," + " inset 0 0 0 7px rgba(0,0,0,0.55)," + " inset 0 1px 0 rgba(255,255,255,0.22)," + " inset 0 -18px 24px rgba(0,0,0,0.65)"
-    };
-}
-function metalInnerStyle() {
-    return {
-        border: "3px solid rgba(0,0,0,0.45)",
-        borderRadius: 16,
-        background: "repeating-linear-gradient(90deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, rgba(255,255,255,0.025) 1px, rgba(255,255,255,0.025) 6px)," + " linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(233,236,240,0.98) 100%)",
-        boxShadow: "inset 0 0 0 2px rgba(255,255,255,0.70)," + " inset 0 0 0 6px rgba(0,0,0,0.10)," + " inset 0 -12px 22px rgba(0,0,0,0.12)"
-    };
-}
-const silverBackplate = {
-    background: "radial-gradient(circle at 50% 0%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.16) 38%, rgba(0,0,0,0.08) 72%, rgba(0,0,0,0.22) 100%), linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(236,238,242,0.98) 100%)"
-};
 function parseISODateOnly(d) {
     if (!d) return null;
     const s = String(d).trim();
     const dt = new Date(s.length === 10 ? `${s}T00:00:00` : s);
     return isNaN(dt.getTime()) ? null : dt;
+}
+function formatDateNl(d) {
+    const dt = parseISODateOnly(d);
+    if (!dt) {
+        const raw = String(d ?? "").trim();
+        if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) return raw;
+        return raw;
+    }
+    const dd = String(dt.getDate()).padStart(2, "0");
+    const mm = String(dt.getMonth() + 1).padStart(2, "0");
+    const yyyy = dt.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
 }
 function calcAgeYearsOnDate(eventDate, birthDate) {
     let years = eventDate.getFullYear() - birthDate.getFullYear();
@@ -408,25 +391,6 @@ function isContextCompleet(ctx) {
     ];
     return required.every((v)=>v != null && String(v).trim() !== "");
 }
-function isBelgischeGymInfoRow(r) {
-    const code = String(r?.rule_code ?? "").toUpperCase();
-    const rule = String(r?.rule ?? "").toUpperCase();
-    const msg = String(r?.boodschap ?? "").toUpperCase();
-    if (code.includes("KEURMERK_BE")) return true;
-    if (code.includes("BELG") && code.includes("INFO")) return true;
-    if (rule.includes("BELGI") && (rule.includes("KEURMERK") || rule.includes("SPORTSCHOOL"))) return true;
-    if (msg.includes("BELGI") && (msg.includes("BKBMO") || msg.includes("BKMO") || msg.includes("BOKSBOEKJE"))) return true;
-    return false;
-}
-function displayResultaatLabel(r) {
-    if (isBelgischeGymInfoRow(r)) return "LET OP";
-    const s = String(r.resultaat ?? "").trim();
-    return s ? s.toUpperCase() : "";
-}
-function normResultaatRow(r) {
-    if (isBelgischeGymInfoRow(r)) return "ok";
-    return normResultaat(r?.resultaat);
-}
 function normResultaat(v) {
     const s = String(v ?? "").trim().toLowerCase();
     if (!s) return "";
@@ -437,24 +401,41 @@ function normResultaat(v) {
     if (s === "info") return "ok";
     return s;
 }
+function hasDispensatieResultaat(resultaten) {
+    return resultaten.some((r)=>normResultaat(r?.resultaat) === "dispensatie");
+}
+function statusPriority(status) {
+    if (status === "afgekeurd") return 4;
+    if (status === "dispensatie") return 3;
+    if (status === "actie") return 2;
+    if (status === "ok") return 1;
+    return 0;
+}
 function statusFromResultaten(resultaten) {
-    let s = "geen_info";
+    let best = "geen_info";
     for (const r of resultaten){
-        const res = normResultaatRow(r);
-        if (res === "afgekeurd") return "afgekeurd";
-        if (res === "dispensatie" || res === "actie") {
-            s = s === "geen_info" || s === "ok" ? "actie" : s;
-        }
-        if (res === "ok") s = s === "geen_info" ? "ok" : s;
+        const res = normResultaat(r?.resultaat);
+        const mapped = res === "afgekeurd" ? "afgekeurd" : res === "dispensatie" ? "dispensatie" : res === "actie" ? "actie" : res === "ok" ? "ok" : "geen_info";
+        if (statusPriority(mapped) > statusPriority(best)) best = mapped;
     }
-    return s;
+    return best;
 }
 function statusFromResultatenOrOk(resultaten, ctxRow) {
+    if (resultaten && resultaten.length > 0) {
+        const resStatus = statusFromResultaten(resultaten);
+        if (resStatus !== "geen_info") return resStatus;
+    }
     if (!isContextCompleet(ctxRow)) return "geen_info";
-    if (!resultaten || resultaten.length === 0) return "ok";
-    return statusFromResultaten(resultaten);
+    return "ok";
 }
-/** ===== UI badges ===== */ function HeaderBadge({ label, value, tone }) {
+function isLicentieRow(r) {
+    const code = String(r.rule_code ?? "").toLowerCase();
+    const rule = String(r.rule ?? "").toLowerCase();
+    const msg = String(r.boodschap ?? "").toLowerCase();
+    const hay = `${code} ${rule} ${msg}`;
+    return hay.includes("licentie") || hay.includes("license");
+}
+function HeaderBadge({ label, value, tone }) {
     const cls = tone === "red" ? "bg-red-500 text-zinc-900" : tone === "yellow" ? "bg-yellow-300 text-black" : tone === "orange" ? "bg-orange-600 text-zinc-900" : tone === "green" ? "bg-green-500 text-zinc-900" : tone === "blue" ? "bg-blue-700 text-white" : tone === "purple" ? "bg-purple-700 text-white" : tone === "white" ? "bg-white/90 text-black" : "bg-gray-500 text-zinc-900";
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
         className: `inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${cls}`,
@@ -463,7 +444,7 @@ function statusFromResultatenOrOk(resultaten, ctxRow) {
                 children: label
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                lineNumber: 281,
+                lineNumber: 253,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -471,18 +452,17 @@ function statusFromResultatenOrOk(resultaten, ctxRow) {
                 children: value
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                lineNumber: 282,
+                lineNumber: 254,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 280,
+        lineNumber: 252,
         columnNumber: 5
     }, this);
 }
 _c = HeaderBadge;
-// FIX: added "blue" tone
 function Chip({ label, tone }) {
     const cls = tone === "red" ? "bg-red-500 text-zinc-900" : tone === "yellow" ? "bg-yellow-300 text-black" : tone === "orange" ? "bg-orange-600 text-zinc-900" : tone === "green" ? "bg-green-500 text-zinc-900" : tone === "purple" ? "bg-purple-700 text-white" : tone === "blue" ? "bg-blue-700 text-white" : tone === "white" ? "bg-white/90 text-black" : "bg-gray-500 text-zinc-900";
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -490,7 +470,7 @@ function Chip({ label, tone }) {
         children: label
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 313,
+        lineNumber: 284,
         columnNumber: 5
     }, this);
 }
@@ -501,7 +481,7 @@ function StatusBadge({ status }) {
         tone: "red"
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 320,
+        lineNumber: 291,
         columnNumber: 38
     }, this);
     if (status === "dispensatie") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
@@ -509,7 +489,7 @@ function StatusBadge({ status }) {
         tone: "orange"
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 321,
+        lineNumber: 292,
         columnNumber: 40
     }, this);
     if (status === "actie") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
@@ -517,7 +497,7 @@ function StatusBadge({ status }) {
         tone: "yellow"
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 322,
+        lineNumber: 293,
         columnNumber: 34
     }, this);
     if (status === "ok") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
@@ -525,7 +505,7 @@ function StatusBadge({ status }) {
         tone: "green"
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 323,
+        lineNumber: 294,
         columnNumber: 31
     }, this);
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
@@ -533,12 +513,11 @@ function StatusBadge({ status }) {
         tone: "white"
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 324,
+        lineNumber: 295,
         columnNumber: 10
     }, this);
 }
 _c2 = StatusBadge;
-// FIX: added "blue" tone, fixed purple inactive (was text-purple-200 = onzichtbaar)
 function FilterButton({ label, active, onClick, count, tone }) {
     const base = "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-extrabold border transition";
     const activeCls = tone === "red" ? "bg-red-500 text-zinc-900 border-red-500" : tone === "yellow" ? "bg-yellow-300 text-black border-yellow-300" : tone === "orange" ? "bg-orange-600 text-zinc-900 border-orange-600" : tone === "green" ? "bg-green-500 text-zinc-900 border-green-500" : tone === "purple" ? "bg-purple-700 text-white border-purple-700" : tone === "blue" ? "bg-blue-700 text-white border-blue-700" : tone === "white" ? "bg-white text-black border-white" : tone === "gray" ? "bg-gray-500 text-zinc-900 border-gray-500" : "bg-zinc-100 text-zinc-900 border-zinc-300";
@@ -552,7 +531,7 @@ function FilterButton({ label, active, onClick, count, tone }) {
                 children: label
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                lineNumber: 388,
+                lineNumber: 358,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -560,18 +539,18 @@ function FilterButton({ label, active, onClick, count, tone }) {
                 children: count
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                lineNumber: 389,
+                lineNumber: 359,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 383,
+        lineNumber: 353,
         columnNumber: 5
     }, this);
 }
 _c3 = FilterButton;
-/** ===== Verbod detectie ===== */ function isVerbodRow(r) {
+function isVerbodRow(r) {
     const code = String(r.rule_code ?? "").toUpperCase();
     const rule = String(r.rule ?? "").toUpperCase();
     const msg = String(r.boodschap ?? "").toUpperCase();
@@ -594,7 +573,7 @@ function isGeenTegenstander(ctx) {
     const heeftBlauw = !!(blauwVa || blauwNaam);
     return heeftRood && !heeftBlauw || !heeftRood && heeftBlauw;
 }
-/** ===== Gala duur helpers ===== */ function parseMinutesFromText(text) {
+function parseMinutesFromText(text) {
     const m = String(text).match(/(\d+)\s*min/i);
     if (!m) return null;
     const n = Number(m[1]);
@@ -627,99 +606,6 @@ function isGalaDuurRow(r) {
     if (msg.includes("DUURT TE LANG")) return true;
     return false;
 }
-// =====================================================================
-// FIX: Gala tijdsduur berekening op basis van Excel-formule
-// Formule per partij: (ronden × rondduur) + (pauzes × pauseduur) + AA + OM
-// =====================================================================
-const KLASSE_MINUTEN = {
-    // A
-    "a titel": 31,
-    "a": 21,
-    // B
-    "b": 14,
-    // C
-    "c": 13,
-    // N / Nieuweling
-    "n": 11.5,
-    // 16/17 jr
-    "16/17": 10.5,
-    // Jeugd / J
-    "j": 8.5,
-    // Demo
-    "demo": 6,
-    // MMA
-    "mma pro": 17,
-    "mma amateur": 17,
-    "mma jeugd": 17
-};
-function matchKlasseMinuten(klasse) {
-    const k = String(klasse ?? "").trim().toLowerCase();
-    if (!k || k === "-") return null;
-    // 1. Verwijder "klasse" suffix zodat "b klasse" → "b", "n klasse" → "n" etc.
-    const stripped = k.replace(/\s*klasse\s*$/i, "").trim();
-    // 2. MMA — specifiek eerst
-    if (stripped.includes("mma")) {
-        if (stripped.includes("pro")) return KLASSE_MINUTEN["mma pro"];
-        if (stripped.includes("jeugd") || stripped.includes("youth")) return KLASSE_MINUTEN["mma jeugd"];
-        // "mma am", "mma amateur", "mma" alleen
-        return KLASSE_MINUTEN["mma amateur"];
-    }
-    // 3. Titel (A titel)
-    if (stripped.includes("titel")) return KLASSE_MINUTEN["a titel"];
-    // 4. K1 / K-1 → A klasse tijden
-    if (stripped.includes("k1") || stripped.includes("k-1")) return KLASSE_MINUTEN["a"];
-    // 5. 16/17 jarigen — vóór jeugd-check
-    if (/16|17/.test(stripped)) return KLASSE_MINUTEN["16/17"];
-    // 6. Jeugd — J / Jeugd / J klasse
-    if (stripped === "j") return KLASSE_MINUTEN["j"];
-    if (stripped.includes("jeugd") || stripped.includes("youth") || stripped.includes("junior")) return KLASSE_MINUTEN["j"];
-    // 7. Nieuweling / N / N klasse
-    if (stripped === "n" || stripped.includes("nieuweling") || stripped.includes("novice")) return KLASSE_MINUTEN["n"];
-    // 8. C / C klasse
-    if (stripped === "c") return KLASSE_MINUTEN["c"];
-    // 9. B / B klasse
-    if (stripped === "b") return KLASSE_MINUTEN["b"];
-    // 10. A / A klasse
-    if (stripped === "a") return KLASSE_MINUTEN["a"];
-    // 11. Demo
-    if (stripped.includes("demo")) return KLASSE_MINUTEN["demo"];
-    return null;
-}
-function calcGalaDuurFromRows(rows) {
-    let totalMins = 0;
-    const unknownSet = new Set();
-    for (const r of rows){
-        const klasse = String(r.klasse_mm ?? r.klasse ?? "").trim();
-        const mins = matchKlasseMinuten(klasse);
-        if (mins !== null) {
-            totalMins += mins;
-        } else if (klasse && klasse !== "-") {
-            unknownSet.add(klasse);
-        }
-    }
-    return {
-        totalMins,
-        unknownKlasses: Array.from(unknownSet)
-    };
-}
-function buildGalaDuurFromMins(totalMins) {
-    const approvalMin = 390; // 6.5 uur
-    const maxMin = 510; // 8.5 uur
-    const needsApproval = totalMins > approvalMin;
-    const overMax = totalMins > maxMin;
-    let extra = "";
-    if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
-    else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
-    else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
-    const q = formatQuarterHoursFromMinutes(totalMins);
-    return {
-        mins: totalMins,
-        needsApproval,
-        overMax,
-        text: `Tijdsduur evenement: ${q}. ${extra}`
-    };
-}
-// =====================================================================
 function buildGalaDuurSamenvatting(runMeldingen) {
     const hit = runMeldingen.find(isGalaDuurRow);
     if (!hit?.boodschap) return null;
@@ -737,9 +623,9 @@ function buildGalaDuurSamenvatting(runMeldingen) {
     const needsApproval = mins > approvalMin;
     const overMax = mins > maxMin;
     let extra = "";
-    if (overMax) extra = `⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.`;
-    else if (needsApproval) extra = `⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.`;
-    else extra = `Binnen 6.5 uur (geen goedkeuring nodig).`;
+    if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
+    else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
+    else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
     const q = formatQuarterHoursFromMinutes(mins);
     return {
         mins,
@@ -748,22 +634,20 @@ function buildGalaDuurSamenvatting(runMeldingen) {
         text: `Tijdsduur evenement: ${q}. ${extra}`
     };
 }
-// FIX: accepts galaDuurMinsOverride so frontend-berekening de backend overschrijft
-function buildCompactRunMeldingen(runMeldingen, galaDuurMinsOverride) {
-    const galaRows = (runMeldingen ?? []).filter(isGalaDuurRow);
-    const rest = (runMeldingen ?? []).filter((r)=>!isGalaDuurRow(r));
-    const mins = galaDuurMinsOverride != null ? galaDuurMinsOverride : galaRows.length > 0 ? (()=>{
-        const s = buildGalaDuurSamenvatting(galaRows);
-        return s?.mins ?? null;
-    })() : null;
-    if (mins === null && galaRows.length === 0) return runMeldingen ?? [];
+function buildCompactRunMeldingen(runMeldingen) {
+    if (!runMeldingen?.length) return [];
+    const galaRows = runMeldingen.filter(isGalaDuurRow);
+    const rest = runMeldingen.filter((r)=>!isGalaDuurRow(r));
+    if (galaRows.length === 0) return runMeldingen;
+    const sum = buildGalaDuurSamenvatting(galaRows);
+    const mins = sum?.mins ?? parseMinutesFromText(galaRows.find((r)=>r?.boodschap)?.boodschap ?? "") ?? null;
     const approvalMin = 390;
     const maxMin = 510;
     const needsApproval = mins != null ? mins > approvalMin : true;
     const overMax = mins != null ? mins > maxMin : false;
     const resultaat = overMax ? "afgekeurd" : needsApproval ? "actie" : "ok";
     const q = mins != null ? formatQuarterHoursFromMinutes(mins) : null;
-    const compactMsg = q ? `Geschatte gala-duur: ${q}. ${overMax ? "Overschrijdt max 8.5 uur — AFKEUR." : needsApproval ? "Boven 6.5 uur — Hoofdofficial nodig / actie." : "Binnen 6.5 uur (geen goedkeuring nodig)."}` : galaRows.find((r)=>r?.boodschap)?.boodschap ?? "Gala-duur kon niet worden berekend.";
+    const compactMsg = q ? `Geschatte gala-duur: ${q}. ${overMax ? "Overschrijdt max 8.5 uur — AFKEUR." : needsApproval ? "Boven 6.5 uur — Hoofdofficial nodig / actie." : "Binnen 6.5 uur (geen goedkeuring nodig)."}` : sum?.text ?? galaRows.find((r)=>r?.boodschap)?.boodschap ?? "";
     const merged = {
         partij_nr: null,
         hoek: null,
@@ -795,7 +679,7 @@ function DarkActionButton({ label, onClick, tone = "orange", title, disabled }) 
         children: label
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 661,
+        lineNumber: 533,
         columnNumber: 5
     }, this);
 }
@@ -809,7 +693,7 @@ function Field({ label, value, onChange, placeholder, type = "text" }) {
                 children: label
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                lineNumber: 696,
+                lineNumber: 568,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -820,38 +704,17 @@ function Field({ label, value, onChange, placeholder, type = "text" }) {
                 className: "w-full rounded-lg px-3 py-2 bg-white text-zinc-900 border border-zinc-300 focus:outline-none focus:border-white/30"
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                lineNumber: 697,
+                lineNumber: 569,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 695,
+        lineNumber: 567,
         columnNumber: 5
     }, this);
 }
 _c5 = Field;
-// FIX: Shell staat nu BUITEN de component zodat de referentie stabiel blijft.
-// Als Shell binnen de component staat, wordt het bij elke state-update als nieuw
-// component type gezien → React unmount/remount → inputs verliezen focus na elke toetsaanslag.
-function Shell({ children }) {
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-        className: `${__TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className} min-h-screen bg-zinc-100 text-zinc-900`,
-        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-            className: "mx-auto w-full max-w-[1400px] px-4 md:px-6 py-6",
-            children: children
-        }, void 0, false, {
-            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-            lineNumber: 714,
-            columnNumber: 7
-        }, this)
-    }, void 0, false, {
-        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 713,
-        columnNumber: 5
-    }, this);
-}
-_c6 = Shell;
 function ControleMatchmakingPage() {
     _s();
     const params = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useParams"])();
@@ -870,7 +733,9 @@ function ControleMatchmakingPage() {
     const [busyPartij, setBusyPartij] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])({});
     const [hasDispByPartij, setHasDispByPartij] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])({});
     const [dispRequestByPartij, setDispRequestByPartij] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])({});
+    const [dispResultaatByPartij, setDispResultaatByPartij] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])({});
     const [countByPartij, setCountByPartij] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])({});
+    const [licentieStatusByPartij, setLicentieStatusByPartij] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])({});
     const [verbodByPartij, setVerbodByPartij] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])({});
     const [filter, setFilter] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("all");
     const [search, setSearch] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
@@ -887,6 +752,8 @@ function ControleMatchmakingPage() {
     const [fBlauwVa, setFBlauwVa] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
     const [fBlauwKg, setFBlauwKg] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
     const [fMaxKg, setFMaxKg] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
+    const [releaseBusy, setReleaseBusy] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
+    const [releaseMsg, setReleaseMsg] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
     async function getAccessToken() {
         const { data } = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$supabaseClient$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["supabase"].auth.getSession();
         return data.session?.access_token ?? null;
@@ -894,8 +761,8 @@ function ControleMatchmakingPage() {
     const subtitle = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
         "ControleMatchmakingPage.useMemo[subtitle]": ()=>{
             const naam = (evenementNaam ?? "").trim();
-            const datum = (evenementDatum ?? "").trim();
-            if (naam && datum) return `${naam}  ${datum}`;
+            const datum = formatDateNl(evenementDatum);
+            if (naam && datum) return `${naam} ${datum}`;
             if (naam) return naam;
             if (datum) return datum;
             return "-";
@@ -911,16 +778,13 @@ function ControleMatchmakingPage() {
             })
     }["ControleMatchmakingPage.useMemo[separator]"], []);
     function openReportHtml() {
-        const url = `/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/rapport`;
-        router.push(url);
+        router.push(`/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/rapport`);
     }
     function openExcel() {
-        const url = `/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`;
-        window.open(url, "_blank");
+        window.open(`/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
     }
     function openSportdataCsv() {
-        const url = `/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`;
-        window.open(url, "_blank");
+        window.open(`/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
     }
     async function addPartijSubmit() {
         setError(null);
@@ -1036,7 +900,6 @@ function ControleMatchmakingPage() {
             setAddBusy(false);
         }
     }
-    // FIX: echte delete via de juiste API
     async function deletePartij(partijNr) {
         if (!confirm(`Partij ${partijNr} verwijderen?`)) return;
         setBusyPartij((prev)=>({
@@ -1074,6 +937,39 @@ function ControleMatchmakingPage() {
             });
         }
     }
+    async function stuurDoorNaarOfficials() {
+        if (!matchmakingId || releaseBusy) return;
+        setReleaseBusy(true);
+        setReleaseMsg(null);
+        setError(null);
+        try {
+            const token = await getAccessToken();
+            if (!token) throw new Error("Niet ingelogd.");
+            const resp = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$api$2f$authedFetch$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["authedFetch"])("/api/officials/release-matchmaking", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    matchmaking_id: matchmakingId
+                })
+            });
+            const json = await resp.json().catch(()=>({}));
+            if (!resp.ok) {
+                throw new Error(json?.error ?? "Doorsturen naar officials mislukt.");
+            }
+            const successMsg = json?.message ?? "✅ Matchmaking is doorgestuurd naar officials en staat nu in het official overzicht.";
+            setReleaseMsg(successMsg);
+            setMsg(successMsg);
+        } catch (e) {
+            const message = e?.message ?? String(e) ?? "Onbekende fout.";
+            setReleaseMsg(`❌ ${message}`);
+            setError(message);
+        } finally{
+            setReleaseBusy(false);
+        }
+    }
     async function load() {
         setLoading(true);
         setError(null);
@@ -1085,11 +981,13 @@ function ControleMatchmakingPage() {
                 setEvenementNaam(null);
                 setEvenementDatum(null);
                 setStatusByPartij({});
-                setRunMeldingen({});
+                setRunMeldingen([]);
                 setHasDispByPartij({});
                 setDispRequestByPartij({});
+                setDispResultaatByPartij({});
                 setCountByPartij({});
                 setVerbodByPartij({});
+                setLicentieStatusByPartij({});
                 return;
             }
             try {
@@ -1147,8 +1045,10 @@ function ControleMatchmakingPage() {
                 setRunMeldingen([]);
                 setHasDispByPartij({});
                 setDispRequestByPartij({});
+                setDispResultaatByPartij({});
                 setCountByPartij({});
                 setVerbodByPartij({});
+                setLicentieStatusByPartij({});
                 return;
             }
             const { data: resRows, error: resErr } = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$supabaseClient$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["supabase"].from("controle_resultaten").select("partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap").eq("controle_run_id", latestControleRunId);
@@ -1173,6 +1073,8 @@ function ControleMatchmakingPage() {
             };
             const verbodMap = {};
             const countMap = {};
+            const dispResultMap = {};
+            const licMap = {};
             for (const pnStr of Object.keys(ctxByPn)){
                 const pn = Number(pnStr);
                 const ctx = ctxByPn[pn];
@@ -1180,10 +1082,23 @@ function ControleMatchmakingPage() {
                 statusMap[pn] = statusFromResultatenOrOk(rr, ctx);
                 verbodMap[pn] = rr.some(isVerbodRow);
                 countMap[pn] = rr.length;
+                dispResultMap[pn] = hasDispensatieResultaat(rr);
+                const licRows = rr.filter(isLicentieRow);
+                if (licRows.length > 0) {
+                    const hasLicIssue = licRows.some((x)=>{
+                        const res = normResultaat(x.resultaat);
+                        return res === "afgekeurd" || res === "actie" || res === "dispensatie";
+                    });
+                    const hasLicOk = licRows.some((x)=>normResultaat(x.resultaat) === "ok");
+                    if (hasLicIssue) licMap[pn] = "issue";
+                    else if (hasLicOk) licMap[pn] = "ok";
+                }
             }
             setStatusByPartij(statusMap);
             setVerbodByPartij(verbodMap);
             setCountByPartij(countMap);
+            setDispResultaatByPartij(dispResultMap);
+            setLicentieStatusByPartij(licMap);
             try {
                 const { data: dispHits } = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$supabaseClient$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["supabase"].from("dispensatie_hits").select("partij_nr").eq("matchmaking_id", matchmakingId);
                 const m = {};
@@ -1221,31 +1136,15 @@ function ControleMatchmakingPage() {
         matchmakingId,
         reloadTick
     ]);
-    // FIX: berekening op basis van Excel-formule, niet meer afhankelijk van backend-tekst
-    const galaDuurCalc = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
-        "ControleMatchmakingPage.useMemo[galaDuurCalc]": ()=>{
-            if (rows.length === 0) return null;
-            const result = calcGalaDuurFromRows(rows);
-            return result.totalMins > 0 ? result : null;
-        }
-    }["ControleMatchmakingPage.useMemo[galaDuurCalc]"], [
-        rows
-    ]);
     const galaDuur = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
-        "ControleMatchmakingPage.useMemo[galaDuur]": ()=>{
-            if (galaDuurCalc) return buildGalaDuurFromMins(galaDuurCalc.totalMins);
-            return buildGalaDuurSamenvatting(runMeldingen);
-        }
+        "ControleMatchmakingPage.useMemo[galaDuur]": ()=>buildGalaDuurSamenvatting(runMeldingen)
     }["ControleMatchmakingPage.useMemo[galaDuur]"], [
-        runMeldingen,
-        galaDuurCalc
+        runMeldingen
     ]);
-    // FIX: geef de frontend-berekening door zodat die de backend overschrijft
     const compactRunMeldingen = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
-        "ControleMatchmakingPage.useMemo[compactRunMeldingen]": ()=>buildCompactRunMeldingen(runMeldingen, galaDuurCalc?.totalMins)
+        "ControleMatchmakingPage.useMemo[compactRunMeldingen]": ()=>buildCompactRunMeldingen(runMeldingen)
     }["ControleMatchmakingPage.useMemo[compactRunMeldingen]"], [
-        runMeldingen,
-        galaDuurCalc
+        runMeldingen
     ]);
     const rowsByPartijNr = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
         "ControleMatchmakingPage.useMemo[rowsByPartijNr]": ()=>{
@@ -1264,26 +1163,59 @@ function ControleMatchmakingPage() {
             for (const r of rows){
                 const pn = Number(r.partij_nr);
                 if (!Number.isFinite(pn)) continue;
-                if (isMissingLicentie(r, "rood") || isMissingLicentie(r, "blauw")) m[pn] = true;
+                const licStatus = licentieStatusByPartij[pn];
+                if (licStatus === "ok") {
+                    m[pn] = false;
+                    continue;
+                }
+                if (licStatus === "issue") {
+                    m[pn] = true;
+                    continue;
+                }
+                const rood = isMissingLicentie(r, "rood");
+                const blauw = isMissingLicentie(r, "blauw");
+                if (rood || blauw) m[pn] = true;
             }
             return m;
         }
     }["ControleMatchmakingPage.useMemo[missingLicentieByPartij]"], [
-        rows
+        rows,
+        licentieStatusByPartij
+    ]);
+    const anyDispensatieByPartij = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
+        "ControleMatchmakingPage.useMemo[anyDispensatieByPartij]": ()=>{
+            const m = {};
+            for (const r of rows){
+                const pn = Number(r.partij_nr);
+                if (!Number.isFinite(pn)) continue;
+                m[pn] = !!dispResultaatByPartij[pn] || !!hasDispByPartij[pn] || !!dispRequestByPartij[pn] || statusByPartij[pn] === "dispensatie";
+            }
+            return m;
+        }
+    }["ControleMatchmakingPage.useMemo[anyDispensatieByPartij]"], [
+        rows,
+        dispResultaatByPartij,
+        hasDispByPartij,
+        dispRequestByPartij,
+        statusByPartij
     ]);
     const totals = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
         "ControleMatchmakingPage.useMemo[totals]": ()=>{
-            let meldingen_totaal = 0, partijen_met_melding = 0;
+            let meldingen_totaal = 0;
+            let partijen_met_melding = 0;
             let ok = 0, actie = 0, afk = 0, disp = 0, geen = 0, verbod = 0, geen_licentie = 0;
             for (const r of rows){
                 const pn = Number(r.partij_nr);
                 if (!Number.isFinite(pn)) continue;
                 const s = statusByPartij[pn] ?? "geen_info";
                 if (s === "afgekeurd") afk++;
+                else if (s === "dispensatie") disp++;
                 else if (s === "actie") actie++;
                 else if (s === "ok") ok++;
                 else geen++;
-                if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
+                if (anyDispensatieByPartij[pn] && s !== "dispensatie") {
+                    disp++;
+                }
                 if (verbodByPartij[pn]) verbod++;
                 if (missingLicentieByPartij[pn]) geen_licentie++;
                 const cnt = countByPartij[pn] ?? 0;
@@ -1306,8 +1238,7 @@ function ControleMatchmakingPage() {
     }["ControleMatchmakingPage.useMemo[totals]"], [
         rows,
         statusByPartij,
-        hasDispByPartij,
-        dispRequestByPartij,
+        anyDispensatieByPartij,
         verbodByPartij,
         countByPartij,
         missingLicentieByPartij
@@ -1320,10 +1251,11 @@ function ControleMatchmakingPage() {
                 if (!Number.isFinite(pn)) continue;
                 const s = statusByPartij[pn] ?? "geen_info";
                 if (s === "afgekeurd") afk++;
+                else if (s === "dispensatie") disp++;
                 else if (s === "actie") actie++;
                 else if (s === "ok") ok++;
                 else geen++;
-                if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
+                if (anyDispensatieByPartij[pn] && s !== "dispensatie") disp++;
                 if (verbodByPartij[pn]) verbod++;
                 if (missingLicentieByPartij[pn]) geen_licentie++;
             }
@@ -1341,8 +1273,7 @@ function ControleMatchmakingPage() {
     }["ControleMatchmakingPage.useMemo[filterCounts]"], [
         rows,
         statusByPartij,
-        hasDispByPartij,
-        dispRequestByPartij,
+        anyDispensatieByPartij,
         verbodByPartij,
         missingLicentieByPartij
     ]);
@@ -1353,7 +1284,9 @@ function ControleMatchmakingPage() {
                 "ControleMatchmakingPage.useMemo[filteredRows].base": (r)=>{
                     const pn = Number(r.partij_nr);
                     if (!Number.isFinite(pn)) return false;
-                    if (filter === "dispensatie") return !!hasDispByPartij[pn] || !!dispRequestByPartij[pn];
+                    if (filter === "dispensatie") {
+                        return !!anyDispensatieByPartij[pn];
+                    }
                     if (filter === "verbod") return !!verbodByPartij[pn];
                     if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
                     if (filter !== "all") {
@@ -1366,7 +1299,7 @@ function ControleMatchmakingPage() {
             if (!q) return base;
             const hay = {
                 "ControleMatchmakingPage.useMemo[filteredRows].hay": (r)=>{
-                    return [
+                    const parts = [
                         r.rood_naam_fp,
                         r.rood_naam_mm,
                         r.rood_naam,
@@ -1380,8 +1313,9 @@ function ControleMatchmakingPage() {
                         r.blauw_gym_mm,
                         r.blauw_va_mm
                     ].map({
-                        "ControleMatchmakingPage.useMemo[filteredRows].hay": (v)=>String(v ?? "").trim().toLowerCase()
-                    }["ControleMatchmakingPage.useMemo[filteredRows].hay"]).filter(Boolean).join(" ");
+                        "ControleMatchmakingPage.useMemo[filteredRows].hay.parts": (v)=>String(v ?? "").trim().toLowerCase()
+                    }["ControleMatchmakingPage.useMemo[filteredRows].hay.parts"]).filter(Boolean);
+                    return parts.join(" ");
                 }
             }["ControleMatchmakingPage.useMemo[filteredRows].hay"];
             return base.filter({
@@ -1392,1524 +1326,1552 @@ function ControleMatchmakingPage() {
         rowsByPartijNr,
         filter,
         statusByPartij,
-        hasDispByPartij,
-        dispRequestByPartij,
+        anyDispensatieByPartij,
         verbodByPartij,
         missingLicentieByPartij,
         search
     ]);
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Shell, {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("main", {
+        className: "flex items-center justify-center min-h-screen px-4 py-8",
+        style: {
+            background: "#eef0f3"
+        },
         children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-            style: metalFrameStyle("orange"),
-            className: "p-3 md:p-4",
-            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                style: metalInnerStyle(),
-                className: "p-4 md:p-5",
-                children: [
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                        className: "flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3",
-                        style: {
-                            background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
-                            border: "2px solid rgba(63,63,70,0.55)",
-                            boxShadow: "0 14px 30px rgba(0,0,0,0.14)",
-                            color: "#fff"
-                        },
-                        children: [
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "min-w-[220px]",
+            className: "relative w-full max-w-[1280px]",
+            children: [
+                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                    className: "pointer-events-none absolute -inset-10 rounded-[48px]",
+                    style: {
+                        boxShadow: "0 0 110px rgba(220,220,220,0.26), 0 0 180px rgba(220,220,220,0.16), 0 0 140px rgba(255,77,0,0.04)"
+                    }
+                }, void 0, false, {
+                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                    lineNumber: 1254,
+                    columnNumber: 9
+                }, this),
+                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                    className: "relative rounded-[42px] p-[10px]",
+                    children: [
+                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                            className: "absolute inset-0 rounded-[42px]",
+                            style: {
+                                background: "linear-gradient(180deg, #d0d0d0 0%, #8f8f8f 50%, #2a2a2a 100%)",
+                                boxShadow: `
+                0 0 0 1px rgba(255,255,255,0.35),
+                0 0 0 2px rgba(120,120,120,0.20),
+                0 30px 80px rgba(0,0,0,0.70)
+              `
+                            }
+                        }, void 0, false, {
+                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                            lineNumber: 1263,
+                            columnNumber: 11
+                        }, this),
+                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                            className: "relative rounded-[34px] p-[2px]",
+                            style: {
+                                background: "linear-gradient(135deg, rgba(245,245,245,0.95) 0%, rgba(200,200,200,0.65) 40%, rgba(150,150,150,0.45) 70%, rgba(255,77,0,0.10) 100%)"
+                            },
+                            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                className: "rounded-[32px] px-6 py-5",
+                                style: {
+                                    background: "linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)",
+                                    border: "2px solid rgba(63,63,70,0.30)",
+                                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.95)",
+                                    color: "#111827"
+                                },
                                 children: [
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: __TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className,
+                                        className: "flex items-center justify-between gap-6 px-5 py-5",
                                         style: {
-                                            color: NVB_ORANGE,
-                                            letterSpacing: "0.14em",
-                                            fontSize: 14,
-                                            fontWeight: 700,
-                                            textTransform: "uppercase"
+                                            background: "linear-gradient(180deg, #34343a 0%, #23232a 100%)",
+                                            border: "1px solid rgba(255,255,255,0.08)",
+                                            boxShadow: "0 18px 34px rgba(0,0,0,0.22)",
+                                            color: "#fff"
                                         },
-                                        children: "FIGHTSUPPORT"
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1147,
-                                        columnNumber: 15
-                                    }, this),
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: __TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className,
-                                        style: {
-                                            color: "rgba(255,255,255,0.80)",
-                                            fontSize: 12,
-                                            letterSpacing: "0.06em",
-                                            fontWeight: 500
-                                        },
-                                        children: "Vechtsport ondersteuning"
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1150,
-                                        columnNumber: 15
-                                    }, this)
-                                ]
-                            }, void 0, true, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1146,
-                                columnNumber: 13
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "shrink-0",
-                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$components$2f$NvbLightButton$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
-                                    label: "← Terug naar Overzicht",
-                                    onClick: ()=>router.push("/dashboard/admin/controle")
-                                }, void 0, false, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1156,
-                                    columnNumber: 15
-                                }, this)
-                            }, void 0, false, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1155,
-                                columnNumber: 13
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "flex-1 flex justify-center",
-                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "rounded-[22px] p-[4px]",
-                                    style: {
-                                        background: "linear-gradient(135deg, #f5f5f5 0%, #bdbdbd 28%, #8e8e8e 55%, #f0f0f0 72%, #6f6f6f 100%)",
-                                        boxShadow: "0 0 0 2px rgba(255,255,255,0.45), 0 0 0 6px rgba(120,120,120,0.22), 0 14px 30px rgba(0,0,0,0.55), 0 0 28px rgba(220,220,220,0.22)"
-                                    },
-                                    children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "rounded-[18px] px-4 py-3",
-                                        style: {
-                                            background: "linear-gradient(180deg, rgba(0,0,0,0.68) 0%, rgba(0,0,0,0.40) 100%)",
-                                            border: "1px solid rgba(255,255,255,0.10)"
-                                        },
-                                        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$image$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
-                                            src: "/branding/fightsupport/logo-dark.png",
-                                            width: 92,
-                                            height: 92,
-                                            alt: "FightSupport",
-                                            priority: true
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1168,
-                                            columnNumber: 19
-                                        }, this)
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1167,
-                                        columnNumber: 17
-                                    }, this)
-                                }, void 0, false, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1160,
-                                    columnNumber: 15
-                                }, this)
-                            }, void 0, false, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1159,
-                                columnNumber: 13
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "flex flex-wrap gap-2 justify-end min-w-[320px]",
-                                children: [
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
-                                        label: "CSV Sportdata",
-                                        tone: "purple",
-                                        onClick: openSportdataCsv
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1174,
-                                        columnNumber: 15
-                                    }, this),
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
-                                        label: "Excel",
-                                        tone: "green",
-                                        onClick: openExcel
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1175,
-                                        columnNumber: 15
-                                    }, this),
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
-                                        label: "Rapportage",
-                                        tone: "orange",
-                                        onClick: openReportHtml
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1176,
-                                        columnNumber: 15
-                                    }, this),
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "ml-2",
-                                        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$components$2f$NvbDarkButton$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
-                                            label: "Partij toevoegen",
-                                            onClick: ()=>setShowAdd(true)
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1178,
-                                            columnNumber: 17
-                                        }, this)
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1177,
-                                        columnNumber: 15
-                                    }, this)
-                                ]
-                            }, void 0, true, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1173,
-                                columnNumber: 13
-                            }, this)
-                        ]
-                    }, void 0, true, {
-                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                        lineNumber: 1137,
-                        columnNumber: 11
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                        className: "my-3",
-                        style: separator
-                    }, void 0, false, {
-                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                        lineNumber: 1183,
-                        columnNumber: 11
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                        className: "text-center",
-                        children: [
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: __TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className,
-                                style: {
-                                    color: NVB_ORANGE,
-                                    fontSize: 46,
-                                    fontWeight: 900,
-                                    letterSpacing: "0.02em"
-                                },
-                                children: "Matchmaking"
-                            }, void 0, false, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1187,
-                                columnNumber: 13
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: __TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className,
-                                style: {
-                                    marginTop: 10,
-                                    fontSize: 24,
-                                    fontWeight: 900,
-                                    letterSpacing: "0.02em",
-                                    color: "#1f1f23",
-                                    display: "inline-block",
-                                    padding: "8px 14px",
-                                    borderRadius: 14,
-                                    background: "rgba(255,255,255,0.72)",
-                                    border: "2px solid rgba(42,42,46,0.25)",
-                                    boxShadow: "0 10px 24px rgba(0,0,0,0.08)"
-                                },
-                                children: safeText(subtitle, "Onbekend evenement")
-                            }, void 0, false, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1190,
-                                columnNumber: 13
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: __TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className,
-                                style: {
-                                    marginTop: 8,
-                                    fontSize: 12,
-                                    color: "rgba(42,42,46,0.78)",
-                                    letterSpacing: "0.06em"
-                                },
-                                children: matchmakingId
-                            }, void 0, false, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1193,
-                                columnNumber: 13
-                            }, this)
-                        ]
-                    }, void 0, true, {
-                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                        lineNumber: 1186,
-                        columnNumber: 11
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                        className: "my-3",
-                        style: separator
-                    }, void 0, false, {
-                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                        lineNumber: 1198,
-                        columnNumber: 11
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                        className: "rounded-3xl border-2 border-zinc-500/60 p-4 md:p-5 shadow-[0_22px_60px_rgba(24,24,27,0.12)] ring-1 ring-white/50",
-                        style: silverBackplate,
-                        children: loading ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                            className: "text-zinc-700",
-                            children: "Laden…"
-                        }, void 0, false, {
-                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                            lineNumber: 1206,
-                            columnNumber: 15
-                        }, this) : error ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                            className: "text-red-700",
-                            children: error
-                        }, void 0, false, {
-                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                            lineNumber: 1208,
-                            columnNumber: 15
-                        }, this) : rows.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                            className: "text-zinc-700",
-                            children: "Geen context gevonden (context nog niet gevuld?)."
-                        }, void 0, false, {
-                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                            lineNumber: 1210,
-                            columnNumber: 15
-                        }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                            className: "space-y-3",
-                            children: [
-                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "flex flex-wrap items-center gap-3",
-                                    children: [
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                            className: "text-sm text-zinc-800",
-                                            children: [
-                                                "Partijen: ",
-                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                    className: "text-zinc-900 font-semibold",
-                                                    children: totals.totaal
-                                                }, void 0, false, {
-                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                    lineNumber: 1215,
-                                                    columnNumber: 31
-                                                }, this)
-                                            ]
-                                        }, void 0, true, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1214,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Meldingen totaal",
-                                            value: totals.meldingen_totaal,
-                                            tone: "white"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1217,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Partijen met melding",
-                                            value: totals.partijen_met_melding,
-                                            tone: "white"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1218,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Verbod",
-                                            value: totals.verbod,
-                                            tone: "purple"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1219,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Geen licentie",
-                                            value: totals.geen_licentie,
-                                            tone: "blue"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1220,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Afkeur",
-                                            value: totals.afk,
-                                            tone: "red"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1221,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Dispensatie",
-                                            value: totals.dispensatie,
-                                            tone: "orange"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1222,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Actie",
-                                            value: totals.actie,
-                                            tone: "yellow"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1223,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "OK",
-                                            value: totals.ok,
-                                            tone: "green"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1224,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
-                                            label: "Geen info",
-                                            value: totals.geen,
-                                            tone: "white"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1225,
-                                            columnNumber: 19
-                                        }, this)
-                                    ]
-                                }, void 0, true, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1213,
-                                    columnNumber: 17
-                                }, this),
-                                galaDuur?.text && compactRunMeldingen.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "rounded-xl border border-zinc-300 bg-white/5 p-3 text-sm",
-                                    children: [
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                            className: "font-semibold text-zinc-900",
-                                            children: "Gala duur:"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1230,
-                                            columnNumber: 21
-                                        }, this),
-                                        " ",
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                            className: "text-zinc-800",
-                                            children: galaDuur.text
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1231,
-                                            columnNumber: 21
-                                        }, this)
-                                    ]
-                                }, void 0, true, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1229,
-                                    columnNumber: 19
-                                }, this) : null,
-                                compactRunMeldingen.length > 0 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "mt-3 rounded-xl bg-white p-0 overflow-hidden",
-                                    style: {
-                                        border: "3px solid #2b2b2b",
-                                        boxShadow: "0 12px 26px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.65)"
-                                    },
-                                    children: [
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                            className: "px-4 py-3 font-extrabold text-white",
-                                            style: {
-                                                background: "linear-gradient(180deg, #2a2a2e 0%, #1f1f23 100%)",
-                                                borderBottom: "2px solid rgba(255,77,0,0.50)"
-                                            },
-                                            children: "Run meldingen"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1237,
-                                            columnNumber: 21
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                            className: "p-4",
-                                            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                className: "mt-1 space-y-2 text-sm",
-                                                children: compactRunMeldingen.map((r, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                        className: "rounded-md bg-white p-3",
-                                                        style: {
-                                                            border: "2px solid rgba(43,43,43,0.35)",
-                                                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.70), 0 10px 18px rgba(0,0,0,0.05)"
-                                                        },
-                                                        children: [
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                className: "flex items-start gap-2",
-                                                                children: [
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                        className: "min-w-0",
-                                                                        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                            className: "text-zinc-900 font-semibold leading-tight",
-                                                                            children: [
-                                                                                r.rule ?? "(run)",
-                                                                                r.rule_code ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "ml-2 text-xs text-zinc-600 font-semibold",
-                                                                                    children: [
-                                                                                        "(",
-                                                                                        r.rule_code,
-                                                                                        ")"
-                                                                                    ]
-                                                                                }, void 0, true, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1248,
-                                                                                    columnNumber: 50
-                                                                                }, this) : null
-                                                                            ]
-                                                                        }, void 0, true, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1246,
-                                                                            columnNumber: 33
-                                                                        }, this)
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1245,
-                                                                        columnNumber: 31
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                        className: "ml-auto text-xs font-extrabold tracking-wide text-zinc-700",
-                                                                        children: displayResultaatLabel(r)
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1251,
-                                                                        columnNumber: 31
-                                                                    }, this)
-                                                                ]
-                                                            }, void 0, true, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1244,
-                                                                columnNumber: 29
-                                                            }, this),
-                                                            r.boodschap ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                className: "mt-1 text-zinc-700 leading-snug",
-                                                                children: r.boodschap
-                                                            }, void 0, false, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1255,
-                                                                columnNumber: 44
-                                                            }, this) : null
-                                                        ]
-                                                    }, `${r.rule_code ?? "run"}-${i}`, true, {
-                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1243,
-                                                        columnNumber: 27
-                                                    }, this))
-                                            }, void 0, false, {
-                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1241,
-                                                columnNumber: 23
-                                            }, this)
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1240,
-                                            columnNumber: 21
-                                        }, this)
-                                    ]
-                                }, void 0, true, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1236,
-                                    columnNumber: 19
-                                }, this),
-                                msg ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "text-sm text-zinc-700",
-                                    children: msg
-                                }, void 0, false, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1263,
-                                    columnNumber: 24
-                                }, this) : null,
-                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "flex flex-wrap items-center gap-2 rounded-xl border border-zinc-300 bg-white/5 p-3",
-                                    children: [
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                            className: "text-sm font-semibold text-zinc-800 mr-2",
-                                            children: "Filter:"
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1266,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                            className: "flex-1 min-w-[220px]",
-                                            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
-                                                value: search,
-                                                onChange: (e)=>setSearch(e.target.value),
-                                                placeholder: "Zoek op naam, sportschool of VA…",
-                                                className: "w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500",
-                                                style: {
-                                                    background: "linear-gradient(180deg, #ffffff 0%, #f4f6f9 100%)",
-                                                    border: "2px solid rgba(63,63,70,0.35)",
-                                                    color: "#111827",
-                                                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.90), 0 8px 18px rgba(0,0,0,0.10)"
-                                                }
-                                            }, void 0, false, {
-                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1269,
-                                                columnNumber: 21
-                                            }, this)
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1268,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "Alle",
-                                            count: filterCounts.all,
-                                            tone: "neutral",
-                                            active: filter === "all",
-                                            onClick: ()=>setFilter("all")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1283,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "Verbod",
-                                            count: filterCounts.verbod,
-                                            tone: "purple",
-                                            active: filter === "verbod",
-                                            onClick: ()=>setFilter("verbod")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1284,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "Geen licentie",
-                                            count: filterCounts.geen_licentie,
-                                            tone: "blue",
-                                            active: filter === "geen_licentie",
-                                            onClick: ()=>setFilter("geen_licentie")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1285,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "Afkeur",
-                                            count: filterCounts.afgekeurd,
-                                            tone: "red",
-                                            active: filter === "afgekeurd",
-                                            onClick: ()=>setFilter("afgekeurd")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1286,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "Dispensatie",
-                                            count: filterCounts.dispensatie,
-                                            tone: "orange",
-                                            active: filter === "dispensatie",
-                                            onClick: ()=>setFilter("dispensatie")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1287,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "Actie",
-                                            count: filterCounts.actie,
-                                            tone: "yellow",
-                                            active: filter === "actie",
-                                            onClick: ()=>setFilter("actie")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1288,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "OK",
-                                            count: filterCounts.ok,
-                                            tone: "green",
-                                            active: filter === "ok",
-                                            onClick: ()=>setFilter("ok")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1289,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
-                                            label: "Geen info",
-                                            count: filterCounts.geen_info,
-                                            tone: "white",
-                                            active: filter === "geen_info",
-                                            onClick: ()=>setFilter("geen_info")
-                                        }, void 0, false, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1290,
-                                            columnNumber: 19
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                            className: "ml-auto text-xs text-zinc-600",
-                                            children: [
-                                                "Toon: ",
-                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                    className: "font-semibold text-zinc-900",
-                                                    children: filteredRows.length
-                                                }, void 0, false, {
-                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                    lineNumber: 1293,
-                                                    columnNumber: 27
-                                                }, this)
-                                            ]
-                                        }, void 0, true, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                            lineNumber: 1292,
-                                            columnNumber: 19
-                                        }, this)
-                                    ]
-                                }, void 0, true, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1265,
-                                    columnNumber: 17
-                                }, this),
-                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "overflow-auto rounded-xl border border-zinc-300",
-                                    children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("table", {
-                                        className: "min-w-full border-collapse",
                                         children: [
-                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("thead", {
-                                                style: {
-                                                    background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
-                                                    color: "#fff",
-                                                    borderBottom: "3px solid rgba(255,77,0,0.55)"
-                                                },
-                                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tr", {
-                                                    children: [
-                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
-                                                            className: "py-3 px-4 text-left w-24",
-                                                            children: "#"
-                                                        }, void 0, false, {
-                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1301,
-                                                            columnNumber: 25
-                                                        }, this),
-                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
-                                                            className: "py-3 px-4 text-left",
-                                                            children: "Vechters"
-                                                        }, void 0, false, {
-                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1302,
-                                                            columnNumber: 25
-                                                        }, this),
-                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
-                                                            className: "py-3 px-4 text-left w-[320px]",
-                                                            children: "Info"
-                                                        }, void 0, false, {
-                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1303,
-                                                            columnNumber: 25
-                                                        }, this),
-                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
-                                                            className: "py-3 px-4 text-left w-[260px]",
-                                                            children: "Acties"
-                                                        }, void 0, false, {
-                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1304,
-                                                            columnNumber: 25
-                                                        }, this)
-                                                    ]
-                                                }, void 0, true, {
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "flex items-center gap-4 min-w-[240px]",
+                                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$image$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
+                                                    src: "/branding/fightsupport/excel-logo.png",
+                                                    width: 180,
+                                                    height: 48,
+                                                    alt: "FightSupport",
+                                                    priority: true,
+                                                    style: {
+                                                        width: "auto",
+                                                        height: "44px",
+                                                        objectFit: "contain"
+                                                    }
+                                                }, void 0, false, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                    lineNumber: 1300,
-                                                    columnNumber: 23
+                                                    lineNumber: 1301,
+                                                    columnNumber: 19
                                                 }, this)
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1299,
-                                                columnNumber: 21
+                                                lineNumber: 1300,
+                                                columnNumber: 17
                                             }, this),
-                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tbody", {
-                                                children: filteredRows.map((r, i)=>{
-                                                    const zebraWhite = i % 2 === 0;
-                                                    const roodNaam = safeText(r.rood_naam_fp ?? r.rood_naam_mm, "-");
-                                                    const blauwNaam = safeText(r.blauw_naam_fp ?? r.blauw_naam_mm, "-");
-                                                    const roodGym = safeText(r.rood_gym_mm, "-");
-                                                    const blauwGym = safeText(r.blauw_gym_mm, "-");
-                                                    const roodVA = safeText(r.rood_va_mm, "-");
-                                                    const blauwVA = safeText(r.blauw_va_mm, "-");
-                                                    const roodAge = ageAtEvent(r, "rood");
-                                                    const blauwAge = ageAtEvent(r, "blauw");
-                                                    const pn = Number(r.partij_nr);
-                                                    const status = Number.isFinite(pn) ? statusByPartij[pn] ?? "geen_info" : "geen_info";
-                                                    const discipline = safeText(r.discipline, "-");
-                                                    const klasse = safeText(r.klasse_mm, "-");
-                                                    const eventDatum = safeText(r.evenement_datum, "-");
-                                                    const dividerClass = zebraWhite ? "border-t border-gray-400/70" : "border-t border-zinc-300";
-                                                    const heeftVerbod = Number.isFinite(pn) ? !!verbodByPartij[pn] : false;
-                                                    const geenTegenstander = isGeenTegenstander(r);
-                                                    const busy = Number.isFinite(pn) ? busyPartij[pn] : null;
-                                                    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tr", {
-                                                        style: {
-                                                            backgroundColor: zebraWhite ? "#ffffff" : "#0d0d0d",
-                                                            color: zebraWhite ? "#000" : "#fff"
-                                                        },
-                                                        children: [
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
-                                                                className: "py-3 px-4 font-semibold align-top",
-                                                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                    className: "flex items-center gap-2 flex-wrap",
-                                                                    children: [
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                            className: "tabular-nums",
-                                                                            children: r.partij_nr ?? "-"
-                                                                        }, void 0, false, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1335,
-                                                                            columnNumber: 33
-                                                                        }, this),
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(StatusBadge, {
-                                                                            status: status
-                                                                        }, void 0, false, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1336,
-                                                                            columnNumber: 33
-                                                                        }, this),
-                                                                        heeftVerbod ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
-                                                                            label: "VERBOD",
-                                                                            tone: "purple"
-                                                                        }, void 0, false, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1337,
-                                                                            columnNumber: 48
-                                                                        }, this) : null,
-                                                                        Number.isFinite(pn) && missingLicentieByPartij[pn] ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
-                                                                            label: "GEEN LICENTIE",
-                                                                            tone: "blue"
-                                                                        }, void 0, false, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1338,
-                                                                            columnNumber: 87
-                                                                        }, this) : null
-                                                                    ]
-                                                                }, void 0, true, {
-                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                    lineNumber: 1334,
-                                                                    columnNumber: 31
-                                                                }, this)
-                                                            }, void 0, false, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1333,
-                                                                columnNumber: 29
-                                                            }, this),
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
-                                                                className: "py-3 px-4 align-top",
-                                                                children: [
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                        className: "flex items-center gap-3 min-w-0",
-                                                                        children: [
-                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                className: "inline-block w-3 h-3 rounded-full shrink-0",
-                                                                                style: {
-                                                                                    backgroundColor: "#ef4444"
-                                                                                }
-                                                                            }, void 0, false, {
-                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1344,
-                                                                                columnNumber: 33
-                                                                            }, this),
-                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                                className: "min-w-0 text-sm",
-                                                                                children: [
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "font-semibold",
-                                                                                        children: roodNaam
-                                                                                    }, void 0, false, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1346,
-                                                                                        columnNumber: 35
-                                                                                    }, this),
-                                                                                    " ",
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "opacity-80",
-                                                                                        children: [
-                                                                                            "(",
-                                                                                            roodAge,
-                                                                                            " jaar)"
-                                                                                        ]
-                                                                                    }, void 0, true, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1347,
-                                                                                        columnNumber: 35
-                                                                                    }, this),
-                                                                                    " ",
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "opacity-80",
-                                                                                        children: [
-                                                                                            "• ",
-                                                                                            roodGym
-                                                                                        ]
-                                                                                    }, void 0, true, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1348,
-                                                                                        columnNumber: 35
-                                                                                    }, this),
-                                                                                    " ",
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "opacity-80",
-                                                                                        children: [
-                                                                                            "• FP/VA: ",
-                                                                                            roodVA
-                                                                                        ]
-                                                                                    }, void 0, true, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1349,
-                                                                                        columnNumber: 35
-                                                                                    }, this)
-                                                                                ]
-                                                                            }, void 0, true, {
-                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1345,
-                                                                                columnNumber: 33
-                                                                            }, this)
-                                                                        ]
-                                                                    }, void 0, true, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1343,
-                                                                        columnNumber: 31
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                        className: `my-2 ${dividerClass}`
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1352,
-                                                                        columnNumber: 31
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                        className: "flex items-center gap-3 min-w-0",
-                                                                        children: [
-                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                className: "inline-block w-3 h-3 rounded-full shrink-0",
-                                                                                style: {
-                                                                                    backgroundColor: "#3b82f6"
-                                                                                }
-                                                                            }, void 0, false, {
-                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1354,
-                                                                                columnNumber: 33
-                                                                            }, this),
-                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                                className: "min-w-0 text-sm",
-                                                                                children: [
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "font-semibold",
-                                                                                        children: blauwNaam
-                                                                                    }, void 0, false, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1356,
-                                                                                        columnNumber: 35
-                                                                                    }, this),
-                                                                                    " ",
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "opacity-80",
-                                                                                        children: [
-                                                                                            "(",
-                                                                                            blauwAge,
-                                                                                            " jaar)"
-                                                                                        ]
-                                                                                    }, void 0, true, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1357,
-                                                                                        columnNumber: 35
-                                                                                    }, this),
-                                                                                    " ",
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "opacity-80",
-                                                                                        children: [
-                                                                                            "• ",
-                                                                                            blauwGym
-                                                                                        ]
-                                                                                    }, void 0, true, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1358,
-                                                                                        columnNumber: 35
-                                                                                    }, this),
-                                                                                    " ",
-                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                        className: "opacity-80",
-                                                                                        children: [
-                                                                                            "• FP/VA: ",
-                                                                                            blauwVA
-                                                                                        ]
-                                                                                    }, void 0, true, {
-                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1359,
-                                                                                        columnNumber: 35
-                                                                                    }, this)
-                                                                                ]
-                                                                            }, void 0, true, {
-                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1355,
-                                                                                columnNumber: 33
-                                                                            }, this)
-                                                                        ]
-                                                                    }, void 0, true, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1353,
-                                                                        columnNumber: 31
-                                                                    }, this),
-                                                                    geenTegenstander ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                        className: "mt-2 text-xs font-extrabold",
-                                                                        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                            className: "px-2 py-1 rounded bg-red-500 text-zinc-900",
-                                                                            children: "GEEN TEGENSTANDER"
-                                                                        }, void 0, false, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1364,
-                                                                            columnNumber: 35
-                                                                        }, this)
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1363,
-                                                                        columnNumber: 33
-                                                                    }, this) : null
-                                                                ]
-                                                            }, void 0, true, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1342,
-                                                                columnNumber: 29
-                                                            }, this),
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
-                                                                className: "py-3 px-4 align-top",
-                                                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                    className: "space-y-1 text-sm",
-                                                                    children: [
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                            children: [
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "font-semibold",
-                                                                                    children: "Discipline:"
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1371,
-                                                                                    columnNumber: 38
-                                                                                }, this),
-                                                                                " ",
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "opacity-90",
-                                                                                    children: discipline
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1371,
-                                                                                    columnNumber: 89
-                                                                                }, this)
-                                                                            ]
-                                                                        }, void 0, true, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1371,
-                                                                            columnNumber: 33
-                                                                        }, this),
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                            children: [
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "font-semibold",
-                                                                                    children: "Klasse:"
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1372,
-                                                                                    columnNumber: 38
-                                                                                }, this),
-                                                                                " ",
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "opacity-90",
-                                                                                    children: klasse
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1372,
-                                                                                    columnNumber: 85
-                                                                                }, this)
-                                                                            ]
-                                                                        }, void 0, true, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1372,
-                                                                            columnNumber: 33
-                                                                        }, this),
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                            children: [
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "font-semibold",
-                                                                                    children: "Event datum:"
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1373,
-                                                                                    columnNumber: 38
-                                                                                }, this),
-                                                                                " ",
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "opacity-90",
-                                                                                    children: eventDatum
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1373,
-                                                                                    columnNumber: 90
-                                                                                }, this)
-                                                                            ]
-                                                                        }, void 0, true, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1373,
-                                                                            columnNumber: 33
-                                                                        }, this),
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                            children: [
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "font-semibold",
-                                                                                    children: "Meldingen:"
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1374,
-                                                                                    columnNumber: 38
-                                                                                }, this),
-                                                                                " ",
-                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                                                    className: "opacity-90",
-                                                                                    children: Number.isFinite(pn) ? countByPartij[pn] ?? 0 : 0
-                                                                                }, void 0, false, {
-                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1374,
-                                                                                    columnNumber: 88
-                                                                                }, this)
-                                                                            ]
-                                                                        }, void 0, true, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1374,
-                                                                            columnNumber: 33
-                                                                        }, this)
-                                                                    ]
-                                                                }, void 0, true, {
-                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                    lineNumber: 1370,
-                                                                    columnNumber: 31
-                                                                }, this)
-                                                            }, void 0, false, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1369,
-                                                                columnNumber: 29
-                                                            }, this),
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
-                                                                className: "py-3 px-4 align-top",
-                                                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                    className: "flex flex-wrap gap-2",
-                                                                    children: [
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$client$2f$app$2d$dir$2f$link$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
-                                                                            href: `/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/${encodeURIComponent(String(r.partij_nr ?? ""))}`,
-                                                                            className: "px-3 py-1.5 rounded font-extrabold text-sm",
-                                                                            style: {
-                                                                                background: "rgba(0,0,0,0.55)",
-                                                                                border: `1px solid rgba(255,77,0,0.85)`,
-                                                                                color: "rgba(255,210,190,0.95)"
-                                                                            },
-                                                                            children: "Detail"
-                                                                        }, void 0, false, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1380,
-                                                                            columnNumber: 33
-                                                                        }, this),
-                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
-                                                                            label: busy === "delete" ? "… Verwijderen" : "Verwijderen",
-                                                                            tone: "red",
-                                                                            disabled: busy === "delete",
-                                                                            onClick: ()=>Number.isFinite(pn) && deletePartij(pn)
-                                                                        }, void 0, false, {
-                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1388,
-                                                                            columnNumber: 33
-                                                                        }, this)
-                                                                    ]
-                                                                }, void 0, true, {
-                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                    lineNumber: 1379,
-                                                                    columnNumber: 31
-                                                                }, this)
-                                                            }, void 0, false, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1378,
-                                                                columnNumber: 29
-                                                            }, this)
-                                                        ]
-                                                    }, r.id ?? `${r.partij_nr}-${i}`, true, {
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "flex flex-1 items-center justify-end gap-3 flex-wrap",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
+                                                        label: releaseBusy ? "Doorsturen…" : "→ Bondteam",
+                                                        tone: "orange",
+                                                        onClick: stuurDoorNaarOfficials,
+                                                        disabled: releaseBusy
+                                                    }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1329,
-                                                        columnNumber: 27
-                                                    }, this);
-                                                })
-                                            }, void 0, false, {
+                                                        lineNumber: 1312,
+                                                        columnNumber: 19
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
+                                                        label: "Rapportage",
+                                                        tone: "orange",
+                                                        onClick: openReportHtml
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1318,
+                                                        columnNumber: 19
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
+                                                        label: "Excel",
+                                                        tone: "green",
+                                                        onClick: openExcel
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1323,
+                                                        columnNumber: 19
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
+                                                        label: "CSV Sportdata",
+                                                        tone: "purple",
+                                                        onClick: openSportdataCsv
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1328,
+                                                        columnNumber: 19
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1307,
-                                                columnNumber: 21
+                                                lineNumber: 1311,
+                                                columnNumber: 17
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1298,
-                                        columnNumber: 19
-                                    }, this)
-                                }, void 0, false, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1297,
-                                    columnNumber: 17
-                                }, this),
-                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                    className: "pt-2 text-xs text-zinc-500 text-center",
-                                    children: "© FightSupport"
-                                }, void 0, false, {
-                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                    lineNumber: 1403,
-                                    columnNumber: 17
-                                }, this)
-                            ]
-                        }, void 0, true, {
-                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                            lineNumber: 1212,
-                            columnNumber: 15
-                        }, this)
-                    }, void 0, false, {
-                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                        lineNumber: 1201,
-                        columnNumber: 11
-                    }, this),
-                    showAdd && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                        className: "fixed inset-0 z-[999] flex items-center justify-center px-4",
-                        children: [
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "absolute inset-0",
-                                style: {
-                                    background: "rgba(0,0,0,0.65)"
-                                },
-                                onClick: ()=>!addBusy && setShowAdd(false)
-                            }, void 0, false, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1411,
-                                columnNumber: 15
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "relative w-full max-w-[980px] rounded-2xl border-[3px] border-zinc-700/40 bg-white shadow-2xl overflow-hidden",
-                                children: [
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "px-6 py-4 flex items-center justify-between",
+                                        lineNumber: 1291,
+                                        columnNumber: 15
+                                    }, this),
+                                    releaseMsg ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "mt-4 rounded-2xl border px-4 py-3 text-sm font-semibold",
                                         style: {
-                                            background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
-                                            borderBottom: "3px solid rgba(255,77,0,0.55)"
+                                            background: releaseMsg.startsWith("✅") ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
+                                            color: releaseMsg.startsWith("✅") ? "#166534" : "#991b1b",
+                                            borderColor: releaseMsg.startsWith("✅") ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"
                                         },
+                                        children: releaseMsg
+                                    }, void 0, false, {
+                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                        lineNumber: 1337,
+                                        columnNumber: 17
+                                    }, this) : null,
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "pt-6",
                                         children: [
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: `${__TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className} text-center`,
+                                                style: {
+                                                    color: NVB_ORANGE,
+                                                    fontSize: 22,
+                                                    fontWeight: 900,
+                                                    letterSpacing: "0.12em",
+                                                    textTransform: "uppercase"
+                                                },
+                                                children: "Matchmaking controle"
+                                            }, void 0, false, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                lineNumber: 1354,
+                                                columnNumber: 17
+                                            }, this),
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "mt-5 flex flex-wrap items-center justify-center gap-3",
                                                 children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+                                                        type: "button",
+                                                        onClick: ()=>router.push("/dashboard/admin/controle"),
+                                                        className: `${__TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-zinc-900 transition hover:translate-y-[-1px]`,
+                                                        style: {
+                                                            background: "linear-gradient(180deg, #f2f2f2 0%, #cfcfcf 48%, #a8a8a8 100%)",
+                                                            border: "1px solid rgba(82,82,91,0.45)",
+                                                            borderRadius: 0,
+                                                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 10px 18px rgba(0,0,0,0.12)",
+                                                            minWidth: 180
+                                                        },
+                                                        children: "← Terug naar overzicht"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1368,
+                                                        columnNumber: 19
+                                                    }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                        className: "text-white font-extrabold text-lg",
+                                                        className: __TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className,
+                                                        style: {
+                                                            fontSize: 24,
+                                                            fontWeight: 900,
+                                                            letterSpacing: "0.02em",
+                                                            color: "#1f1f23",
+                                                            display: "inline-block",
+                                                            padding: "12px 22px",
+                                                            borderRadius: 0,
+                                                            background: "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
+                                                            border: "1px solid rgba(42,42,46,0.22)",
+                                                            boxShadow: "0 12px 24px rgba(0,0,0,0.08)"
+                                                        },
+                                                        children: safeText(subtitle, "Onbekend evenement")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1383,
+                                                        columnNumber: 19
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+                                                        type: "button",
+                                                        onClick: ()=>setShowAdd(true),
+                                                        className: `${__TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px]`,
+                                                        style: {
+                                                            background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
+                                                            border: "1px solid rgba(150,40,0,0.55)",
+                                                            borderRadius: 0,
+                                                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(255,77,0,0.18)",
+                                                            minWidth: 180
+                                                        },
                                                         children: "Partij toevoegen"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1415,
-                                                        columnNumber: 21
-                                                    }, this),
-                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                        className: "text-white/75 text-xs",
-                                                        children: "Discipline / klasse + rood vs blauw (VA nummers als tekst) + max gewicht"
-                                                    }, void 0, false, {
-                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1416,
-                                                        columnNumber: 21
+                                                        lineNumber: 1401,
+                                                        columnNumber: 19
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1414,
-                                                columnNumber: 19
+                                                lineNumber: 1367,
+                                                columnNumber: 17
                                             }, this),
-                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
-                                                className: "text-white/70 hover:text-white font-bold",
-                                                onClick: ()=>!addBusy && setShowAdd(false),
-                                                children: "✕"
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: __TURBOPACK__imported__module__$5b$next$5d2f$internal$2f$font$2f$google$2f$inter_a71219c2$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].className,
+                                                style: {
+                                                    marginTop: 12,
+                                                    textAlign: "center",
+                                                    fontSize: 12,
+                                                    color: "rgba(42,42,46,0.78)",
+                                                    letterSpacing: "0.06em"
+                                                },
+                                                children: matchmakingId
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1418,
-                                                columnNumber: 19
+                                                lineNumber: 1417,
+                                                columnNumber: 17
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1413,
-                                        columnNumber: 17
+                                        lineNumber: 1353,
+                                        columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "px-6 py-5 space-y-4",
+                                        className: "my-4",
+                                        style: separator
+                                    }, void 0, false, {
+                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                        lineNumber: 1431,
+                                        columnNumber: 15
+                                    }, this),
+                                    loading ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "text-zinc-700",
+                                        children: "Laden…"
+                                    }, void 0, false, {
+                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                        lineNumber: 1434,
+                                        columnNumber: 17
+                                    }, this) : error ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "text-red-700",
+                                        children: error
+                                    }, void 0, false, {
+                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                        lineNumber: 1436,
+                                        columnNumber: 17
+                                    }, this) : rows.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "text-zinc-700",
+                                        children: "Geen context gevonden (context nog niet gevuld?)."
+                                    }, void 0, false, {
+                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                        lineNumber: 1438,
+                                        columnNumber: 17
+                                    }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "space-y-3",
                                         children: [
-                                            error ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                className: "text-red-700 text-sm",
-                                                children: error
-                                            }, void 0, false, {
-                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1422,
-                                                columnNumber: 28
-                                            }, this) : null,
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                className: "grid grid-cols-1 md:grid-cols-2 gap-3",
+                                                className: "flex flex-wrap items-center gap-3",
                                                 children: [
-                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                        label: "Discipline",
-                                                        value: fDiscipline,
-                                                        onChange: setFDiscipline,
-                                                        placeholder: "Kickboksen / Muay Thai / MMA..."
-                                                    }, void 0, false, {
-                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1424,
-                                                        columnNumber: 21
-                                                    }, this),
-                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                        label: "Klasse",
-                                                        value: fKlasse,
-                                                        onChange: setFKlasse,
-                                                        placeholder: "N / C / B / A..."
-                                                    }, void 0, false, {
-                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1425,
-                                                        columnNumber: 21
-                                                    }, this)
-                                                ]
-                                            }, void 0, true, {
-                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1423,
-                                                columnNumber: 19
-                                            }, this),
-                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                className: "grid grid-cols-1 md:grid-cols-2 gap-4",
-                                                children: [
-                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                        className: "rounded-xl border-2 border-zinc-300 bg-white p-4",
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                        className: "text-sm text-zinc-800",
                                                         children: [
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                className: "text-zinc-900 font-extrabold mb-3",
-                                                                children: "Rood"
+                                                            "Partijen:",
+                                                            " ",
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                className: "text-zinc-900 font-semibold",
+                                                                children: totals.totaal
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1429,
-                                                                columnNumber: 23
-                                                            }, this),
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                className: "grid grid-cols-1 md:grid-cols-2 gap-3",
-                                                                children: [
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "Naam rood",
-                                                                        value: fRoodNaam,
-                                                                        onChange: setFRoodNaam
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1431,
-                                                                        columnNumber: 25
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "Sportschool rood",
-                                                                        value: fRoodGym,
-                                                                        onChange: setFRoodGym
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1432,
-                                                                        columnNumber: 25
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "VA nummer rood",
-                                                                        value: fRoodVa,
-                                                                        onChange: setFRoodVa,
-                                                                        placeholder: "tekst"
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1433,
-                                                                        columnNumber: 25
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "KG rood",
-                                                                        value: fRoodKg,
-                                                                        onChange: setFRoodKg,
-                                                                        type: "number",
-                                                                        placeholder: "bijv. 71.5"
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1434,
-                                                                        columnNumber: 25
-                                                                    }, this)
-                                                                ]
-                                                            }, void 0, true, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1430,
+                                                                lineNumber: 1446,
                                                                 columnNumber: 23
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1428,
+                                                        lineNumber: 1444,
                                                         columnNumber: 21
                                                     }, this),
-                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                        className: "rounded-xl border-2 border-zinc-300 bg-white p-4",
-                                                        children: [
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                className: "text-zinc-900 font-extrabold mb-3",
-                                                                children: "Blauw"
-                                                            }, void 0, false, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1438,
-                                                                columnNumber: 23
-                                                            }, this),
-                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                                className: "grid grid-cols-1 md:grid-cols-2 gap-3",
-                                                                children: [
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "Naam blauw",
-                                                                        value: fBlauwNaam,
-                                                                        onChange: setFBlauwNaam
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1440,
-                                                                        columnNumber: 25
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "Sportschool blauw",
-                                                                        value: fBlauwGym,
-                                                                        onChange: setFBlauwGym
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1441,
-                                                                        columnNumber: 25
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "VA nummer blauw",
-                                                                        value: fBlauwVa,
-                                                                        onChange: setFBlauwVa,
-                                                                        placeholder: "tekst"
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1442,
-                                                                        columnNumber: 25
-                                                                    }, this),
-                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                                        label: "KG blauw",
-                                                                        value: fBlauwKg,
-                                                                        onChange: setFBlauwKg,
-                                                                        type: "number",
-                                                                        placeholder: "bijv. 71.5"
-                                                                    }, void 0, false, {
-                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1443,
-                                                                        columnNumber: 25
-                                                                    }, this)
-                                                                ]
-                                                            }, void 0, true, {
-                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1439,
-                                                                columnNumber: 23
-                                                            }, this)
-                                                        ]
-                                                    }, void 0, true, {
-                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1437,
-                                                        columnNumber: 21
-                                                    }, this)
-                                                ]
-                                            }, void 0, true, {
-                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1427,
-                                                columnNumber: 19
-                                            }, this),
-                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                className: "grid grid-cols-1 md:grid-cols-3 gap-3",
-                                                children: [
-                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
-                                                        label: "Max gewicht (KG)",
-                                                        value: fMaxKg,
-                                                        onChange: setFMaxKg,
-                                                        type: "number",
-                                                        placeholder: "bijv. 72.0"
-                                                    }, void 0, false, {
-                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1448,
-                                                        columnNumber: 21
-                                                    }, this),
-                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                                        className: "md:col-span-2 text-xs text-zinc-700 flex items-center",
-                                                        children: 'Tip: als je "max gewicht" als tolerantie bedoelt (bv 3kg), zeg het even — dan maak ik er 2 velden van: "gewichtsklasse" + "max afwijking".'
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Meldingen totaal",
+                                                        value: totals.meldingen_totaal,
+                                                        tone: "white"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
                                                         lineNumber: 1449,
                                                         columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Partijen met melding",
+                                                        value: totals.partijen_met_melding,
+                                                        tone: "white"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1450,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Verbod",
+                                                        value: totals.verbod,
+                                                        tone: "purple"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1451,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Geen licentie",
+                                                        value: totals.geen_licentie,
+                                                        tone: "blue"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1452,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Afkeur",
+                                                        value: totals.afk,
+                                                        tone: "red"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1453,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Dispensatie",
+                                                        value: totals.dispensatie,
+                                                        tone: "orange"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1454,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Actie",
+                                                        value: totals.actie,
+                                                        tone: "yellow"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1455,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "OK",
+                                                        value: totals.ok,
+                                                        tone: "green"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1456,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
+                                                        label: "Geen info",
+                                                        value: totals.geen,
+                                                        tone: "white"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1457,
+                                                        columnNumber: 21
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1447,
+                                                lineNumber: 1443,
+                                                columnNumber: 19
+                                            }, this),
+                                            galaDuur?.text && compactRunMeldingen.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "rounded-xl border border-zinc-300 bg-white/5 p-3 text-sm",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                        className: "font-semibold text-zinc-900",
+                                                        children: "Gala duur:"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1462,
+                                                        columnNumber: 23
+                                                    }, this),
+                                                    " ",
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                        className: "text-zinc-800",
+                                                        children: galaDuur.text
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1463,
+                                                        columnNumber: 23
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                lineNumber: 1461,
+                                                columnNumber: 21
+                                            }, this) : null,
+                                            compactRunMeldingen.length > 0 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "mt-3 rounded-xl bg-white p-0 overflow-hidden",
+                                                style: {
+                                                    border: "3px solid #2b2b2b",
+                                                    boxShadow: "0 12px 26px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.65)"
+                                                },
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "px-4 py-3 font-extrabold text-white",
+                                                        style: {
+                                                            background: "linear-gradient(180deg, #2a2a2e 0%, #1f1f23 100%)",
+                                                            borderBottom: "2px solid rgba(255,77,0,0.50)"
+                                                        },
+                                                        children: "Run meldingen"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1476,
+                                                        columnNumber: 23
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "p-4",
+                                                        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                            className: "mt-1 space-y-2 text-sm",
+                                                            children: compactRunMeldingen.map((r, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                    className: "rounded-md bg-white p-3",
+                                                                    style: {
+                                                                        border: "2px solid rgba(43,43,43,0.35)",
+                                                                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.70), 0 10px 18px rgba(0,0,0,0.05)"
+                                                                    },
+                                                                    children: [
+                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                            className: "flex items-start gap-2",
+                                                                            children: [
+                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                    className: "min-w-0",
+                                                                                    children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                        className: "text-zinc-900 font-semibold leading-tight",
+                                                                                        children: [
+                                                                                            r.rule ?? "(run)",
+                                                                                            r.rule_code ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "ml-2 text-xs text-zinc-600 font-semibold",
+                                                                                                children: [
+                                                                                                    "(",
+                                                                                                    r.rule_code,
+                                                                                                    ")"
+                                                                                                ]
+                                                                                            }, void 0, true, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1504,
+                                                                                                columnNumber: 39
+                                                                                            }, this) : null
+                                                                                        ]
+                                                                                    }, void 0, true, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1501,
+                                                                                        columnNumber: 35
+                                                                                    }, this)
+                                                                                }, void 0, false, {
+                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                    lineNumber: 1500,
+                                                                                    columnNumber: 33
+                                                                                }, this),
+                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                    className: "ml-auto text-xs font-extrabold tracking-wide text-zinc-700",
+                                                                                    children: String(r.resultaat ?? "").toUpperCase()
+                                                                                }, void 0, false, {
+                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                    lineNumber: 1511,
+                                                                                    columnNumber: 33
+                                                                                }, this)
+                                                                            ]
+                                                                        }, void 0, true, {
+                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                            lineNumber: 1499,
+                                                                            columnNumber: 31
+                                                                        }, this),
+                                                                        r.boodschap ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                            className: "mt-1 text-zinc-700 leading-snug",
+                                                                            children: r.boodschap
+                                                                        }, void 0, false, {
+                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                            lineNumber: 1517,
+                                                                            columnNumber: 33
+                                                                        }, this) : null
+                                                                    ]
+                                                                }, `${r.rule_code ?? "run"}-${i}`, true, {
+                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                    lineNumber: 1490,
+                                                                    columnNumber: 29
+                                                                }, this))
+                                                        }, void 0, false, {
+                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                            lineNumber: 1488,
+                                                            columnNumber: 25
+                                                        }, this)
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1487,
+                                                        columnNumber: 23
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                lineNumber: 1468,
+                                                columnNumber: 21
+                                            }, this),
+                                            msg ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "text-sm text-zinc-700",
+                                                children: msg
+                                            }, void 0, false, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                lineNumber: 1526,
+                                                columnNumber: 26
+                                            }, this) : null,
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "flex flex-wrap items-center gap-2 rounded-xl border border-zinc-300 bg-white/5 p-3",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "text-sm font-semibold text-zinc-800 mr-2",
+                                                        children: "Filter:"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1529,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "flex-1 min-w-[220px]",
+                                                        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
+                                                            value: search,
+                                                            onChange: (e)=>setSearch(e.target.value),
+                                                            placeholder: "Zoek op naam, sportschool of VA…",
+                                                            className: "w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500",
+                                                            style: {
+                                                                background: "linear-gradient(180deg, #ffffff 0%, #f4f6f9 100%)",
+                                                                border: "2px solid rgba(63,63,70,0.35)",
+                                                                color: "#111827",
+                                                                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.90), 0 8px 18px rgba(0,0,0,0.10)"
+                                                            }
+                                                        }, void 0, false, {
+                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                            lineNumber: 1532,
+                                                            columnNumber: 23
+                                                        }, this)
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1531,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "Alle",
+                                                        count: filterCounts.all,
+                                                        tone: "neutral",
+                                                        active: filter === "all",
+                                                        onClick: ()=>setFilter("all")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1547,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "Verbod",
+                                                        count: filterCounts.verbod,
+                                                        tone: "purple",
+                                                        active: filter === "verbod",
+                                                        onClick: ()=>setFilter("verbod")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1548,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "Geen licentie",
+                                                        count: filterCounts.geen_licentie,
+                                                        tone: "blue",
+                                                        active: filter === "geen_licentie",
+                                                        onClick: ()=>setFilter("geen_licentie")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1549,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "Afkeur",
+                                                        count: filterCounts.afgekeurd,
+                                                        tone: "red",
+                                                        active: filter === "afgekeurd",
+                                                        onClick: ()=>setFilter("afgekeurd")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1550,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "Dispensatie",
+                                                        count: filterCounts.dispensatie,
+                                                        tone: "orange",
+                                                        active: filter === "dispensatie",
+                                                        onClick: ()=>setFilter("dispensatie")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1551,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "Actie",
+                                                        count: filterCounts.actie,
+                                                        tone: "yellow",
+                                                        active: filter === "actie",
+                                                        onClick: ()=>setFilter("actie")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1552,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "OK",
+                                                        count: filterCounts.ok,
+                                                        tone: "green",
+                                                        active: filter === "ok",
+                                                        onClick: ()=>setFilter("ok")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1553,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
+                                                        label: "Geen info",
+                                                        count: filterCounts.geen_info,
+                                                        tone: "white",
+                                                        active: filter === "geen_info",
+                                                        onClick: ()=>setFilter("geen_info")
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1554,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "ml-auto text-xs text-zinc-600",
+                                                        children: [
+                                                            "Toon: ",
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                className: "font-semibold text-zinc-900",
+                                                                children: filteredRows.length
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1557,
+                                                                columnNumber: 29
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1556,
+                                                        columnNumber: 21
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                lineNumber: 1528,
+                                                columnNumber: 19
+                                            }, this),
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "overflow-auto rounded-xl border border-zinc-300",
+                                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("table", {
+                                                    className: "min-w-full border-collapse",
+                                                    children: [
+                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("thead", {
+                                                            style: {
+                                                                background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
+                                                                color: "#fff",
+                                                                borderBottom: "3px solid rgba(255,77,0,0.55)"
+                                                            },
+                                                            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tr", {
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
+                                                                        className: "py-3 px-4 text-left w-24",
+                                                                        children: "#"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1571,
+                                                                        columnNumber: 27
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
+                                                                        className: "py-3 px-4 text-left",
+                                                                        children: "Vechters"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1572,
+                                                                        columnNumber: 27
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
+                                                                        className: "py-3 px-4 text-left w-[320px]",
+                                                                        children: "Info"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1573,
+                                                                        columnNumber: 27
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
+                                                                        className: "py-3 px-4 text-left w-[260px]",
+                                                                        children: "Acties"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1574,
+                                                                        columnNumber: 27
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1570,
+                                                                columnNumber: 25
+                                                            }, this)
+                                                        }, void 0, false, {
+                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                            lineNumber: 1563,
+                                                            columnNumber: 23
+                                                        }, this),
+                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tbody", {
+                                                            children: filteredRows.map((r, i)=>{
+                                                                const zebraWhite = i % 2 === 0;
+                                                                const roodNaam = safeText(r.rood_naam_fp ?? r.rood_naam_mm, "-");
+                                                                const blauwNaam = safeText(r.blauw_naam_fp ?? r.blauw_naam_mm, "-");
+                                                                const roodGym = safeText(r.rood_gym_mm, "-");
+                                                                const blauwGym = safeText(r.blauw_gym_mm, "-");
+                                                                const roodVA = safeText(r.rood_va_mm, "-");
+                                                                const blauwVA = safeText(r.blauw_va_mm, "-");
+                                                                const roodAge = ageAtEvent(r, "rood");
+                                                                const blauwAge = ageAtEvent(r, "blauw");
+                                                                const pn = Number(r.partij_nr);
+                                                                const status = Number.isFinite(pn) ? statusByPartij[pn] ?? "geen_info" : "geen_info";
+                                                                const discipline = safeText(r.discipline, "-");
+                                                                const klasse = safeText(r.klasse_mm, "-");
+                                                                const eventDatum = safeText(r.evenement_datum, "-");
+                                                                const dividerClass = zebraWhite ? "border-t border-gray-400/70" : "border-t border-zinc-300";
+                                                                const heeftVerbod = Number.isFinite(pn) ? !!verbodByPartij[pn] : false;
+                                                                const heeftDispensatie = Number.isFinite(pn) ? !!anyDispensatieByPartij[pn] : false;
+                                                                const geenTegenstander = isGeenTegenstander(r);
+                                                                const busy = Number.isFinite(pn) ? busyPartij[pn] : null;
+                                                                return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tr", {
+                                                                    style: {
+                                                                        backgroundColor: zebraWhite ? "#ffffff" : "#0d0d0d",
+                                                                        color: zebraWhite ? "#000" : "#fff"
+                                                                    },
+                                                                    children: [
+                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
+                                                                            className: "py-3 px-4 font-semibold align-top",
+                                                                            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                className: "flex items-center gap-2 flex-wrap",
+                                                                                children: [
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                        className: "tabular-nums",
+                                                                                        children: r.partij_nr ?? "-"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1622,
+                                                                                        columnNumber: 35
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(StatusBadge, {
+                                                                                        status: status
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1623,
+                                                                                        columnNumber: 35
+                                                                                    }, this),
+                                                                                    heeftDispensatie && status !== "dispensatie" ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
+                                                                                        label: "DISPENSATIE",
+                                                                                        tone: "orange"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1625,
+                                                                                        columnNumber: 37
+                                                                                    }, this) : null,
+                                                                                    heeftVerbod ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
+                                                                                        label: "VERBOD",
+                                                                                        tone: "purple"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1627,
+                                                                                        columnNumber: 50
+                                                                                    }, this) : null,
+                                                                                    Number.isFinite(pn) && missingLicentieByPartij[pn] ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
+                                                                                        label: "GEEN LICENTIE",
+                                                                                        tone: "blue"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1629,
+                                                                                        columnNumber: 37
+                                                                                    }, this) : null
+                                                                                ]
+                                                                            }, void 0, true, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                lineNumber: 1621,
+                                                                                columnNumber: 33
+                                                                            }, this)
+                                                                        }, void 0, false, {
+                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                            lineNumber: 1620,
+                                                                            columnNumber: 31
+                                                                        }, this),
+                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
+                                                                            className: "py-3 px-4 align-top",
+                                                                            children: [
+                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                    className: "flex items-center gap-3 min-w-0",
+                                                                                    children: [
+                                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                            className: "inline-block w-3 h-3 rounded-full shrink-0",
+                                                                                            style: {
+                                                                                                backgroundColor: "#ef4444"
+                                                                                            }
+                                                                                        }, void 0, false, {
+                                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                            lineNumber: 1636,
+                                                                                            columnNumber: 35
+                                                                                        }, this),
+                                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                            className: "min-w-0 text-sm",
+                                                                                            children: [
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "font-semibold",
+                                                                                                    children: roodNaam
+                                                                                                }, void 0, false, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1641,
+                                                                                                    columnNumber: 37
+                                                                                                }, this),
+                                                                                                " ",
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "opacity-80",
+                                                                                                    children: [
+                                                                                                        "(",
+                                                                                                        roodAge,
+                                                                                                        " jaar)"
+                                                                                                    ]
+                                                                                                }, void 0, true, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1642,
+                                                                                                    columnNumber: 37
+                                                                                                }, this),
+                                                                                                " ",
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "opacity-80",
+                                                                                                    children: [
+                                                                                                        "• ",
+                                                                                                        roodGym
+                                                                                                    ]
+                                                                                                }, void 0, true, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1643,
+                                                                                                    columnNumber: 37
+                                                                                                }, this),
+                                                                                                " ",
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "opacity-80",
+                                                                                                    children: [
+                                                                                                        "• FP/VA: ",
+                                                                                                        roodVA
+                                                                                                    ]
+                                                                                                }, void 0, true, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1644,
+                                                                                                    columnNumber: 37
+                                                                                                }, this)
+                                                                                            ]
+                                                                                        }, void 0, true, {
+                                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                            lineNumber: 1640,
+                                                                                            columnNumber: 35
+                                                                                        }, this)
+                                                                                    ]
+                                                                                }, void 0, true, {
+                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                    lineNumber: 1635,
+                                                                                    columnNumber: 33
+                                                                                }, this),
+                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                    className: `my-2 ${dividerClass}`
+                                                                                }, void 0, false, {
+                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                    lineNumber: 1648,
+                                                                                    columnNumber: 33
+                                                                                }, this),
+                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                    className: "flex items-center gap-3 min-w-0",
+                                                                                    children: [
+                                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                            className: "inline-block w-3 h-3 rounded-full shrink-0",
+                                                                                            style: {
+                                                                                                backgroundColor: "#3b82f6"
+                                                                                            }
+                                                                                        }, void 0, false, {
+                                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                            lineNumber: 1651,
+                                                                                            columnNumber: 35
+                                                                                        }, this),
+                                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                            className: "min-w-0 text-sm",
+                                                                                            children: [
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "font-semibold",
+                                                                                                    children: blauwNaam
+                                                                                                }, void 0, false, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1656,
+                                                                                                    columnNumber: 37
+                                                                                                }, this),
+                                                                                                " ",
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "opacity-80",
+                                                                                                    children: [
+                                                                                                        "(",
+                                                                                                        blauwAge,
+                                                                                                        " jaar)"
+                                                                                                    ]
+                                                                                                }, void 0, true, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1657,
+                                                                                                    columnNumber: 37
+                                                                                                }, this),
+                                                                                                " ",
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "opacity-80",
+                                                                                                    children: [
+                                                                                                        "• ",
+                                                                                                        blauwGym
+                                                                                                    ]
+                                                                                                }, void 0, true, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1658,
+                                                                                                    columnNumber: 37
+                                                                                                }, this),
+                                                                                                " ",
+                                                                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                    className: "opacity-80",
+                                                                                                    children: [
+                                                                                                        "• FP/VA: ",
+                                                                                                        blauwVA
+                                                                                                    ]
+                                                                                                }, void 0, true, {
+                                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                    lineNumber: 1659,
+                                                                                                    columnNumber: 37
+                                                                                                }, this)
+                                                                                            ]
+                                                                                        }, void 0, true, {
+                                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                            lineNumber: 1655,
+                                                                                            columnNumber: 35
+                                                                                        }, this)
+                                                                                    ]
+                                                                                }, void 0, true, {
+                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                    lineNumber: 1650,
+                                                                                    columnNumber: 33
+                                                                                }, this),
+                                                                                geenTegenstander ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                    className: "mt-2 text-xs font-extrabold",
+                                                                                    children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                        className: "px-2 py-1 rounded bg-red-500 text-zinc-900",
+                                                                                        children: "GEEN TEGENSTANDER"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1665,
+                                                                                        columnNumber: 37
+                                                                                    }, this)
+                                                                                }, void 0, false, {
+                                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                    lineNumber: 1664,
+                                                                                    columnNumber: 35
+                                                                                }, this) : null
+                                                                            ]
+                                                                        }, void 0, true, {
+                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                            lineNumber: 1634,
+                                                                            columnNumber: 31
+                                                                        }, this),
+                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
+                                                                            className: "py-3 px-4 align-top",
+                                                                            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                className: "space-y-1 text-sm",
+                                                                                children: [
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                        children: [
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "font-semibold",
+                                                                                                children: "Discipline:"
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1675,
+                                                                                                columnNumber: 37
+                                                                                            }, this),
+                                                                                            " ",
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "opacity-90",
+                                                                                                children: discipline
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1676,
+                                                                                                columnNumber: 37
+                                                                                            }, this)
+                                                                                        ]
+                                                                                    }, void 0, true, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1674,
+                                                                                        columnNumber: 35
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                        children: [
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "font-semibold",
+                                                                                                children: "Klasse:"
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1679,
+                                                                                                columnNumber: 37
+                                                                                            }, this),
+                                                                                            " ",
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "opacity-90",
+                                                                                                children: klasse
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1680,
+                                                                                                columnNumber: 37
+                                                                                            }, this)
+                                                                                        ]
+                                                                                    }, void 0, true, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1678,
+                                                                                        columnNumber: 35
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                        children: [
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "font-semibold",
+                                                                                                children: "Event datum:"
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1683,
+                                                                                                columnNumber: 37
+                                                                                            }, this),
+                                                                                            " ",
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "opacity-90",
+                                                                                                children: eventDatum
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1684,
+                                                                                                columnNumber: 37
+                                                                                            }, this)
+                                                                                        ]
+                                                                                    }, void 0, true, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1682,
+                                                                                        columnNumber: 35
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                        children: [
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "font-semibold",
+                                                                                                children: "Meldingen:"
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1687,
+                                                                                                columnNumber: 37
+                                                                                            }, this),
+                                                                                            " ",
+                                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                                                className: "opacity-90",
+                                                                                                children: Number.isFinite(pn) ? countByPartij[pn] ?? 0 : 0
+                                                                                            }, void 0, false, {
+                                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                                lineNumber: 1688,
+                                                                                                columnNumber: 37
+                                                                                            }, this)
+                                                                                        ]
+                                                                                    }, void 0, true, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1686,
+                                                                                        columnNumber: 35
+                                                                                    }, this)
+                                                                                ]
+                                                                            }, void 0, true, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                lineNumber: 1673,
+                                                                                columnNumber: 33
+                                                                            }, this)
+                                                                        }, void 0, false, {
+                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                            lineNumber: 1672,
+                                                                            columnNumber: 31
+                                                                        }, this),
+                                                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
+                                                                            className: "py-3 px-4 align-top",
+                                                                            children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                className: "flex flex-wrap gap-2",
+                                                                                children: [
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$client$2f$app$2d$dir$2f$link$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
+                                                                                        href: `/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/${encodeURIComponent(String(r.partij_nr ?? ""))}`,
+                                                                                        className: "px-3 py-1.5 rounded font-extrabold text-sm",
+                                                                                        style: {
+                                                                                            background: "rgba(0,0,0,0.55)",
+                                                                                            border: `1px solid rgba(255,77,0,0.85)`,
+                                                                                            color: "rgba(255,210,190,0.95)"
+                                                                                        },
+                                                                                        children: "Detail"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1697,
+                                                                                        columnNumber: 35
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
+                                                                                        label: busy === "delete" ? "… Verwijderen" : "Verwijderen",
+                                                                                        tone: "red",
+                                                                                        disabled: busy === "delete",
+                                                                                        onClick: ()=>Number.isFinite(pn) && deletePartij(pn)
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1709,
+                                                                                        columnNumber: 35
+                                                                                    }, this)
+                                                                                ]
+                                                                            }, void 0, true, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                lineNumber: 1696,
+                                                                                columnNumber: 33
+                                                                            }, this)
+                                                                        }, void 0, false, {
+                                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                            lineNumber: 1695,
+                                                                            columnNumber: 31
+                                                                        }, this)
+                                                                    ]
+                                                                }, r.id ?? `${r.partij_nr}-${i}`, true, {
+                                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                    lineNumber: 1613,
+                                                                    columnNumber: 29
+                                                                }, this);
+                                                            })
+                                                        }, void 0, false, {
+                                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                            lineNumber: 1578,
+                                                            columnNumber: 23
+                                                        }, this)
+                                                    ]
+                                                }, void 0, true, {
+                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                    lineNumber: 1562,
+                                                    columnNumber: 21
+                                                }, this)
+                                            }, void 0, false, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                lineNumber: 1561,
+                                                columnNumber: 19
+                                            }, this),
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "pt-2 text-xs text-zinc-500 text-center",
+                                                children: "© FightSupport"
+                                            }, void 0, false, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                lineNumber: 1724,
                                                 columnNumber: 19
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1421,
+                                        lineNumber: 1442,
                                         columnNumber: 17
                                     }, this),
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "px-6 py-4 border-t border-zinc-300 flex items-center justify-end gap-3",
+                                    showAdd && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "fixed inset-0 z-[999] flex items-center justify-center px-4",
                                         children: [
-                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$components$2f$NvbLightButton$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
-                                                label: "Annuleren",
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "absolute inset-0",
+                                                style: {
+                                                    background: "rgba(0,0,0,0.65)"
+                                                },
                                                 onClick: ()=>!addBusy && setShowAdd(false)
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1456,
+                                                lineNumber: 1730,
                                                 columnNumber: 19
                                             }, this),
-                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$components$2f$NvbDarkButton$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
-                                                label: addBusy ? "Bezig..." : "Partij toevoegen",
-                                                onClick: addPartijSubmit
-                                            }, void 0, false, {
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "relative w-full max-w-[980px] rounded-2xl border-[3px] border-zinc-700/40 bg-white shadow-2xl overflow-hidden",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "px-6 py-4 flex items-center justify-between",
+                                                        style: {
+                                                            background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
+                                                            borderBottom: "3px solid rgba(255,77,0,0.55)"
+                                                        },
+                                                        children: [
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                        className: "text-white font-extrabold text-lg",
+                                                                        children: "Partij toevoegen"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1744,
+                                                                        columnNumber: 25
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                        className: "text-white/75 text-xs",
+                                                                        children: "Discipline / klasse + rood vs blauw (VA nummers als tekst) + max gewicht"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1745,
+                                                                        columnNumber: 25
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1743,
+                                                                columnNumber: 23
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+                                                                className: "text-white/70 hover:text-white font-bold",
+                                                                onClick: ()=>!addBusy && setShowAdd(false),
+                                                                children: "✕"
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1750,
+                                                                columnNumber: 23
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1736,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "px-6 py-5 space-y-4",
+                                                        children: [
+                                                            error ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                className: "text-red-700 text-sm",
+                                                                children: error
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1759,
+                                                                columnNumber: 32
+                                                            }, this) : null,
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                className: "grid grid-cols-1 md:grid-cols-2 gap-3",
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                        label: "Discipline",
+                                                                        value: fDiscipline,
+                                                                        onChange: setFDiscipline,
+                                                                        placeholder: "Kickboksen / Muay Thai / MMA..."
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1762,
+                                                                        columnNumber: 25
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                        label: "Klasse",
+                                                                        value: fKlasse,
+                                                                        onChange: setFKlasse,
+                                                                        placeholder: "N / C / B / A..."
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1768,
+                                                                        columnNumber: 25
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1761,
+                                                                columnNumber: 23
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                className: "grid grid-cols-1 md:grid-cols-2 gap-4",
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                        className: "rounded-xl border-2 border-zinc-300 bg-white p-4",
+                                                                        children: [
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                className: "text-zinc-900 font-extrabold mb-3",
+                                                                                children: "Rood"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                lineNumber: 1778,
+                                                                                columnNumber: 27
+                                                                            }, this),
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                className: "grid grid-cols-1 md:grid-cols-2 gap-3",
+                                                                                children: [
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "Naam rood",
+                                                                                        value: fRoodNaam,
+                                                                                        onChange: setFRoodNaam
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1780,
+                                                                                        columnNumber: 29
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "Sportschool rood",
+                                                                                        value: fRoodGym,
+                                                                                        onChange: setFRoodGym
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1781,
+                                                                                        columnNumber: 29
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "VA nummer rood",
+                                                                                        value: fRoodVa,
+                                                                                        onChange: setFRoodVa,
+                                                                                        placeholder: "tekst"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1782,
+                                                                                        columnNumber: 29
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "KG rood",
+                                                                                        value: fRoodKg,
+                                                                                        onChange: setFRoodKg,
+                                                                                        type: "number",
+                                                                                        placeholder: "bijv. 71.5"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1783,
+                                                                                        columnNumber: 29
+                                                                                    }, this)
+                                                                                ]
+                                                                            }, void 0, true, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                lineNumber: 1779,
+                                                                                columnNumber: 27
+                                                                            }, this)
+                                                                        ]
+                                                                    }, void 0, true, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1777,
+                                                                        columnNumber: 25
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                        className: "rounded-xl border-2 border-zinc-300 bg-white p-4",
+                                                                        children: [
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                className: "text-zinc-900 font-extrabold mb-3",
+                                                                                children: "Blauw"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                lineNumber: 1788,
+                                                                                columnNumber: 27
+                                                                            }, this),
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                                className: "grid grid-cols-1 md:grid-cols-2 gap-3",
+                                                                                children: [
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "Naam blauw",
+                                                                                        value: fBlauwNaam,
+                                                                                        onChange: setFBlauwNaam
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1790,
+                                                                                        columnNumber: 29
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "Sportschool blauw",
+                                                                                        value: fBlauwGym,
+                                                                                        onChange: setFBlauwGym
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1791,
+                                                                                        columnNumber: 29
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "VA nummer blauw",
+                                                                                        value: fBlauwVa,
+                                                                                        onChange: setFBlauwVa,
+                                                                                        placeholder: "tekst"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1792,
+                                                                                        columnNumber: 29
+                                                                                    }, this),
+                                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                                        label: "KG blauw",
+                                                                                        value: fBlauwKg,
+                                                                                        onChange: setFBlauwKg,
+                                                                                        type: "number",
+                                                                                        placeholder: "bijv. 71.5"
+                                                                                    }, void 0, false, {
+                                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                        lineNumber: 1793,
+                                                                                        columnNumber: 29
+                                                                                    }, this)
+                                                                                ]
+                                                                            }, void 0, true, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                                lineNumber: 1789,
+                                                                                columnNumber: 27
+                                                                            }, this)
+                                                                        ]
+                                                                    }, void 0, true, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1787,
+                                                                        columnNumber: 25
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1776,
+                                                                columnNumber: 23
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                className: "grid grid-cols-1 md:grid-cols-3 gap-3",
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
+                                                                        label: "Max gewicht (KG)",
+                                                                        value: fMaxKg,
+                                                                        onChange: setFMaxKg,
+                                                                        type: "number",
+                                                                        placeholder: "bijv. 72.0"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1799,
+                                                                        columnNumber: 25
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                        className: "md:col-span-2 text-xs text-zinc-700 flex items-center",
+                                                                        children: "Tip: als je “max gewicht” als tolerantie bedoelt (bv 3kg), zeg het even — dan maak ik er 2 velden van: “gewichtsklasse” + “max afwijking”."
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                        lineNumber: 1806,
+                                                                        columnNumber: 25
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1798,
+                                                                columnNumber: 23
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1758,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "px-6 py-4 border-t border-zinc-300 flex items-center justify-end gap-3",
+                                                        children: [
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$components$2f$NvbLightButton$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
+                                                                label: "Annuleren",
+                                                                onClick: ()=>!addBusy && setShowAdd(false)
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1814,
+                                                                columnNumber: 23
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$components$2f$NvbDarkButton$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
+                                                                label: addBusy ? "Bezig..." : "Partij toevoegen",
+                                                                onClick: addPartijSubmit
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                                lineNumber: 1818,
+                                                                columnNumber: 23
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                                                        lineNumber: 1813,
+                                                        columnNumber: 21
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1457,
+                                                lineNumber: 1735,
                                                 columnNumber: 19
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1455,
+                                        lineNumber: 1729,
                                         columnNumber: 17
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1412,
-                                columnNumber: 15
+                                lineNumber: 1282,
+                                columnNumber: 13
                             }, this)
-                        ]
-                    }, void 0, true, {
-                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                        lineNumber: 1410,
-                        columnNumber: 13
-                    }, this)
-                ]
-            }, void 0, true, {
-                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                lineNumber: 1135,
-                columnNumber: 9
-            }, this)
-        }, void 0, false, {
+                        }, void 0, false, {
+                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                            lineNumber: 1275,
+                            columnNumber: 11
+                        }, this)
+                    ]
+                }, void 0, true, {
+                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
+                    lineNumber: 1262,
+                    columnNumber: 9
+                }, this)
+            ]
+        }, void 0, true, {
             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-            lineNumber: 1134,
+            lineNumber: 1253,
             columnNumber: 7
         }, this)
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 1133,
+        lineNumber: 1249,
         columnNumber: 5
     }, this);
 }
-_s(ControleMatchmakingPage, "Wzf5H/RRjRMga8xg8P0L3wLulAI=", false, function() {
+_s(ControleMatchmakingPage, "V3YbhSIJqMB6dqg8lSVPfbCi5+o=", false, function() {
     return [
         __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useParams"],
         __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useRouter"]
     ];
 });
-_c7 = ControleMatchmakingPage;
-var _c, _c1, _c2, _c3, _c4, _c5, _c6, _c7;
+_c6 = ControleMatchmakingPage;
+var _c, _c1, _c2, _c3, _c4, _c5, _c6;
 __turbopack_context__.k.register(_c, "HeaderBadge");
 __turbopack_context__.k.register(_c1, "Chip");
 __turbopack_context__.k.register(_c2, "StatusBadge");
 __turbopack_context__.k.register(_c3, "FilterButton");
 __turbopack_context__.k.register(_c4, "DarkActionButton");
 __turbopack_context__.k.register(_c5, "Field");
-__turbopack_context__.k.register(_c6, "Shell");
-__turbopack_context__.k.register(_c7, "ControleMatchmakingPage");
+__turbopack_context__.k.register(_c6, "ControleMatchmakingPage");
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }

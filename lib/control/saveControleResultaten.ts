@@ -12,10 +12,10 @@ export type RuleHit = {
 
   partij_nr?: number | null;
 
-  // ✅ uuid string, nooit object
+  // uuid string
   bout_id?: string | null;
 
-  // ✅ uuid string
+  // uuid string
   matchmaking_id?: string | null;
 };
 
@@ -46,7 +46,10 @@ function asUuid(v: any): string | null {
 }
 
 function asInt(v: any): number | null {
-  const n = Number(String(v ?? "").trim());
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -67,36 +70,49 @@ function normalizeReviewStatus(v: any): "approved" | "rejected" | null {
 }
 
 /**
- * ✅ saveControleResultaten (preserve handmatige reviews + aantekeningen)
+ * saveControleResultaten
  *
  * Scopes:
- * - zonder bout_id: werkt zoals vroeger (hele run vervangen)
- * - met bout_id: alleen die bout vervangen (perfect voor rescrape 1 partij)
+ * - zonder scope: hele run vervangen
+ * - met bout_id: alleen die bout vervangen
+ * - met partij_nr: alleen die partij vervangen
+ * - met beide: bout_id heeft voorrang, partij_nr als extra safety
  */
 export async function saveControleResultaten(opts: {
   controle_run_id: string;
   matchmaking_id: string;
   hits: RuleHit[];
-  bout_id?: string | null; // ✅ scope op stabiele bout sleutel (== bout_uid)
+  bout_id?: string | null;
+  partij_nr?: number | null;
 }) {
   const controle_run_id = asUuid(opts?.controle_run_id);
   const matchmaking_id = asUuid(opts?.matchmaking_id);
   const scopedBoutId = asUuid(opts?.bout_id);
+  const scopedPartijNr = asInt(opts?.partij_nr);
 
-  if (!controle_run_id) throw new Error("[saveControleResultaten] controle_run_id ontbreekt/ongeldig");
-  if (!matchmaking_id) throw new Error("[saveControleResultaten] matchmaking_id ontbreekt/ongeldig");
+  if (!controle_run_id) {
+    throw new Error("[saveControleResultaten] controle_run_id ontbreekt/ongeldig");
+  }
+  if (!matchmaking_id) {
+    throw new Error("[saveControleResultaten] matchmaking_id ontbreekt/ongeldig");
+  }
 
   const hitsIn = Array.isArray(opts?.hits) ? opts.hits : [];
 
-  // ✅ 0) bestaande reviews ophalen (voordat we deleten) — scoped indien bout_id
+  // 0) bestaande reviews ophalen vóór delete
   let exQ = supabaseAdmin
     .from("controle_resultaten")
     .select(
       "partij_nr,bout_id,rule_code,hoek,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,original_resultaat,resultaat,actie_status"
     )
-    .eq("controle_run_id", controle_run_id);
+    .eq("controle_run_id", controle_run_id)
+    .eq("matchmaking_id", matchmaking_id);
 
-  if (scopedBoutId) exQ = exQ.eq("bout_id", scopedBoutId);
+  if (scopedBoutId) {
+    exQ = exQ.eq("bout_id", scopedBoutId);
+  } else if (scopedPartijNr != null) {
+    exQ = exQ.eq("partij_nr", scopedPartijNr);
+  }
 
   const { data: existing, error: exErr } = await exQ;
   if (exErr) throw exErr;
@@ -113,30 +129,41 @@ export async function saveControleResultaten(opts: {
     }
   }
 
-  // ✅ 1) oude resultaten weg — scoped indien bout_id
-  let delQ = supabaseAdmin.from("controle_resultaten").delete().eq("controle_run_id", controle_run_id);
-  if (scopedBoutId) delQ = delQ.eq("bout_id", scopedBoutId);
+  // 1) oude resultaten scoped verwijderen
+  let delQ = supabaseAdmin
+    .from("controle_resultaten")
+    .delete()
+    .eq("controle_run_id", controle_run_id)
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (scopedBoutId) {
+    delQ = delQ.eq("bout_id", scopedBoutId);
+  } else if (scopedPartijNr != null) {
+    delQ = delQ.eq("partij_nr", scopedPartijNr);
+  }
 
   const { error: delErr } = await delQ;
   if (delErr) throw delErr;
 
-  // ✅ 2) rows bouwen + review terugplakken
+  // 2) rows bouwen + reviews terugzetten
   const rowsToInsert: any[] = [];
 
   for (const hit of hitsIn) {
-    const partij_nr = asInt(hit?.partij_nr);
-
-    // als hit geen bout_id meegeeft maar we werken scoped: forceer scopedBoutId
-    const bout_id = asUuid(hit?.bout_id) ?? scopedBoutId ?? null;
-
-    // safety: bij scoped opslaan MÓET bout_id bestaan
-    if (scopedBoutId && !bout_id) continue;
-
+    const partij_nr = asInt(hit?.partij_nr) ?? scopedPartijNr ?? null;
+    const hitBoutId = asUuid(hit?.bout_id);
+    const bout_id = hitBoutId ?? scopedBoutId ?? null;
     const mmId = asUuid(hit?.matchmaking_id) ?? matchmaking_id;
+
+    // safety:
+    // - als we op bout scoped werken en row heeft andere bout -> skip
+    if (scopedBoutId && bout_id !== scopedBoutId) continue;
+
+    // - als we op partij scoped werken en row heeft andere partij -> skip
+    if (scopedBoutId == null && scopedPartijNr != null && partij_nr !== scopedPartijNr) continue;
 
     const baseRow: any = {
       controle_run_id,
-      run_id: controle_run_id, // legacy/handig
+      run_id: controle_run_id,
       matchmaking_id: mmId,
 
       partij_nr,
@@ -160,7 +187,6 @@ export async function saveControleResultaten(opts: {
 
     const prev = reviewMap.get(key);
 
-    // ✅ als admin ooit reviewed heeft: behoud review + override resultaat
     if (prev) {
       const norm = prev._norm as "approved" | "rejected" | null;
 
@@ -168,11 +194,8 @@ export async function saveControleResultaten(opts: {
       baseRow.review_note = prev.review_note ?? null;
       baseRow.reviewed_by = prev.reviewed_by ?? null;
       baseRow.reviewed_at = prev.reviewed_at ?? null;
-
-      // behoud aantekeningen altijd
       baseRow.aantekeningen = prev.aantekeningen ?? null;
 
-      // admin decision wint van rule-hit
       if (norm === "approved") {
         baseRow.resultaat = "OK";
         baseRow.actie_status = "goedgekeurd";
@@ -187,6 +210,9 @@ export async function saveControleResultaten(opts: {
 
   if (rowsToInsert.length === 0) return;
 
-  const { error: insErr } = await supabaseAdmin.from("controle_resultaten").insert(rowsToInsert);
+  const { error: insErr } = await supabaseAdmin
+    .from("controle_resultaten")
+    .insert(rowsToInsert);
+
   if (insErr) throw insErr;
 }

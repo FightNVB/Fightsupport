@@ -72,6 +72,23 @@ function toBoolLoose(v: any): boolean | null {
   return null;
 }
 
+function normalizeMaxGewicht(v: any): number | null {
+  if (v == null) return null;
+
+  const raw = String(v).trim();
+  if (!raw) return null;
+
+  const cleaned = raw.replace(",", ".").replace(/\s+/g, "");
+  const numeric = cleaned.replace(/[^0-9.\-]/g, "");
+
+  if (!numeric) return null;
+
+  const n = Number(numeric);
+  if (!Number.isFinite(n)) return null;
+
+  return Math.abs(n);
+}
+
 function boutFingerprint(opts: {
   vaR: string | null;
   vaB: string | null;
@@ -85,7 +102,6 @@ function boutFingerprint(opts: {
   const d = normUpper(opts.discipline);
   const k = normUpper(opts.klasse);
 
-  // optioneel toernooi meenemen als je 'm hebt
   const tBool = toBoolLoose(opts.is_toernooi);
   const t = tBool == null ? "" : tBool ? "||T" : "||F";
 
@@ -93,7 +109,6 @@ function boutFingerprint(opts: {
 }
 
 async function fetchExistingBoutUidIndex(matchmaking_id: string) {
-  // Map fingerprint -> list of bout_uid(s)
   const index = new Map<string, string[]>();
 
   const { data, error } = await supabaseAdmin
@@ -153,7 +168,6 @@ function roleLower(r: any): RoleName {
 ========================================================= */
 export async function POST(req: Request) {
   try {
-    // ✅ Auth: only authenticated roles can submit
     const auth = await requireAnyRole(req, ["admin", "matchmaker", "official", "hoofdofficial"]);
     const userId = auth.userId;
     const role = roleLower(auth.role);
@@ -167,24 +181,18 @@ export async function POST(req: Request) {
     let hoofdofficial: string | null = null;
     let promotor: string | null = null;
 
-    // uploaded_by is ALWAYS enforced server-side from auth
     const uploaded_by: string = userId;
 
     let matchmaking_id: string | null = null;
     let force_new = false;
 
-    // ✅ event koppeling / auto-create
     let event_id: string | null = null;
 
-    // upload token (client-side correlation, not DB id)
     const upload_token = randomUUID();
     let raw_filename: string | null = null;
 
     let bouts: any[] = [];
 
-    // -----------------------
-    // A) JSON + file_path
-    // -----------------------
     if (isJson(req)) {
       const body = await req.json();
 
@@ -198,27 +206,23 @@ export async function POST(req: Request) {
       matchmaker = body.matchmaker ? String(body.matchmaker).trim() : null;
 
       const bondteamRaw = body.bondteam ? String(body.bondteam).trim() : null;
-      bondteam = bondteamRaw && ALLOWED_BONDTEAMS.has(bondteamRaw) ? bondteamRaw : bondteamRaw; // niet blokkeren, maar wel normaliseren
+      bondteam = bondteamRaw && ALLOWED_BONDTEAMS.has(bondteamRaw) ? bondteamRaw : bondteamRaw;
 
       hoofdofficial = body.hoofdofficial ? String(body.hoofdofficial).trim() : null;
       promotor = body.promotor ? String(body.promotor).trim() : null;
-
-      // ignore uploaded_by from client (spoofing)
 
       matchmaking_id = body.matchmaking_id ? String(body.matchmaking_id) : null;
       force_new = Boolean(body.force_new ?? false);
 
       event_id = body.event_id ? String(body.event_id) : null;
 
-      if (!file_path) return NextResponse.json({ error: "JSON mist file_path." }, { status: 400 });
+      if (!file_path) {
+        return NextResponse.json({ error: "JSON mist file_path." }, { status: 400 });
+      }
 
       const buffer = await downloadStorageFile(file_path);
       bouts = await parseExcelToBouts(buffer);
-    }
-    // -----------------------
-    // B) multipart form-data
-    // -----------------------
-    else if (isForm(req)) {
+    } else if (isForm(req)) {
       const form = await req.formData();
       const file = form.get("file") as File | null;
 
@@ -233,15 +237,14 @@ export async function POST(req: Request) {
       hoofdofficial = String(form.get("hoofdofficial") ?? "").trim() || null;
       promotor = String(form.get("promotor") ?? "").trim() || null;
 
-      // ignore uploaded_by from client (spoofing)
-
       matchmaking_id = String(form.get("matchmaking_id") ?? "").trim() || null;
       force_new = String(form.get("force_new") ?? "false") === "true";
 
       event_id = String(form.get("event_id") ?? "").trim() || null;
 
-      if (!file) return NextResponse.json({ error: "Geen file ontvangen." }, { status: 400 });
-
+      if (!file) {
+        return NextResponse.json({ error: "Geen file ontvangen." }, { status: 400 });
+      }
 
       raw_filename = (file as any)?.name ? String((file as any).name) : null;
 
@@ -255,31 +258,37 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Shared validation (after parsing)
-    if (!evenement_naam || !evenement_datum) return bad("Vul verplicht in: evenement_naam en evenement_datum.");
-    if (!bondteam) return bad("Bondteam is verplicht.");
-    if (!ALLOWED_BONDTEAMS.has(String(bondteam))) return bad("Onbekend bondteam.");
+    if (!evenement_naam || !evenement_datum) {
+      return bad("Vul verplicht in: evenement_naam en evenement_datum.");
+    }
+    if (!bondteam) {
+      return bad("Bondteam is verplicht.");
+    }
+    if (!ALLOWED_BONDTEAMS.has(String(bondteam))) {
+      return bad("Onbekend bondteam.");
+    }
 
     if (role === "official" || role === "hoofdofficial") {
-      // official: must stay within own bondteam
       const userBond = await getUserBondteam(userId);
       if (!userBond) return bad("Je profiel mist bondteam.", 403);
-      if (String(userBond) !== String(bondteam)) return bad("Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.", 403);
+      if (String(userBond) !== String(bondteam)) {
+        return bad("Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.", 403);
+      }
 
       const mm = String(matchmaker ?? "").trim();
       const pr = String(promotor ?? "").trim();
-      if (!mm && !pr) return bad("Vul matchmaker of promotor in (minimaal één).", 400);
+      if (!mm && !pr) {
+        return bad("Vul matchmaker of promotor in (minimaal één).", 400);
+      }
     } else {
-      // matchmaker/admin: matchmaker verplicht
       const mm = String(matchmaker ?? "").trim();
-      if (!mm) return bad("Matchmaker is verplicht.", 400);
+      if (!mm) {
+        return bad("Matchmaker is verplicht.", 400);
+      }
     }
 
     const now = new Date().toISOString();
 
-    // -----------------------
-    // 0) event aanmaken (als niet meegegeven)
-    // -----------------------
     let evId = event_id ? String(event_id).trim() : "";
     if (!evId) {
       const { data: ev, error: evErr } = await supabaseAdmin
@@ -297,24 +306,26 @@ export async function POST(req: Request) {
         .select("id")
         .single();
 
-      if (evErr) return NextResponse.json({ error: evErr.message }, { status: 500 });
+      if (evErr) {
+        return NextResponse.json({ error: evErr.message }, { status: 500 });
+      }
       evId = String((ev as any)?.id ?? "").trim();
     } else {
-      // licht check: bestaat event?
-      const { data: ex, error: exErr } = await supabaseAdmin.from("events").select("id").eq("id", evId).maybeSingle();
-      if (exErr) return NextResponse.json({ error: exErr.message }, { status: 500 });
+      const { data: ex, error: exErr } = await supabaseAdmin
+        .from("events")
+        .select("id")
+        .eq("id", evId)
+        .maybeSingle();
+
+      if (exErr) {
+        return NextResponse.json({ error: exErr.message }, { status: 500 });
+      }
       if (!ex) {
         return NextResponse.json({ error: "event_id bestaat niet (events)." }, { status: 400 });
       }
     }
 
-    // -----------------------
-    // 1) matchmaking id bepalen (bigint-safe)
-    // -----------------------
-    // Let op: sommige installs gebruiken BIGINT ids i.p.v. UUID. Daarom:
-    // - Als matchmaking_id wordt meegegeven: moet dit numeriek zijn.
-    // - Als nieuw: laat Postgres het id genereren en lees het terug.
-    let mmId: string = "";
+    let mmId = "";
     if (!force_new && matchmaking_id) {
       const s = String(matchmaking_id).trim();
       if (!/^\d+$/.test(s)) {
@@ -335,15 +346,17 @@ export async function POST(req: Request) {
         })
         .select("id")
         .single();
-      if (mmError) return NextResponse.json({ error: mmError.message }, { status: 500 });
+
+      if (mmError) {
+        return NextResponse.json({ error: mmError.message }, { status: 500 });
+      }
+
       mmId = String((mm as any)?.id ?? "").trim();
-      if (!mmId) return NextResponse.json({ error: "Kon matchmaking id niet bepalen." }, { status: 500 });
+      if (!mmId) {
+        return NextResponse.json({ error: "Kon matchmaking id niet bepalen." }, { status: 500 });
+      }
     }
 
-    // -----------------------
-    // 2) upload meta opslaan (met event_id!) (bigint-safe)
-    // -----------------------
-    // Laat ook hier het id door Postgres genereren als de kolom BIGINT is.
     const { data: uploadRow, error: uploadErr } = await supabaseAdmin
       .from("matchmaking_uploads")
       .insert({
@@ -364,14 +377,13 @@ export async function POST(req: Request) {
       })
       .select("id")
       .single();
-    if (uploadErr) return NextResponse.json({ error: uploadErr.message }, { status: 500 });
 
-    // Zorg dat response altijd upload_id teruggeeft (string)
+    if (uploadErr) {
+      return NextResponse.json({ error: uploadErr.message }, { status: 500 });
+    }
+
     const uploadIdFinal = String((uploadRow as any)?.id ?? "").trim();
 
-    // -----------------------
-    // 4) bouts insert met bout_uid herkenning
-    // -----------------------
     const existingIndex = await fetchExistingBoutUidIndex(mmId);
 
     let reused = 0;
@@ -379,14 +391,13 @@ export async function POST(req: Request) {
     let created = 0;
 
     const rows: any[] = [];
+
     for (const b of bouts ?? []) {
       const vaR = toVaStrict((b as any)?.va_rood ?? (b as any)?.rood_va ?? (b as any)?.rood_va_mm);
       const vaB = toVaStrict((b as any)?.va_blauw ?? (b as any)?.blauw_va ?? (b as any)?.blauw_va_mm);
 
       const discipline = normUpper((b as any)?.discipline ?? "");
       const klasse = normUpper((b as any)?.klasse ?? "");
-
-      // ✅ parser kan is_toernooi of toernooi geven
       const is_toernooi = (b as any)?.is_toernooi ?? (b as any)?.toernooi ?? null;
 
       const fp = boutFingerprint({ vaR, vaB, discipline, klasse, is_toernooi });
@@ -399,7 +410,6 @@ export async function POST(req: Request) {
           bout_uid = list[0];
           reused++;
         } else if (list.length > 1) {
-          // ambigu: kies niet automatisch
           ambiguous++;
           bout_uid = randomUUID();
         } else {
@@ -432,6 +442,8 @@ export async function POST(req: Request) {
         klasse: klasse || null,
         is_toernooi: toBoolLoose(is_toernooi),
 
+        max_gewicht: normalizeMaxGewicht((b as any)?.max_gewicht),
+
         raw_json: (b as any)?.extra ?? null,
 
         created_at: now,
@@ -439,8 +451,13 @@ export async function POST(req: Request) {
     }
 
     if (rows.length) {
-      const { error: boutErr } = await supabaseAdmin.from("matchmaking_bouts_raw").insert(rows);
-      if (boutErr) return NextResponse.json({ error: boutErr.message }, { status: 500 });
+      const { error: boutErr } = await supabaseAdmin
+        .from("matchmaking_bouts_raw")
+        .insert(rows);
+
+      if (boutErr) {
+        return NextResponse.json({ error: boutErr.message }, { status: 500 });
+      }
     }
 
     return NextResponse.json({

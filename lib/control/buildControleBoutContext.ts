@@ -1,9 +1,6 @@
-// lib/control/buildControleBoutContext.ts
-
 import dayjs from "dayjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildClassAwareRecord, totalsToFlat } from "@/lib/recordCalculator";
-import { makeBoutId } from "@/lib/shared/makeBoutId";
 import crypto from "crypto";
 
 function toIsoDateOnly(d: any): string | null {
@@ -46,8 +43,16 @@ function toNullableStr(v: any): string | null {
 
 function toNullableNumber(v: any): number | null {
   if (v == null) return null;
-  const s = String(v).trim().replace(",", ".");
-  if (!s) return null;
+  const raw = String(v).trim();
+  if (!raw) return null;
+
+  let s = raw.toLowerCase().replace(/kg/g, "").replace(/\s+/g, "");
+
+  if (/^-\d+([.,]\d+)?$/.test(s)) {
+    s = s.slice(1);
+  }
+
+  s = s.replace(",", ".");
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
@@ -78,14 +83,26 @@ function toVaStrict(v: any): string | null {
   return null;
 }
 
+function resolveMaxGewicht(partij: any): number | null {
+  return toNullableNumber(
+    partij?.max_gewicht ??
+      partij?.max_gewicht_mm ??
+      partij?.maxgewicht ??
+      partij?.max_kg ??
+      partij?.gewicht_max ??
+      partij?.afgesproken_gewicht ??
+      partij?.agreed_weight ??
+      null
+  );
+}
+
 type EvenementInfo = {
   evenement_naam: string | null;
-  evenement_datum: string | null; // YYYY-MM-DD
+  evenement_datum: string | null;
   event_id: string | null;
 };
 
 async function fetchEvenementInfo(matchmaking_id: string): Promise<EvenementInfo> {
-  // Primair: nieuwste matchmaking_uploads rij
   const { data, error } = await supabaseAdmin
     .from("matchmaking_uploads")
     .select("evenement_naam, evenement_datum, event_id")
@@ -99,7 +116,6 @@ async function fetchEvenementInfo(matchmaking_id: string): Promise<EvenementInfo
   let evenement_datum: string | null = toIsoDateOnly((data as any)?.[0]?.evenement_datum ?? null);
   const event_id: string | null = toNullableStr((data as any)?.[0]?.event_id ?? null);
 
-  // Fallback: events tabel (als event_id bestaat en info (deels) ontbreekt)
   if (event_id && (!evenement_naam || !evenement_datum)) {
     const { data: ev, error: evErr } = await supabaseAdmin
       .from("events")
@@ -116,7 +132,6 @@ async function fetchEvenementInfo(matchmaking_id: string): Promise<EvenementInfo
   return { evenement_naam, evenement_datum, event_id };
 }
 
-// ✅ MMA: afleiden huidige klasse uit uitslagen (laatste partij)
 function parseMmaFromUitslagKlasse(v: any): "PRO" | "AMATEUR" | null {
   const s = String(v ?? "").trim().toUpperCase();
   if (!s) return null;
@@ -127,7 +142,7 @@ function parseMmaFromUitslagKlasse(v: any): "PRO" | "AMATEUR" | null {
 
 function latestUitslagByDatum(uitslagen: any[]): any | null {
   if (!Array.isArray(uitslagen) || uitslagen.length === 0) return null;
-  // probeer te sorteren op datum (YYYY-MM-DD). Als datum ontbreekt: laat originele volgorde staan.
+
   const withDate = uitslagen
     .map((u) => ({ u, d: toIsoDateOnly((u as any)?.datum) }))
     .filter((x) => !!x.d);
@@ -141,7 +156,6 @@ function latestUitslagByDatum(uitslagen: any[]): any | null {
 }
 
 function resolveMmaCurrentKlasse(fighter: any, uitslagen: any[]): "PRO" | "AMATEUR" | null {
-  // 1) direct uit fighters_raw (als aanwezig)
   const direct =
     fighter?.mma_current_klasse ??
     fighter?.mma_klasse ??
@@ -152,39 +166,160 @@ function resolveMmaCurrentKlasse(fighter: any, uitslagen: any[]): "PRO" | "AMATE
   const directParsed = parseMmaFromUitslagKlasse(direct);
   if (directParsed) return directParsed;
 
-  // 2) anders: laatste partij in uitslagen_raw
   const last = latestUitslagByDatum(uitslagen);
   const parsed = parseMmaFromUitslagKlasse(last?.klasse);
   return parsed;
 }
 
-export async function buildControleBoutContext(matchmaking_id: string, controle_run_id: string) {
+function getDemoTotaalFromRecord(rec: any): number {
+  const flat = totalsToFlat(rec);
+  const candidates = [
+    flat?.demo,
+    flat?._all_demo,
+    rec?.current?._all?.demo,
+    rec?._all?.demo,
+  ];
+
+  for (const v of candidates) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return Math.max(0, n);
+  }
+
+  return 0;
+}
+
+function newestTimestampValue(row: any): string {
+  return String(
+    row?.updated_at ??
+      row?.created_at ??
+      row?.scraped_at ??
+      row?.inserted_at ??
+      ""
+  );
+}
+
+function pickNewestByVa(rows: any[]): Map<string, any> {
+  const out = new Map<string, any>();
+
+  for (const row of rows ?? []) {
+    const va = String((row as any)?.va_nummer ?? "").trim();
+    if (!va) continue;
+
+    const prev = out.get(va);
+    if (!prev) {
+      out.set(va, row);
+      continue;
+    }
+
+    const prevTs = newestTimestampValue(prev);
+    const rowTs = newestTimestampValue(row);
+
+    if (rowTs > prevTs) {
+      out.set(va, row);
+    }
+  }
+
+  return out;
+}
+
+function groupByVa(rows: any[]): Map<string, any[]> {
+  const out = new Map<string, any[]>();
+
+  for (const row of rows ?? []) {
+    const va = String((row as any)?.va_nummer ?? "").trim();
+    if (!va) continue;
+    if (!out.has(va)) out.set(va, []);
+    out.get(va)!.push(row);
+  }
+
+  return out;
+}
+
+function normalizeLooseText(v: any): string {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function dedupeUitslagenRows(rows: any[]): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+
+  for (const row of rows ?? []) {
+    const key = [
+      String((row as any)?.va_nummer ?? "").trim(),
+      toIsoDateOnly((row as any)?.datum) ?? "",
+      normalizeLooseText((row as any)?.discipline),
+      normalizeLooseText((row as any)?.klasse),
+      normalizeLooseText((row as any)?.uitslag),
+      normalizeLooseText((row as any)?.evenement),
+      normalizeLooseText((row as any)?.tegenstander),
+      toIsoDateOnly((row as any)?.evenement_datum ?? (row as any)?.datum) ?? "",
+    ].join("|");
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+
+  return out;
+}
+
+function countDemoUitslagen(rows: any[]): number {
+  let total = 0;
+  for (const row of rows ?? []) {
+    const u = normalizeLooseText((row as any)?.uitslag);
+    if (u.includes("demo") || u.includes("demonstr")) total += 1;
+  }
+  return total;
+}
+
+export async function buildControleBoutContext(
+  matchmaking_id: string,
+  controle_run_id: string,
+  opts?: { partij_nr?: number | null }
+) {
   if (!matchmaking_id) throw new Error("[buildControleBoutContext] matchmaking_id ontbreekt");
   if (!controle_run_id) throw new Error("[buildControleBoutContext] controle_run_id ontbreekt");
 
-  console.log("[buildControleBoutContext] start", { matchmaking_id, controle_run_id });
+  const scopedPartijNr =
+    opts?.partij_nr != null && Number.isFinite(Number(opts.partij_nr))
+      ? Number(opts.partij_nr)
+      : null;
 
-  // 1) bouts ophalen
-  const { data: bouts, error: bErr } = await supabaseAdmin
+  console.log("[buildControleBoutContext] start", {
+    matchmaking_id,
+    controle_run_id,
+    partij_nr: scopedPartijNr,
+  });
+
+  let boutsQ = supabaseAdmin
     .from("matchmaking_bouts_raw")
-    .select("*") // moet bout_uid bevatten
+    .select("*")
     .eq("matchmaking_id", matchmaking_id)
     .order("partij_nr", { ascending: true });
+
+  if (scopedPartijNr != null) {
+    boutsQ = boutsQ.eq("partij_nr", scopedPartijNr);
+  }
+
+  const { data: bouts, error: bErr } = await boutsQ;
 
   if (bErr) throw bErr;
   if (!bouts?.length) return;
 
-  // 2) event info (naam + datum) waarheid
   const evInfo = await fetchEvenementInfo(matchmaking_id);
   const evenement_datum = evInfo.evenement_datum;
   const evenement_naam = evInfo.evenement_naam;
 
-  if (!evenement_datum)
+  if (!evenement_datum) {
     console.warn("[buildControleBoutContext] evenement_datum is NULL", { matchmaking_id });
-  if (!evenement_naam)
+  }
+  if (!evenement_naam) {
     console.warn("[buildControleBoutContext] evenement_naam is NULL", { matchmaking_id });
+  }
 
-  // 3) VA’s verzamelen
   const vas = new Set<string>();
   for (const p of bouts as any[]) {
     const r = toVaStrict(p?.va_rood);
@@ -193,55 +328,64 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
     if (b) vas.add(b);
   }
 
-  // 4) fighters_raw bulk
+  const vaList = [...vas];
+
   const fighterByVa = new Map<string, any>();
-  if (vas.size > 0) {
+  if (vaList.length > 0) {
     const { data: fighters, error: fErr } = await supabaseAdmin
       .from("fighters_raw")
       .select("*")
       .eq("matchmaking_id", matchmaking_id)
       .eq("controle_run_id", controle_run_id)
-      .in("va_nummer", [...vas]);
+      .in("va_nummer", vaList);
 
     if (fErr) throw fErr;
-    for (const f of fighters ?? []) fighterByVa.set(String((f as any).va_nummer), f);
+
+    const newestFighters = pickNewestByVa(fighters ?? []);
+    for (const [va, row] of newestFighters.entries()) {
+      fighterByVa.set(va, row);
+    }
   }
 
-  // 5) uitslagen_raw bulk
   const uitslagenByVa = new Map<string, any[]>();
-  if (vas.size > 0) {
+  if (vaList.length > 0) {
     const { data: uitslagen, error: uErr } = await supabaseAdmin
       .from("uitslagen_raw")
       .select("*")
       .eq("matchmaking_id", matchmaking_id)
       .eq("controle_run_id", controle_run_id)
-      .in("va_nummer", [...vas]);
+      .in("va_nummer", vaList);
 
     if (uErr) throw uErr;
 
-    for (const r of uitslagen ?? []) {
-      const va = String((r as any).va_nummer);
-      if (!uitslagenByVa.has(va)) uitslagenByVa.set(va, []);
-      uitslagenByVa.get(va)!.push(r);
+    const grouped = groupByVa(uitslagen ?? []);
+    for (const [va, rows] of grouped.entries()) {
+      uitslagenByVa.set(va, dedupeUitslagenRows(rows));
     }
   }
 
-  // 6) oude context weg
-  const { error: delCtxErr } = await supabaseAdmin
+  let delCtxQ = supabaseAdmin
     .from("controle_bout_context")
     .delete()
     .eq("matchmaking_id", matchmaking_id)
     .eq("controle_run_id", controle_run_id);
+
+  if (scopedPartijNr != null) delCtxQ = delCtxQ.eq("partij_nr", scopedPartijNr);
+
+  const { error: delCtxErr } = await delCtxQ;
   if (delCtxErr) throw delCtxErr;
 
-  const { error: delUitsErr } = await supabaseAdmin
+  let delUitsQ = supabaseAdmin
     .from("controle_uitslagen")
     .delete()
     .eq("matchmaking_id", matchmaking_id)
     .eq("controle_run_id", controle_run_id);
+
+  if (scopedPartijNr != null) delUitsQ = delUitsQ.eq("partij_nr", scopedPartijNr);
+
+  const { error: delUitsErr } = await delUitsQ;
   if (delUitsErr) throw delUitsErr;
 
-  // 7) rows bouwen
   const rowsToInsert: any[] = [];
   const uitslagenToInsert: any[] = [];
 
@@ -249,8 +393,6 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
     const vaR = toVaStrict(partij?.va_rood);
     const vaB = toVaStrict(partij?.va_blauw);
 
-    // ✅ VA wijziging (persistente bron): probeer 'oude MM VA' uit matchmaking_bouts_raw te lezen.
-    // Belangrijk: controle_bout_context wordt per run opnieuw opgebouwd, dus 'prev' moet uit raw/audit komen.
     const vaRPrev = toVaStrict(
       (partij as any)?.rood_va_mm_prev ??
         (partij as any)?.va_rood_prev ??
@@ -269,15 +411,14 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
 
     const partijNr = partij?.partij_nr ?? null;
 
-    // ✅ bout_id = immutable (uuid uit matchmaking_bouts_raw.bout_uid)
-    let bout_id = makeBoutId(partij?.bout_uid);
+    let bout_id: string | null = null;
 
-    if (!bout_id) {
-      // ❗ Dit mag eigenlijk nooit meer gebeuren als de parser altijd bout_uid zet.
-      // Maar: liever NIET een hele partij verliezen. We maken dan een nieuwe uuid, loggen hard,
-      // en schrijven hem meteen terug naar matchmaking_bouts_raw zodat het vanaf nu stabiel is.
+    if (typeof partij?.bout_uid === "string" && partij.bout_uid.trim()) {
+      bout_id = partij.bout_uid.trim();
+    } else {
       const newUid = crypto.randomUUID();
-      console.error("[buildControleBoutContext] FATAAL: bout_uid ontbreekt/ongeldig -> maak nieuwe bout_uid", {
+
+      console.error("[buildControleBoutContext] FATAAL: bout_uid ontbreekt -> nieuwe bout_uid", {
         matchmaking_id,
         controle_run_id,
         partij_nr: partijNr,
@@ -289,7 +430,6 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
         new_uid: newUid,
       });
 
-      // probeer te herstellen in raw-tabel (beste effort)
       if (partijNr != null) {
         try {
           await supabaseAdmin
@@ -303,12 +443,10 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
         }
       }
 
-      // gebruik nieuwe uid als bout_id
-      // (makeBoutId accepteert uuid-string)
       (partij as any).bout_uid = newUid;
+      bout_id = newUid;
     }
-    bout_id = makeBoutId((partij as any).bout_uid);
-    // ✅ uitslagen klaarzetten voor controle_uitslagen (met bout_id)
+
     if (partijNr != null) {
       if (vaR) {
         for (const u of uitslagenR) {
@@ -317,13 +455,15 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
             controle_run_id,
             partij_nr: partijNr,
             bout_id,
-
             hoek: "rood",
             va_nummer: vaR,
             datum: u?.datum ? toIsoDateOnly(u.datum) : null,
             discipline: u?.discipline ?? null,
             klasse: u?.klasse ?? null,
             uitslag: u?.uitslag ?? null,
+            evenement: u?.evenement ?? null,
+            tegenstander: u?.tegenstander ?? null,
+            evenement_datum: toIsoDateOnly(u?.evenement_datum ?? u?.datum),
           });
         }
       }
@@ -335,13 +475,15 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
             controle_run_id,
             partij_nr: partijNr,
             bout_id,
-
             hoek: "blauw",
             va_nummer: vaB,
             datum: u?.datum ? toIsoDateOnly(u.datum) : null,
             discipline: u?.discipline ?? null,
             klasse: u?.klasse ?? null,
             uitslag: u?.uitslag ?? null,
+            evenement: u?.evenement ?? null,
+            tegenstander: u?.tegenstander ?? null,
+            evenement_datum: toIsoDateOnly(u?.evenement_datum ?? u?.datum),
           });
         }
       }
@@ -355,20 +497,17 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
     const recRClass = buildClassAwareRecord(uitslagenR, currentClass);
     const recBClass = buildClassAwareRecord(uitslagenB, currentClass);
 
-    const flatR = totalsToFlat(recRClass.current._all);
-    const flatB = totalsToFlat(recBClass.current._all);
-
-    const histR = totalsToFlat(recRClass.historic._all);
-    const histB = totalsToFlat(recBClass.historic._all);
-
     const rood_leeftijd_event =
       fr?.geboortedatum && evenement_datum ? calcAgeYears(fr.geboortedatum, evenement_datum) : null;
     const blauw_leeftijd_event =
       fb?.geboortedatum && evenement_datum ? calcAgeYears(fb.geboortedatum, evenement_datum) : null;
 
-    // ✅ MMA: current klasse uit fighters_raw of laatste uitslag (P=PRO, AMA=AMATEUR)
     const rood_mma_current_klasse = resolveMmaCurrentKlasse(fr, uitslagenR);
     const blauw_mma_current_klasse = resolveMmaCurrentKlasse(fb, uitslagenB);
+
+    const max_gewicht = resolveMaxGewicht(partij);
+    const rood_demo_totaal = Math.max(getDemoTotaalFromRecord(recRClass), countDemoUitslagen(uitslagenR));
+    const blauw_demo_totaal = Math.max(getDemoTotaalFromRecord(recBClass), countDemoUitslagen(uitslagenB));
 
     rowsToInsert.push({
       controle_run_id,
@@ -378,20 +517,18 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
 
       matchmaking_id: partij?.matchmaking_id ?? matchmaking_id,
 
-      // ✅ stabiele bout sleutel (uuid)
       bout_id,
 
       discipline: partij?.discipline ?? null,
       klasse_mm: partij?.klasse ?? null,
       is_toernooi: toNullableBool(partij?.is_toernooi ?? partij?.toernooi),
-      max_gewicht: toNullableNumber(partij?.max_gewicht),
+
+      max_gewicht,
 
       rood_naam_mm: toNullableStr(partij?.rood_naam),
       rood_gym_mm: toNullableStr(partij?.rood_gym),
       rood_gewicht_mm: toNullableNumber(partij?.rood_gewicht),
       rood_va_mm: vaR,
-      // ✅ Als matchmaker VA is gecorrigeerd: toon zowel oude (MM) als nieuwe (huidig)
-      // (prev blijft leeg als er nooit een wijziging is geweest)
       rood_va_mm_prev: vaRPrev,
 
       blauw_naam_mm: toNullableStr(partij?.blauw_naam),
@@ -403,7 +540,6 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
       evenement_naam: evenement_naam ?? null,
       evenement_datum: evenement_datum ?? null,
 
-      // fighters_raw
       rood_naam_fp: fr?.naam ?? null,
       rood_geboortedatum_fp: fr?.geboortedatum ? toIsoDateOnly(fr.geboortedatum) : null,
       rood_geslacht: normGender(fr?.geslacht),
@@ -413,9 +549,9 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
       blauw_geboortedatum_fp: fb?.geboortedatum ? toIsoDateOnly(fb.geboortedatum) : null,
       blauw_geslacht: normGender(fb?.geslacht),
       blauw_leeftijd_event,
+
       rood_mma_current_klasse,
       blauw_mma_current_klasse,
-
 
       rood_totaal_wedstrijden_scrape:
         fr?.totaal_wedstrijden ?? fr?.totaal ?? fr?.totaal_wedstrijden_scrape ?? null,
@@ -447,59 +583,42 @@ export async function buildControleBoutContext(matchmaking_id: string, controle_
       blauw_nulmeting_opmerking: fb?.nulmeting_opmerking ?? null,
       blauw_nulmeting_klasse: fb?.nulmeting_klasse ?? null,
 
-      rood_record_w: flatR.record_w,
-      rood_record_l: flatR.record_l,
-      rood_record_d: flatR.record_d,
-      rood_record_o: flatR.record_o,
-
-      blauw_record_w: flatB.record_w,
-      blauw_record_l: flatB.record_l,
-      blauw_record_d: flatB.record_d,
-      blauw_record_o: flatB.record_o,
-
-      rood_demo: flatR.demo_totaal,
-      blauw_demo: flatB.demo_totaal,
-
-      rood_historisch_w: histR.record_w,
-      rood_historisch_l: histR.record_l,
-      rood_historisch_d: histR.record_d,
-      rood_historisch_o: histR.record_o,
-      rood_historisch_demo: histR.demo_totaal,
-      rood_historisch_totaal: histR.partijen_historie,
-      rood_historisch_overige_discipline: recRClass.historic_other_discipline_total,
-
-      blauw_historisch_w: histB.record_w,
-      blauw_historisch_l: histB.record_l,
-      blauw_historisch_d: histB.record_d,
-      blauw_historisch_o: histB.record_o,
-      blauw_historisch_demo: histB.demo_totaal,
-      blauw_historisch_totaal: histB.partijen_historie,
-      blauw_historisch_overige_discipline: recBClass.historic_other_discipline_total,
-
       rood_uitslagen_per_discipline: recRClass,
       blauw_uitslagen_per_discipline: recBClass,
+      rood_demo_totaal,
+      blauw_demo_totaal,
+      rood_demo: rood_demo_totaal,
+      blauw_demo: blauw_demo_totaal,
     });
   }
 
-  // 8) insert controle_uitslagen (chunks)
   if (uitslagenToInsert.length > 0) {
     const chunkSize = 500;
     for (let i = 0; i < uitslagenToInsert.length; i += chunkSize) {
       const chunk = uitslagenToInsert.slice(i, i + chunkSize);
-      const { error: uInsErr } = await supabaseAdmin.from("controle_uitslagen").insert(chunk);
+      const { error: uInsErr } = await supabaseAdmin
+        .from("controle_uitslagen")
+        .upsert(chunk, {
+          onConflict:
+            "controle_run_id,partij_nr,hoek,va_nummer,datum,discipline,klasse,uitslag,evenement,tegenstander,evenement_datum",
+          ignoreDuplicates: true,
+        });
       if (uInsErr) throw uInsErr;
     }
   }
 
-  // 9) insert controle_bout_context
   if (rowsToInsert.length > 0) {
-    const { error: insErr } = await supabaseAdmin.from("controle_bout_context").upsert(rowsToInsert, { onConflict: "controle_run_id,partij_nr" });
+    const { error: insErr } = await supabaseAdmin
+      .from("controle_bout_context")
+      .upsert(rowsToInsert, { onConflict: "controle_run_id,partij_nr" });
+
     if (insErr) throw insErr;
   }
 
   console.log("[buildControleBoutContext] klaar", {
     matchmaking_id,
     controle_run_id,
+    partij_nr: scopedPartijNr,
     rows: rowsToInsert.length,
     uitslagen: uitslagenToInsert.length,
   });

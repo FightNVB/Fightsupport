@@ -54,13 +54,24 @@ export async function POST(req: Request) {
 
     const huidig = normalizeResultaat(row.resultaat);
 
-    // ✅ DISPENSATIE: normaal via dispensatie-module,
+    const code = String((row as any)?.rule_code ?? "").toLowerCase();
+    const ruleName = String((row as any)?.rule ?? "").toLowerCase();
+    const msg = String((row as any)?.boodschap ?? "").toLowerCase();
+    const hay = `${code} ${ruleName} ${msg}`;
+
+    const isLicentieOfKeurmerk =
+      hay.includes("licentie") || hay.includes("keurmerk");
+
+    // DISPENSATIE: normaal via dispensatie-module,
     // maar superadmin mag (op verzoek) direct goed/afkeuren vanuit de controle-detailpagina.
     if (huidig === "dispensatie") {
       if (role !== "superadmin") {
-        return NextResponse.json({ error: "Dispensatie kan niet via review API (gebruik dispensatie-module)." }, { status: 400 });
+        return NextResponse.json(
+          { error: "Dispensatie kan niet via review API (gebruik dispensatie-module)." },
+          { status: 400 }
+        );
       }
-      // superadmin: toegestaan (gaat verder in dezelfde approve/reject flow)
+      // superadmin: toegestaan
     }
 
     // reject: reden verplicht
@@ -70,7 +81,7 @@ export async function POST(req: Request) {
 
     const reviewed_at = nowIso();
 
-    // ✅ Ownership check (matchmaker must own the matchmaking)
+    // Ownership check (matchmaker must own the matchmaking)
     const mmId = String((row as any)?.matchmaking_id ?? "").trim();
     if (mmId) {
       await assertCanAccessMatchmaking({ matchmaking_id: mmId, userId, role });
@@ -81,7 +92,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 🔒 Matchmaker restrictions:
+    // Matchmaker restrictions:
     // - matchmaker may ONLY approve (no reject)
     // - matchmaker may ONLY approve a small allow-list (Belgium checks, 40+ info, name mismatch, missing data)
     // - never approve license/keurmerk/startverbod or general combat rules overrides
@@ -90,13 +101,10 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Matchmakers kunnen alleen goedkeuren." }, { status: 403 });
       }
 
-      const code = String((row as any)?.rule_code ?? "").toLowerCase();
-      const ruleName = String((row as any)?.rule ?? "").toLowerCase();
-      const msg = String((row as any)?.boodschap ?? "").toLowerCase();
-      const hay = `${code} ${ruleName} ${msg}`;
-
-      // Hard blocks: never allow matchmakers to overrule these
-      const denied = hay.includes("licentie") || hay.includes("keurmerk") || hay.includes("startverbod");
+      const denied =
+        hay.includes("licentie") ||
+        hay.includes("keurmerk") ||
+        hay.includes("startverbod");
 
       if (denied) {
         return NextResponse.json({ error: "Matchmakers mogen deze melding niet overrulen." }, { status: 403 });
@@ -114,12 +122,26 @@ export async function POST(req: Request) {
         hay.includes("geen va");
 
       if (!allowed) {
-        return NextResponse.json({ error: "Matchmakers mogen alleen INFO/ACTIE meldingen goedkeuren (Belgë/40+/naam mismatch/missende gegevens)." }, { status: 403 });
+        return NextResponse.json({
+          error:
+            "Matchmakers mogen alleen INFO/ACTIE meldingen goedkeuren (België/40+/naam mismatch/missende gegevens).",
+        }, { status: 403 });
+      }
+    }
+
+    // Alleen superadmin mag AFKEUR op licentie/keurmerk overrulen
+    if (decision === "approve" && huidig === "afgekeurd" && isLicentieOfKeurmerk) {
+      if (role !== "superadmin") {
+        return NextResponse.json(
+          { error: "Alleen superadmin mag AFKEUR op licentie of keurmerk overrulen." },
+          { status: 403 }
+        );
       }
     }
 
     if (decision === "approve") {
-      // ✅ voldoet aan DB constraint: review_status = 'goedgekeurd'
+      // Bij goedkeuren wordt resultaat altijd OK.
+      // Daardoor blijft deze override staan en zie je overal alleen nog OK.
       const update = {
         resultaat: "ok",
         review_status: "goedgekeurd",
@@ -129,7 +151,11 @@ export async function POST(req: Request) {
         aantekeningen: note ?? row.aantekeningen,
       };
 
-      const { error: updErr } = await supabase.from("controle_resultaten").update(update).eq("id", controle_resultaat_id);
+      const { error: updErr } = await supabase
+        .from("controle_resultaten")
+        .update(update)
+        .eq("id", controle_resultaat_id);
+
       if (updErr) throw updErr;
 
       return NextResponse.json({ ok: true, row: { ...row, ...update } });
@@ -138,14 +164,18 @@ export async function POST(req: Request) {
     // decision === "reject"
     const update = {
       resultaat: "afgekeurd",
-      review_status: "afgekeurd", // ✅ voldoet aan constraint
+      review_status: "afgekeurd",
       reviewed_by: userId,
       reviewed_at,
       original_resultaat: row.original_resultaat ?? row.resultaat,
       aantekeningen: note,
     };
 
-    const { error: updErr } = await supabase.from("controle_resultaten").update(update).eq("id", controle_resultaat_id);
+    const { error: updErr } = await supabase
+      .from("controle_resultaten")
+      .update(update)
+      .eq("id", controle_resultaat_id);
+
     if (updErr) throw updErr;
 
     return NextResponse.json({ ok: true, row: { ...row, ...update } });

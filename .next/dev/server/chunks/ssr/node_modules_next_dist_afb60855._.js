@@ -4213,6 +4213,8 @@ function deleteFromLru(deleted) {
                 head = null;
             } else {
                 head = next;
+                prev.next = next;
+                next.prev = prev;
             }
         } else {
             prev.next = next;

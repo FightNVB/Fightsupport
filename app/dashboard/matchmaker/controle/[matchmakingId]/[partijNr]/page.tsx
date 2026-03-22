@@ -1842,7 +1842,7 @@ export default function PartijDetailPage() {
       });
 
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error ?? "Herscrape mislukt");
+      if (!r.ok) throw new Error(j?.error ?? "Automatische controle mislukt");
 
       window.location.reload();
     } catch (e: any) {
@@ -1980,9 +1980,9 @@ export default function PartijDetailPage() {
       });
 
       const j2 = await r2.json().catch(() => ({}));
-      if (!r2.ok) throw new Error(j2?.error ?? "Herscrape mislukt");
+      if (!r2.ok) throw new Error(j2?.error ?? "Automatische controle mislukt");
 
-      setMsg("✅ Opgeslagen + herscrape gestart.");
+      setMsg("✅ Opgeslagen + automatische controle gestart.");
       closeEdit();
       window.location.reload();
     } catch (e: any) {
@@ -2487,7 +2487,7 @@ export default function PartijDetailPage() {
                   disabled={rescraping}
                   className="inline-flex items-center px-4 py-2 rounded bg-[var(--brand-orange)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
                 >
-                  {rescraping ? "Herscrape…" : "Herscrape partij"}
+                  {rescraping ? "Automatische controle…" : "Fightpaspoort controle"}
                 </button>
 
                 <button
@@ -2612,14 +2612,14 @@ export default function PartijDetailPage() {
                       onClick={saveAndRescrapeFromModal}
                       disabled={editSaving}
                       className="px-4 py-2 rounded bg-white text-black font-extrabold hover:opacity-90 disabled:opacity-50"
-                      title="Opslaan en daarna herscrape starten"
+                      title="Opslaan en automatische controle starten"
                     >
-                      {editSaving ? "Bezig…" : "Opslaan + Herscrape"}
+                      {editSaving ? "Bezig…" : "Opslaan + Automatische controle"}
                     </button>
                   </div>
 
                   <div className="text-xs text-zinc-600">
-                    Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan + Fightpaspoort” haalt daarna Fightpaspoort opnieuw op.
+                    Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan + Automatische controle” haalt daarna Fightpaspoort info opnieuw op.
                   </div>
                 </div>
               </div>

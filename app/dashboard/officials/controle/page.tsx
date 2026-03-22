@@ -1,17 +1,15 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { supabase } from "@/lib/supabaseClient";
 
 import NvbLightButton from "@/components/NvbLightButton";
 import NvbDarkButton from "@/components/NvbDarkButton";
 
 const NVB_ORANGE = "#ff4d00";
 
-// Shared "silver backplate" look that matches the detail flow.
 const silverBackplate: CSSProperties = {
   background:
     "radial-gradient(circle at 50% 0%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.16) 38%, rgba(0,0,0,0.08) 72%, rgba(0,0,0,0.22) 100%), linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(236,238,242,0.98) 100%)",
@@ -26,6 +24,17 @@ interface ControleRun {
   run_type: string | null;
 }
 
+interface OfficialQueueJob {
+  id: string;
+  matchmaking_id: string;
+  status: "queued" | "running" | "done" | "failed" | "cancelled" | string;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  controle_run_id: string | null;
+  error_message: string | null;
+}
+
 interface UploadRow {
   id: string;
   evenement_naam: string | null;
@@ -33,6 +42,8 @@ interface UploadRow {
   locatie: string | null;
 
   matchmaking_id: string | null;
+  official_release?: boolean | null;
+  official_released_at?: string | null;
 
   matchmaker: string | null;
   promotor: string | null;
@@ -42,11 +53,17 @@ interface UploadRow {
   uploaded_by?: string | null;
 
   laatste_run: ControleRun | null;
+  actieve_queue_job: OfficialQueueJob | null;
 }
 
 function formatDate(v: string | null) {
   if (!v) return "-";
   return new Date(v).toLocaleDateString("nl-NL");
+}
+
+function formatDateTime(v: string | null | undefined) {
+  if (!v) return "-";
+  return new Date(v).toLocaleString("nl-NL");
 }
 
 function Small({
@@ -68,85 +85,105 @@ function Small({
   );
 }
 
+function getQueueStatusLabel(job: OfficialQueueJob | null, run: ControleRun | null) {
+  if (job?.status === "queued") return "in wachtrij";
+  if (job?.status === "running") return "bezig";
+  if (job?.status === "failed") return "mislukt";
+  if (job?.status === "done") return "doorgestuurd";
+  if (run?.status === "klaar") return "klaar";
+  if (run?.status === "failed") return "failed";
+  if (run?.status) return run.status;
+  return "nieuw";
+}
+
+function getQueueStatusStyle(job: OfficialQueueJob | null, run: ControleRun | null): CSSProperties {
+  const label = getQueueStatusLabel(job, run);
+
+  if (label === "in wachtrij") {
+    return {
+      background: "rgba(255, 193, 7, 0.16)",
+      color: "#7a5400",
+      border: "1px solid rgba(255, 193, 7, 0.45)",
+    };
+  }
+
+  if (label === "bezig") {
+    return {
+      background: "rgba(255, 77, 0, 0.14)",
+      color: "#b63b00",
+      border: "1px solid rgba(255, 77, 0, 0.45)",
+    };
+  }
+
+  if (label === "klaar" || label === "doorgestuurd") {
+    return {
+      background: "rgba(34, 197, 94, 0.14)",
+      color: "#166534",
+      border: "1px solid rgba(34, 197, 94, 0.45)",
+    };
+  }
+
+  if (label === "mislukt" || label === "failed") {
+    return {
+      background: "rgba(220, 38, 38, 0.14)",
+      color: "#991b1b",
+      border: "1px solid rgba(220, 38, 38, 0.45)",
+    };
+  }
+
+  return {
+    background: "rgba(120,120,120,0.12)",
+    color: "#444",
+    border: "1px solid rgba(120,120,120,0.28)",
+  };
+}
+
 export default function ControleOverzichtPage() {
   const [rows, setRows] = useState<UploadRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-
   const [sportsBusy, setSportsBusy] = useState(false);
   const [sportsMsg, setSportsMsg] = useState<string>("");
-
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editMatchmaker, setEditMatchmaker] = useState("");
-  const [editPromotor, setEditPromotor] = useState("");
-  const [editBondteam, setEditBondteam] = useState("");
-  const [saveMsg, setSaveMsg] = useState<string>("");
+  const [errorMsg, setErrorMsg] = useState<string>("");
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load();
+    const t = setInterval(() => {
+      void load(false);
+    }, 5000);
+
+    return () => clearInterval(t);
   }, []);
 
-  async function load() {
-    setLoading(true);
-    setSaveMsg("");
+  async function load(showLoader = true) {
+    if (showLoader) setLoading(true);
+    setErrorMsg("");
     setSportsMsg("");
 
-    const { data: uploads, error: uploadError } = await supabase
-      .from("matchmaking_uploads")
-      .select(
-        `
-        id,
-        uploaded_at,
-        uploaded_by,
-        evenement_naam,
-        evenement_datum,
-        locatie,
-        matchmaking_id,
-        matchmaker,
-        promotor,
-        bondteam
-      `
-      )
-      .order("uploaded_at", { ascending: false });
+    try {
+      const res = await authedFetch("/api/officials/released-matchmakings", {
+        method: "GET",
+      });
 
-    if (uploadError) {
-      console.error("Fout bij laden uploads:", uploadError);
-      setRows([]);
-      setLoading(false);
-      return;
-    }
+      const json = await res.json().catch(() => ({}));
 
-    const matchmakingIds = (uploads ?? [])
-      .map((u: any) => u.matchmaking_id)
-      .filter(Boolean) as string[];
-
-    const { data: runs } = matchmakingIds.length
-      ? await supabase
-          .from("controle_runs")
-          .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type")
-          .in("matchmaking_id", matchmakingIds)
-      : { data: [] as any[] };
-
-    const runMap = new Map<string, ControleRun>();
-    (runs ?? []).forEach((r: ControleRun) => {
-      const existing = runMap.get(r.matchmaking_id);
-      if (
-        !existing ||
-        new Date(r.gestart_op ?? 0) > new Date(existing.gestart_op ?? 0)
-      ) {
-        runMap.set(r.matchmaking_id, r);
+      if (!res.ok) {
+        throw new Error(
+          json?.error ??
+            "Laden official overzicht mislukt. Controleer de route of permissies."
+        );
       }
-    });
 
-    const merged: UploadRow[] = (uploads ?? []).map((u: any) => ({
-      ...u,
-      laatste_run: u.matchmaking_id ? runMap.get(u.matchmaking_id) ?? null : null,
-    }));
-
-    setRows(merged);
-    setLoading(false);
+      setRows(Array.isArray(json?.rows) ? json.rows : []);
+    } catch (e: any) {
+      console.error("Fout bij laden official overzicht:", e);
+      setRows([]);
+      setErrorMsg(
+        e?.message ??
+          "Laden official overzicht mislukt. Controleer route / rechten / API-response."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function runSportscholen() {
@@ -158,126 +195,33 @@ export default function ControleOverzichtPage() {
         method: "POST",
       });
 
+      const json = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const t = await res.text();
-        console.error("sportscholen sync failed:", res.status, t);
-        setSportsMsg("❌ Sync mislukt (zie console).");
+        setSportsMsg(`❌ ${json?.error ?? "Sync mislukt."}`);
         return;
       }
 
-      setSportsMsg("✅ Sportscholen gesynchroniseerd.");
-    } catch (e) {
+      setSportsMsg(json?.message ?? "✅ Sportscholen gesynchroniseerd.");
+    } catch (e: any) {
       console.error(e);
-      setSportsMsg("❌ Sync mislukt (onverwachte fout).");
+      setSportsMsg(`❌ ${e?.message ?? "Sync mislukt (onverwachte fout)."}`);
     } finally {
       setSportsBusy(false);
     }
   }
 
-  async function startControle(matchmaking_id: string) {
-    try {
-      setBusyId(matchmaking_id);
-      setIsBusy(true);
-
-      const res = await authedFetch("/api/control-engine/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchmaking_id }),
-      });
-
-      if (!res.ok) {
-        const t = await res.text();
-        console.error("Start controle failed:", res.status, t);
-        alert("Start controle mislukt. Check console/logs.");
-        return;
-      }
-
-      await load();
-    } finally {
-      setBusyId(null);
-      setIsBusy(false);
-    }
-  }
-
-  async function deleteMatchmaking(matchmaking_id: string) {
-    const ok2 = window.confirm(
-      "Weet je zeker dat je deze matchmaking + alle controle data wilt verwijderen?\n\nDit kan niet ongedaan gemaakt worden."
-    );
-    if (!ok2) return;
-
-    try {
-      setBusyId(matchmaking_id);
-
-      const res = await authedFetch("/api/control-engine/delete-matchmaking", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchmaking_id }),
-      });
-
-      if (!res.ok) {
-        const t = await res.text();
-        console.error("Delete failed:", res.status, t);
-        alert("Verwijderen mislukt. Check console/logs.");
-        return;
-      }
-
-      await load();
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  function openEdit(r: UploadRow) {
-    setSaveMsg("");
-    setEditId(r.id);
-    setEditMatchmaker(r.matchmaker ?? "");
-    setEditPromotor(r.promotor ?? "");
-    setEditBondteam(r.bondteam ?? "");
-  }
-
-  function closeEdit() {
-    setEditId(null);
-    setEditMatchmaker("");
-    setEditPromotor("");
-    setEditBondteam("");
-  }
-
-  async function saveEdit(uploadId: string) {
-    try {
-      setSaveMsg("");
-      if (!editMatchmaker.trim()) {
-        setSaveMsg("⚠️ Matchmaker is verplicht.");
-        return;
-      }
-
-      const { error } = await supabase
-        .from("matchmaking_uploads")
-        .update({
-          matchmaker: editMatchmaker.trim(),
-          promotor: editPromotor.trim() || null,
-          bondteam: editBondteam.trim() || null,
-        })
-        .eq("id", uploadId);
-
-      if (error) {
-        console.error("Update upload meta error:", error);
-        setSaveMsg("❌ Opslaan mislukt.");
-        return;
-      }
-
-      setSaveMsg("✅ Opgeslagen.");
-      await load();
-      closeEdit();
-    } catch (e) {
-      console.error(e);
-      setSaveMsg("❌ Onverwachte fout bij opslaan.");
-    }
-  }
+  const visibleRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const aTime = new Date(a.official_released_at ?? a.uploaded_at ?? 0).getTime();
+      const bTime = new Date(b.official_released_at ?? b.uploaded_at ?? 0).getTime();
+      return bTime - aTime;
+    });
+  }, [rows]);
 
   return (
     <main className="min-h-screen px-4 py-6" style={{ background: "#eef0f3" }}>
       <div className="mx-auto w-full max-w-[1500px]">
-        {/* OUTER FRAME */}
         <div
           className="rounded-[32px] p-[6px]"
           style={{
@@ -297,7 +241,6 @@ export default function ControleOverzichtPage() {
               boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
             }}
           >
-            {/* TOPBAR */}
             <div
               className="px-6 py-5"
               style={{
@@ -306,7 +249,6 @@ export default function ControleOverzichtPage() {
               }}
             >
               <div className="grid grid-cols-3 items-center gap-4">
-                {/* links */}
                 <div className="justify-self-start leading-tight">
                   <div
                     className="font-extrabold tracking-[0.20em]"
@@ -323,33 +265,29 @@ export default function ControleOverzichtPage() {
                   >
                     FIGHTSUPPORT
                   </div>
-                  <div className="text-xs text-white/70">
-                    Vechtsport ondersteuning
-                  </div>
+                  <div className="text-xs text-white/70">Vechtsport ondersteuning</div>
 
-                  {/* ✅ kleine buttons: light + dark */}
                   <div className="mt-3 flex flex-wrap gap-2 items-center">
                     <Small origin="left center">
                       <NvbLightButton
                         label="← Terug naar Menu"
-                        onClick={() =>
-                          (window.location.href = "/dashboard/officials")
-                        }
+                        onClick={() => {
+                          window.location.href = "/dashboard/officials";
+                        }}
                       />
                     </Small>
 
                     <Small origin="left center">
                       <NvbDarkButton
-                        label="Upload MM"
-                        onClick={() =>
-                          (window.location.href = "/dashboard/officials/upload")
-                        }
+                        label="Ververs"
+                        onClick={() => {
+                          void load(true);
+                        }}
                       />
                     </Small>
                   </div>
                 </div>
 
-                {/* midden: logo */}
                 <div className="justify-self-center">
                   <div
                     className="rounded-[28px] p-[6px]"
@@ -372,17 +310,16 @@ export default function ControleOverzichtPage() {
                       }}
                     >
                       <Image
-                        src="/branding/fightsupport/logo-dark.png"
+                        src="/branding/fightsupport/excel-logo.png"
                         alt="FightSupport"
-                        width={120}
-                        height={120}
+                        width={650}
+                        height={200}
                         priority
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* rechts */}
                 <div className="justify-self-end flex flex-col items-end gap-2">
                   <button
                     onClick={runSportscholen}
@@ -392,11 +329,9 @@ export default function ControleOverzichtPage() {
                   >
                     {sportsBusy ? "Sportscholen…" : "Sportscholen sync"}
                   </button>
+
                   {sportsMsg ? (
-                    <span
-                      className="text-xs"
-                      style={{ color: "var(--brand-orange)" }}
-                    >
+                    <span className="text-xs" style={{ color: "var(--brand-orange)" }}>
                       {sportsMsg}
                     </span>
                   ) : null}
@@ -404,14 +339,12 @@ export default function ControleOverzichtPage() {
               </div>
             </div>
 
-            {/* CONTENT */}
             <div className="px-4 md:px-6 py-6">
               <div
                 className="rounded-3xl border-2 border-zinc-500/60 p-4 md:p-5 shadow-[0_22px_60px_rgba(24,24,27,0.12)] ring-1 ring-white/50"
                 style={silverBackplate}
               >
                 <div className="px-2 md:px-3 py-2">
-                  {/* Titel (NVB-oranje zoals detail) */}
                   <div className="mt-2 text-center">
                     <h1
                       className="text-4xl md:text-5xl font-extrabold tracking-wide"
@@ -441,9 +374,22 @@ export default function ControleOverzichtPage() {
                     />
 
                     <p className="mt-2 text-sm md:text-base text-zinc-700">
-                      Matchmakings ter controle
+                      Doorgestuurde matchmakings voor officials
                     </p>
                   </div>
+
+                  {errorMsg ? (
+                    <div
+                      className="mt-5 rounded-2xl border px-4 py-3 text-sm font-semibold"
+                      style={{
+                        background: "rgba(220,38,38,0.10)",
+                        color: "#991b1b",
+                        borderColor: "rgba(220,38,38,0.28)",
+                      }}
+                    >
+                      ❌ {errorMsg}
+                    </div>
+                  ) : null}
 
                   {loading ? (
                     <p className="text-gray-500 mt-6 text-center">Laden…</p>
@@ -480,159 +426,81 @@ export default function ControleOverzichtPage() {
                               <th className="py-3 px-4 text-left">Promotor</th>
                               <th className="py-3 px-4 text-left">Bondteam</th>
                               <th className="py-3 px-4 text-left">Status</th>
+                              <th className="py-3 px-4 text-left">Doorgestuurd</th>
                               <th className="py-3 px-4 text-left">Acties</th>
                             </tr>
                           </thead>
 
                           <tbody>
-                            {rows.map((r, i) => {
+                            {visibleRows.map((r, i) => {
                               const zebra = i % 2 === 0;
                               const run = r.laatste_run;
-
+                              const queueJob = r.actieve_queue_job;
                               const hasMatchmaking = !!r.matchmaking_id;
-                              const canView =
-                                hasMatchmaking && run?.status === "klaar";
-
-                              const isEditing = editId === r.id;
                               const mmId = r.matchmaking_id ?? "";
-                              const rowBusy = busyId === mmId;
 
                               return (
                                 <tr
                                   key={r.id}
                                   style={{
-                                    backgroundColor: zebra
-                                      ? "#ffffff"
-                                      : "#0d0d0d",
+                                    backgroundColor: zebra ? "#ffffff" : "#0d0d0d",
                                     color: zebra ? "#000" : "#fff",
                                   }}
                                 >
-                                  <td className="py-3 px-4">
-                                    {formatDate(r.evenement_datum)}
-                                  </td>
-                                  <td className="py-3 px-4 font-semibold">
-                                    {r.evenement_naam ?? "-"}
-                                  </td>
-                                  <td className="py-3 px-4">
-                                    {r.locatie ?? "-"}
-                                  </td>
+                                  <td className="py-3 px-4">{formatDate(r.evenement_datum)}</td>
+                                  <td className="py-3 px-4 font-semibold">{r.evenement_naam ?? "-"}</td>
+                                  <td className="py-3 px-4">{r.locatie ?? "-"}</td>
+                                  <td className="py-3 px-4">{r.matchmaker ?? "-"}</td>
+                                  <td className="py-3 px-4">{r.promotor ?? "-"}</td>
+                                  <td className="py-3 px-4">{r.bondteam ?? "-"}</td>
 
                                   <td className="py-3 px-4">
-                                    {isEditing ? (
-                                      <input
-                                        className="w-full orange-input h-9"
-                                        value={editMatchmaker}
-                                        onChange={(e) =>
-                                          setEditMatchmaker(e.target.value)
-                                        }
-                                        placeholder="Matchmaker"
-                                      />
-                                    ) : (
-                                      r.matchmaker ?? "-"
-                                    )}
-                                  </td>
-
-                                  <td className="py-3 px-4">
-                                    {isEditing ? (
-                                      <input
-                                        className="w-full orange-input h-9"
-                                        value={editPromotor}
-                                        onChange={(e) =>
-                                          setEditPromotor(e.target.value)
-                                        }
-                                        placeholder="Promotor (optioneel)"
-                                      />
-                                    ) : (
-                                      r.promotor ?? "-"
-                                    )}
-                                  </td>
-
-                                  <td className="py-3 px-4">
-                                    {isEditing ? (
-                                      <input
-                                        className="w-full orange-input h-9"
-                                        value={editBondteam}
-                                        onChange={(e) =>
-                                          setEditBondteam(e.target.value)
-                                        }
-                                        placeholder="Bondteam (optioneel)"
-                                      />
-                                    ) : (
-                                      r.bondteam ?? "-"
-                                    )}
-                                  </td>
-
-                                  <td className="py-3 px-4">
-                                    {run?.status ?? "geen run"}
-                                  </td>
-
-                                  <td className="py-3 px-4">
-                                    <div className="flex flex-wrap gap-2">
-                                      {canView ? (
-                                        <Link
-                                          href={`/dashboard/admin/controle/${mmId}`}
-                                          className="px-3 py-2 text-sm rounded bg-[#151515] text-white border border-orange-600 hover:bg-orange-600 hover:text-black"
-                                        >
-                                          Matchmaking
-                                        </Link>
-                                      ) : (
-                                        <span className="px-3 py-2 text-sm rounded bg-[#151515] text-white/40 border border-white/15">
-                                          Matchmaking
-                                        </span>
-                                      )}
-
-                                      <button
-                                        disabled={!hasMatchmaking || rowBusy}
-                                        onClick={() => startControle(mmId)}
-                                        className="px-3 py-2 text-sm rounded bg-[#151515] text-white border border-orange-600 hover:bg-orange-600 hover:text-black disabled:opacity-50"
-                                      >
-                                        {rowBusy && isBusy
-                                          ? "Bezig…"
-                                          : "Start controle"}
-                                      </button>
-
-                                      {!isEditing ? (
-                                        <button
-                                          onClick={() => openEdit(r)}
-                                          className="px-3 py-2 text-sm rounded bg-[#2b2b2b] text-white border border-white/10 hover:bg-white hover:text-black"
-                                        >
-                                          Bewerken
-                                        </button>
-                                      ) : (
-                                        <>
-                                          <button
-                                            onClick={() => saveEdit(r.id)}
-                                            className="px-3 py-2 text-sm rounded bg-[#2b2b2b] text-white border border-white/10 hover:bg-white hover:text-black"
-                                          >
-                                            Opslaan
-                                          </button>
-                                          <button
-                                            onClick={closeEdit}
-                                            className="px-3 py-2 text-sm rounded bg-[#2b2b2b] text-white border border-white/10 hover:bg-white hover:text-black"
-                                          >
-                                            Annuleren
-                                          </button>
-                                        </>
-                                      )}
-
-                                      <button
-                                        disabled={!hasMatchmaking || rowBusy}
-                                        onClick={() => deleteMatchmaking(mmId)}
-                                        className="px-3 py-2 text-sm rounded bg-[#151515] text-white border border-red-600 hover:bg-red-600 hover:text-black disabled:opacity-50"
-                                      >
-                                        Verwijderen
-                                      </button>
-                                    </div>
-
-                                    {isEditing && saveMsg ? (
-                                      <div className="mt-2 text-xs text-white/80">
-                                        {saveMsg}
+                                    <span
+                                      className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+                                      style={getQueueStatusStyle(queueJob, run)}
+                                    >
+                                      {getQueueStatusLabel(queueJob, run)}
+                                    </span>
+                                    {queueJob?.status === "failed" && queueJob?.error_message ? (
+                                      <div className="mt-1 text-xs opacity-80">
+                                        {queueJob.error_message}
                                       </div>
                                     ) : null}
+                                  </td>
+
+                                  <td className="py-3 px-4 text-sm">
+                                    {formatDateTime(r.official_released_at)}
+                                  </td>
+
+                                  <td className="py-3 px-4">
+                                    {hasMatchmaking ? (
+                                      <Link
+                                        href={`/dashboard/officials/controle/${encodeURIComponent(mmId)}`}
+                                        className="inline-flex px-3 py-2 text-sm rounded bg-[#151515] text-white border border-orange-600 hover:bg-orange-600 hover:text-black"
+                                      >
+                                        Matchmaking
+                                      </Link>
+                                    ) : (
+                                      <span className="inline-flex px-3 py-2 text-sm rounded bg-[#151515] text-white/40 border border-white/15">
+                                        Geen matchmaking
+                                      </span>
+                                    )}
                                   </td>
                                 </tr>
                               );
                             })}
+
+                            {visibleRows.length === 0 ? (
+                              <tr>
+                                <td
+                                  colSpan={9}
+                                  className="py-8 px-4 text-center text-zinc-500"
+                                  style={{ background: "#ffffff" }}
+                                >
+                                  Geen doorgestuurde matchmakings gevonden.
+                                </td>
+                              </tr>
+                            ) : null}
                           </tbody>
                         </table>
                       </div>
@@ -642,21 +510,9 @@ export default function ControleOverzichtPage() {
               </div>
             </div>
 
-            {/* tiny style hook */}
             <style jsx global>{`
               :root {
                 --brand-orange: ${NVB_ORANGE};
-              }
-              .orange-input {
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid rgba(255, 77, 0, 0.35);
-                border-radius: 10px;
-                padding: 0 10px;
-                outline: none;
-              }
-              .orange-input:focus {
-                border-color: rgba(255, 77, 0, 0.75);
-                box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.18);
               }
             `}</style>
           </div>

@@ -25,19 +25,93 @@ type ResultRow = {
   hoek?: "rood" | "blauw" | null;
 };
 
+type AuditEvent = {
+  partij_nr: number | null;
+  hoek: "rood" | "blauw" | null;
+  event_type: string | null;
+  old_va: string | null;
+  new_va: string | null;
+  actor_email: string | null;
+  created_at: string | null;
+  reason: string | null;
+};
+
 type PartijStatus = "OK" | "AFKEUR" | "DISPENSATIE" | "ACTIE";
 
 function safe(v: any, fallback = "") {
   const s = String(v ?? "").trim();
   return s ? s : fallback;
 }
+
+function safeRaw(v: any) {
+  return String(v ?? "").trim();
+}
+
+function normalizeVa(v: any) {
+  return String(v ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[-–—]/g, "")
+    .toUpperCase();
+}
+
+function numOrBlank(v: any) {
+  if (v === null || v === undefined || v === "") return "";
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+
+  const raw = String(v).trim();
+  if (!raw) return "";
+
+  const normalized = raw.replace(",", ".");
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : raw;
+}
+
 function normCode(v: any) {
   return String(v ?? "").trim().toUpperCase();
 }
 
 function isApprovedOrClosed(review_status: any) {
   if (review_status == null) return false;
-  const s = String(review_status).trim().toLowerCase();
+  const raw = String(review_status).trim().toLowerCase();
+  if (!raw) return false;
+
+  const tokens = raw
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/g)
+    .filter(Boolean);
+
+  const tset = new Set(tokens);
+  const hasAny = (...t: string[]) => t.some((x) => tset.has(x));
+
+  if (
+    hasAny(
+      "approved",
+      "approve",
+      "accepted",
+      "ok",
+      "akkoord",
+      "done",
+      "closed",
+      "resolved",
+      "complete",
+      "completed"
+    )
+  ) {
+    return true;
+  }
+
+  if (hasAny("goedgekeurd", "afgehandeld")) return true;
+  if (tset.has("goed") && !tset.has("niet")) return true;
+  if (raw.includes("goedgekeurd") || raw.includes("afgehandeld")) return true;
+
+  return false;
+}
+
+function textLooksApproved(v: any) {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return false;
   return (
     s === "approved" ||
     s === "approve" ||
@@ -46,13 +120,27 @@ function isApprovedOrClosed(review_status: any) {
     s === "goedgekeurd" ||
     s === "akkoord" ||
     s === "accepted" ||
-    s === "yes" ||
-    s === "done" ||
-    s === "closed" ||
-    s === "afgehandeld" ||
     s === "resolved" ||
+    s === "afgehandeld" ||
+    s === "closed" ||
     s === "complete" ||
-    s === "completed"
+    s === "completed" ||
+    s.includes("goedgekeurd") ||
+    s.includes("approved") ||
+    s.includes("akkoord") ||
+    s.includes("afgehandeld") ||
+    s.includes("resolved")
+  );
+}
+
+function rowIsEffectivelyApproved(r: ResultRow) {
+  const anyRow = r as any;
+  return (
+    isApprovedOrClosed(anyRow?.review_status) ||
+    textLooksApproved(anyRow?.status) ||
+    textLooksApproved(anyRow?.review_result) ||
+    textLooksApproved(anyRow?.besluit) ||
+    textLooksApproved(anyRow?.aantekeningen)
   );
 }
 
@@ -81,20 +169,70 @@ function dispensatieStatusLabel(r: ResultRow) {
   return "OPEN";
 }
 
-/** Naam mismatch nooit tonen (behalve VA gewijzigd) */
+function rowHaystack(r: ResultRow) {
+  return `${r.rule_code ?? ""} ${r.rule ?? ""} ${r.boodschap ?? ""} ${r.aantekeningen ?? ""}`.toLowerCase();
+}
+
 function isNameMismatch(r: ResultRow) {
   const c = normCode(r.rule_code);
   return c.startsWith("VECHTER_NAAM_MISMATCH") || c.startsWith("VECHTER_NAAM_ANDERS");
 }
 
-/** VA gewijzigd */
+function isVARow(r: ResultRow) {
+  const hay = rowHaystack(r);
+  const c = normCode(r.rule_code);
+  return (
+    c.includes("VA") ||
+    hay.includes("fightpaspoort") ||
+    hay.includes("va nummer") ||
+    hay.includes("va-nummer") ||
+    hay.includes("v.a.") ||
+    hay.includes("passport nummer")
+  );
+}
+
+function isMissingVARow(r: ResultRow) {
+  const hay = rowHaystack(r);
+  const c = normCode(r.rule_code);
+  return (
+    c.includes("VA_ONTBREEKT") ||
+    c.includes("VA_MISSING") ||
+    c.includes("FIGHTPASPOORT_ONTBREEKT") ||
+    c.includes("FIGHTPASPOORT_MISSING") ||
+    c.includes("GEEN_VA") ||
+    (isVARow(r) &&
+      (hay.includes("ontbreekt") ||
+        hay.includes("missing") ||
+        hay.includes("geen va") ||
+        hay.includes("geen fightpaspoort") ||
+        hay.includes("leeg va") ||
+        hay.includes("va ontbreekt") ||
+        hay.includes("fightpaspoort ontbreekt") ||
+        hay.includes("geen nummer") ||
+        hay.includes("nummer ontbreekt")))
+  );
+}
+
 function isFightpaspoortGewijzigd(r: ResultRow) {
   const c = normCode(r.rule_code);
-  if (c.startsWith("VA_NUMMER_AANGEPAST")) return true;
+  if (
+    c.startsWith("VA_NUMMER_AANGEPAST") ||
+    c.includes("VA_CHANGED") ||
+    c.includes("VA_WIJZIG") ||
+    c.includes("FIGHTPASPOORT_GEWIJZIGD")
+  ) {
+    return true;
+  }
 
-  const rr = String(r.rule ?? "").toLowerCase();
-  const bb = String(r.boodschap ?? "").toLowerCase();
-  return rr.includes("fightpaspoort nummer gewijzigd") || bb.includes("fightpaspoort nummer gewijzigd");
+  const hay = rowHaystack(r);
+  return (
+    hay.includes("fightpaspoort nummer gewijzigd") ||
+    hay.includes("va nummer gewijzigd") ||
+    hay.includes("va aangepast") ||
+    hay.includes("fightpaspoort aangepast") ||
+    hay.includes("gewijzigd van") ||
+    hay.includes("aangepast van")
+  );
 }
 
 function statusFromResultaat(resultaat: any): PartijStatus {
@@ -104,9 +242,11 @@ function statusFromResultaat(resultaat: any): PartijStatus {
   if (s === "actie") return "ACTIE";
   return "OK";
 }
+
 function statusPrio(s: PartijStatus) {
   return s === "AFKEUR" ? 1 : s === "DISPENSATIE" ? 2 : s === "ACTIE" ? 3 : 9;
 }
+
 function partyStatusVoorMeldingen(meldingen: ResultRow[]): PartijStatus {
   if (!meldingen?.length) return "OK";
   let best: PartijStatus = "OK";
@@ -130,6 +270,7 @@ function isDispensatieMelding(m: ResultRow) {
   if (c.includes("KLASSE") && c.includes("VERSCHIL")) return true;
   return false;
 }
+
 function hasDispensatie(meldingen: ResultRow[]) {
   return (meldingen ?? []).some(isDispensatieMelding);
 }
@@ -176,26 +317,33 @@ async function getLatestRun(matchmaking_id: string) {
   return data?.[0] ?? null;
 }
 
-/**
- * ✅ Eventmeta (FightSupport):
- * 1) matchmaking_uploads.event_id -> events.id (naam, datum)
- * 2) fallback: events.matchmaking_id == matchmaking_id
- * 3) fallback: events.upload_id == matchmaking_id
- * 4) fallback: matchmaking_uploads.(evenement_naam/evenement_datum)
- */
 async function getEventMeta(matchmaking_id: string) {
   try {
-    const { data: up, error: upErr } = await supabase
+    const { data: upByMm, error: upByMmErr } = await supabase
       .from("matchmaking_uploads")
-      .select("event_id, evenement_naam, evenement_datum, matchmaking_id")
-      .or(`id.eq.${matchmaking_id},matchmaking_id.eq.${matchmaking_id}`)
+      .select("id, event_id, evenement_naam, evenement_datum, matchmaking_id, bondteam, uploaded_at")
+      .eq("matchmaking_id", matchmaking_id)
       .order("uploaded_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (upErr) throw upErr;
+    if (upByMmErr) throw upByMmErr;
 
-    const uploadEventId = (up as any)?.event_id ? String((up as any).event_id) : null;
+    let up = upByMm;
+
+    if (!up) {
+      const { data: upById, error: upByIdErr } = await supabase
+        .from("matchmaking_uploads")
+        .select("id, event_id, evenement_naam, evenement_datum, matchmaking_id, bondteam, uploaded_at")
+        .eq("id", matchmaking_id)
+        .limit(1)
+        .maybeSingle();
+
+      if (upByIdErr) throw upByIdErr;
+      up = upById;
+    }
+
+    const uploadEventId = up?.event_id ? String(up.event_id) : null;
 
     if (uploadEventId) {
       const { data: ev, error: evErr } = await supabase
@@ -206,9 +354,10 @@ async function getEventMeta(matchmaking_id: string) {
 
       if (!evErr && ev) {
         return {
-          id: String((ev as any)?.id ?? uploadEventId),
-          naam: (ev as any)?.naam ?? null,
-          datum: (ev as any)?.datum ?? null,
+          id: String(ev.id ?? uploadEventId),
+          naam: ev.naam ?? up?.evenement_naam ?? null,
+          datum: ev.datum ?? up?.evenement_datum ?? null,
+          bond: up?.bondteam ?? null,
         };
       }
     }
@@ -223,9 +372,10 @@ async function getEventMeta(matchmaking_id: string) {
 
     if (!evByMmErr && evByMm) {
       return {
-        id: String((evByMm as any)?.id ?? null),
-        naam: (evByMm as any)?.naam ?? null,
-        datum: (evByMm as any)?.datum ?? null,
+        id: String(evByMm.id ?? null),
+        naam: evByMm.naam ?? up?.evenement_naam ?? null,
+        datum: evByMm.datum ?? up?.evenement_datum ?? null,
+        bond: up?.bondteam ?? null,
       };
     }
 
@@ -239,23 +389,52 @@ async function getEventMeta(matchmaking_id: string) {
 
     if (!evByUploadErr && evByUpload) {
       return {
-        id: String((evByUpload as any)?.id ?? null),
-        naam: (evByUpload as any)?.naam ?? null,
-        datum: (evByUpload as any)?.datum ?? null,
+        id: String(evByUpload.id ?? null),
+        naam: evByUpload.naam ?? up?.evenement_naam ?? null,
+        datum: evByUpload.datum ?? up?.evenement_datum ?? null,
+        bond: up?.bondteam ?? null,
       };
     }
 
     return {
-      id: uploadEventId ?? null,
-      naam: (up as any)?.evenement_naam ?? null,
-      datum: (up as any)?.evenement_datum ?? null,
+      id: uploadEventId ?? up?.id ?? null,
+      naam: up?.evenement_naam ?? null,
+      datum: up?.evenement_datum ?? null,
+      bond: up?.bondteam ?? null,
     };
   } catch {
-    return { id: null, naam: null, datum: null };
+    return { id: null, naam: null, datum: null, bond: null };
   }
 }
 
-/** ✅ Excel kolomnummer -> Excel kolomletters (1=>A, 26=>Z, 27=>AA, ...) */
+async function getMatchmakingRawMap(matchmaking_id: string) {
+  const byBoutId = new Map<string, any>();
+  const byPartijNr = new Map<number, any>();
+
+  const { data, error } = await supabase
+    .from("matchmaking_bouts_raw")
+    .select("bout_uid, partij_nr, max_gewicht")
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    const boutIdCandidates = [(row as any)?.bout_uid]
+      .map((v: any) => safe(v, ""))
+      .filter(Boolean);
+
+    const partijNr = Number((row as any)?.partij_nr);
+    const maxGewicht = (row as any)?.max_gewicht ?? null;
+
+    for (const boutId of boutIdCandidates) {
+      byBoutId.set(boutId, maxGewicht);
+    }
+    if (Number.isFinite(partijNr)) byPartijNr.set(partijNr, maxGewicht);
+  }
+
+  return { byBoutId, byPartijNr };
+}
+
 function colToName(n: number) {
   let num = Math.max(1, Math.floor(n));
   let s = "";
@@ -267,7 +446,6 @@ function colToName(n: number) {
   return s;
 }
 
-/** ✅ merge helper: unmerge eerst als al gemerged (voorkomt "Cannot merge already merged cells") */
 function ensureMerged(ws: ExcelJS.Worksheet, range: string) {
   try {
     (ws as any).unMergeCells?.(range);
@@ -297,97 +475,6 @@ function styleRowFillAndFont(row: ExcelJS.Row, isWhite: boolean) {
   });
 }
 
-function writeHeaderBlock(opts: {
-  ws: ExcelJS.Worksheet;
-  title: string;
-  eventName: string;
-  eventDate: string;
-  runStart: string;
-  runEnd: string;
-  runId: string;
-  matchmakingId: string;
-  colCount: number;
-  logoSpace?: boolean;
-}) {
-  const { ws, title, eventName, eventDate, runStart, runEnd, runId, matchmakingId, colCount, logoSpace } = opts;
-
-  const endCol = Math.max(1, colCount);
-  const endColLetter = colToName(endCol);
-
-  if (endCol <= 3) {
-    ensureMerged(ws, `A1:${endColLetter}1`);
-    ensureMerged(ws, `A2:${endColLetter}2`);
-    ensureMerged(ws, `A3:${endColLetter}3`);
-
-    ws.getCell("A1").value = title;
-    ws.getCell("A2").value = `Evenement: ${eventName}  •  Datum: ${eventDate}`;
-    ws.getCell("A3").value = `Controle: ${runStart} → ${runEnd}  •  Run: ${runId}  •  Matchmaking: ${matchmakingId}`;
-
-    ws.getCell("A1").font = { bold: true, size: 16, color: { argb: "FF0D0D0D" } };
-    ws.getCell("A2").font = { bold: true, size: 11, color: { argb: "FF0D0D0D" } };
-    ws.getCell("A3").font = { size: 10, color: { argb: "FF0D0D0D" } };
-
-    ws.getCell("A1").alignment = { vertical: "middle", horizontal: "left" };
-    ws.getCell("A2").alignment = { vertical: "middle", horizontal: "left" };
-    ws.getCell("A3").alignment = { vertical: "middle", horizontal: "left" };
-  } else {
-    if (logoSpace) {
-      ensureMerged(ws, "A1:C3");
-      const a1 = ws.getCell("A1");
-      a1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } } as any;
-      a1.border = {
-        top: { style: "thin", color: { argb: "FF9CA3AF" } },
-        left: { style: "thin", color: { argb: "FF9CA3AF" } },
-        bottom: { style: "thin", color: { argb: "FF9CA3AF" } },
-        right: { style: "thin", color: { argb: "FF9CA3AF" } },
-      } as any;
-      a1.alignment = { vertical: "middle", horizontal: "center" } as any;
-      a1.value = {
-        richText: [
-          { text: "FIGHT", font: { bold: true, size: 18, color: { argb: "FF111827" } } },
-          { text: "SUPPORT", font: { bold: true, size: 18, color: { argb: "FFFF6200" } } },
-        ],
-      } as any;
-    }
-
-    ensureMerged(ws, `D1:${endColLetter}1`);
-    ensureMerged(ws, `D2:${endColLetter}2`);
-    ensureMerged(ws, `D3:${endColLetter}3`);
-
-    ws.getCell("D1").value = title;
-    ws.getCell("D2").value = `Evenement: ${eventName}  •  Datum: ${eventDate}`;
-    ws.getCell("D3").value = `Controle: ${runStart} → ${runEnd}  •  Run: ${runId}  •  Matchmaking: ${matchmakingId}`;
-
-    ws.getCell("D1").font = { bold: true, size: 16, color: { argb: "FF0D0D0D" } };
-    ws.getCell("D2").font = { bold: true, size: 11, color: { argb: "FF0D0D0D" } };
-    ws.getCell("D3").font = { size: 10, color: { argb: "FF0D0D0D" } };
-
-    ws.getCell("D1").alignment = { vertical: "middle", horizontal: "left" };
-    ws.getCell("D2").alignment = { vertical: "middle", horizontal: "left" };
-    ws.getCell("D3").alignment = { vertical: "middle", horizontal: "left" };
-  }
-
-  for (let rr = 1; rr <= 3; rr++) {
-    const row = ws.getRow(rr);
-    for (let c = 1; c <= endCol; c++) {
-      const cell = ws.getCell(rr, c);
-      if (!cell.fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } } as any;
-      cell.border =
-        cell.border ??
-        ({
-          top: { style: "thin", color: { argb: "FF9CA3AF" } },
-          left: { style: "thin", color: { argb: "FF9CA3AF" } },
-          bottom: { style: "thin", color: { argb: "FF9CA3AF" } },
-          right: { style: "thin", color: { argb: "FF9CA3AF" } },
-        } as any);
-    }
-  }
-
-  ws.getRow(1).height = 22;
-  ws.getRow(2).height = 18;
-  ws.getRow(3).height = 18;
-}
-
 function styleHeaderRow(ws: ExcelJS.Worksheet, headerRowNumber: number, colCount: number) {
   const headerRow = ws.getRow(headerRowNumber);
   headerRow.height = 20;
@@ -406,18 +493,94 @@ function styleHeaderRow(ws: ExcelJS.Worksheet, headerRowNumber: number, colCount
   }
 }
 
-function isLicentieOk(v: any): boolean {
-  const s = String(v ?? "").trim().toLowerCase();
-  if (!s) return false;
-  return s === "ja" || s === "yes" || s === "true" || s === "1" || s === "geldig";
-}
-function keurmerkIsProbleem(v: any) {
-  return v === false || v == null;
+function styleUploadMetaCell(cell: ExcelJS.Cell, opts?: { bold?: boolean; align?: "left" | "center" | "right" }) {
+  cell.font = {
+    name: "Calibri",
+    size: 11,
+    bold: !!opts?.bold,
+    color: { argb: "FF000000" },
+  };
+  cell.alignment = {
+    vertical: "middle",
+    horizontal: opts?.align ?? "left",
+    wrapText: true,
+  };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } } as any;
 }
 
-async function addLogoToSheet(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet) {
+function styleUploadHeaderCell(cell: ExcelJS.Cell) {
+  cell.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFFF6200" },
+  } as any;
+  cell.font = {
+    name: "Calibri",
+    size: 11,
+    bold: true,
+    color: { argb: "FF000000" },
+  };
+  cell.alignment = {
+    vertical: "middle",
+    horizontal: "center",
+    wrapText: true,
+  };
+  cell.border = {
+    top: { style: "thin", color: { argb: "FF9CA3AF" } },
+    left: { style: "thin", color: { argb: "FF9CA3AF" } },
+    bottom: { style: "thin", color: { argb: "FF9CA3AF" } },
+    right: { style: "thin", color: { argb: "FF9CA3AF" } },
+  };
+}
+
+function styleUploadDataCell(cell: ExcelJS.Cell, opts?: { center?: boolean }) {
+  cell.font = {
+    name: "Calibri",
+    size: 11,
+    color: { argb: "FF000000" },
+  };
+  cell.alignment = {
+    vertical: "middle",
+    horizontal: opts?.center ? "center" : "left",
+    wrapText: true,
+  };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } } as any;
+  cell.border = {
+    top: { style: "thin", color: { argb: "FF9CA3AF" } },
+    left: { style: "thin", color: { argb: "FF9CA3AF" } },
+    bottom: { style: "thin", color: { argb: "FF9CA3AF" } },
+    right: { style: "thin", color: { argb: "FF9CA3AF" } },
+  };
+}
+
+function styleUploadSheetLayout(ws: ExcelJS.Worksheet) {
+  ws.views = [{ state: "normal", showGridLines: true }];
+
+  ws.getColumn(1).width = 12;
+  ws.getColumn(2).width = 15;
+  ws.getColumn(3).width = 18;
+  ws.getColumn(4).width = 34;
+  ws.getColumn(5).width = 28;
+  ws.getColumn(6).width = 18;
+  ws.getColumn(7).width = 10;
+  ws.getColumn(8).width = 6;
+  ws.getColumn(9).width = 34;
+  ws.getColumn(10).width = 28;
+  ws.getColumn(11).width = 18;
+  ws.getColumn(12).width = 10;
+  ws.getColumn(13).width = 14;
+
+  ws.getRow(1).height = 24;
+  ws.getRow(2).height = 22;
+  ws.getRow(3).height = 22;
+  ws.getRow(4).height = 22;
+  ws.getRow(5).height = 12;
+  ws.getRow(6).height = 24;
+}
+
+async function addOverviewLogo(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet) {
   const candidates = [
-    // FightSupport branding (voorkeur)
+    path.join(process.cwd(), "public", "branding", "fightsupport", "excel-logo.png"),
     path.join(process.cwd(), "public", "logo_fightsupport.png"),
   ];
 
@@ -430,10 +593,7 @@ async function addLogoToSheet(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet) {
     } catch {}
   }
 
-  if (!found) {
-    console.warn("⚠️ Logo niet gevonden. Gezocht in:", candidates);
-    return;
-  }
+  if (!found) return;
 
   const ext = found.toLowerCase().endsWith(".png")
     ? "png"
@@ -441,34 +601,153 @@ async function addLogoToSheet(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet) {
       ? "jpeg"
       : null;
 
-  if (!ext) {
-    console.warn("⚠️ Logo heeft onbekende extensie:", found);
-    return;
-  }
+  if (!ext) return;
 
-  try {
-    const buf = await fs.readFile(found);
-    const imageId = wb.addImage({ buffer: buf, extension: ext as any });
-    ws.addImage(imageId, {
-      tl: { col: 0.05, row: 0.15 },
-      ext: { width: 200, height: 70 },
-    });
-    console.log("✅ Logo toegevoegd vanuit:", found);
-  } catch (e) {
-    console.error("❌ Logo kon niet worden toegevoegd:", found, e);
+  const buf = await fs.readFile(found);
+  const imageId = wb.addImage({ buffer: buf, extension: ext as any });
+
+  ws.addImage(imageId, {
+    tl: { col: 0.35, row: 0.2 },
+    ext: { width: 210, height: 78 },
+    editAs: "oneCell",
+  });
+}
+
+function writeUploadLikeOverviewHeader(opts: {
+  wb: ExcelJS.Workbook;
+  ws: ExcelJS.Worksheet;
+  eventName: string;
+  eventDate: string;
+  bond: string;
+}) {
+  const { ws, eventName, eventDate, bond } = opts;
+
+  styleUploadSheetLayout(ws);
+
+  ensureMerged(ws, "D1:G1");
+  ensureMerged(ws, "D2:E2");
+  ensureMerged(ws, "D3:E3");
+  ensureMerged(ws, "D4:E4");
+
+  ws.getCell("D1").value = "FIGHTSUPPORT EXCEL RAPPORTAGE";
+  ws.getCell("D1").font = {
+    name: "Calibri",
+    size: 14,
+    bold: true,
+    color: { argb: "FF000000" },
+  };
+  ws.getCell("D1").alignment = { vertical: "middle", horizontal: "left" };
+  ws.getCell("D1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } } as any;
+
+  ws.getCell("D2").value = "Naam Evenement:";
+  styleUploadMetaCell(ws.getCell("D2"), { bold: true });
+  ws.getCell("F2").value = eventName && eventName !== "-" ? eventName : "";
+  styleUploadMetaCell(ws.getCell("F2"));
+
+  ws.getCell("D3").value = "Datum Evenement:";
+  styleUploadMetaCell(ws.getCell("D3"), { bold: true });
+  ws.getCell("F3").value = eventDate && eventDate !== "-" ? eventDate : "";
+  styleUploadMetaCell(ws.getCell("F3"));
+
+  ws.getCell("D4").value = "Bond:";
+  styleUploadMetaCell(ws.getCell("D4"), { bold: true });
+  ws.getCell("F4").value = bond || "";
+  styleUploadMetaCell(ws.getCell("F4"));
+
+  const headers = [
+    "Partij nr",
+    "Discipline",
+    "Klasse",
+    "Naam atleet 1",
+    "Sportschool (1)",
+    "Fightpaspoort nr (1)",
+    "KG (1)",
+    "VS",
+    "Naam atleet 2",
+    "Sportschool (2)",
+    "Fightpaspoort nr (2)",
+    "KG (2)",
+    "Max KG",
+  ];
+
+  for (let c = 1; c <= headers.length; c++) {
+    const cell = ws.getCell(6, c);
+    cell.value = headers[c - 1];
+    styleUploadHeaderCell(cell);
   }
 }
 
-/** Hoek infereren als hij ontbreekt */
+function writeHeaderBlock(opts: {
+  ws: ExcelJS.Worksheet;
+  title: string;
+  eventName: string;
+  eventDate: string;
+  runStart: string;
+  runEnd: string;
+  runId: string;
+  matchmakingId: string;
+  colCount: number;
+}) {
+  const { ws, title, eventName, eventDate, runStart, runEnd, runId, matchmakingId, colCount } = opts;
+
+  const endCol = Math.max(1, colCount);
+  const endColLetter = colToName(endCol);
+
+  ensureMerged(ws, `A1:${endColLetter}1`);
+  ensureMerged(ws, `A2:${endColLetter}2`);
+  ensureMerged(ws, `A3:${endColLetter}3`);
+
+  ws.getCell("A1").value = title;
+  ws.getCell("A2").value = `Evenement: ${eventName}  •  Datum: ${eventDate}`;
+  ws.getCell("A3").value = `Controle: ${runStart} → ${runEnd}  •  Run: ${runId}  •  Matchmaking: ${matchmakingId}`;
+
+  ws.getCell("A1").font = { bold: true, size: 16, color: { argb: "FF0D0D0D" } };
+  ws.getCell("A2").font = { bold: true, size: 11, color: { argb: "FF0D0D0D" } };
+  ws.getCell("A3").font = { size: 10, color: { argb: "FF0D0D0D" } };
+
+  ws.getCell("A1").alignment = { vertical: "middle", horizontal: "left" };
+  ws.getCell("A2").alignment = { vertical: "middle", horizontal: "left" };
+  ws.getCell("A3").alignment = { vertical: "middle", horizontal: "left" };
+
+  for (let rr = 1; rr <= 3; rr++) {
+    for (let c = 1; c <= endCol; c++) {
+      const cell = ws.getCell(rr, c);
+      if (!cell.fill) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } } as any;
+      }
+      cell.border = {
+        top: { style: "thin", color: { argb: "FF9CA3AF" } },
+        left: { style: "thin", color: { argb: "FF9CA3AF" } },
+        bottom: { style: "thin", color: { argb: "FF9CA3AF" } },
+        right: { style: "thin", color: { argb: "FF9CA3AF" } },
+      };
+    }
+  }
+
+  ws.getRow(1).height = 22;
+  ws.getRow(2).height = 18;
+  ws.getRow(3).height = 18;
+}
+
 function inferHoek(r: ResultRow): "rood" | "blauw" | null {
   if (r.hoek === "rood" || r.hoek === "blauw") return r.hoek;
-  const c = normCode(r.rule_code ?? r.rule);
-  if (c.includes("_ROOD")) return "rood";
-  if (c.includes("_BLAUW")) return "blauw";
+
+  const c = String(r.rule_code ?? "").toLowerCase();
+  const rr = String(r.rule ?? "").toLowerCase();
+  const bb = String(r.boodschap ?? "").toLowerCase();
+  const hay = `${c} ${rr} ${bb}`;
+
+  if (hay.includes("_rood") || hay.includes(" rood") || hay.includes("rode hoek") || hay.includes("hoek rood")) {
+    return "rood";
+  }
+
+  if (hay.includes("_blauw") || hay.includes(" blauw") || hay.includes("blauwe hoek") || hay.includes("hoek blauw")) {
+    return "blauw";
+  }
+
   return null;
 }
 
-/** Verbod detectie (nieuwe flow) */
 function isVerbodMelding(r: ResultRow) {
   const c = normCode(r.rule_code ?? r.rule);
   if (c.startsWith("VERBOD_")) return true;
@@ -478,7 +757,6 @@ function isVerbodMelding(r: ResultRow) {
   return rr.includes("VERBOD") || bb.includes("VERBOD");
 }
 
-/** Licentie meldingen (op basis van rules, niet ctx) */
 function isLicentieMelding(r: ResultRow) {
   const c = normCode(r.rule_code ?? r.rule);
   const isL = c.startsWith("LICENTIE_") || c.includes("LICENTIE");
@@ -486,68 +764,132 @@ function isLicentieMelding(r: ResultRow) {
   return statusFromResultaat(r.resultaat) === "AFKEUR";
 }
 
-/** Keurmerk meldingen (op basis van rules, niet ctx) — alleen AFKEUR op dit tabblad */
 function isKeurmerkMelding(r: ResultRow) {
   const rule = (r.rule_code ?? "").toUpperCase();
   const status = (r.resultaat ?? "").toUpperCase();
-
   if (!rule.includes("KEURMERK")) return false;
-
   return status === "AFKEUR" || status === "ACTIE";
 }
 
-/** Startverbod meldingen (op basis van rules) */
 function isStartverbodMelding(r: ResultRow) {
   const c = normCode(r.rule_code ?? r.rule);
   return c.includes("STARTVERBOD");
 }
 
-/** Geen VA meldingen (op basis van rules) */
-function isGeenVaMelding(r: ResultRow) {
-  const c = normCode(r.rule_code ?? r.rule);
-  return c.startsWith("VA_ONTBREEKT") || c.includes("VA_ONTBREEKT");
-}
-
-/**
- * ✅ VA helper:
- * - prev (MM fout/oude): *_va_mm_prev
- * - current (huidig): *_va_mm → va_* → *_va
- */
 function getVaInfo(ctx: any, side: "rood" | "blauw") {
   if (!ctx) return { prev: "", current: "", changed: false };
 
-  // Let op: we gebruiken een sentinel "-" als iemand een lege VA invult.
-  // Daarmee kunnen we "leeg → ingevuld" herkennen zonder dat alle partijen als gewijzigd tellen.
-  const prevRaw =
-    side === "rood" ? (ctx?.rood_va_mm_prev ?? null) : (ctx?.blauw_va_mm_prev ?? null);
+  const prevRaw = side === "rood" ? (ctx?.rood_va_mm_prev ?? null) : (ctx?.blauw_va_mm_prev ?? null);
 
   const current =
     side === "rood"
       ? safe(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.rood_va, "")
       : safe(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.blauw_va, "");
 
-  // changed ONLY if prevRaw is explicitly set by our API:
-  // - "-"  => was leeg en is nu ingevuld
-  // - "123" => was 123 en is nu iets anders
-  const prevRawStr = prevRaw === null || prevRaw === undefined ? null : String(prevRaw);
-  const changed =
-    prevRawStr === "-" ? !!current : (prevRawStr ? (!!current && prevRawStr !== current) : false);
+  const prevNorm = normalizeVa(prevRaw);
+  const currentNorm = normalizeVa(current);
 
-  const prev = prevRawStr === "-" ? "" : safe(prevRawStr, "");
+  const prevDisplay = prevRaw === null || prevRaw === undefined || String(prevRaw).trim() === "-" ? "" : safe(prevRaw, "");
+  const changed = !!prevNorm && !!currentNorm && prevNorm !== currentNorm;
 
-  return { prev, current, changed };
+  return { prev: prevDisplay, current, changed };
+}
+
+function getCurrentNaam(ctx: any, side: "rood" | "blauw") {
+  if (!ctx) return "";
+  return side === "rood"
+    ? safe(
+        ctx?.rood_naam_fp ??
+          ctx?.rood_naam_gecorrigeerd ??
+          ctx?.rood_naam_corrected ??
+          ctx?.rood_naam_mm ??
+          ctx?.rood_naam,
+        ""
+      )
+    : safe(
+        ctx?.blauw_naam_fp ??
+          ctx?.blauw_naam_gecorrigeerd ??
+          ctx?.blauw_naam_corrected ??
+          ctx?.blauw_naam_mm ??
+          ctx?.blauw_naam,
+        ""
+      );
+}
+
+function getCurrentGym(ctx: any, side: "rood" | "blauw") {
+  if (!ctx) return "";
+  return side === "rood"
+    ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "")
+    : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "");
+}
+
+function getCurrentGewicht(ctx: any, side: "rood" | "blauw") {
+  if (!ctx) return "";
+  const raw =
+    side === "rood"
+      ? ctx?.rood_gewicht_mm ?? ctx?.rood_gewicht ?? ctx?.gewicht_rood ?? ctx?.rood_weight
+      : ctx?.blauw_gewicht_mm ?? ctx?.blauw_gewicht ?? ctx?.gewicht_blauw ?? ctx?.blauw_weight;
+  return numOrBlank(raw);
+}
+
+function hasFilledValue(v: any) {
+  return v !== null && v !== undefined && String(v).trim() !== "";
+}
+
+function getResolvedMaxGewicht(
+  ctx: any,
+  rawMaps: { byBoutId: Map<string, any>; byPartijNr: Map<number, any> }
+) {
+  const directCandidates = [
+    ctx?.max_gewicht,
+    ctx?.max_gewicht_mm,
+    ctx?.gewicht_max_mm,
+    ctx?.matchmaking_bouts_raw_max_gewicht,
+    ctx?.gewicht_max,
+    ctx?.max_kg,
+    ctx?.extra?.max_gewicht,
+    ctx?.extra?.max_kg,
+    ctx?.extra?.gewicht_max,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (hasFilledValue(candidate)) return numOrBlank(candidate);
+  }
+
+  const boutIdCandidates = [ctx?.bout_id, ctx?.bout_uid]
+    .map((v: any) => safe(v, ""))
+    .filter(Boolean);
+
+  for (const boutId of boutIdCandidates) {
+    if (!rawMaps.byBoutId.has(boutId)) continue;
+    const v = rawMaps.byBoutId.get(boutId);
+    if (hasFilledValue(v)) return numOrBlank(v);
+  }
+
+  const partijNr = Number(ctx?.partij_nr);
+  if (Number.isFinite(partijNr) && rawMaps.byPartijNr.has(partijNr)) {
+    const v = rawMaps.byPartijNr.get(partijNr);
+    if (hasFilledValue(v)) return numOrBlank(v);
+  }
+
+  return "";
 }
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const matchmaking_id = String(url.searchParams.get("matchmaking_id") ?? "").trim();
-    if (!matchmaking_id) return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
+    if (!matchmaking_id) {
+      return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
+    }
 
     const run = await getLatestRun(matchmaking_id);
-    if (!run?.id) return NextResponse.json({ error: "Geen controle_run gevonden voor deze matchmaking_id" }, { status: 400 });
+    if (!run?.id) {
+      return NextResponse.json({ error: "Geen controle_run gevonden voor deze matchmaking_id" }, { status: 400 });
+    }
 
     const eventMeta = await getEventMeta(matchmaking_id);
+    const rawMaps = await getMatchmakingRawMap(matchmaking_id);
 
     const { data: ctxRows, error: ctxErr } = await supabase
       .from("controle_bout_context")
@@ -563,11 +905,36 @@ export async function GET(req: Request) {
       .eq("controle_run_id", run.id);
     if (resErr) throw resErr;
 
+    const { data: auditRows, error: auditErr } = await supabase
+      .from("controle_audit_events")
+      .select("partij_nr, hoek, event_type, old_va, new_va, actor_email, created_at, reason")
+      .eq("controle_run_id", run.id)
+      .eq("matchmaking_id", matchmaking_id)
+      .order("created_at", { ascending: false });
+
+    if (auditErr) {
+      console.warn("audit load failed:", auditErr.message);
+    }
+
     const resultaten = (resRows ?? []) as ResultRow[];
+    const auditEvents = (auditRows ?? []) as AuditEvent[];
 
     const openMeldingen = resultaten.filter((r) => {
-      if (isApprovedOrClosed((r as any).review_status)) return false;
       if (isNameMismatch(r) && !isFightpaspoortGewijzigd(r)) return false;
+
+      if (isMissingVARow(r)) {
+        if (rowIsEffectivelyApproved(r)) return false;
+        return true;
+      }
+
+      if (isFightpaspoortGewijzigd(r)) {
+        if (rowIsEffectivelyApproved(r)) return false;
+        return true;
+      }
+
+      if (rowIsEffectivelyApproved(r)) return false;
+      if (String(r.resultaat ?? "").trim().toLowerCase() === "ok") return false;
+
       return true;
     });
 
@@ -597,6 +964,7 @@ export async function GET(req: Request) {
 
     const eventName = safe(eventMeta?.naam, "-");
     const eventDate = fmtNlDateOnly(eventMeta?.datum);
+    const eventBond = safe((eventMeta as any)?.bond, "");
     const runStart = fmtDateTime(run.gestart_op);
     const runEnd = fmtDateTime(run.afgerond_op);
     const runId = safe(run.id, "-");
@@ -611,101 +979,65 @@ export async function GET(req: Request) {
     wb.creator = "FightSupport";
     wb.created = new Date();
 
-    // =========================================================
-    // TAB VOLGORDE:
-    // Overzicht, Verbod, Startverbod, Licentie, Keurmerk,
-    // Dispensatie, Geen VA, VA gewijzigd, Meldingen
-    // =========================================================
-
-    // =========================
-    // 1) OVERZICHT (logo)
-    // ✅ AANGEPAST: VA oud + VA huidig + VA gewijzigd?
-    // =========================
     {
       const ws = wb.addWorksheet("Overzicht");
 
-      ws.columns = [
-        { header: "Partij_nr", width: 9 },
-        { header: "Partij", width: 10 },
-        { header: "Discipline", width: 12 },
-        { header: "Klasse", width: 18 },
-        { header: "Rood naam", width: 26 },
-        { header: "Rood sportschool", width: 24 },
-        { header: "Rood VA (MM oud)", width: 14 },
-        { header: "Rood VA (huidig)", width: 14 },
-        { header: "Blauw naam", width: 26 },
-        { header: "Blauw sportschool", width: 24 },
-        { header: "Blauw VA (MM oud)", width: 14 },
-        { header: "Blauw VA (huidig)", width: 14 },
-        { header: "VA gewijzigd?", width: 12 },
-        { header: "Status", width: 12 },
-        { header: "Open meldingen", width: 14 },
-        { header: "Dispensatie vereist", width: 18 },
-      ];
-
-      writeHeaderBlock({
+      writeUploadLikeOverviewHeader({
+        wb,
         ws,
-        title: "FightSupport – Overzicht",
         eventName,
         eventDate,
-        runStart,
-        runEnd,
-        runId,
-        matchmakingId: matchmaking_id,
-        colCount: 16,
-        logoSpace: true,
+        bond: eventBond,
       });
 
-      await addLogoToSheet(wb, ws);
+      await addOverviewLogo(wb, ws);
 
-      const HEADER_ROW = 4;
-      ws.getRow(HEADER_ROW).values = (ws.columns ?? []).map((c) => c.header) as any;
-      styleHeaderRow(ws, HEADER_ROW, 16);
-
-      const START_ROW = HEADER_ROW + 1;
+      const START_ROW = 7;
       let outRowNr = START_ROW;
 
       for (const p of ctxList) {
         const pn = Number(p.partij_nr);
         const meldingen = Number.isFinite(pn) ? meldByPartij.get(pn) ?? [] : [];
-        const status = partyStatusVoorMeldingen(meldingen);
-        const openCount = meldingen.length;
-        const dispVereist = hasDispensatie(meldingen) ? "vereist" : "";
+        const _status = partyStatusVoorMeldingen(meldingen);
+        const _openCount = meldingen.length;
+        const _dispVereist = hasDispensatie(meldingen) ? "vereist" : "";
 
         const roodVa = getVaInfo(p, "rood");
         const blauwVa = getVaInfo(p, "blauw");
-        const vaGewijzigd = roodVa.changed || blauwVa.changed ? "JA" : "";
 
         const row = ws.getRow(outRowNr++);
-        row.values = [
-          p.partij_nr ?? null,
-          p.partij_label ?? p.partij_nr ?? null,
-          safe(p.discipline, ""),
-          safe(p.klasse_mm ?? p.klasse, ""),
-          safe(p.rood_naam_fp ?? p.rood_naam_mm, ""),
-          safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym, ""),
-          safe(roodVa.prev, ""),
-          safe(roodVa.current, ""),
-          safe(p.blauw_naam_fp ?? p.blauw_naam_mm, ""),
-          safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym, ""),
-          safe(blauwVa.prev, ""),
-          safe(blauwVa.current, ""),
-          vaGewijzigd,
-          status,
-          openCount,
-          dispVereist,
-        ];
 
-        const isWhite = (row.number - START_ROW) % 2 === 0;
-        styleRowFillAndFont(row, isWhite);
+        row.getCell(1).value = p.partij_nr ?? null;
+        row.getCell(2).value = safe(p.discipline, "");
+        row.getCell(3).value = safe(p.klasse_mm ?? p.klasse, "");
+        row.getCell(4).value = getCurrentNaam(p, "rood");
+        row.getCell(5).value = getCurrentGym(p, "rood");
+        row.getCell(6).value = safe(roodVa.current, "");
+        row.getCell(7).value = getCurrentGewicht(p, "rood");
+        row.getCell(8).value = "vs";
+        row.getCell(9).value = getCurrentNaam(p, "blauw");
+        row.getCell(10).value = getCurrentGym(p, "blauw");
+        row.getCell(11).value = safe(blauwVa.current, "");
+        row.getCell(12).value = getCurrentGewicht(p, "blauw");
+        row.getCell(13).value = getResolvedMaxGewicht(p, rawMaps);
+
+        for (let c = 1; c <= 13; c++) {
+          styleUploadDataCell(row.getCell(c), {
+            center: c === 1 || c === 7 || c === 8 || c === 12 || c === 13,
+          });
+        }
+
+        row.getCell(8).font = {
+          name: "Calibri",
+          size: 11,
+          bold: true,
+          color: { argb: "FF000000" },
+        };
+
+        row.height = 21;
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 16 } };
     }
 
-    // =========================
-    // 2) VERBOD (open)
-    // =========================
     {
       const ws = wb.addWorksheet("Verbod");
 
@@ -768,13 +1100,8 @@ export async function GET(req: Request) {
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 7 } };
     }
 
-    // =========================
-    // 3) STARTVERBOD (open, op basis van meldingen)
-    // =========================
     {
       const ws = wb.addWorksheet("Startverbod");
 
@@ -814,16 +1141,8 @@ export async function GET(req: Request) {
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
         const hoek = inferHoek(r);
 
-        const naam =
-          hoek === "blauw"
-            ? safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm, "-")
-            : safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm, "-");
-
-        const gym =
-          hoek === "blauw"
-            ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "-")
-            : safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "-");
-
+        const naam = getCurrentNaam(ctx, hoek === "blauw" ? "blauw" : "rood");
+        const gym = getCurrentGym(ctx, hoek === "blauw" ? "blauw" : "rood");
         const partij = safe(ctx?.partij_label ?? ctx?.partij_nr ?? r.partij_nr, "-");
 
         const row = ws.getRow(rno++);
@@ -832,14 +1151,8 @@ export async function GET(req: Request) {
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 5 } };
     }
 
-    // =========================
-    // 4) LICENTIE (open, op basis van meldingen)
-    // ✅ AANGEPAST: VA huidig altijd via ctx (mm > va_* > *_va)
-    // =========================
     {
       const ws = wb.addWorksheet("Licentie");
 
@@ -887,20 +1200,10 @@ export async function GET(req: Request) {
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
         const hoek = inferHoek(r);
 
-        const naam =
-          hoek === "blauw"
-            ? safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm, "-")
-            : safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm, "-");
-
-        const gym =
-          hoek === "blauw"
-            ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "-")
-            : safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "-");
-
+        const naam = getCurrentNaam(ctx, hoek === "blauw" ? "blauw" : "rood");
+        const gym = getCurrentGym(ctx, hoek === "blauw" ? "blauw" : "rood");
         const lic = hoek === "blauw" ? safe(ctx?.blauw_licentie, "onbekend") : safe(ctx?.rood_licentie, "onbekend");
-
         const vaInfo = getVaInfo(ctx, hoek === "blauw" ? "blauw" : "rood");
-
         const partij = safe(ctx?.partij_label ?? ctx?.partij_nr ?? r.partij_nr, "-");
 
         const row = ws.getRow(rno++);
@@ -909,13 +1212,8 @@ export async function GET(req: Request) {
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 8 } };
     }
 
-    // =========================
-    // 5) KEURMERK (open, sportscholen uniek op basis van meldingen)
-    // =========================
     {
       const ws = wb.addWorksheet("Keurmerk");
 
@@ -953,12 +1251,7 @@ export async function GET(req: Request) {
         if (!ctx) continue;
 
         const hoek = inferHoek(r);
-
-        const gym =
-          hoek === "blauw"
-            ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "")
-            : safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "");
-
+        const gym = getCurrentGym(ctx, hoek === "blauw" ? "blauw" : "rood");
         if (!gym) continue;
 
         const reden =
@@ -980,13 +1273,8 @@ export async function GET(req: Request) {
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 3 } };
     }
 
-    // =========================
-    // 6) DISPENSATIE (altijd tonen: open + goedgekeurd + afgekeurd)
-    // =========================
     {
       const ws = wb.addWorksheet("Dispensatie");
 
@@ -1011,12 +1299,12 @@ export async function GET(req: Request) {
         runEnd,
         runId,
         matchmakingId: matchmaking_id,
-        colCount: 7,
+        colCount: 9,
       });
 
       const HEADER_ROW = 4;
       ws.getRow(HEADER_ROW).values = (ws.columns ?? []).map((c) => c.header) as any;
-      styleHeaderRow(ws, HEADER_ROW, 7);
+      styleHeaderRow(ws, HEADER_ROW, 9);
 
       const START_ROW = HEADER_ROW + 1;
 
@@ -1051,14 +1339,8 @@ export async function GET(req: Request) {
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 7 } };
     }
 
-    // =========================
-    // 7) GEEN VA (open, op basis van meldingen)
-    // ✅ AANGEPAST: toon VA huidig + (optioneel) MM oud
-    // =========================
     {
       const ws = wb.addWorksheet("Geen VA");
 
@@ -1074,7 +1356,7 @@ export async function GET(req: Request) {
 
       writeHeaderBlock({
         ws,
-        title: "FightSupport – Geen/ongeldig VA nummer (open)",
+        title: "FightSupport – Geen/ontbrekend VA nummer",
         eventName,
         eventDate,
         runStart,
@@ -1090,151 +1372,234 @@ export async function GET(req: Request) {
 
       const START_ROW = HEADER_ROW + 1;
 
-      const rows = openMeldingen
-        .filter((r) => isGeenVaMelding(r))
-        .sort((a, b) => {
-          const ap = Number(a.partij_nr ?? 999999);
-          const bp = Number(b.partij_nr ?? 999999);
-          if (ap !== bp) return ap - bp;
-          return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
+      const rows: Array<{
+        partij: string;
+        hoek: "rood" | "blauw";
+        naam: string;
+        gym: string;
+        current: string;
+        prev: string;
+        melding: string;
+        partij_nr: number;
+      }> = [];
+
+      const seen = new Set<string>();
+
+      for (const ctx of ctxList) {
+        const pn = Number((ctx as any)?.partij_nr);
+        if (!Number.isFinite(pn)) continue;
+        const partij = safe((ctx as any)?.partij_label ?? (ctx as any)?.partij_nr ?? pn, "-");
+
+        for (const side of ["rood", "blauw"] as const) {
+          const info = getVaInfo(ctx, side);
+          if (safeRaw(info.current)) continue;
+
+          const key = `${pn}-${side}-ctx`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          rows.push({
+            partij_nr: pn,
+            partij,
+            hoek: side,
+            naam: getCurrentNaam(ctx, side),
+            gym: getCurrentGym(ctx, side),
+            current: safe(info.current, ""),
+            prev: safe(info.prev, ""),
+            melding: "Fightpaspoortnummer ontbreekt",
+          });
+        }
+      }
+
+      for (const r of resultaten) {
+        if (!isMissingVARow(r)) continue;
+        if (rowIsEffectivelyApproved(r)) continue;
+
+        const pn = Number(r.partij_nr);
+        const hoek = inferHoek(r);
+        if (!Number.isFinite(pn) || !hoek) continue;
+
+        const key = `${pn}-${hoek}-row`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const ctx = ctxByPn.get(pn);
+        const info = getVaInfo(ctx, hoek);
+
+        rows.push({
+          partij_nr: pn,
+          partij: safe(ctx?.partij_label ?? ctx?.partij_nr ?? pn, "-"),
+          hoek,
+          naam: getCurrentNaam(ctx, hoek),
+          gym: getCurrentGym(ctx, hoek),
+          current: safe(info.current, ""),
+          prev: safe(info.prev, ""),
+          melding: safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer ontbreekt", "Fightpaspoortnummer ontbreekt"),
         });
+      }
+
+      rows.sort((a, b) => a.partij_nr - b.partij_nr || a.hoek.localeCompare(b.hoek));
 
       let rno = START_ROW;
-      for (const r of rows) {
-        const pn = Number(r.partij_nr);
-        const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
-        const hoek = inferHoek(r);
-
-        const naam =
-          hoek === "blauw"
-            ? safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm, "-")
-            : safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm, "-");
-
-        const gym =
-          hoek === "blauw"
-            ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "-")
-            : safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "-");
-
-        const vaInfo = getVaInfo(ctx, hoek === "blauw" ? "blauw" : "rood");
-
-        const partij = safe(ctx?.partij_label ?? ctx?.partij_nr ?? r.partij_nr, "-");
-
+      for (const item of rows) {
         const row = ws.getRow(rno++);
-        row.values = [partij, safe(hoek, ""), naam, gym, safe(vaInfo.current, ""), safe(vaInfo.prev, ""), safe(r.boodschap ?? r.rule, "")];
+        row.values = [item.partij, item.hoek, item.naam, item.gym, item.current, item.prev, item.melding];
 
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 7 } };
     }
 
-    // =========================
-    // 8) VA GEWIJZIGD (open)
-// ✅ AANGEPAST: toon VA wijzigingen óók als er géén specifieke melding bestaat (leeg → ingevuld telt ook)
-// =========================
-{
-  const ws = wb.addWorksheet("VA gewijzigd");
+    {
+      const ws = wb.addWorksheet("VA gewijzigd");
 
-  ws.columns = [
-    { header: "Partij_nr", width: 9 },
-    { header: "Hoek", width: 9 },
-    { header: "Naam", width: 28 },
-    { header: "Sportschool", width: 26 },
-    { header: "VA (MM oud)", width: 14 },
-    { header: "VA (huidig)", width: 14 },
-    { header: "Wijziging", width: 26 },
-    { header: "Updated", width: 20 },
-  ];
+      ws.columns = [
+        { header: "Partij_nr", width: 9 },
+        { header: "Hoek", width: 9 },
+        { header: "Naam", width: 28 },
+        { header: "Sportschool", width: 26 },
+        { header: "VA (MM oud)", width: 14 },
+        { header: "VA (huidig)", width: 14 },
+        { header: "Wijziging", width: 36 },
+        { header: "Updated", width: 20 },
+      ];
 
-  writeHeaderBlock({
-    ws,
-    title: "FightSupport – VA nummer wijzigingen (open)",
-    eventName,
-    eventDate,
-    runStart,
-    runEnd,
-    runId,
-    matchmakingId: matchmaking_id,
-    colCount: 8,
-  });
-
-  const HEADER_ROW = 4;
-  ws.getRow(HEADER_ROW).values = (ws.columns ?? []).map((c) => c.header) as any;
-  styleHeaderRow(ws, HEADER_ROW, 8);
-
-  const START_ROW = HEADER_ROW + 1;
-
-  // Bouw wijzigingenlijst uit CONTEXT (dus onafhankelijk van welke rules/meldingen er zijn)
-  const changes: Array<{
-    partij_nr: number;
-    hoek: "rood" | "blauw";
-    naam: string;
-    gym: string;
-    prev: string;
-    current: string;
-    label: string;
-    updated: string;
-  }> = [];
-
-  for (const ctx of ctxRows ?? []) {
-    const pn = Number((ctx as any)?.partij_nr);
-    if (!Number.isFinite(pn)) continue;
-
-    for (const side of ["rood", "blauw"] as const) {
-      const info = getVaInfo(ctx, side);
-      if (!info.changed) continue;
-
-      const naam =
-        side === "blauw"
-          ? safe((ctx as any)?.blauw_naam_fp ?? (ctx as any)?.blauw_naam_mm ?? (ctx as any)?.blauw_naam, "-")
-          : safe((ctx as any)?.rood_naam_fp ?? (ctx as any)?.rood_naam_mm ?? (ctx as any)?.rood_naam, "-");
-
-      const gym =
-        side === "blauw"
-          ? safe((ctx as any)?.blauw_gym_fp ?? (ctx as any)?.blauw_gym_mm ?? (ctx as any)?.blauw_gym, "-")
-          : safe((ctx as any)?.rood_gym_fp ?? (ctx as any)?.rood_gym_mm ?? (ctx as any)?.rood_gym, "-");
-
-      const label = info.prev ? `${info.prev} → ${info.current}` : `→ ${info.current}`;
-
-      changes.push({
-        partij_nr: pn,
-        hoek: side,
-        naam,
-        gym,
-        prev: safe(info.prev, ""),
-        current: safe(info.current, ""),
-        label,
-        updated: safe((ctx as any)?.updated_at ?? (ctx as any)?.created_at ?? "", ""),
+      writeHeaderBlock({
+        ws,
+        title: "FightSupport – VA nummer wijzigingen",
+        eventName,
+        eventDate,
+        runStart,
+        runEnd,
+        runId,
+        matchmakingId: matchmaking_id,
+        colCount: 8,
       });
+
+      const HEADER_ROW = 4;
+      ws.getRow(HEADER_ROW).values = (ws.columns ?? []).map((c) => c.header) as any;
+      styleHeaderRow(ws, HEADER_ROW, 8);
+
+      const START_ROW = HEADER_ROW + 1;
+
+      const changes: Array<{
+        partij_nr: number;
+        hoek: "rood" | "blauw";
+        naam: string;
+        gym: string;
+        prev: string;
+        current: string;
+        label: string;
+        updated: string;
+      }> = [];
+
+      const seen = new Set<string>();
+
+      for (const ctx of ctxList) {
+        const pn = Number((ctx as any)?.partij_nr);
+        if (!Number.isFinite(pn)) continue;
+
+        for (const side of ["rood", "blauw"] as const) {
+          const info = getVaInfo(ctx, side);
+          if (!info.changed) continue;
+
+          const key = `${pn}-${side}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          const naam = getCurrentNaam(ctx, side);
+          const gym = getCurrentGym(ctx, side);
+
+          changes.push({
+            partij_nr: pn,
+            hoek: side,
+            naam,
+            gym,
+            prev: safe(info.prev, ""),
+            current: safe(info.current, ""),
+            label: `${safe(info.prev, "-")} → ${safe(info.current, "-")}`,
+            updated: safe((ctx as any)?.updated_at ?? (ctx as any)?.created_at ?? "", ""),
+          });
+        }
+      }
+
+      for (const ev of auditEvents) {
+        if (normCode(ev.event_type) !== "VA_CHANGED") continue;
+
+        const pn = Number(ev.partij_nr);
+        const hoek = ev.hoek === "blauw" ? "blauw" : "rood";
+        if (!Number.isFinite(pn)) continue;
+
+        const key = `${pn}-${hoek}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const ctx = ctxByPn.get(pn);
+        const naam = getCurrentNaam(ctx, hoek);
+        const gym = getCurrentGym(ctx, hoek);
+
+        changes.push({
+          partij_nr: pn,
+          hoek,
+          naam,
+          gym,
+          prev: safe(ev.old_va, ""),
+          current: safe(ev.new_va, ""),
+          label: `${safe(ev.old_va, "-")} → ${safe(ev.new_va, "-")}`,
+          updated: safe(ev.created_at, ""),
+        });
+      }
+
+      for (const r of resultaten) {
+        if (!isFightpaspoortGewijzigd(r)) continue;
+        if (rowIsEffectivelyApproved(r)) continue;
+
+        const pn = Number(r.partij_nr);
+        const hoek = inferHoek(r);
+        if (!Number.isFinite(pn) || !hoek) continue;
+
+        const key = `${pn}-${hoek}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const ctx = ctxByPn.get(pn);
+        const info = getVaInfo(ctx, hoek);
+
+        changes.push({
+          partij_nr: pn,
+          hoek,
+          naam: getCurrentNaam(ctx, hoek),
+          gym: getCurrentGym(ctx, hoek),
+          prev: safe(info.prev, ""),
+          current: safe(info.current, ""),
+          label:
+            info.prev || info.current
+              ? `${safe(info.prev, "-")} → ${safe(info.current, "-")}`
+              : safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer gewijzigd", "Fightpaspoortnummer gewijzigd"),
+          updated: safe(r.created_at, ""),
+        });
+      }
+
+      changes.sort((a, b) => a.partij_nr - b.partij_nr || a.hoek.localeCompare(b.hoek));
+
+      let rno = START_ROW;
+      for (const ch of changes) {
+        const row = ws.getRow(rno++);
+        row.values = [
+          ch.partij_nr,
+          ch.hoek,
+          ch.naam,
+          ch.gym,
+          ch.prev,
+          ch.current,
+          ch.label,
+          ch.updated,
+        ];
+        const isWhite = (row.number - START_ROW) % 2 === 0;
+        styleRowFillAndFont(row, isWhite);
+      }
     }
-  }
 
-  changes.sort((a, b) => a.partij_nr - b.partij_nr || a.hoek.localeCompare(b.hoek));
-
-  let rno = START_ROW;
-  for (const ch of changes) {
-    const row = ws.getRow(rno++);
-    row.values = [
-      ch.partij_nr,
-      ch.hoek,
-      ch.naam,
-      ch.gym,
-      ch.prev,
-      ch.current,
-      ch.label,
-      ch.updated,
-    ];
-    const isWhite = (row.number - START_ROW) % 2 === 0;
-    styleRowFillAndFont(row, isWhite);
-  }
-
-  ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 8 } };
-}
-
-// =========================
-// 9) MELDINGEN (alleen open, dispensaties staan apart)
-    // =========================
     {
       const ws = wb.addWorksheet("Meldingen");
 
@@ -1304,8 +1669,6 @@ export async function GET(req: Request) {
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
       }
-
-      ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: 11 } };
     }
 
     const outBuf = await wb.xlsx.writeBuffer();
@@ -1316,7 +1679,6 @@ export async function GET(req: Request) {
       .replace(/\s+/g, "_");
 
     const dateForFile = fmtYmdForFilename(eventMeta?.datum);
-
     const filename = `FightSupport_${cleanEventName}_${dateForFile}_run_${String(run.id).slice(0, 8)}.xlsx`;
 
     return new Response(outBuf, {

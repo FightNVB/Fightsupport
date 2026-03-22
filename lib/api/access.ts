@@ -7,20 +7,31 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
+function norm(v: unknown) {
+  return String(v ?? "").trim().toLowerCase();
+}
+
 export async function assertCanAccessMatchmaking(
   userId: string,
   role: string,
   matchmakingId: string
 ) {
+  const roleName = norm(role);
+
   // Admin / Superadmin mogen alles
-  if (role === "Admin" || role === "Superadmin") {
+  if (
+    roleName === "admin" ||
+    roleName === "administrator" ||
+    roleName === "superadmin" ||
+    roleName === "super_admin"
+  ) {
     return;
   }
 
   const { data: upload, error } = await supabaseAdmin
     .from("matchmaking_uploads")
-    .select("uploaded_by, event_id")
-    .eq("id", matchmakingId)
+    .select("id, matchmaking_id, uploaded_by, event_id")
+    .eq("matchmaking_id", matchmakingId)
     .maybeSingle();
 
   if (error || !upload) {
@@ -28,7 +39,7 @@ export async function assertCanAccessMatchmaking(
   }
 
   // Matchmaker: alleen eigen uploads
-  if (role === "Matchmaker") {
+  if (roleName === "matchmaker") {
     if (upload.uploaded_by !== userId) {
       throw new Error("FORBIDDEN_MATCHMAKER");
     }
@@ -36,7 +47,7 @@ export async function assertCanAccessMatchmaking(
   }
 
   // Official / Hoofdofficial: alleen als hij hoofdofficial is van event
-  if (role === "Official" || role === "Hoofdofficial") {
+  if (roleName === "official" || roleName === "hoofdofficial") {
     if (!upload.event_id) {
       throw new Error("FORBIDDEN_NO_EVENT");
     }
@@ -58,6 +69,5 @@ export async function assertCanAccessMatchmaking(
     return;
   }
 
-  // Alles wat hier komt: geen toegang
   throw new Error("FORBIDDEN_ROLE");
 }

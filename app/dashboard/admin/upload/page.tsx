@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
 import DarkCardInputLayout from "@/components/DarkCardInputLayout";
-import Link from "next/link";
 import { authedFetch } from "@/lib/api/authedFetch";
 
 type Profile = {
@@ -14,18 +14,27 @@ type Profile = {
   full_name?: string | null;
 };
 
-function norm(v: any) {
+function norm(v: unknown) {
   return String(v ?? "").trim();
 }
-function isEmpty(v: any) {
+
+function isEmpty(v: unknown) {
   return !norm(v);
 }
 
 const BONDTEAMS = ["IRO", "NKF", "WPKL", "WMTA", "VON", "UMC", "MMAAN", "MON"];
 
-function isAdminRole(role: any) {
+function isAdminRole(role: unknown) {
   const r = String(role ?? "").trim().toLowerCase();
   return r === "admin" || r === "superadmin";
+}
+
+function fieldClass() {
+  return "w-full rounded-xl border border-white/10 bg-[#101114] px-3 py-2.5 text-white outline-none transition placeholder:text-white/35 focus:border-[#ff4d00]/60 focus:ring-2 focus:ring-[#ff4d00]/20";
+}
+
+function labelClass() {
+  return "mb-1.5 text-sm font-medium text-white/90";
 }
 
 export default function UploadMatchmakingAdminPage() {
@@ -47,7 +56,7 @@ export default function UploadMatchmakingAdminPage() {
   const [hoofdofficial, setHoofdofficial] = useState("");
 
   const [busy, setBusy] = useState(false);
-  const [melding, setMelding] = useState<string>("");
+  const [melding, setMelding] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -55,59 +64,67 @@ export default function UploadMatchmakingAdminPage() {
         setProfile({});
         return;
       }
+
       const { data, error } = await supabase
         .from("user_profiles")
         .select("role,bondteam,full_name")
         .eq("id", user.id)
         .maybeSingle();
-      if (error) console.warn("profile load error:", error.message);
-      setProfile((data ?? {}) as any);
 
-      // sensible prefills
-      const bt = String((data as any)?.bondteam ?? "").trim();
-      if (bt && !bondteam) setBondteam(bt);
-      const fn = String((data as any)?.full_name ?? "").trim();
-      if (fn && !matchmaker) setMatchmaker(fn);
+      if (error) {
+        console.warn("profile load error:", error.message);
+      }
+
+      const profileData = (data ?? {}) as Profile;
+      setProfile(profileData);
+
+      const bt = norm(profileData.bondteam);
+      if (bt) {
+        setBondteam((prev) => prev || bt);
+      }
+
+      const fn = norm(profileData.full_name);
+      if (fn) {
+        setMatchmaker((prev) => prev || fn);
+      }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   async function onUpload() {
     setMelding("");
 
     if (!isAdmin) {
-      setMelding("❌ Geen rechten. Alleen admin/superadmin kan uploaden.");
+      setMelding("Je hebt geen rechten om deze upload uit te voeren.");
       return;
     }
 
     if (!file) {
-      setMelding("❌ Kies eerst een Excel bestand.");
+      setMelding("Kies eerst een Excel-bestand.");
       return;
     }
 
-    // ✅ Admin upload: bondteam + matchmaker verplicht
     if (isEmpty(eventNaam) || isEmpty(datum) || isEmpty(bondteam) || isEmpty(matchmaker)) {
-      setMelding("❌ Vul verplicht in: Naam, Datum, Bondteam en Matchmaker.");
+      setMelding("Vul evenement naam, datum, bondteam en matchmaker in.");
       return;
     }
 
     try {
       setBusy(true);
-      setMelding("⏳ Uploaden…");
+      setMelding("Uploaden...");
 
-      // 1) upload naar storage
       const filePath = `matchmakings/${Date.now()}_${file.name}`;
+
       const { error: uploadError } = await supabase.storage
         .from("uploads")
         .upload(filePath, file, { upsert: true });
+
       if (uploadError) {
         console.error(uploadError);
-        setMelding("❌ Upload naar storage mislukt.");
+        setMelding("Upload naar storage mislukt.");
         return;
       }
 
-      // 2) verwerken + event + matchmaking aanmaken
-      setMelding("⏳ Matchmaking verwerken…");
+      setMelding("Matchmaking verwerken...");
 
       const response = await authedFetch("/api/submit-matchmaking", {
         method: "POST",
@@ -115,11 +132,9 @@ export default function UploadMatchmakingAdminPage() {
         body: JSON.stringify({
           file_path: filePath,
           raw_filename: file.name,
-
           evenement_naam: norm(eventNaam),
           evenement_datum: norm(datum),
           locatie: norm(plaats) || null,
-
           bondteam: norm(bondteam),
           matchmaker: norm(matchmaker),
           promotor: norm(promotor) || null,
@@ -127,82 +142,92 @@ export default function UploadMatchmakingAdminPage() {
         }),
       });
 
-      const data = await response.json().catch(() => ({} as any));
+      const data = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        setMelding(`❌ ${data?.error ?? "Onbekende fout"}`);
+        setMelding(data?.error ?? "Onbekende fout.");
         return;
       }
 
-      const matchmaking_id = String(data?.matchmaking_id ?? "").trim();
-      const event_id = String(data?.event_id ?? "").trim();
-
-      if (!matchmaking_id) {
-        setMelding("❌ Upload gelukt maar matchmaking_id ontbreekt in response.");
+      const matchmakingId = norm(data?.matchmaking_id);
+      if (!matchmakingId) {
+        setMelding("Upload gelukt maar matchmaking_id ontbreekt in de response.");
         return;
       }
 
-      setMelding(`✅ Upload gelukt. Event gekoppeld (${event_id || "—"}). Doorsturen naar controle…`);
-      router.push(`/dashboard/admin/controle`);
+      setMelding("Upload gelukt. Doorsturen naar controle...");
+      router.push("/dashboard/admin/controle");
     } catch (e: any) {
       console.error(e);
-      setMelding(`❌ ${e?.message ?? "Onbekende fout"}`);
+      setMelding(e?.message ?? "Onbekende fout.");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <DarkCardInputLayout title="Upload Excel">
-      <div className="space-y-4">
-        <div className="text-sm opacity-90">
-          <div className="font-semibold">Template</div>
-          <div className="flex items-center gap-3 mt-1">
-            <Link className="underline" href="/templates/admin_upload_template.xlsx" target="_blank">
+    <DarkCardInputLayout
+      title="Upload matchmaking"
+      backHref="/dashboard/admin"
+      backLabel="← Terug"
+    >
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-white">Template</div>
+              <div className="mt-1 text-sm text-white/65">
+                Gebruik het juiste Excel-template voor de upload.
+              </div>
+            </div>
+
+            <Link
+              href="/templates/fightsupport-upload.xlsx"
+              target="_blank"
+              className="inline-flex items-center justify-center rounded-xl border border-[#ff4d00]/40 bg-[#ff4d00]/10 px-3.5 py-2 text-sm font-medium text-[#ff9a6e] transition hover:border-[#ff4d00]/70 hover:bg-[#ff4d00]/15 hover:text-white"
+            >
               Download template
             </Link>
-            <span className="opacity-80">
-              Gebruik de kolom <b>VS</b> voor partijen en <b>T</b> (T1/T2/…) voor toernooien.
-            </span>
           </div>
         </div>
 
         {!isAdmin && (
-          <div className="p-3 rounded bg-red-950/40 border border-red-800 text-sm">
-            Je bent niet ingelogd als admin/superadmin. Uploaden is geblokkeerd.
+          <div className="rounded-2xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-100">
+            Je hebt geen rechten om deze upload uit te voeren.
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="block">
-            <div className="text-sm mb-1">
-              Evenement naam <span className="text-red-400">*</span>
+            <div className={labelClass()}>
+              Evenement naam <span className="text-[#ff6b35]">*</span>
             </div>
             <input
-              className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
+              className={fieldClass()}
               value={eventNaam}
               onChange={(e) => setEventNaam(e.target.value)}
-              placeholder="Bijv. King of the Ring"
+              placeholder="Bijvoorbeeld: King of the Ring"
             />
           </label>
 
           <label className="block">
-            <div className="text-sm mb-1">
-              Datum <span className="text-red-400">*</span>
+            <div className={labelClass()}>
+              Datum <span className="text-[#ff6b35]">*</span>
             </div>
             <input
               type="date"
-              className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
+              className={fieldClass()}
               value={datum}
               onChange={(e) => setDatum(e.target.value)}
             />
           </label>
 
           <label className="block">
-            <div className="text-sm mb-1">
-              Bondteam <span className="text-red-400">*</span>
+            <div className={labelClass()}>
+              Bondteam <span className="text-[#ff6b35]">*</span>
             </div>
             <select
-              className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
+              className={fieldClass()}
               value={bondteam}
               onChange={(e) => setBondteam(e.target.value)}
             >
@@ -216,11 +241,11 @@ export default function UploadMatchmakingAdminPage() {
           </label>
 
           <label className="block">
-            <div className="text-sm mb-1">
-              Matchmaker <span className="text-red-400">*</span>
+            <div className={labelClass()}>
+              Matchmaker <span className="text-[#ff6b35]">*</span>
             </div>
             <input
-              className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
+              className={fieldClass()}
               value={matchmaker}
               onChange={(e) => setMatchmaker(e.target.value)}
               placeholder="Naam matchmaker"
@@ -228,9 +253,9 @@ export default function UploadMatchmakingAdminPage() {
           </label>
 
           <label className="block">
-            <div className="text-sm mb-1">Promotor (optioneel)</div>
+            <div className={labelClass()}>Promotor</div>
             <input
-              className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
+              className={fieldClass()}
               value={promotor}
               onChange={(e) => setPromotor(e.target.value)}
               placeholder="Naam promotor"
@@ -238,19 +263,19 @@ export default function UploadMatchmakingAdminPage() {
           </label>
 
           <label className="block">
-            <div className="text-sm mb-1">Locatie</div>
+            <div className={labelClass()}>Locatie</div>
             <input
-              className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
+              className={fieldClass()}
               value={plaats}
               onChange={(e) => setPlaats(e.target.value)}
-              placeholder="Bijv. Amersfoort"
+              placeholder="Bijvoorbeeld: Amersfoort"
             />
           </label>
 
-          <label className="block">
-            <div className="text-sm mb-1">Hoofdofficial (optioneel)</div>
+          <label className="block md:col-span-2">
+            <div className={labelClass()}>Hoofdofficial</div>
             <input
-              className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
+              className={fieldClass()}
               value={hoofdofficial}
               onChange={(e) => setHoofdofficial(e.target.value)}
               placeholder="Naam hoofdofficial"
@@ -259,27 +284,40 @@ export default function UploadMatchmakingAdminPage() {
         </div>
 
         <label className="block">
-          <div className="text-sm mb-1">
-            Excel bestand <span className="text-red-400">*</span>
+          <div className={labelClass()}>
+            Excel bestand <span className="text-[#ff6b35]">*</span>
           </div>
           <input
-            className="w-full p-2 rounded bg-black/30 border border-white/10 text-white placeholder-white/40"
             type="file"
             accept=".xlsx,.xls"
+            className="w-full rounded-xl border border-white/10 bg-[#101114] px-3 py-2.5 text-white outline-none transition file:mr-4 file:rounded-lg file:border-0 file:bg-[#ff4d00] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-[#ff5e1f]"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
+          {file ? (
+            <div className="mt-2 text-sm text-white/60">Gekozen bestand: {file.name}</div>
+          ) : null}
         </label>
 
-        <button
-          className="px-4 py-2 rounded bg-orange-600 hover:bg-orange-500 disabled:opacity-50"
-          onClick={onUpload}
-          disabled={busy || !isAdmin}
-        >
-          {busy ? "Bezig…" : "Uploaden & starten controle"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            className="inline-flex items-center justify-center rounded-xl border border-[#ff4d00]/50 bg-gradient-to-b from-[#ff6a2a] to-[#d9470a] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(255,77,0,0.25)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onUpload}
+            disabled={busy || !isAdmin}
+          >
+            {busy ? "Bezig..." : "Uploaden"}
+          </button>
+
+          <Link
+            href="/dashboard/admin"
+            className="inline-flex items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white/85 transition hover:bg-white/[0.07] hover:text-white"
+          >
+            Terug
+          </Link>
+        </div>
 
         {melding && (
-          <div className="p-3 rounded bg-black/30 border border-white/10 text-sm whitespace-pre-wrap">
+          <div className="whitespace-pre-wrap rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white/90">
             {melding}
           </div>
         )}
