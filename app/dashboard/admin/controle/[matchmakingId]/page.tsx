@@ -760,7 +760,7 @@ export default function ControleMatchmakingPage() {
     }
   }
 
-  async function deletePartij(partijNr: number) {
+  async function deletePartij(partijNr: number, boutId?: string | null) {
     if (!confirm(`Partij ${partijNr} verwijderen?`)) return;
 
     setBusyPartij((prev) => ({ ...prev, [partijNr]: "delete" }));
@@ -779,6 +779,8 @@ export default function ControleMatchmakingPage() {
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
           partij_nr: partijNr,
+          controle_run_id: run?.id ?? null,
+          bout_id: boutId ?? null,
         }),
       });
 
@@ -1710,7 +1712,19 @@ export default function ControleMatchmakingPage() {
                                     label={busy === "delete" ? "… Verwijderen" : "Verwijderen"}
                                     tone="red"
                                     disabled={busy === "delete"}
-                                    onClick={() => Number.isFinite(pn) && deletePartij(pn)}
+                                    onClick={() =>
+                                      Number.isFinite(pn) &&
+                                      deletePartij(
+                                        pn,
+                                        typeof r?.bout_id === "string"
+                                          ? r.bout_id
+                                          : typeof r?.bout_uid === "string"
+                                            ? r.bout_uid
+                                            : typeof r?.id === "string"
+                                              ? r.id
+                                              : null
+                                      )
+                                    }
                                   />
                                 </div>
                               </td>

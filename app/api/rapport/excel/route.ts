@@ -219,7 +219,9 @@ function isFightpaspoortGewijzigd(r: ResultRow) {
     c.startsWith("VA_NUMMER_AANGEPAST") ||
     c.includes("VA_CHANGED") ||
     c.includes("VA_WIJZIG") ||
-    c.includes("FIGHTPASPOORT_GEWIJZIGD")
+    c.includes("VA_UPDATED") ||
+    c.includes("FIGHTPASPOORT_GEWIJZIGD") ||
+    c.includes("FIGHTPASPOORT_AANGEPAST")
   ) {
     return true;
   }
@@ -231,7 +233,20 @@ function isFightpaspoortGewijzigd(r: ResultRow) {
     hay.includes("va aangepast") ||
     hay.includes("fightpaspoort aangepast") ||
     hay.includes("gewijzigd van") ||
-    hay.includes("aangepast van")
+    hay.includes("aangepast van") ||
+    hay.includes("oude va") ||
+    hay.includes("nieuwe va")
+  );
+}
+
+function isVaAuditEventType(v: any) {
+  const c = normCode(v);
+  return (
+    c === "VA_CHANGED" ||
+    c === "VA_UPDATED" ||
+    c === "VA_NUMMER_AANGEPAST" ||
+    c === "FIGHTPASPOORT_GEWIJZIGD" ||
+    c === "FIGHTPASPOORT_AANGEPAST"
   );
 }
 
@@ -779,20 +794,48 @@ function isStartverbodMelding(r: ResultRow) {
 function getVaInfo(ctx: any, side: "rood" | "blauw") {
   if (!ctx) return { prev: "", current: "", changed: false };
 
-  const prevRaw = side === "rood" ? (ctx?.rood_va_mm_prev ?? null) : (ctx?.blauw_va_mm_prev ?? null);
-
-  const current =
+  const prevCandidates =
     side === "rood"
-      ? safe(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.rood_va, "")
-      : safe(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.blauw_va, "");
+      ? [ctx?.rood_va_mm_prev, ctx?.rood_va_prev, ctx?.va_rood_prev]
+      : [ctx?.blauw_va_mm_prev, ctx?.blauw_va_prev, ctx?.va_blauw_prev];
+
+  const currentCandidates =
+    side === "rood"
+      ? [
+          ctx?.rood_va_mm,
+          ctx?.rood_va_gecorrigeerd,
+          ctx?.rood_va_corrected,
+          ctx?.va_rood,
+          ctx?.rood_va,
+        ]
+      : [
+          ctx?.blauw_va_mm,
+          ctx?.blauw_va_gecorrigeerd,
+          ctx?.blauw_va_corrected,
+          ctx?.va_blauw,
+          ctx?.blauw_va,
+        ];
+
+  const hasPrevColumn =
+    side === "rood"
+      ? (ctx?.rood_va_mm_prev !== undefined && ctx?.rood_va_mm_prev !== null) ||
+        (ctx?.rood_va_prev !== undefined && ctx?.rood_va_prev !== null) ||
+        (ctx?.va_rood_prev !== undefined && ctx?.va_rood_prev !== null)
+      : (ctx?.blauw_va_mm_prev !== undefined && ctx?.blauw_va_mm_prev !== null) ||
+        (ctx?.blauw_va_prev !== undefined && ctx?.blauw_va_prev !== null) ||
+        (ctx?.va_blauw_prev !== undefined && ctx?.va_blauw_prev !== null);
+
+  const prevRaw = prevCandidates.find((v) => v !== undefined && v !== null) ?? null;
+  const currentRaw = currentCandidates.find((v) => String(v ?? "").trim() !== "") ?? "";
 
   const prevNorm = normalizeVa(prevRaw);
-  const currentNorm = normalizeVa(current);
+  const currentNorm = normalizeVa(currentRaw);
 
   const prevDisplay = prevRaw === null || prevRaw === undefined || String(prevRaw).trim() === "-" ? "" : safe(prevRaw, "");
-  const changed = !!prevNorm && !!currentNorm && prevNorm !== currentNorm;
+  const currentDisplay = safe(currentRaw, "");
+  const changed = hasPrevColumn && prevNorm !== currentNorm;
 
-  return { prev: prevDisplay, current, changed };
+  return { prev: prevDisplay, current: currentDisplay, changed };
 }
 
 function getCurrentNaam(ctx: any, side: "rood" | "blauw") {
@@ -928,7 +971,6 @@ export async function GET(req: Request) {
       }
 
       if (isFightpaspoortGewijzigd(r)) {
-        if (rowIsEffectivelyApproved(r)) return false;
         return true;
       }
 
@@ -1372,78 +1414,32 @@ export async function GET(req: Request) {
 
       const START_ROW = HEADER_ROW + 1;
 
-      const rows: Array<{
-        partij: string;
-        hoek: "rood" | "blauw";
-        naam: string;
-        gym: string;
-        current: string;
-        prev: string;
-        melding: string;
-        partij_nr: number;
-      }> = [];
-
-      const seen = new Set<string>();
-
-      for (const ctx of ctxList) {
-        const pn = Number((ctx as any)?.partij_nr);
-        if (!Number.isFinite(pn)) continue;
-        const partij = safe((ctx as any)?.partij_label ?? (ctx as any)?.partij_nr ?? pn, "-");
-
-        for (const side of ["rood", "blauw"] as const) {
-          const info = getVaInfo(ctx, side);
-          if (safeRaw(info.current)) continue;
-
-          const key = `${pn}-${side}-ctx`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-
-          rows.push({
-            partij_nr: pn,
-            partij,
-            hoek: side,
-            naam: getCurrentNaam(ctx, side),
-            gym: getCurrentGym(ctx, side),
-            current: safe(info.current, ""),
-            prev: safe(info.prev, ""),
-            melding: "Fightpaspoortnummer ontbreekt",
-          });
-        }
-      }
-
-      for (const r of resultaten) {
-        if (!isMissingVARow(r)) continue;
-        if (rowIsEffectivelyApproved(r)) continue;
-
-        const pn = Number(r.partij_nr);
-        const hoek = inferHoek(r);
-        if (!Number.isFinite(pn) || !hoek) continue;
-
-        const key = `${pn}-${hoek}-row`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        const ctx = ctxByPn.get(pn);
-        const info = getVaInfo(ctx, hoek);
-
-        rows.push({
-          partij_nr: pn,
-          partij: safe(ctx?.partij_label ?? ctx?.partij_nr ?? pn, "-"),
-          hoek,
-          naam: getCurrentNaam(ctx, hoek),
-          gym: getCurrentGym(ctx, hoek),
-          current: safe(info.current, ""),
-          prev: safe(info.prev, ""),
-          melding: safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer ontbreekt", "Fightpaspoortnummer ontbreekt"),
+      const rows = openMeldingen
+        .filter((r) => isMissingVARow(r))
+        .sort((a, b) => {
+          const ap = Number(a.partij_nr ?? 999999);
+          const bp = Number(b.partij_nr ?? 999999);
+          if (ap !== bp) return ap - bp;
+          return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
         });
-      }
-
-      rows.sort((a, b) => a.partij_nr - b.partij_nr || a.hoek.localeCompare(b.hoek));
 
       let rno = START_ROW;
-      for (const item of rows) {
+      for (const r of rows) {
+        const pn = Number(r.partij_nr);
+        const hoek = inferHoek(r);
+        const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
+        const vaInfo = getVaInfo(ctx, hoek === "blauw" ? "blauw" : "rood");
+
         const row = ws.getRow(rno++);
-        row.values = [item.partij, item.hoek, item.naam, item.gym, item.current, item.prev, item.melding];
+        row.values = [
+          safe(ctx?.partij_label ?? ctx?.partij_nr ?? r.partij_nr, "-"),
+          safe(hoek, ""),
+          getCurrentNaam(ctx, hoek === "blauw" ? "blauw" : "rood"),
+          getCurrentGym(ctx, hoek === "blauw" ? "blauw" : "rood"),
+          safe(vaInfo.current, ""),
+          safe(vaInfo.prev, ""),
+          safe(r.boodschap ?? r.rule, ""),
+        ];
 
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);
@@ -1482,118 +1478,32 @@ export async function GET(req: Request) {
 
       const START_ROW = HEADER_ROW + 1;
 
-      const changes: Array<{
-        partij_nr: number;
-        hoek: "rood" | "blauw";
-        naam: string;
-        gym: string;
-        prev: string;
-        current: string;
-        label: string;
-        updated: string;
-      }> = [];
-
-      const seen = new Set<string>();
-
-      for (const ctx of ctxList) {
-        const pn = Number((ctx as any)?.partij_nr);
-        if (!Number.isFinite(pn)) continue;
-
-        for (const side of ["rood", "blauw"] as const) {
-          const info = getVaInfo(ctx, side);
-          if (!info.changed) continue;
-
-          const key = `${pn}-${side}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-
-          const naam = getCurrentNaam(ctx, side);
-          const gym = getCurrentGym(ctx, side);
-
-          changes.push({
-            partij_nr: pn,
-            hoek: side,
-            naam,
-            gym,
-            prev: safe(info.prev, ""),
-            current: safe(info.current, ""),
-            label: `${safe(info.prev, "-")} → ${safe(info.current, "-")}`,
-            updated: safe((ctx as any)?.updated_at ?? (ctx as any)?.created_at ?? "", ""),
-          });
-        }
-      }
-
-      for (const ev of auditEvents) {
-        if (normCode(ev.event_type) !== "VA_CHANGED") continue;
-
-        const pn = Number(ev.partij_nr);
-        const hoek = ev.hoek === "blauw" ? "blauw" : "rood";
-        if (!Number.isFinite(pn)) continue;
-
-        const key = `${pn}-${hoek}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        const ctx = ctxByPn.get(pn);
-        const naam = getCurrentNaam(ctx, hoek);
-        const gym = getCurrentGym(ctx, hoek);
-
-        changes.push({
-          partij_nr: pn,
-          hoek,
-          naam,
-          gym,
-          prev: safe(ev.old_va, ""),
-          current: safe(ev.new_va, ""),
-          label: `${safe(ev.old_va, "-")} → ${safe(ev.new_va, "-")}`,
-          updated: safe(ev.created_at, ""),
+      const rows = resultaten
+        .filter((r) => isFightpaspoortGewijzigd(r))
+        .sort((a, b) => {
+          const ap = Number(a.partij_nr ?? 999999);
+          const bp = Number(b.partij_nr ?? 999999);
+          if (ap !== bp) return ap - bp;
+          return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
         });
-      }
-
-      for (const r of resultaten) {
-        if (!isFightpaspoortGewijzigd(r)) continue;
-        if (rowIsEffectivelyApproved(r)) continue;
-
-        const pn = Number(r.partij_nr);
-        const hoek = inferHoek(r);
-        if (!Number.isFinite(pn) || !hoek) continue;
-
-        const key = `${pn}-${hoek}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        const ctx = ctxByPn.get(pn);
-        const info = getVaInfo(ctx, hoek);
-
-        changes.push({
-          partij_nr: pn,
-          hoek,
-          naam: getCurrentNaam(ctx, hoek),
-          gym: getCurrentGym(ctx, hoek),
-          prev: safe(info.prev, ""),
-          current: safe(info.current, ""),
-          label:
-            info.prev || info.current
-              ? `${safe(info.prev, "-")} → ${safe(info.current, "-")}`
-              : safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer gewijzigd", "Fightpaspoortnummer gewijzigd"),
-          updated: safe(r.created_at, ""),
-        });
-      }
-
-      changes.sort((a, b) => a.partij_nr - b.partij_nr || a.hoek.localeCompare(b.hoek));
 
       let rno = START_ROW;
-      for (const ch of changes) {
+      for (const r of rows) {
+        const pn = Number(r.partij_nr);
+        const hoek = inferHoek(r);
+        const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
+        const vaInfo = getVaInfo(ctx, hoek === "blauw" ? "blauw" : "rood");
+
         const row = ws.getRow(rno++);
         row.values = [
-          ch.partij_nr,
-          ch.hoek,
-          ch.naam,
-          ch.gym,
-          ch.prev,
-          ch.current,
-          ch.label,
-          ch.updated,
+          r.partij_nr ?? null,
+          safe(hoek, ""),
+          getCurrentNaam(ctx, hoek === "blauw" ? "blauw" : "rood"),
+          getCurrentGym(ctx, hoek === "blauw" ? "blauw" : "rood"),
+          safe(vaInfo.prev, ""),
+          safe(vaInfo.current, ""),
+          safe(r.boodschap ?? r.rule, ""),
+          safe(r.created_at, ""),
         ];
         const isWhite = (row.number - START_ROW) % 2 === 0;
         styleRowFillAndFont(row, isWhite);

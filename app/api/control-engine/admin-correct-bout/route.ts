@@ -71,7 +71,11 @@ async function getBoutRow(matchmaking_id: string, partij_nr: number) {
   return data ?? null;
 }
 
-async function getBoutContextRow(matchmaking_id: string, controle_run_id: string, partij_nr: number) {
+async function getBoutContextRow(
+  matchmaking_id: string,
+  controle_run_id: string,
+  partij_nr: number
+) {
   const { data, error } = await supabase
     .from("controle_bout_context")
     .select("*")
@@ -117,16 +121,26 @@ export async function POST(req: Request) {
       );
     }
 
-    const oldVaRood = existingBout?.va_rood ? String(existingBout.va_rood) : null;
-    const oldVaBlauw = existingBout?.va_blauw ? String(existingBout.va_blauw) : null;
+    const oldVaRood =
+      existingBout?.va_rood != null && String(existingBout.va_rood).trim()
+        ? String(existingBout.va_rood).trim()
+        : null;
+
+    const oldVaBlauw =
+      existingBout?.va_blauw != null && String(existingBout.va_blauw).trim()
+        ? String(existingBout.va_blauw).trim()
+        : null;
 
     const patch: Record<string, any> = {};
 
-    if (Object.prototype.hasOwnProperty.call(body, "new_va_rood")) {
+    const hasNewVaRood = Object.prototype.hasOwnProperty.call(body, "new_va_rood");
+    const hasNewVaBlauw = Object.prototype.hasOwnProperty.call(body, "new_va_blauw");
+
+    if (hasNewVaRood) {
       patch.va_rood = normalizeVa(body.new_va_rood);
     }
 
-    if (Object.prototype.hasOwnProperty.call(body, "new_va_blauw")) {
+    if (hasNewVaBlauw) {
       patch.va_blauw = normalizeVa(body.new_va_blauw);
     }
 
@@ -150,31 +164,40 @@ export async function POST(req: Request) {
       patch.blauw_gym = String(body.new_blauw_gym ?? "").trim() || null;
     }
 
-    const newVaRood = Object.prototype.hasOwnProperty.call(body, "new_va_rood")
-      ? (patch.va_rood ?? null)
-      : null;
+    const newVaRood = hasNewVaRood ? (patch.va_rood ?? null) : oldVaRood;
+    const newVaBlauw = hasNewVaBlauw ? (patch.va_blauw ?? null) : oldVaBlauw;
 
-    const newVaBlauw = Object.prototype.hasOwnProperty.call(body, "new_va_blauw")
-      ? (patch.va_blauw ?? null)
-      : null;
-
-    const roodVaChanged =
-      newVaRood !== null && newVaRood !== (oldVaRood ?? null);
-    const blauwVaChanged =
-      newVaBlauw !== null && newVaBlauw !== (oldVaBlauw ?? null);
+    const roodVaChanged = hasNewVaRood && newVaRood !== oldVaRood;
+    const blauwVaChanged = hasNewVaBlauw && newVaBlauw !== oldVaBlauw;
 
     if (roodVaChanged) {
-      const prevExisting = existingBout?.rood_va_mm_prev
-        ? String(existingBout.rood_va_mm_prev)
-        : null;
+      const prevExisting =
+        existingBout?.rood_va_mm_prev != null &&
+        String(existingBout.rood_va_mm_prev).trim()
+          ? String(existingBout.rood_va_mm_prev).trim()
+          : null;
+
       if (!prevExisting) patch.rood_va_mm_prev = oldVaRood;
+
+      patch.rood_va_changed = true;
+      patch.rood_va_is_gewijzigd = true;
+      patch.rood_va_changed_at = new Date().toISOString();
+      patch.rood_va_was = oldVaRood;
     }
 
     if (blauwVaChanged) {
-      const prevExisting = existingBout?.blauw_va_mm_prev
-        ? String(existingBout.blauw_va_mm_prev)
-        : null;
+      const prevExisting =
+        existingBout?.blauw_va_mm_prev != null &&
+        String(existingBout.blauw_va_mm_prev).trim()
+          ? String(existingBout.blauw_va_mm_prev).trim()
+          : null;
+
       if (!prevExisting) patch.blauw_va_mm_prev = oldVaBlauw;
+
+      patch.blauw_va_changed = true;
+      patch.blauw_va_is_gewijzigd = true;
+      patch.blauw_va_changed_at = new Date().toISOString();
+      patch.blauw_va_was = oldVaBlauw;
     }
 
     if (Object.keys(patch).length > 0) {

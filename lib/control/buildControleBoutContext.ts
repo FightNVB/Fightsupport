@@ -77,9 +77,17 @@ function toBoolJaNeeLoose(v: any): boolean | null {
 function toVaStrict(v: any): string | null {
   if (v == null) return null;
   const s = String(v).trim();
-  if (/^\d{1,5}$/.test(s)) return s;
+  if (/^\d{3,6}$/.test(s)) return s;
   const digits = s.replace(/[^0-9]/g, "");
-  if (/^\d{1,5}$/.test(digits)) return digits;
+  if (/^\d{3,6}$/.test(digits)) return digits;
+  return null;
+}
+
+function firstValidVa(...values: any[]): string | null {
+  for (const v of values) {
+    const parsed = toVaStrict(v);
+    if (parsed) return parsed;
+  }
   return null;
 }
 
@@ -322,8 +330,8 @@ export async function buildControleBoutContext(
 
   const vas = new Set<string>();
   for (const p of bouts as any[]) {
-    const r = toVaStrict(p?.va_rood);
-    const b = toVaStrict(p?.va_blauw);
+    const r = toVaStrict((p as any)?.va_rood);
+    const b = toVaStrict((p as any)?.va_blauw);
     if (r) vas.add(r);
     if (b) vas.add(b);
   }
@@ -390,20 +398,21 @@ export async function buildControleBoutContext(
   const uitslagenToInsert: any[] = [];
 
   for (const partij of bouts as any[]) {
-    const vaR = toVaStrict(partij?.va_rood);
-    const vaB = toVaStrict(partij?.va_blauw);
+    const vaR = toVaStrict((partij as any)?.va_rood ?? null);
+    const vaB = toVaStrict((partij as any)?.va_blauw ?? null);
 
-    const vaRPrev = toVaStrict(
-      (partij as any)?.rood_va_mm_prev ??
-        (partij as any)?.va_rood_prev ??
-        (partij as any)?.rood_va_prev ??
-        null
+    const vaRPrev = firstValidVa(
+      (partij as any)?.rood_va_mm_prev,
+      (partij as any)?.va_rood_prev,
+      (partij as any)?.rood_va_prev,
+      (partij as any)?.rood_va_was
     );
-    const vaBPrev = toVaStrict(
-      (partij as any)?.blauw_va_mm_prev ??
-        (partij as any)?.va_blauw_prev ??
-        (partij as any)?.blauw_va_prev ??
-        null
+
+    const vaBPrev = firstValidVa(
+      (partij as any)?.blauw_va_mm_prev,
+      (partij as any)?.va_blauw_prev,
+      (partij as any)?.blauw_va_prev,
+      (partij as any)?.blauw_va_was
     );
 
     const uitslagenR = vaR ? uitslagenByVa.get(vaR) ?? [] : [];

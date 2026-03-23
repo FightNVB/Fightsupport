@@ -58,6 +58,16 @@ type IssueSummaryItem = {
   detail: string;
 };
 
+type VerbodSummaryItem = {
+  partij_nr: number;
+  partij: string;
+  hoek: "rood" | "blauw";
+  naam: string;
+  gym: string;
+  type: "STARTVERBOD" | "VERBOD";
+  detail: string;
+};
+
 function safe(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
   return s ? s : fallback;
@@ -102,6 +112,7 @@ function normResultaatLower(v: any) {
   if (s === "dispensatie" || s === "disp") return "dispensatie";
   if (s === "actie" || s === "waarschuwing") return "actie";
   if (s === "ok" || s === "goedgekeurd" || s === "info") return "ok";
+  if (s === "verbod") return "verbod";
   return s;
 }
 
@@ -187,13 +198,80 @@ function isMissingVARow(row: ResultRow) {
   );
 }
 
+function isGenericMissingVARow(row: ResultRow) {
+  const text = `${row.rule ?? ""} ${row.boodschap ?? ""}`.trim().toLowerCase().replace(/\s+/g, " ");
+
+  return (
+    text === "fightpaspoortnummer ontbreekt" ||
+    text === "fightpaspoort nummer ontbreekt" ||
+    text === "va nummer ontbreekt" ||
+    text === "fight passport nummer ontbreekt" ||
+    text === "fightpaspoort ontbreekt"
+  );
+}
+
+function missingVARowSpecificity(row: ResultRow) {
+  const msg = safeRaw(row.boodschap ?? row.rule);
+  let score = 0;
+
+  if (!isGenericMissingVARow(row)) score += 100;
+  if (msg) score += Math.min(msg.length, 80);
+  if (safeRaw(row.aantekeningen)) score += 10;
+  if (safeRaw(row.rule_code)) score += 5;
+
+  return score;
+}
+
+function dedupeRows(rows: ResultRow[]) {
+  const missingVaBest = new Map<string, ResultRow>();
+  const otherRows: ResultRow[] = [];
+
+  for (const row of rows) {
+    if (isMissingVARow(row)) {
+      const pn = Number(row.partij_nr);
+      const hoek = inferHoek(row) ?? "onbekend";
+      const key = `${Number.isFinite(pn) ? pn : "x"}-${hoek}-missing-va`;
+      const prev = missingVaBest.get(key);
+
+      if (!prev) {
+        missingVaBest.set(key, row);
+        continue;
+      }
+
+      const prevScore = missingVARowSpecificity(prev);
+      const nextScore = missingVARowSpecificity(row);
+
+      if (nextScore > prevScore) {
+        missingVaBest.set(key, row);
+        continue;
+      }
+
+      if (nextScore === prevScore) {
+        const prevTime = prev.created_at ? new Date(prev.created_at).getTime() : 0;
+        const nextTime = row.created_at ? new Date(row.created_at).getTime() : 0;
+        if (nextTime > prevTime) {
+          missingVaBest.set(key, row);
+        }
+      }
+
+      continue;
+    }
+
+    otherRows.push(row);
+  }
+
+  return [...otherRows, ...Array.from(missingVaBest.values())];
+}
+
 function isFightpaspoortGewijzigd(row: ResultRow) {
   const c = normCode(row.rule_code);
   if (
     c.startsWith("VA_NUMMER_AANGEPAST") ||
     c.includes("VA_CHANGED") ||
     c.includes("VA_WIJZIG") ||
-    c.includes("FIGHTPASPOORT_GEWIJZIGD")
+    c.includes("VA_UPDATED") ||
+    c.includes("FIGHTPASPOORT_GEWIJZIGD") ||
+    c.includes("FIGHTPASPOORT_AANGEPAST")
   ) {
     return true;
   }
@@ -205,7 +283,9 @@ function isFightpaspoortGewijzigd(row: ResultRow) {
     hay.includes("va aangepast") ||
     hay.includes("fightpaspoort aangepast") ||
     hay.includes("gewijzigd van") ||
-    hay.includes("aangepast van")
+    hay.includes("aangepast van") ||
+    hay.includes("oude va") ||
+    hay.includes("nieuwe va")
   );
 }
 
@@ -285,6 +365,56 @@ function inferHoek(row: ResultRow): "rood" | "blauw" | null {
   }
 
   return null;
+}
+
+function isVerbodRow(row: ResultRow) {
+  const c = normCode(row.rule_code ?? row.rule);
+  if (c.includes("STARTVERBOD")) return false;
+  if (c.startsWith("VERBOD_")) return true;
+  if (c.startsWith("VERBODZONDER") || c.startsWith("VERBOD_ZONDER")) return true;
+  if (c.includes("JEUGD_VOLWASSEN_MIX")) return true;
+  if (c.includes("LEEFTIJD_VERSCHIL") && c.includes("AFKEUR")) return true;
+
+  const r = String(row.rule ?? "").toUpperCase();
+  const b = String(row.boodschap ?? "").toUpperCase();
+  return r.includes("VERBOD") || b.includes("VERBOD");
+}
+
+function isStartverbodRow(row: ResultRow) {
+  const c = normCode(row.rule_code ?? row.rule);
+  return c.includes("STARTVERBOD");
+}
+
+function isVaAuditEventType(v: any) {
+  const c = normCode(v);
+  return (
+    c === "VA_CHANGED" ||
+    c === "VA_UPDATED" ||
+    c === "VA_NUMMER_AANGEPAST" ||
+    c === "FIGHTPASPOORT_GEWIJZIGD" ||
+    c === "FIGHTPASPOORT_AANGEPAST"
+  );
+}
+
+function getCurrentVaFromCtx(ctx: any, hoek: "rood" | "blauw") {
+  if (hoek === "rood") {
+    return safeRaw(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.rood_va);
+  }
+  return safeRaw(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.blauw_va);
+}
+
+function getPrevVaFromCtx(ctx: any, hoek: "rood" | "blauw") {
+  if (hoek === "rood") {
+    return safeRaw(ctx?.rood_va_mm_prev);
+  }
+  return safeRaw(ctx?.blauw_va_mm_prev);
+}
+
+function hasPrevVaField(ctx: any, hoek: "rood" | "blauw") {
+  if (hoek === "rood") {
+    return ctx?.rood_va_mm_prev !== undefined && ctx?.rood_va_mm_prev !== null;
+  }
+  return ctx?.blauw_va_mm_prev !== undefined && ctx?.blauw_va_mm_prev !== null;
 }
 
 function statusFromResultaat(resultaat: any, rule_code?: any): PartijStatus {
@@ -574,7 +704,7 @@ export default function RapportPage() {
   }, [matchmakingId]);
 
   const openMeldingen = useMemo(() => {
-    return (resultaten ?? []).filter((r) => {
+    const filtered = (resultaten ?? []).filter((r) => {
       if (isNameMismatch(r) && !isFightpaspoortGewijzigd(r)) return false;
 
       if (isMissingVARow(r)) {
@@ -583,7 +713,6 @@ export default function RapportPage() {
       }
 
       if (isFightpaspoortGewijzigd(r)) {
-        if (isApprovedOrClosed(r.review_status)) return false;
         return true;
       }
 
@@ -604,6 +733,8 @@ export default function RapportPage() {
 
       return true;
     });
+
+    return dedupeRows(filtered);
   }, [resultaten]);
 
   const openKeurmerkRows = useMemo(() => {
@@ -619,6 +750,65 @@ export default function RapportPage() {
     }
     return map;
   }, [ctxRows]);
+
+  const verbodStartverbodIssues = useMemo(() => {
+    const items: VerbodSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const r of resultaten ?? []) {
+      const resultaat = normResultaatLower(r.resultaat);
+
+      let type: "STARTVERBOD" | "VERBOD" | null = null;
+
+      if (isStartverbodRow(r)) {
+        if (resultaat === "ok") continue;
+        type = "STARTVERBOD";
+      } else if (isVerbodRow(r)) {
+        if (isApprovedOrClosed(r.review_status)) continue;
+        if (resultaat === "ok") continue;
+        type = "VERBOD";
+      } else {
+        continue;
+      }
+
+      const pn = Number(r.partij_nr);
+      const hoek = inferHoek(r);
+      if (!Number.isFinite(pn) || !hoek) continue;
+
+      const ctx = ctxByPartij.get(pn);
+      const naam =
+        hoek === "rood"
+          ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm)
+          : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
+
+      const gym =
+        hoek === "rood"
+          ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
+          : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
+
+      const detail = safe(r.boodschap ?? r.rule ?? r.rule_code ?? type);
+      const key = `${type}-${pn}-${hoek}-${detail}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      items.push({
+        partij_nr: pn,
+        partij: safe(ctx?.partij_label ?? pn),
+        hoek,
+        naam,
+        gym,
+        type,
+        detail,
+      });
+    }
+
+    return items.sort((a, b) => {
+      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
+      if (a.type !== b.type) return a.type === "STARTVERBOD" ? -1 : 1;
+      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
+      return a.naam.localeCompare(b.naam, "nl");
+    });
+  }, [resultaten, ctxByPartij]);
 
   const meldByPartij = useMemo(() => {
     const m = new Map<number, ResultRow[]>();
@@ -755,59 +945,19 @@ export default function RapportPage() {
 
   const missingVaIssues = useMemo(() => {
     const items: IssueSummaryItem[] = [];
-    const seen = new Set<string>();
 
-    for (const p of ctxRows ?? []) {
-      const pn = Number(p.partij_nr);
-      if (!Number.isFinite(pn)) continue;
-      const partij = safe(p.partij_label ?? p.partij_nr);
+    const missingRows = dedupeRows(
+      (resultaten ?? []).filter((r) => {
+        if (!isMissingVARow(r)) return false;
+        if (isApprovedOrClosed(r.review_status)) return false;
+        return true;
+      })
+    );
 
-      const roodVa = safeRaw((p as any).rood_va_mm ?? (p as any).va_rood ?? (p as any).rood_va);
-      const blauwVa = safeRaw((p as any).blauw_va_mm ?? (p as any).va_blauw ?? (p as any).blauw_va);
-
-      if (!roodVa) {
-        const key = `${pn}-rood-ctx`;
-        if (!seen.has(key)) {
-          items.push({
-            partij_nr: pn,
-            partij,
-            hoek: "rood",
-            naam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-            gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
-            label: "VA ontbreekt",
-            detail: "Fightpaspoortnummer ontbreekt",
-          });
-          seen.add(key);
-        }
-      }
-
-      if (!blauwVa) {
-        const key = `${pn}-blauw-ctx`;
-        if (!seen.has(key)) {
-          items.push({
-            partij_nr: pn,
-            partij,
-            hoek: "blauw",
-            naam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
-            gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
-            label: "VA ontbreekt",
-            detail: "Fightpaspoortnummer ontbreekt",
-          });
-          seen.add(key);
-        }
-      }
-    }
-
-    for (const r of resultaten ?? []) {
-      if (!isMissingVARow(r)) continue;
-      if (isApprovedOrClosed(r.review_status)) continue;
-
+    for (const r of missingRows) {
       const pn = Number(r.partij_nr);
       const hoek = inferHoek(r);
       if (!Number.isFinite(pn) || !hoek) continue;
-
-      const key = `${pn}-${hoek}-row`;
-      if (seen.has(key)) continue;
 
       const ctx = ctxByPartij.get(pn);
       items.push({
@@ -815,11 +965,13 @@ export default function RapportPage() {
         partij: safe(ctx?.partij_label ?? pn),
         hoek,
         naam: hoek === "rood" ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm) : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm),
-        gym: hoek === "rood" ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym) : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym),
+        gym:
+          hoek === "rood"
+            ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
+            : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym),
         label: "VA ontbreekt",
         detail: safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer ontbreekt"),
       });
-      seen.add(key);
     }
 
     return items.sort((a, b) => {
@@ -827,7 +979,7 @@ export default function RapportPage() {
       if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
       return a.naam.localeCompare(b.naam, "nl");
     });
-  }, [ctxRows, resultaten, ctxByPartij]);
+  }, [resultaten, ctxByPartij]);
 
   const keurmerkIssues = useMemo(() => {
     const items: IssueSummaryItem[] = [];
@@ -881,12 +1033,13 @@ export default function RapportPage() {
       if (!Number.isFinite(pn)) continue;
       const partij = safe(p.partij_label ?? p.partij_nr);
 
-      const roodPrevRaw = safeRaw((p as any).rood_va_mm_prev);
-      const roodCurrentRaw = safeRaw((p as any).rood_va_mm ?? (p as any).va_rood ?? (p as any).rood_va);
+      const roodPrevRaw = getPrevVaFromCtx(p, "rood");
+      const roodCurrentRaw = getCurrentVaFromCtx(p, "rood");
       const roodPrev = normalizeVa(roodPrevRaw);
       const roodCurrent = normalizeVa(roodCurrentRaw);
+      const roodHasPrevField = hasPrevVaField(p, "rood");
 
-      if ((p as any).rood_va_mm_prev != null && roodPrev && roodCurrent && roodPrev !== roodCurrent) {
+      if (roodHasPrevField && roodPrev !== roodCurrent) {
         const naam = safe(p.rood_naam_fp ?? p.rood_naam_mm);
         items.push({
           partij_nr: pn,
@@ -900,12 +1053,13 @@ export default function RapportPage() {
         seen.add(`${pn}-rood`);
       }
 
-      const blauwPrevRaw = safeRaw((p as any).blauw_va_mm_prev);
-      const blauwCurrentRaw = safeRaw((p as any).blauw_va_mm ?? (p as any).va_blauw ?? (p as any).blauw_va);
+      const blauwPrevRaw = getPrevVaFromCtx(p, "blauw");
+      const blauwCurrentRaw = getCurrentVaFromCtx(p, "blauw");
       const blauwPrev = normalizeVa(blauwPrevRaw);
       const blauwCurrent = normalizeVa(blauwCurrentRaw);
+      const blauwHasPrevField = hasPrevVaField(p, "blauw");
 
-      if ((p as any).blauw_va_mm_prev != null && blauwPrev && blauwCurrent && blauwPrev !== blauwCurrent) {
+      if (blauwHasPrevField && blauwPrev !== blauwCurrent) {
         const naam = safe(p.blauw_naam_fp ?? p.blauw_naam_mm);
         items.push({
           partij_nr: pn,
@@ -921,12 +1075,17 @@ export default function RapportPage() {
     }
 
     for (const ev of auditEvents ?? []) {
-      if (normCode(ev.event_type) !== "VA_CHANGED") continue;
+      if (!isVaAuditEventType(ev.event_type)) continue;
+
       const pn = Number(ev.partij_nr);
       if (!Number.isFinite(pn)) continue;
       const hoek = (ev.hoek ?? "rood") as "rood" | "blauw";
       const key = `${pn}-${hoek}`;
       if (seen.has(key)) continue;
+
+      const oldNorm = normalizeVa(ev.old_va);
+      const newNorm = normalizeVa(ev.new_va);
+      if (oldNorm === newNorm) continue;
 
       const ctx = ctxByPartij.get(pn);
       const naam =
@@ -951,7 +1110,6 @@ export default function RapportPage() {
 
     for (const r of resultaten ?? []) {
       if (!isFightpaspoortGewijzigd(r)) continue;
-      if (isApprovedOrClosed(r.review_status)) continue;
 
       const pn = Number(r.partij_nr);
       const hoek = inferHoek(r);
@@ -1269,6 +1427,44 @@ export default function RapportPage() {
 
         <section className="page-break rounded-[24px] border border-black/10 bg-white p-4 shadow-[0_12px_30px_rgba(0,0,0,0.08)]">
           <div className="space-y-4">
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={`${verbodStartverbodIssues.length}`}>VERBOD / STARTVERBOD</SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Type</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {verbodStartverbodIssues.length ? (
+                      verbodStartverbodIssues.map((item, idx) => (
+                        <tr key={`${item.type}-${item.partij_nr}-${item.hoek}-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
+                          <td className={`px-2 py-1.5 font-black ${rowBg(idx)}`}>{item.type}</td>
+                          <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
+                          <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen open verboden of startverboden.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             <div className="overflow-hidden rounded-[18px] border border-black/10">
               <SectionTitle right={`${licentieIssues.length}`}>GEEN LICENTIE</SectionTitle>
               <div className="overflow-x-auto px-3 pb-3">

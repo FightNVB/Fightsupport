@@ -900,7 +900,7 @@ function ControleMatchmakingPage() {
             setAddBusy(false);
         }
     }
-    async function deletePartij(partijNr) {
+    async function deletePartij(partijNr, boutId) {
         if (!confirm(`Partij ${partijNr} verwijderen?`)) return;
         setBusyPartij((prev)=>({
                 ...prev,
@@ -918,7 +918,9 @@ function ControleMatchmakingPage() {
                 },
                 body: JSON.stringify({
                     matchmaking_id: matchmakingId,
-                    partij_nr: partijNr
+                    partij_nr: partijNr,
+                    controle_run_id: run?.id ?? null,
+                    bout_id: boutId ?? null
                 })
             });
             const json = await resp.json().catch(()=>({}));
@@ -1346,7 +1348,7 @@ function ControleMatchmakingPage() {
                     }
                 }, void 0, false, {
                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                    lineNumber: 1254,
+                    lineNumber: 1256,
                     columnNumber: 9
                 }, this),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1364,7 +1366,7 @@ function ControleMatchmakingPage() {
                             }
                         }, void 0, false, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                            lineNumber: 1263,
+                            lineNumber: 1265,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1405,12 +1407,12 @@ function ControleMatchmakingPage() {
                                                     }
                                                 }, void 0, false, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                    lineNumber: 1301,
+                                                    lineNumber: 1303,
                                                     columnNumber: 19
                                                 }, this)
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1300,
+                                                lineNumber: 1302,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1423,7 +1425,7 @@ function ControleMatchmakingPage() {
                                                         disabled: releaseBusy
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1312,
+                                                        lineNumber: 1314,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
@@ -1432,7 +1434,7 @@ function ControleMatchmakingPage() {
                                                         onClick: openReportHtml
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1318,
+                                                        lineNumber: 1320,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
@@ -1441,7 +1443,7 @@ function ControleMatchmakingPage() {
                                                         onClick: openExcel
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1323,
+                                                        lineNumber: 1325,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
@@ -1450,19 +1452,19 @@ function ControleMatchmakingPage() {
                                                         onClick: openSportdataCsv
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1328,
+                                                        lineNumber: 1330,
                                                         columnNumber: 19
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1311,
+                                                lineNumber: 1313,
                                                 columnNumber: 17
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1291,
+                                        lineNumber: 1293,
                                         columnNumber: 15
                                     }, this),
                                     releaseMsg ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1475,7 +1477,7 @@ function ControleMatchmakingPage() {
                                         children: releaseMsg
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1337,
+                                        lineNumber: 1339,
                                         columnNumber: 17
                                     }, this) : null,
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1493,7 +1495,7 @@ function ControleMatchmakingPage() {
                                                 children: "Matchmaking controle"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1354,
+                                                lineNumber: 1356,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1513,7 +1515,7 @@ function ControleMatchmakingPage() {
                                                         children: "← Terug naar overzicht"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1368,
+                                                        lineNumber: 1370,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1533,7 +1535,7 @@ function ControleMatchmakingPage() {
                                                         children: safeText(subtitle, "Onbekend evenement")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1383,
+                                                        lineNumber: 1385,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -1550,13 +1552,13 @@ function ControleMatchmakingPage() {
                                                         children: "Partij toevoegen"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1401,
+                                                        lineNumber: 1403,
                                                         columnNumber: 19
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1367,
+                                                lineNumber: 1369,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1571,13 +1573,13 @@ function ControleMatchmakingPage() {
                                                 children: matchmakingId
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1417,
+                                                lineNumber: 1419,
                                                 columnNumber: 17
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1353,
+                                        lineNumber: 1355,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1585,7 +1587,7 @@ function ControleMatchmakingPage() {
                                         style: separator
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1431,
+                                        lineNumber: 1433,
                                         columnNumber: 15
                                     }, this),
                                     loading ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1593,21 +1595,21 @@ function ControleMatchmakingPage() {
                                         children: "Laden…"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1434,
+                                        lineNumber: 1436,
                                         columnNumber: 17
                                     }, this) : error ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: "text-red-700",
                                         children: error
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1436,
+                                        lineNumber: 1438,
                                         columnNumber: 17
                                     }, this) : rows.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: "text-zinc-700",
                                         children: "Geen context gevonden (context nog niet gevuld?)."
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1438,
+                                        lineNumber: 1440,
                                         columnNumber: 17
                                     }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: "space-y-3",
@@ -1625,13 +1627,13 @@ function ControleMatchmakingPage() {
                                                                 children: totals.totaal
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1446,
+                                                                lineNumber: 1448,
                                                                 columnNumber: 23
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1444,
+                                                        lineNumber: 1446,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1640,7 +1642,7 @@ function ControleMatchmakingPage() {
                                                         tone: "white"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1449,
+                                                        lineNumber: 1451,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1649,7 +1651,7 @@ function ControleMatchmakingPage() {
                                                         tone: "white"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1450,
+                                                        lineNumber: 1452,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1658,7 +1660,7 @@ function ControleMatchmakingPage() {
                                                         tone: "purple"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1451,
+                                                        lineNumber: 1453,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1667,7 +1669,7 @@ function ControleMatchmakingPage() {
                                                         tone: "blue"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1452,
+                                                        lineNumber: 1454,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1676,7 +1678,7 @@ function ControleMatchmakingPage() {
                                                         tone: "red"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1453,
+                                                        lineNumber: 1455,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1685,7 +1687,7 @@ function ControleMatchmakingPage() {
                                                         tone: "orange"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1454,
+                                                        lineNumber: 1456,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1694,7 +1696,7 @@ function ControleMatchmakingPage() {
                                                         tone: "yellow"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1455,
+                                                        lineNumber: 1457,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1703,7 +1705,7 @@ function ControleMatchmakingPage() {
                                                         tone: "green"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1456,
+                                                        lineNumber: 1458,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(HeaderBadge, {
@@ -1712,13 +1714,13 @@ function ControleMatchmakingPage() {
                                                         tone: "white"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1457,
+                                                        lineNumber: 1459,
                                                         columnNumber: 21
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1443,
+                                                lineNumber: 1445,
                                                 columnNumber: 19
                                             }, this),
                                             galaDuur?.text && compactRunMeldingen.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1729,7 +1731,7 @@ function ControleMatchmakingPage() {
                                                         children: "Gala duur:"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1462,
+                                                        lineNumber: 1464,
                                                         columnNumber: 23
                                                     }, this),
                                                     " ",
@@ -1738,13 +1740,13 @@ function ControleMatchmakingPage() {
                                                         children: galaDuur.text
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1463,
+                                                        lineNumber: 1465,
                                                         columnNumber: 23
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1461,
+                                                lineNumber: 1463,
                                                 columnNumber: 21
                                             }, this) : null,
                                             compactRunMeldingen.length > 0 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1763,7 +1765,7 @@ function ControleMatchmakingPage() {
                                                         children: "Run meldingen"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1476,
+                                                        lineNumber: 1478,
                                                         columnNumber: 23
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1795,18 +1797,18 @@ function ControleMatchmakingPage() {
                                                                                                 ]
                                                                                             }, void 0, true, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1504,
+                                                                                                lineNumber: 1506,
                                                                                                 columnNumber: 39
                                                                                             }, this) : null
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1501,
+                                                                                        lineNumber: 1503,
                                                                                         columnNumber: 35
                                                                                     }, this)
                                                                                 }, void 0, false, {
                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1500,
+                                                                                    lineNumber: 1502,
                                                                                     columnNumber: 33
                                                                                 }, this),
                                                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -1814,13 +1816,13 @@ function ControleMatchmakingPage() {
                                                                                     children: String(r.resultaat ?? "").toUpperCase()
                                                                                 }, void 0, false, {
                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1511,
+                                                                                    lineNumber: 1513,
                                                                                     columnNumber: 33
                                                                                 }, this)
                                                                             ]
                                                                         }, void 0, true, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1499,
+                                                                            lineNumber: 1501,
                                                                             columnNumber: 31
                                                                         }, this),
                                                                         r.boodschap ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1828,29 +1830,29 @@ function ControleMatchmakingPage() {
                                                                             children: r.boodschap
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1517,
+                                                                            lineNumber: 1519,
                                                                             columnNumber: 33
                                                                         }, this) : null
                                                                     ]
                                                                 }, `${r.rule_code ?? "run"}-${i}`, true, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                    lineNumber: 1490,
+                                                                    lineNumber: 1492,
                                                                     columnNumber: 29
                                                                 }, this))
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1488,
+                                                            lineNumber: 1490,
                                                             columnNumber: 25
                                                         }, this)
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1487,
+                                                        lineNumber: 1489,
                                                         columnNumber: 23
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1468,
+                                                lineNumber: 1470,
                                                 columnNumber: 21
                                             }, this),
                                             msg ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1858,7 +1860,7 @@ function ControleMatchmakingPage() {
                                                 children: msg
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1526,
+                                                lineNumber: 1528,
                                                 columnNumber: 26
                                             }, this) : null,
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1869,7 +1871,7 @@ function ControleMatchmakingPage() {
                                                         children: "Filter:"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1529,
+                                                        lineNumber: 1531,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1887,12 +1889,12 @@ function ControleMatchmakingPage() {
                                                             }
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1532,
+                                                            lineNumber: 1534,
                                                             columnNumber: 23
                                                         }, this)
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1531,
+                                                        lineNumber: 1533,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1903,7 +1905,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("all")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1547,
+                                                        lineNumber: 1549,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1914,7 +1916,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("verbod")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1548,
+                                                        lineNumber: 1550,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1925,7 +1927,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("geen_licentie")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1549,
+                                                        lineNumber: 1551,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1936,7 +1938,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("afgekeurd")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1550,
+                                                        lineNumber: 1552,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1947,7 +1949,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("dispensatie")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1551,
+                                                        lineNumber: 1553,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1958,7 +1960,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("actie")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1552,
+                                                        lineNumber: 1554,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1969,7 +1971,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("ok")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1553,
+                                                        lineNumber: 1555,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(FilterButton, {
@@ -1980,7 +1982,7 @@ function ControleMatchmakingPage() {
                                                         onClick: ()=>setFilter("geen_info")
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1554,
+                                                        lineNumber: 1556,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1992,19 +1994,19 @@ function ControleMatchmakingPage() {
                                                                 children: filteredRows.length
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1557,
+                                                                lineNumber: 1559,
                                                                 columnNumber: 29
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1556,
+                                                        lineNumber: 1558,
                                                         columnNumber: 21
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1528,
+                                                lineNumber: 1530,
                                                 columnNumber: 19
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2025,7 +2027,7 @@ function ControleMatchmakingPage() {
                                                                         children: "#"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1571,
+                                                                        lineNumber: 1573,
                                                                         columnNumber: 27
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -2033,7 +2035,7 @@ function ControleMatchmakingPage() {
                                                                         children: "Vechters"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1572,
+                                                                        lineNumber: 1574,
                                                                         columnNumber: 27
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -2041,7 +2043,7 @@ function ControleMatchmakingPage() {
                                                                         children: "Info"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1573,
+                                                                        lineNumber: 1575,
                                                                         columnNumber: 27
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -2049,18 +2051,18 @@ function ControleMatchmakingPage() {
                                                                         children: "Acties"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1574,
+                                                                        lineNumber: 1576,
                                                                         columnNumber: 27
                                                                     }, this)
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1570,
+                                                                lineNumber: 1572,
                                                                 columnNumber: 25
                                                             }, this)
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1563,
+                                                            lineNumber: 1565,
                                                             columnNumber: 23
                                                         }, this),
                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tbody", {
@@ -2100,14 +2102,14 @@ function ControleMatchmakingPage() {
                                                                                         children: r.partij_nr ?? "-"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1622,
+                                                                                        lineNumber: 1624,
                                                                                         columnNumber: 35
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(StatusBadge, {
                                                                                         status: status
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1623,
+                                                                                        lineNumber: 1625,
                                                                                         columnNumber: 35
                                                                                     }, this),
                                                                                     heeftDispensatie && status !== "dispensatie" ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
@@ -2115,7 +2117,7 @@ function ControleMatchmakingPage() {
                                                                                         tone: "orange"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1625,
+                                                                                        lineNumber: 1627,
                                                                                         columnNumber: 37
                                                                                     }, this) : null,
                                                                                     heeftVerbod ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
@@ -2123,7 +2125,7 @@ function ControleMatchmakingPage() {
                                                                                         tone: "purple"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1627,
+                                                                                        lineNumber: 1629,
                                                                                         columnNumber: 50
                                                                                     }, this) : null,
                                                                                     Number.isFinite(pn) && missingLicentieByPartij[pn] ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Chip, {
@@ -2131,18 +2133,18 @@ function ControleMatchmakingPage() {
                                                                                         tone: "blue"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1629,
+                                                                                        lineNumber: 1631,
                                                                                         columnNumber: 37
                                                                                     }, this) : null
                                                                                 ]
                                                                             }, void 0, true, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1621,
+                                                                                lineNumber: 1623,
                                                                                 columnNumber: 33
                                                                             }, this)
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1620,
+                                                                            lineNumber: 1622,
                                                                             columnNumber: 31
                                                                         }, this),
                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -2158,7 +2160,7 @@ function ControleMatchmakingPage() {
                                                                                             }
                                                                                         }, void 0, false, {
                                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                            lineNumber: 1636,
+                                                                                            lineNumber: 1638,
                                                                                             columnNumber: 35
                                                                                         }, this),
                                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2169,7 +2171,7 @@ function ControleMatchmakingPage() {
                                                                                                     children: roodNaam
                                                                                                 }, void 0, false, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1641,
+                                                                                                    lineNumber: 1643,
                                                                                                     columnNumber: 37
                                                                                                 }, this),
                                                                                                 " ",
@@ -2182,7 +2184,7 @@ function ControleMatchmakingPage() {
                                                                                                     ]
                                                                                                 }, void 0, true, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1642,
+                                                                                                    lineNumber: 1644,
                                                                                                     columnNumber: 37
                                                                                                 }, this),
                                                                                                 " ",
@@ -2194,7 +2196,7 @@ function ControleMatchmakingPage() {
                                                                                                     ]
                                                                                                 }, void 0, true, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1643,
+                                                                                                    lineNumber: 1645,
                                                                                                     columnNumber: 37
                                                                                                 }, this),
                                                                                                 " ",
@@ -2206,26 +2208,26 @@ function ControleMatchmakingPage() {
                                                                                                     ]
                                                                                                 }, void 0, true, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1644,
+                                                                                                    lineNumber: 1646,
                                                                                                     columnNumber: 37
                                                                                                 }, this)
                                                                                             ]
                                                                                         }, void 0, true, {
                                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                            lineNumber: 1640,
+                                                                                            lineNumber: 1642,
                                                                                             columnNumber: 35
                                                                                         }, this)
                                                                                     ]
                                                                                 }, void 0, true, {
                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1635,
+                                                                                    lineNumber: 1637,
                                                                                     columnNumber: 33
                                                                                 }, this),
                                                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                                                                     className: `my-2 ${dividerClass}`
                                                                                 }, void 0, false, {
                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1648,
+                                                                                    lineNumber: 1650,
                                                                                     columnNumber: 33
                                                                                 }, this),
                                                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2238,7 +2240,7 @@ function ControleMatchmakingPage() {
                                                                                             }
                                                                                         }, void 0, false, {
                                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                            lineNumber: 1651,
+                                                                                            lineNumber: 1653,
                                                                                             columnNumber: 35
                                                                                         }, this),
                                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2249,7 +2251,7 @@ function ControleMatchmakingPage() {
                                                                                                     children: blauwNaam
                                                                                                 }, void 0, false, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1656,
+                                                                                                    lineNumber: 1658,
                                                                                                     columnNumber: 37
                                                                                                 }, this),
                                                                                                 " ",
@@ -2262,7 +2264,7 @@ function ControleMatchmakingPage() {
                                                                                                     ]
                                                                                                 }, void 0, true, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1657,
+                                                                                                    lineNumber: 1659,
                                                                                                     columnNumber: 37
                                                                                                 }, this),
                                                                                                 " ",
@@ -2274,7 +2276,7 @@ function ControleMatchmakingPage() {
                                                                                                     ]
                                                                                                 }, void 0, true, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1658,
+                                                                                                    lineNumber: 1660,
                                                                                                     columnNumber: 37
                                                                                                 }, this),
                                                                                                 " ",
@@ -2286,19 +2288,19 @@ function ControleMatchmakingPage() {
                                                                                                     ]
                                                                                                 }, void 0, true, {
                                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                    lineNumber: 1659,
+                                                                                                    lineNumber: 1661,
                                                                                                     columnNumber: 37
                                                                                                 }, this)
                                                                                             ]
                                                                                         }, void 0, true, {
                                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                            lineNumber: 1655,
+                                                                                            lineNumber: 1657,
                                                                                             columnNumber: 35
                                                                                         }, this)
                                                                                     ]
                                                                                 }, void 0, true, {
                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1650,
+                                                                                    lineNumber: 1652,
                                                                                     columnNumber: 33
                                                                                 }, this),
                                                                                 geenTegenstander ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2308,18 +2310,18 @@ function ControleMatchmakingPage() {
                                                                                         children: "GEEN TEGENSTANDER"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1665,
+                                                                                        lineNumber: 1667,
                                                                                         columnNumber: 37
                                                                                     }, this)
                                                                                 }, void 0, false, {
                                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                    lineNumber: 1664,
+                                                                                    lineNumber: 1666,
                                                                                     columnNumber: 35
                                                                                 }, this) : null
                                                                             ]
                                                                         }, void 0, true, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1634,
+                                                                            lineNumber: 1636,
                                                                             columnNumber: 31
                                                                         }, this),
                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -2334,7 +2336,7 @@ function ControleMatchmakingPage() {
                                                                                                 children: "Discipline:"
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1675,
+                                                                                                lineNumber: 1677,
                                                                                                 columnNumber: 37
                                                                                             }, this),
                                                                                             " ",
@@ -2343,13 +2345,13 @@ function ControleMatchmakingPage() {
                                                                                                 children: discipline
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1676,
+                                                                                                lineNumber: 1678,
                                                                                                 columnNumber: 37
                                                                                             }, this)
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1674,
+                                                                                        lineNumber: 1676,
                                                                                         columnNumber: 35
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2359,7 +2361,7 @@ function ControleMatchmakingPage() {
                                                                                                 children: "Klasse:"
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1679,
+                                                                                                lineNumber: 1681,
                                                                                                 columnNumber: 37
                                                                                             }, this),
                                                                                             " ",
@@ -2368,13 +2370,13 @@ function ControleMatchmakingPage() {
                                                                                                 children: klasse
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1680,
+                                                                                                lineNumber: 1682,
                                                                                                 columnNumber: 37
                                                                                             }, this)
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1678,
+                                                                                        lineNumber: 1680,
                                                                                         columnNumber: 35
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2384,7 +2386,7 @@ function ControleMatchmakingPage() {
                                                                                                 children: "Event datum:"
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1683,
+                                                                                                lineNumber: 1685,
                                                                                                 columnNumber: 37
                                                                                             }, this),
                                                                                             " ",
@@ -2393,13 +2395,13 @@ function ControleMatchmakingPage() {
                                                                                                 children: eventDatum
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1684,
+                                                                                                lineNumber: 1686,
                                                                                                 columnNumber: 37
                                                                                             }, this)
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1682,
+                                                                                        lineNumber: 1684,
                                                                                         columnNumber: 35
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2409,7 +2411,7 @@ function ControleMatchmakingPage() {
                                                                                                 children: "Meldingen:"
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1687,
+                                                                                                lineNumber: 1689,
                                                                                                 columnNumber: 37
                                                                                             }, this),
                                                                                             " ",
@@ -2418,24 +2420,24 @@ function ControleMatchmakingPage() {
                                                                                                 children: Number.isFinite(pn) ? countByPartij[pn] ?? 0 : 0
                                                                                             }, void 0, false, {
                                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                                lineNumber: 1688,
+                                                                                                lineNumber: 1690,
                                                                                                 columnNumber: 37
                                                                                             }, this)
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1686,
+                                                                                        lineNumber: 1688,
                                                                                         columnNumber: 35
                                                                                     }, this)
                                                                                 ]
                                                                             }, void 0, true, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1673,
+                                                                                lineNumber: 1675,
                                                                                 columnNumber: 33
                                                                             }, this)
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1672,
+                                                                            lineNumber: 1674,
                                                                             columnNumber: 31
                                                                         }, this),
                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -2454,51 +2456,51 @@ function ControleMatchmakingPage() {
                                                                                         children: "Detail"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1697,
+                                                                                        lineNumber: 1699,
                                                                                         columnNumber: 35
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(DarkActionButton, {
                                                                                         label: busy === "delete" ? "… Verwijderen" : "Verwijderen",
                                                                                         tone: "red",
                                                                                         disabled: busy === "delete",
-                                                                                        onClick: ()=>Number.isFinite(pn) && deletePartij(pn)
+                                                                                        onClick: ()=>Number.isFinite(pn) && deletePartij(pn, typeof r?.bout_id === "string" ? r.bout_id : typeof r?.bout_uid === "string" ? r.bout_uid : typeof r?.id === "string" ? r.id : null)
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1709,
+                                                                                        lineNumber: 1711,
                                                                                         columnNumber: 35
                                                                                     }, this)
                                                                                 ]
                                                                             }, void 0, true, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1696,
+                                                                                lineNumber: 1698,
                                                                                 columnNumber: 33
                                                                             }, this)
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                            lineNumber: 1695,
+                                                                            lineNumber: 1697,
                                                                             columnNumber: 31
                                                                         }, this)
                                                                     ]
                                                                 }, r.id ?? `${r.partij_nr}-${i}`, true, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                    lineNumber: 1613,
+                                                                    lineNumber: 1615,
                                                                     columnNumber: 29
                                                                 }, this);
                                                             })
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                            lineNumber: 1578,
+                                                            lineNumber: 1580,
                                                             columnNumber: 23
                                                         }, this)
                                                     ]
                                                 }, void 0, true, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                    lineNumber: 1562,
+                                                    lineNumber: 1564,
                                                     columnNumber: 21
                                                 }, this)
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1561,
+                                                lineNumber: 1563,
                                                 columnNumber: 19
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2506,13 +2508,13 @@ function ControleMatchmakingPage() {
                                                 children: "© FightSupport"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1724,
+                                                lineNumber: 1738,
                                                 columnNumber: 19
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1442,
+                                        lineNumber: 1444,
                                         columnNumber: 17
                                     }, this),
                                     showAdd && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2526,7 +2528,7 @@ function ControleMatchmakingPage() {
                                                 onClick: ()=>!addBusy && setShowAdd(false)
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1730,
+                                                lineNumber: 1744,
                                                 columnNumber: 19
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2546,7 +2548,7 @@ function ControleMatchmakingPage() {
                                                                         children: "Partij toevoegen"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1744,
+                                                                        lineNumber: 1758,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2554,13 +2556,13 @@ function ControleMatchmakingPage() {
                                                                         children: "Discipline / klasse + rood vs blauw (VA nummers als tekst) + max gewicht"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1745,
+                                                                        lineNumber: 1759,
                                                                         columnNumber: 25
                                                                     }, this)
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1743,
+                                                                lineNumber: 1757,
                                                                 columnNumber: 23
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -2569,13 +2571,13 @@ function ControleMatchmakingPage() {
                                                                 children: "✕"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1750,
+                                                                lineNumber: 1764,
                                                                 columnNumber: 23
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1736,
+                                                        lineNumber: 1750,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2586,7 +2588,7 @@ function ControleMatchmakingPage() {
                                                                 children: error
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1759,
+                                                                lineNumber: 1773,
                                                                 columnNumber: 32
                                                             }, this) : null,
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2599,7 +2601,7 @@ function ControleMatchmakingPage() {
                                                                         placeholder: "Kickboksen / Muay Thai / MMA..."
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1762,
+                                                                        lineNumber: 1776,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
@@ -2609,13 +2611,13 @@ function ControleMatchmakingPage() {
                                                                         placeholder: "N / C / B / A..."
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1768,
+                                                                        lineNumber: 1782,
                                                                         columnNumber: 25
                                                                     }, this)
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1761,
+                                                                lineNumber: 1775,
                                                                 columnNumber: 23
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2629,7 +2631,7 @@ function ControleMatchmakingPage() {
                                                                                 children: "Rood"
                                                                             }, void 0, false, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1778,
+                                                                                lineNumber: 1792,
                                                                                 columnNumber: 27
                                                                             }, this),
                                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2641,7 +2643,7 @@ function ControleMatchmakingPage() {
                                                                                         onChange: setFRoodNaam
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1780,
+                                                                                        lineNumber: 1794,
                                                                                         columnNumber: 29
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
@@ -2650,7 +2652,7 @@ function ControleMatchmakingPage() {
                                                                                         onChange: setFRoodGym
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1781,
+                                                                                        lineNumber: 1795,
                                                                                         columnNumber: 29
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
@@ -2660,7 +2662,7 @@ function ControleMatchmakingPage() {
                                                                                         placeholder: "tekst"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1782,
+                                                                                        lineNumber: 1796,
                                                                                         columnNumber: 29
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
@@ -2671,19 +2673,19 @@ function ControleMatchmakingPage() {
                                                                                         placeholder: "bijv. 71.5"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1783,
+                                                                                        lineNumber: 1797,
                                                                                         columnNumber: 29
                                                                                     }, this)
                                                                                 ]
                                                                             }, void 0, true, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1779,
+                                                                                lineNumber: 1793,
                                                                                 columnNumber: 27
                                                                             }, this)
                                                                         ]
                                                                     }, void 0, true, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1777,
+                                                                        lineNumber: 1791,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2694,7 +2696,7 @@ function ControleMatchmakingPage() {
                                                                                 children: "Blauw"
                                                                             }, void 0, false, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1788,
+                                                                                lineNumber: 1802,
                                                                                 columnNumber: 27
                                                                             }, this),
                                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2706,7 +2708,7 @@ function ControleMatchmakingPage() {
                                                                                         onChange: setFBlauwNaam
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1790,
+                                                                                        lineNumber: 1804,
                                                                                         columnNumber: 29
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
@@ -2715,7 +2717,7 @@ function ControleMatchmakingPage() {
                                                                                         onChange: setFBlauwGym
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1791,
+                                                                                        lineNumber: 1805,
                                                                                         columnNumber: 29
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
@@ -2725,7 +2727,7 @@ function ControleMatchmakingPage() {
                                                                                         placeholder: "tekst"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1792,
+                                                                                        lineNumber: 1806,
                                                                                         columnNumber: 29
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Field, {
@@ -2736,25 +2738,25 @@ function ControleMatchmakingPage() {
                                                                                         placeholder: "bijv. 71.5"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                        lineNumber: 1793,
+                                                                                        lineNumber: 1807,
                                                                                         columnNumber: 29
                                                                                     }, this)
                                                                                 ]
                                                                             }, void 0, true, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                                lineNumber: 1789,
+                                                                                lineNumber: 1803,
                                                                                 columnNumber: 27
                                                                             }, this)
                                                                         ]
                                                                     }, void 0, true, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1787,
+                                                                        lineNumber: 1801,
                                                                         columnNumber: 25
                                                                     }, this)
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1776,
+                                                                lineNumber: 1790,
                                                                 columnNumber: 23
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2768,7 +2770,7 @@ function ControleMatchmakingPage() {
                                                                         placeholder: "bijv. 72.0"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1799,
+                                                                        lineNumber: 1813,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2776,19 +2778,19 @@ function ControleMatchmakingPage() {
                                                                         children: "Tip: als je “max gewicht” als tolerantie bedoelt (bv 3kg), zeg het even — dan maak ik er 2 velden van: “gewichtsklasse” + “max afwijking”."
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                        lineNumber: 1806,
+                                                                        lineNumber: 1820,
                                                                         columnNumber: 25
                                                                     }, this)
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1798,
+                                                                lineNumber: 1812,
                                                                 columnNumber: 23
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1758,
+                                                        lineNumber: 1772,
                                                         columnNumber: 21
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2799,7 +2801,7 @@ function ControleMatchmakingPage() {
                                                                 onClick: ()=>!addBusy && setShowAdd(false)
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1814,
+                                                                lineNumber: 1828,
                                                                 columnNumber: 23
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$components$2f$NvbDarkButton$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
@@ -2807,53 +2809,53 @@ function ControleMatchmakingPage() {
                                                                 onClick: addPartijSubmit
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                                lineNumber: 1818,
+                                                                lineNumber: 1832,
                                                                 columnNumber: 23
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                        lineNumber: 1813,
+                                                        lineNumber: 1827,
                                                         columnNumber: 21
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                                lineNumber: 1735,
+                                                lineNumber: 1749,
                                                 columnNumber: 19
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                        lineNumber: 1729,
+                                        lineNumber: 1743,
                                         columnNumber: 17
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                                lineNumber: 1282,
+                                lineNumber: 1284,
                                 columnNumber: 13
                             }, this)
                         }, void 0, false, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                            lineNumber: 1275,
+                            lineNumber: 1277,
                             columnNumber: 11
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-                    lineNumber: 1262,
+                    lineNumber: 1264,
                     columnNumber: 9
                 }, this)
             ]
         }, void 0, true, {
             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-            lineNumber: 1253,
+            lineNumber: 1255,
             columnNumber: 7
         }, this)
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/page.tsx",
-        lineNumber: 1249,
+        lineNumber: 1251,
         columnNumber: 5
     }, this);
 }
