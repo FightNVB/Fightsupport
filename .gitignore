@@ -22,4 +22,5 @@ Thumbs.db
 # Build outputs
 dist/
 build/
-.next/
+.next/tsconfig.tsbuildinfo
+tsconfig.tsbuildinfo
