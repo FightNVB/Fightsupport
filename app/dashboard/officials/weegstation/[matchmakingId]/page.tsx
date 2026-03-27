@@ -801,10 +801,20 @@ export default function WeegstationDetailPage() {
     [roleNames]
   );
 
+  // Matchmakers can view weegstation read-only but cannot edit weights, penalties or dispensaties
+  const isMatchmakerOnly = useMemo(
+    () =>
+      roleNames.includes("matchmaker") &&
+      !roleNames.some((r) =>
+        ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin"].includes(r)
+      ),
+    [roleNames]
+  );
+
   const canAccess = useMemo(
     () =>
       roleNames.some((r) =>
-        ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin"].includes(r)
+        ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin", "matchmaker"].includes(r)
       ),
     [roleNames]
   );
@@ -930,7 +940,7 @@ export default function WeegstationDetailPage() {
 
         if (
           !names.some((r) =>
-            ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin"].includes(r)
+            ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin", "matchmaker"].includes(r)
           )
         ) {
           throw new Error("Je hebt geen toegang tot de weeglijst.");
@@ -953,8 +963,10 @@ export default function WeegstationDetailPage() {
           names.some((r) => r === "official" || r === "hoofdofficial") &&
           mmBondteam &&
           mmBondteam === String(profile?.bondteam ?? "").trim().toLowerCase();
+        // Matchmakers get read-only access to any weegstation
+        const matchmakerAccess = names.includes("matchmaker");
 
-        if (!adminAccess && !teamAccess) {
+        if (!adminAccess && !teamAccess && !matchmakerAccess) {
           throw new Error("Je mag alleen matchmakings van je eigen bondteam zien en bewerken.");
         }
 
@@ -1678,6 +1690,12 @@ export default function WeegstationDetailPage() {
                     </div>
                   </div>
 
+                  {isMatchmakerOnly && (
+                    <div className="mb-3 rounded-[8px] border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                      👁 Alleen-lezen modus — matchmakers mogen gewichten bekijken maar niet wijzigen.
+                    </div>
+                  )}
+
                   <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.95fr]">
                     <div
                       className="rounded-[10px] p-4"
@@ -1722,8 +1740,10 @@ export default function WeegstationDetailPage() {
                           autoComplete="off"
                           placeholder="Gewicht"
                           value={activeWeightValue}
+                          readOnly={isMatchmakerOnly}
+                          disabled={isMatchmakerOnly}
                           onChange={(e) => {
-                            if (!selectedRow || !selectedFighter) return;
+                            if (isMatchmakerOnly || !selectedRow || !selectedFighter) return;
                             if (selectedFighter.corner === "red") {
                               setDraft(selectedRow.id, { rood: e.target.value });
                             } else {
@@ -1731,6 +1751,7 @@ export default function WeegstationDetailPage() {
                             }
                           }}
                           onKeyDown={(e) => {
+                            if (isMatchmakerOnly) return;
                             if (e.key !== "Enter") return;
                             e.preventDefault();
                             void saveSelected();
@@ -1741,19 +1762,21 @@ export default function WeegstationDetailPage() {
                             fontSize: 30,
                             fontWeight: 800,
                             textAlign: "center",
-                            background: "rgba(255,255,255,0.95)",
+                            background: isMatchmakerOnly ? "rgba(243,244,246,0.95)" : "rgba(255,255,255,0.95)",
                             border:
                               selectedFighter.corner === "red"
                                 ? "2.5px solid rgba(220,38,38,0.34)"
                                 : "2.5px solid rgba(37,99,235,0.34)",
                             borderRadius: 4,
-                            color: "#111",
+                            color: isMatchmakerOnly ? "#6b7280" : "#111",
                             outline: "none",
                             letterSpacing: "0.02em",
                           }}
                         />
                         <div className="mt-2 text-xs font-semibold text-zinc-500">
-                          Typ gewicht en druk op Enter om direct op te slaan.
+                          {isMatchmakerOnly
+                            ? "Alleen-lezen — matchmakers mogen geen gewichten wijzigen."
+                            : "Typ gewicht en druk op Enter om direct op te slaan."}
                         </div>
                       </div>
 
@@ -1975,6 +1998,7 @@ export default function WeegstationDetailPage() {
                     </div>
                   </div>
 
+                  {!isMatchmakerOnly && (
                   <ActionButton
                     onClick={saveSelected}
                     disabled={savingId === selectedRow.id}
@@ -1984,6 +2008,7 @@ export default function WeegstationDetailPage() {
                     <Save className="h-4 w-4" />
                     {savingId === selectedRow.id ? "Opslaan..." : "Opslaan"}
                   </ActionButton>
+                  )}
                 </div>
               )}
             </div>

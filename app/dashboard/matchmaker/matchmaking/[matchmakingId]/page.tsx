@@ -1414,6 +1414,24 @@ export default function MatchmakerMatchmakingPage() {
                   >
                     Partij toevoegen
                   </button>
+
+                  <Link
+                    href={`/dashboard/officials/weegstation/${encodeURIComponent(matchmakingId)}`}
+                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px]`}
+                    style={{
+                      background: "linear-gradient(180deg, #1e40af 0%, #1d4ed8 55%, #1e3a8a 100%)",
+                      border: "1px solid rgba(30,64,175,0.55)",
+                      borderRadius: 0,
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(30,64,175,0.18)",
+                      minWidth: 180,
+                      textDecoration: "none",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    ⚖ Weegstation
+                  </Link>
                 </div>
 
                 <div

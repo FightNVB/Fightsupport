@@ -440,6 +440,14 @@ export default function MatchmakerMatchPage() {
 
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{
+    inserted: number;
+    duplicates: number;
+    message: string;
+  } | null>(null);
 
   const [activeDiscipline, setActiveDiscipline] = useState("");
   const [activeKlasse, setActiveKlasse] = useState("");
@@ -955,6 +963,77 @@ export default function MatchmakerMatchPage() {
     }
   }
 
+  async function handleUpload() {
+    if (!uploadFile || !matchmakingId) return;
+
+    setUploadBusy(true);
+    setUploadResult(null);
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        alert("Niet ingelogd.");
+        return;
+      }
+
+      // Collect existing VA nummers for dedup check
+      const existingVaNummers = new Set(
+        fighters
+          .map((f) => String(f.va_nummer ?? "").trim().toLowerCase())
+          .filter(Boolean)
+      );
+
+      const formData = new FormData();
+      formData.append("file", uploadFile);
+      formData.append("matchmaking_id", matchmakingId);
+      formData.append("uploaded_by", user.id);
+
+      const token = (await supabase.auth.getSession()).data.session?.access_token ?? "";
+      const res = await fetch("/api/matchmaker/submit-inschrijvingen", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(json?.error ?? "Upload mislukt");
+        return;
+      }
+
+      // Reload fighters and count duplicates
+      await load();
+
+      // Re-collect after load to count dupes
+      const newFightersQuery = await supabase
+        .from("matchmaker_inschrijvingen")
+        .select("va_nummer")
+        .eq("matchmaking_id", matchmakingId)
+        .eq("upload_id", json.upload_id);
+
+      const newVaNummers = (newFightersQuery.data ?? []).map((r: any) =>
+        String(r.va_nummer ?? "").trim().toLowerCase()
+      );
+      const duplicates = newVaNummers.filter(
+        (va) => va && existingVaNummers.has(va)
+      ).length;
+      const inserted = Math.max(0, (json.inserted ?? 0) - duplicates);
+
+      setUploadResult({
+        inserted,
+        duplicates,
+        message: `${inserted} nieuwe vechter${inserted !== 1 ? "s" : ""} toegevoegd${duplicates > 0 ? `, ${duplicates} dubbel${duplicates !== 1 ? "en" : ""} overgeslagen` : ""}.`,
+      });
+
+      setUploadFile(null);
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
   return (
     <main style={pageBackground}>
       <div style={topShell}>
@@ -1014,13 +1093,13 @@ export default function MatchmakerMatchPage() {
         <div style={actionGrid}>
           <ActionCard
             title="Upload"
-            text="Voeg extra vechters toe aan deze matchmaking"
+            text="Voeg extra vechters toe via Excel (meerdere uploads mogelijk)"
             icon={<Upload size={34} />}
-            onClick={() =>
-              router.push(
-                `/dashboard/matchmaker/matchmaking/upload?matchmaking_id=${matchmakingId}`
-              )
-            }
+            onClick={() => {
+              setUploadResult(null);
+              setUploadFile(null);
+              setShowUploadModal(true);
+            }}
           />
 
           <ActionCard
@@ -1518,6 +1597,99 @@ export default function MatchmakerMatchPage() {
                 onClick={() => void addManualFighter()}
               >
                 {handmatigBusy ? "Opslaan..." : "Toevoegen"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showUploadModal ? (
+        <div style={modalBackdrop} onClick={() => !uploadBusy && setShowUploadModal(false)}>
+          <div style={modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={modalHeader}>
+              <div>
+                <div style={sectionTitle}>Vechters uploaden</div>
+                <div style={sectionSub}>
+                  Upload een Excel bestand met nieuwe vechters. Meerdere uploads zijn mogelijk.
+                </div>
+              </div>
+              <button
+                style={closeBtn}
+                onClick={() => !uploadBusy && setShowUploadModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: "20px 24px" }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>
+                  Excel bestand (.xlsx, .xls)
+                </label>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    borderRadius: 6,
+                    color: "#e2e8f0",
+                    fontSize: 13,
+                  }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setUploadFile(f);
+                    setUploadResult(null);
+                  }}
+                />
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>
+                  1 vechter per rij · Kolommen: naam, discipline, klasse, VA nummer, gewicht, gym
+                </div>
+              </div>
+
+              {uploadResult && (
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 6,
+                    background: uploadResult.duplicates > 0
+                      ? "rgba(234,179,8,0.15)"
+                      : "rgba(34,197,94,0.15)",
+                    border: uploadResult.duplicates > 0
+                      ? "1px solid rgba(234,179,8,0.4)"
+                      : "1px solid rgba(34,197,94,0.4)",
+                    color: uploadResult.duplicates > 0 ? "#fef08a" : "#86efac",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    marginBottom: 12,
+                  }}
+                >
+                  {uploadResult.message}
+                </div>
+              )}
+            </div>
+
+            <div style={modalActionRow}>
+              <button
+                style={secondaryButton}
+                onClick={() => !uploadBusy && setShowUploadModal(false)}
+                disabled={uploadBusy}
+              >
+                Sluiten
+              </button>
+              <button
+                style={{
+                  ...primaryButton,
+                  opacity: !uploadFile || uploadBusy ? 0.55 : 1,
+                  cursor: !uploadFile || uploadBusy ? "not-allowed" : "pointer",
+                }}
+                disabled={!uploadFile || uploadBusy || !matchmakingId}
+                onClick={() => void handleUpload()}
+              >
+                <Upload size={16} style={{ marginRight: 8 }} />
+                {uploadBusy ? "Uploaden..." : "Upload bestand"}
               </button>
             </div>
           </div>
