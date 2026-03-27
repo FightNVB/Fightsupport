@@ -1,55 +1,25 @@
-[00:00:04.616] Server  LOG     ✓ Ready in 3.3s
-[00:00:08.043] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:07:22.557] Server  LOG     ✓ Compiled in 8.3s
-[00:07:24.288] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[00:18:24.105] Server  LOG     ○ Compiling /dashboard/matchmaker/matchmaking/[matchmakingId]/match ...
-[00:18:26.928] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:18:27.190] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[00:18:35.466] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:28:47.236] Server  LOG     ✓ Compiled in 7.3s
-[00:39:57.498] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[00:40:15.003] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[00:44:33.710] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:44:46.467] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[00:45:14.338] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:45:22.671] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[00:45:40.552] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:48:28.389] Server  LOG     ✓ Compiled in 714ms
-[00:48:31.459] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:48:35.548] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:48:45.759] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:49:42.632] Server  LOG     ✓ Compiled in 825ms
-[00:49:42.666] Server  WARN    ⚠ Fast Refresh had to perform a full reload when ./app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
-[00:49:43.866] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:54:59.103] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[00:58:30.902] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[00:58:33.475] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[01:04:18.310] Server  LOG     ✓ Compiled in 14.9s
-[01:04:29.405] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[01:04:38.407] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[01:04:40.767] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[01:04:52.060] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[01:05:02.992] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[01:18:27.376] Server  LOG     ✓ Compiled in 1247ms
-[01:18:29.132] Browser WARN    Image with src "/branding/fightsupport/app-icon.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[01:18:50.848] Server  LOG     ✓ Compiled in 404ms
-[01:19:43.283] Server  LOG     ✓ Compiled in 613ms
-[01:32:29.455] Server  LOG     ✓ Compiled in 2.1s
-[01:41:23.627] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[01:54:14.988] Server  LOG     ✓ Compiled in 1592ms
-[01:54:24.675] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[01:54:33.116] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[01:54:33.116] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" and a height value of 0. This is likely because the parent element of the image has not been styled to have a set height.
-[02:34:50.311] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[02:34:53.138] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[02:47:01.665] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[02:47:01.928] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
-[02:47:10.558] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[03:02:08.468] Server  LOG     ✓ Compiled in 2s
-[03:02:47.761] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[03:02:48.693] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[03:16:46.689] Server  LOG     ✓ Compiled in 7.4s
-[03:16:53.317] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[03:16:54.900] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
-[03:17:01.844] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
-[03:17:02.819] Browser WARN    Image with src "/branding/fightsupport/fighter-shield.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
+[00:00:06.010] Server  LOG     ✓ Ready in 3.7s
+[00:00:41.367] Server  LOG     ○ Compiling /dashboard ...
+[00:00:42.980] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:01:31.935] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[00:08:40.687] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:18:29.588] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[00:22:04.653] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:31:47.785] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[00:49:02.746] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:49:10.700] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:49:34.455] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[00:49:39.200] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:51:35.897] Browser WARN    Image with src "/branding/fightsupport/logo-dark.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[00:57:48.393] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[01:11:07.236] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:11:08.922] Browser WARN    Image with src "/branding/fightsupport/logo-dark.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[01:18:27.236] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:18:31.736] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:20:55.876] Browser WARN    Image with src "/branding/fightsupport/excel-logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[01:20:59.795] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:22:40.622] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:22:51.720] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:23:13.195] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:23:15.519] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[01:36:53.479] Browser WARN    Image with src "/branding/fightsupport/logo-dark.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.

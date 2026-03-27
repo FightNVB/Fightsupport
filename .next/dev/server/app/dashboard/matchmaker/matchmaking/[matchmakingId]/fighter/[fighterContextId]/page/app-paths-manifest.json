@@ -1,0 +1,3 @@
+{
+  "/dashboard/matchmaker/matchmaking/[matchmakingId]/fighter/[fighterContextId]/page": "app/dashboard/matchmaker/matchmaking/[matchmakingId]/fighter/[fighterContextId]/page.js"
+}

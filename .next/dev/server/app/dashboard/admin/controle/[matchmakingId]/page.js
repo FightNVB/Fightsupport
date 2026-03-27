@@ -1,5 +1,5 @@
 var R=require("../../../../../chunks/ssr/[turbopack]_runtime.js")("server/app/dashboard/admin/controle/[matchmakingId]/page.js")
-R.c("server/chunks/ssr/node_modules_next_dist_181ba7b6._.js")
+R.c("server/chunks/ssr/node_modules_next_dist_3c1a309b._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__29d3aa6e._.js")
 R.c("server/chunks/ssr/node_modules_next_dist_7381059c._.js")
 R.c("server/chunks/ssr/[externals]__7f148858._.js")

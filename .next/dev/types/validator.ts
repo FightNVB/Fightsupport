@@ -245,6 +245,24 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../../app/dashboard/matchmaker/definitief/[definitiveId]/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/dashboard/matchmaker/definitief/[definitiveId]">> = Specific
+  const handler = {} as typeof import("../../../app/dashboard/matchmaker/definitief/[definitiveId]/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../app/dashboard/matchmaker/definitief/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/dashboard/matchmaker/definitief">> = Specific
+  const handler = {} as typeof import("../../../app/dashboard/matchmaker/definitief/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../../app/dashboard/matchmaker/matchmaking/[matchmakingId]/fighter/[fighterContextId]/page.tsx
 {
   type __IsExpected<Specific extends AppPageConfig<"/dashboard/matchmaker/matchmaking/[matchmakingId]/fighter/[fighterContextId]">> = Specific
@@ -371,10 +389,28 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../../app/dashboard/officials/lineup/[matchmakingId]/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/dashboard/officials/lineup/[matchmakingId]">> = Specific
+  const handler = {} as typeof import("../../../app/dashboard/officials/lineup/[matchmakingId]/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../../app/dashboard/officials/page.tsx
 {
   type __IsExpected<Specific extends AppPageConfig<"/dashboard/officials">> = Specific
   const handler = {} as typeof import("../../../app/dashboard/officials/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../app/dashboard/officials/uitslagen/[matchmakingId]/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/dashboard/officials/uitslagen/[matchmakingId]">> = Specific
+  const handler = {} as typeof import("../../../app/dashboard/officials/uitslagen/[matchmakingId]/page.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check
@@ -1113,6 +1149,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/officials/start">> = Specific
   const handler = {} as typeof import("../../../app/api/officials/start/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../app/api/officials/uitslagen/export/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/officials/uitslagen/export">> = Specific
+  const handler = {} as typeof import("../../../app/api/officials/uitslagen/export/route.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check

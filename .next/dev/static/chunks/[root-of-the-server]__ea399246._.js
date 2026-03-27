@@ -287,7 +287,7 @@ function SilverButton({ children, onClick, disabled, title, className = "" }) {
         children: children
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 334,
+        lineNumber: 338,
         columnNumber: 5
     }, this);
 }
@@ -299,7 +299,7 @@ function Badge({ text, tone, invert }) {
         children: text
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 386,
+        lineNumber: 390,
         columnNumber: 5
     }, this);
 }
@@ -341,7 +341,7 @@ function MetalPanel({ children, className = "", accent = "none" }) {
                 }
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 431,
+                lineNumber: 435,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -349,13 +349,13 @@ function MetalPanel({ children, className = "", accent = "none" }) {
                 children: children
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 439,
+                lineNumber: 443,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 429,
+        lineNumber: 433,
         columnNumber: 5
     }, this);
 }
@@ -376,7 +376,7 @@ function PlateHeader({ title, right, dot }) {
                                 className: `h-3.5 w-3.5 rounded-sm ${dotCls} shadow-[0_0_0_1px_rgba(0,0,0,0.45)]`
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 460,
+                                lineNumber: 464,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -384,13 +384,13 @@ function PlateHeader({ title, right, dot }) {
                                 children: title
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 461,
+                                lineNumber: 465,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 459,
+                        lineNumber: 463,
                         columnNumber: 9
                     }, this),
                     right ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -398,13 +398,13 @@ function PlateHeader({ title, right, dot }) {
                         children: right
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 463,
+                        lineNumber: 467,
                         columnNumber: 18
                     }, this) : null
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 458,
+                lineNumber: 462,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -414,13 +414,13 @@ function PlateHeader({ title, right, dot }) {
                 }
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 467,
+                lineNumber: 471,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 457,
+        lineNumber: 461,
         columnNumber: 5
     }, this);
 }
@@ -464,7 +464,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                     }
                 }, void 0, false, {
                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                    lineNumber: 529,
+                    lineNumber: 533,
                     columnNumber: 9
                 }, this),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -475,7 +475,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                     }
                 }, void 0, false, {
                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                    lineNumber: 542,
+                    lineNumber: 546,
                     columnNumber: 9
                 }, this),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -489,7 +489,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                     children: "EVENT"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 554,
+                                    lineNumber: 558,
                                     columnNumber: 11
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -500,7 +500,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                     children: evenementNaam ?? "-"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 555,
+                                    lineNumber: 559,
                                     columnNumber: 11
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -513,7 +513,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                                     children: "Datum:"
                                                 }, void 0, false, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 561,
+                                                    lineNumber: 565,
                                                     columnNumber: 15
                                                 }, this),
                                                 " ",
@@ -523,13 +523,13 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                                     children: evenementDatum ?? "-"
                                                 }, void 0, false, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 562,
+                                                    lineNumber: 566,
                                                     columnNumber: 15
                                                 }, this)
                                             ]
                                         }, void 0, true, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 560,
+                                            lineNumber: 564,
                                             columnNumber: 13
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -539,38 +539,13 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                                     children: "Discipline:"
                                                 }, void 0, false, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 567,
-                                                    columnNumber: 15
-                                                }, this),
-                                                " ",
-                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                    className: "text-white font-semibold",
-                                                    children: discipline ?? "-"
-                                                }, void 0, false, {
-                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 568,
-                                                    columnNumber: 15
-                                                }, this)
-                                            ]
-                                        }, void 0, true, {
-                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 566,
-                                            columnNumber: 13
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                            children: [
-                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                                    className: "text-white/60",
-                                                    children: "Klasse (MM):"
-                                                }, void 0, false, {
-                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
                                                     lineNumber: 571,
                                                     columnNumber: 15
                                                 }, this),
                                                 " ",
                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
                                                     className: "text-white font-semibold",
-                                                    children: klasseMM ?? "-"
+                                                    children: discipline ?? "-"
                                                 }, void 0, false, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
                                                     lineNumber: 572,
@@ -581,17 +556,42 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
                                             lineNumber: 570,
                                             columnNumber: 13
+                                        }, this),
+                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                            children: [
+                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                    className: "text-white/60",
+                                                    children: "Klasse (MM):"
+                                                }, void 0, false, {
+                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                    lineNumber: 575,
+                                                    columnNumber: 15
+                                                }, this),
+                                                " ",
+                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                    className: "text-white font-semibold",
+                                                    children: klasseMM ?? "-"
+                                                }, void 0, false, {
+                                                    fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                    lineNumber: 576,
+                                                    columnNumber: 15
+                                                }, this)
+                                            ]
+                                        }, void 0, true, {
+                                            fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                            lineNumber: 574,
+                                            columnNumber: 13
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 559,
+                                    lineNumber: 563,
                                     columnNumber: 11
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                            lineNumber: 552,
+                            lineNumber: 556,
                             columnNumber: 9
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -614,14 +614,14 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                         children: "FIGHTSUPPORT"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 580,
+                                        lineNumber: 584,
                                         columnNumber: 13
                                     }, this),
                                     ("TURBOPACK compile-time falsy", 0) ? /*#__PURE__*/ "TURBOPACK unreachable" : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: "mt-3"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 662,
+                                        lineNumber: 666,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -629,18 +629,18 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                         children: "CONTROLE DASHBOARD"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 665,
+                                        lineNumber: 669,
                                         columnNumber: 13
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 579,
+                                lineNumber: 583,
                                 columnNumber: 11
                             }, this)
                         }, void 0, false, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                            lineNumber: 578,
+                            lineNumber: 582,
                             columnNumber: 9
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -651,7 +651,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                     children: "CONTROLE"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 673,
+                                    lineNumber: 677,
                                     columnNumber: 11
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -662,7 +662,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 674,
+                                    lineNumber: 678,
                                     columnNumber: 11
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -672,12 +672,12 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                         tone: runStatus === "klaar" ? "ok" : runStatus ? "warn" : "info"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 677,
+                                        lineNumber: 681,
                                         columnNumber: 13
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 676,
+                                    lineNumber: 680,
                                     columnNumber: 11
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -689,13 +689,13 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                             children: String(matchmakingId ?? "-")
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 684,
+                                            lineNumber: 688,
                                             columnNumber: 29
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 683,
+                                    lineNumber: 687,
                                     columnNumber: 11
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -713,7 +713,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                             children: "←"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 690,
+                                            lineNumber: 694,
                                             columnNumber: 13
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(SilverButton, {
@@ -724,7 +724,7 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                             children: "←"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 703,
+                                            lineNumber: 707,
                                             columnNumber: 13
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(SilverButton, {
@@ -735,36 +735,36 @@ function BruteHeaderA({ evenementNaam, evenementDatum, discipline, klasseMM, par
                                             children: "→"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 706,
+                                            lineNumber: 710,
                                             columnNumber: 13
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 687,
+                                    lineNumber: 691,
                                     columnNumber: 11
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                            lineNumber: 672,
+                            lineNumber: 676,
                             columnNumber: 9
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                    lineNumber: 550,
+                    lineNumber: 554,
                     columnNumber: 7
                 }, this)
             ]
         }, void 0, true, {
             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-            lineNumber: 510,
+            lineNumber: 514,
             columnNumber: 7
         }, this)
     }, void 0, false, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 509,
+        lineNumber: 513,
         columnNumber: 5
     }, this);
 }
@@ -800,7 +800,7 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                 className: `h-3.5 w-3.5 rounded-sm ${dot}`
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 769,
+                                lineNumber: 773,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -808,13 +808,13 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                 children: label
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 770,
+                                lineNumber: 774,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 768,
+                        lineNumber: 772,
                         columnNumber: 9
                     }, this),
                     canEdit ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -829,17 +829,17 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                         children: "✎ Bewerken"
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 774,
+                        lineNumber: 778,
                         columnNumber: 11
                     }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {}, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 787,
+                        lineNumber: 791,
                         columnNumber: 11
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 758,
+                lineNumber: 762,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -857,7 +857,7 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                         children: naam || "-"
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 795,
+                        lineNumber: 799,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -865,7 +865,7 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                         children: gym || "-"
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 801,
+                        lineNumber: 805,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -877,13 +877,13 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                 children: va || "-"
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 803,
+                                lineNumber: 807,
                                 columnNumber: 18
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 802,
+                        lineNumber: 806,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -897,38 +897,12 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: "Licentie:"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 808,
+                                        lineNumber: 812,
                                         columnNumber: 13
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
                                         text: (lic ?? "Onbekend").toUpperCase(),
                                         tone: lic === "ja" ? "ok" : lic === "nee" ? "err" : "warn",
-                                        invert: true
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 809,
-                                        columnNumber: 13
-                                    }, this)
-                                ]
-                            }, void 0, true, {
-                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 807,
-                                columnNumber: 11
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "flex items-center gap-2",
-                                children: [
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                        className: "text-xs text-white/60",
-                                        children: "Startverbod:"
-                                    }, void 0, false, {
-                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 812,
-                                        columnNumber: 13
-                                    }, this),
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-                                        text: (sv ?? "Onbekend").toUpperCase(),
-                                        tone: sv === "nee" ? "ok" : sv === "ja" ? "err" : "warn",
                                         invert: true
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
@@ -940,11 +914,37 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
                                 lineNumber: 811,
                                 columnNumber: 11
+                            }, this),
+                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                className: "flex items-center gap-2",
+                                children: [
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                        className: "text-xs text-white/60",
+                                        children: "Startverbod:"
+                                    }, void 0, false, {
+                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                        lineNumber: 816,
+                                        columnNumber: 13
+                                    }, this),
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
+                                        text: (sv ?? "Onbekend").toUpperCase(),
+                                        tone: sv === "nee" ? "ok" : sv === "ja" ? "err" : "warn",
+                                        invert: true
+                                    }, void 0, false, {
+                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                        lineNumber: 817,
+                                        columnNumber: 13
+                                    }, this)
+                                ]
+                            }, void 0, true, {
+                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                lineNumber: 815,
+                                columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 806,
+                        lineNumber: 810,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -958,13 +958,13 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: fmtDateOnlyNL(dob)
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 819,
+                                        lineNumber: 823,
                                         columnNumber: 28
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 818,
+                                lineNumber: 822,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -975,13 +975,13 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: leeftijdEvent
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 822,
+                                        lineNumber: 826,
                                         columnNumber: 31
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 821,
+                                lineNumber: 825,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -992,13 +992,13 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: geslacht || "-"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 825,
+                                        lineNumber: 829,
                                         columnNumber: 23
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 824,
+                                lineNumber: 828,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1009,19 +1009,19 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: klasseMM || "-"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 828,
+                                        lineNumber: 832,
                                         columnNumber: 21
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 827,
+                                lineNumber: 831,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 817,
+                        lineNumber: 821,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1037,7 +1037,7 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                 children: "Extra / nulmeting"
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 840,
+                                lineNumber: 844,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1049,7 +1049,7 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: nulKlasse || "-"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 842,
+                                        lineNumber: 846,
                                         columnNumber: 33
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -1057,7 +1057,7 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: " • "
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 843,
+                                        lineNumber: 847,
                                         columnNumber: 13
                                     }, this),
                                     "Totaal (nulmeting): ",
@@ -1066,13 +1066,13 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                         children: nulTotaal ?? "-"
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 844,
+                                        lineNumber: 848,
                                         columnNumber: 33
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 841,
+                                lineNumber: 845,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1080,25 +1080,25 @@ function FighterMetalCard({ side, naam, gym, va, lic, sv, dob, leeftijdEvent, ge
                                 children: nulOpmerking ? nulOpmerking : "-"
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 846,
+                                lineNumber: 850,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 832,
+                        lineNumber: 836,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 791,
+                lineNumber: 795,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 756,
+        lineNumber: 760,
         columnNumber: 5
     }, this);
 }
@@ -1322,7 +1322,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                     children: "Datum"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 1050,
+                                    lineNumber: 1054,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -1330,7 +1330,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                     children: "Discipline"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 1051,
+                                    lineNumber: 1055,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -1338,7 +1338,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                     children: "Klasse"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 1052,
+                                    lineNumber: 1056,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -1346,18 +1346,18 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                     children: "Uitslag"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 1053,
+                                    lineNumber: 1057,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                            lineNumber: 1049,
+                            lineNumber: 1053,
                             columnNumber: 11
                         }, this)
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 1048,
+                        lineNumber: 1052,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tbody", {
@@ -1371,12 +1371,12 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                         children: "Geen uitslagen gevonden."
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 1062,
+                                        lineNumber: 1066,
                                         columnNumber: 17
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 1061,
+                                    lineNumber: 1065,
                                     columnNumber: 15
                                 }, this),
                                 Array.from({
@@ -1388,7 +1388,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1068,
+                                                lineNumber: 1072,
                                                 columnNumber: 19
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1396,7 +1396,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1069,
+                                                lineNumber: 1073,
                                                 columnNumber: 19
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1404,7 +1404,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1070,
+                                                lineNumber: 1074,
                                                 columnNumber: 19
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1412,13 +1412,13 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1071,
+                                                lineNumber: 1075,
                                                 columnNumber: 19
                                             }, this)
                                         ]
                                     }, `empty-${idx}`, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 1067,
+                                        lineNumber: 1071,
                                         columnNumber: 17
                                     }, this))
                             ]
@@ -1432,7 +1432,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: r.datum ?? "-"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1080,
+                                                lineNumber: 1084,
                                                 columnNumber: 21
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1440,7 +1440,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: r.discipline ?? "-"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1081,
+                                                lineNumber: 1085,
                                                 columnNumber: 21
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1448,7 +1448,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: r.klasse ?? "-"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1082,
+                                                lineNumber: 1086,
                                                 columnNumber: 21
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1456,13 +1456,13 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: r.uitslag ?? "-"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1083,
+                                                lineNumber: 1087,
                                                 columnNumber: 21
                                             }, this)
                                         ]
                                     }, `${r.datum ?? "d"}-${idx}`, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 1079,
+                                        lineNumber: 1083,
                                         columnNumber: 19
                                     }, this);
                                 }),
@@ -1476,7 +1476,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1091,
+                                                lineNumber: 1095,
                                                 columnNumber: 25
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1484,7 +1484,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1092,
+                                                lineNumber: 1096,
                                                 columnNumber: 25
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1492,7 +1492,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1093,
+                                                lineNumber: 1097,
                                                 columnNumber: 25
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -1500,13 +1500,13 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                                                 children: " "
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 1094,
+                                                lineNumber: 1098,
                                                 columnNumber: 25
                                             }, this)
                                         ]
                                     }, `pad-${i}`, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 1090,
+                                        lineNumber: 1094,
                                         columnNumber: 23
                                     }, this);
                                 }) : null
@@ -1514,13 +1514,13 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                         }, void 0, true)
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 1058,
+                        lineNumber: 1062,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 1046,
+                lineNumber: 1050,
                 columnNumber: 7
             }, this),
             rows.length > pageSize && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1535,7 +1535,7 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 1106,
+                        lineNumber: 1110,
                         columnNumber: 11
                     }, this),
                     hasMore ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -1545,26 +1545,26 @@ function UitslagenTable({ rows, pageSize = 6 }) {
                         children: "Verder"
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 1110,
+                        lineNumber: 1114,
                         columnNumber: 13
                     }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
                         className: "text-xs text-zinc-500",
                         children: "Einde"
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 1118,
+                        lineNumber: 1122,
                         columnNumber: 13
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 1105,
+                lineNumber: 1109,
                 columnNumber: 9
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 1045,
+        lineNumber: 1049,
         columnNumber: 5
     }, this);
 }
@@ -1624,6 +1624,11 @@ function PartijDetailPage() {
     const [rescraping, setRescraping] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
     const [sendingDisp, setSendingDisp] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
     const [dispSent, setDispSent] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
+    const [manualMeldingOpen, setManualMeldingOpen] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
+    const [manualMeldingSaving, setManualMeldingSaving] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
+    const [manualMeldingText, setManualMeldingText] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
+    const [manualMeldingResultaat, setManualMeldingResultaat] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("ACTIE");
+    const [manualMeldingHoek, setManualMeldingHoek] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
     // ✅ Rollen
     const [roleNames, setRoleNames] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])([]);
     const isSuperadmin = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useMemo"])({
@@ -1793,6 +1798,54 @@ function PartijDetailPage() {
         const rows = resRows ?? [];
         setRegels(rows);
         primeNoteDrafts(rows);
+    }
+    async function addManualMelding() {
+        if (!run?.id || !partijNr || !matchmakingId) return;
+        const boodschap = String(manualMeldingText ?? "").trim();
+        if (!boodschap) {
+            setError("Vul eerst een melding in.");
+            return;
+        }
+        setManualMeldingSaving(true);
+        setError(null);
+        setMsg("");
+        try {
+            const resultaat = manualMeldingResultaat;
+            const severity = resultaat === "AFGEKEURD" ? "error" : resultaat === "DISPENSATIE" ? "warning" : "warning";
+            const payload = {
+                controle_run_id: run.id,
+                run_id: run.id,
+                matchmaking_id: String(matchmakingId),
+                partij_nr: Number(partijNr),
+                bout_id: String(ctx?.bout_id ?? ctx?.id ?? ""),
+                rule: "Handmatige melding",
+                rule_code: "HANDMATIGE_MELDING",
+                resultaat,
+                original_resultaat: resultaat,
+                boodschap,
+                severity,
+                hoek: manualMeldingHoek || null,
+                review_status: "open",
+                reviewed_by: null,
+                reviewed_at: null,
+                actie_status: null,
+                actie: null,
+                aantekeningen: null,
+                review_note: null
+            };
+            const { error: insErr } = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$supabaseClient$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["supabase"].from("controle_resultaten").insert(payload);
+            if (insErr) throw insErr;
+            setManualMeldingText("");
+            setManualMeldingResultaat("ACTIE");
+            setManualMeldingHoek("");
+            setManualMeldingOpen(false);
+            await reloadRegels();
+            setMsg("✅ Handmatige melding opgeslagen.");
+        } catch (e) {
+            setError(e?.message ?? String(e));
+        } finally{
+            setManualMeldingSaving(false);
+        }
     }
     async function approveSingle(resultaatId) {
         if (!resultaatId) return;
@@ -2635,17 +2688,17 @@ function PartijDetailPage() {
                     children: children
                 }, void 0, false, {
                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                    lineNumber: 2173,
+                    lineNumber: 2244,
                     columnNumber: 9
                 }, this)
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 2172,
+                lineNumber: 2243,
                 columnNumber: 7
             }, this)
         }, void 0, false, {
             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-            lineNumber: 2169,
+            lineNumber: 2240,
             columnNumber: 5
         }, this);
     if (loading) {
@@ -2655,12 +2708,12 @@ function PartijDetailPage() {
                 children: "Laden…"
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 2181,
+                lineNumber: 2252,
                 columnNumber: 9
             }, this)
         }, void 0, false, {
             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-            lineNumber: 2180,
+            lineNumber: 2251,
             columnNumber: 7
         }, this);
     }
@@ -2674,7 +2727,7 @@ function PartijDetailPage() {
                         children: error
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 2190,
+                        lineNumber: 2261,
                         columnNumber: 11
                     }, this),
                     msg ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2682,18 +2735,18 @@ function PartijDetailPage() {
                         children: msg
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 2191,
+                        lineNumber: 2262,
                         columnNumber: 18
                     }, this) : null
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 2189,
+                lineNumber: 2260,
                 columnNumber: 9
             }, this)
         }, void 0, false, {
             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-            lineNumber: 2188,
+            lineNumber: 2259,
             columnNumber: 7
         }, this);
     }
@@ -2704,12 +2757,12 @@ function PartijDetailPage() {
                 children: "Geen context gevonden."
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 2200,
+                lineNumber: 2271,
                 columnNumber: 9
             }, this)
         }, void 0, false, {
             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-            lineNumber: 2199,
+            lineNumber: 2270,
             columnNumber: 7
         }, this);
     }
@@ -2733,7 +2786,7 @@ function PartijDetailPage() {
                         onNext: ()=>nav.next && router.push(`/dashboard/admin/controle/${matchmakingId}/${nav.next}`)
                     }, void 0, false, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 2210,
+                        lineNumber: 2281,
                         columnNumber: 11
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2769,12 +2822,12 @@ function PartijDetailPage() {
                                             onEdit: ()=>openEdit("rood")
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2240,
+                                            lineNumber: 2311,
                                             columnNumber: 17
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 2239,
+                                        lineNumber: 2310,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2797,7 +2850,7 @@ function PartijDetailPage() {
                                                         }
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2266,
+                                                        lineNumber: 2337,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2809,7 +2862,7 @@ function PartijDetailPage() {
                                                         }
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2284,
+                                                        lineNumber: 2355,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2821,7 +2874,7 @@ function PartijDetailPage() {
                                                         }
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2295,
+                                                        lineNumber: 2366,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2846,18 +2899,18 @@ function PartijDetailPage() {
                                                             }
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2316,
+                                                            lineNumber: 2387,
                                                             columnNumber: 21
                                                         }, this)
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2306,
+                                                        lineNumber: 2377,
                                                         columnNumber: 19
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2261,
+                                                lineNumber: 2332,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2869,7 +2922,7 @@ function PartijDetailPage() {
                                                         dot: "orange"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2328,
+                                                        lineNumber: 2399,
                                                         columnNumber: 19
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2880,7 +2933,7 @@ function PartijDetailPage() {
                                                                 children: "Ronde tijd"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2330,
+                                                                lineNumber: 2401,
                                                                 columnNumber: 21
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2892,7 +2945,7 @@ function PartijDetailPage() {
                                                                 })()
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2331,
+                                                                lineNumber: 2402,
                                                                 columnNumber: 21
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2900,7 +2953,7 @@ function PartijDetailPage() {
                                                                 children: "Discipline"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2339,
+                                                                lineNumber: 2410,
                                                                 columnNumber: 21
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2908,7 +2961,7 @@ function PartijDetailPage() {
                                                                 children: header.discipline ?? "-"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2340,
+                                                                lineNumber: 2411,
                                                                 columnNumber: 21
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2916,7 +2969,7 @@ function PartijDetailPage() {
                                                                 children: "Klasse"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2342,
+                                                                lineNumber: 2413,
                                                                 columnNumber: 21
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2924,25 +2977,25 @@ function PartijDetailPage() {
                                                                 children: String(header.klasseMM ?? "-")
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2343,
+                                                                lineNumber: 2414,
                                                                 columnNumber: 21
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2329,
+                                                        lineNumber: 2400,
                                                         columnNumber: 19
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2327,
+                                                lineNumber: 2398,
                                                 columnNumber: 17
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 2260,
+                                        lineNumber: 2331,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2965,18 +3018,18 @@ function PartijDetailPage() {
                                             onEdit: ()=>openEdit("blauw")
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2350,
+                                            lineNumber: 2421,
                                             columnNumber: 17
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 2349,
+                                        lineNumber: 2420,
                                         columnNumber: 15
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 2237,
+                                lineNumber: 2308,
                                 columnNumber: 13
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3001,7 +3054,7 @@ function PartijDetailPage() {
                                                             right: `${uitslagenRood.length} regels`
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2376,
+                                                            lineNumber: 2447,
                                                             columnNumber: 19
                                                         }, this),
                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3012,7 +3065,7 @@ function PartijDetailPage() {
                                                                     pageSize: 6
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                    lineNumber: 2379,
+                                                                    lineNumber: 2450,
                                                                     columnNumber: 21
                                                                 }, this),
                                                                 recordRood?.demoAsDraw ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3026,19 +3079,19 @@ function PartijDetailPage() {
                                                                     ]
                                                                 }, void 0, true, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                    lineNumber: 2381,
+                                                                    lineNumber: 2452,
                                                                     columnNumber: 23
                                                                 }, this) : null
                                                             ]
                                                         }, void 0, true, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2378,
+                                                            lineNumber: 2449,
                                                             columnNumber: 19
                                                         }, this)
                                                     ]
                                                 }, void 0, true, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 2375,
+                                                    lineNumber: 2446,
                                                     columnNumber: 17
                                                 }, this),
                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3057,12 +3110,12 @@ function PartijDetailPage() {
                                                                 invert: true
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2393,
+                                                                lineNumber: 2464,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2389,
+                                                            lineNumber: 2460,
                                                             columnNumber: 19
                                                         }, this),
                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3070,19 +3123,19 @@ function PartijDetailPage() {
                                                             children: keurmerkInfo?.rood.reason ?? "-"
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2412,
+                                                            lineNumber: 2483,
                                                             columnNumber: 19
                                                         }, this)
                                                     ]
                                                 }, void 0, true, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 2388,
+                                                    lineNumber: 2459,
                                                     columnNumber: 17
                                                 }, this)
                                             ]
                                         }, void 0, true, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2374,
+                                            lineNumber: 2445,
                                             columnNumber: 15
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3101,7 +3154,7 @@ function PartijDetailPage() {
                                                             right: `${uitslagenBlauw.length} regels`
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2419,
+                                                            lineNumber: 2490,
                                                             columnNumber: 19
                                                         }, this),
                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3112,7 +3165,7 @@ function PartijDetailPage() {
                                                                     pageSize: 6
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                    lineNumber: 2422,
+                                                                    lineNumber: 2493,
                                                                     columnNumber: 21
                                                                 }, this),
                                                                 recordBlauw?.demoAsDraw ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3126,19 +3179,19 @@ function PartijDetailPage() {
                                                                     ]
                                                                 }, void 0, true, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                    lineNumber: 2424,
+                                                                    lineNumber: 2495,
                                                                     columnNumber: 23
                                                                 }, this) : null
                                                             ]
                                                         }, void 0, true, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2421,
+                                                            lineNumber: 2492,
                                                             columnNumber: 19
                                                         }, this)
                                                     ]
                                                 }, void 0, true, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 2418,
+                                                    lineNumber: 2489,
                                                     columnNumber: 17
                                                 }, this),
                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3157,12 +3210,12 @@ function PartijDetailPage() {
                                                                 invert: true
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2436,
+                                                                lineNumber: 2507,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2432,
+                                                            lineNumber: 2503,
                                                             columnNumber: 19
                                                         }, this),
                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3170,30 +3223,30 @@ function PartijDetailPage() {
                                                             children: keurmerkInfo?.blauw.reason ?? "-"
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2455,
+                                                            lineNumber: 2526,
                                                             columnNumber: 19
                                                         }, this)
                                                     ]
                                                 }, void 0, true, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 2431,
+                                                    lineNumber: 2502,
                                                     columnNumber: 17
                                                 }, this)
                                             ]
                                         }, void 0, true, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2417,
+                                            lineNumber: 2488,
                                             columnNumber: 15
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2372,
+                                    lineNumber: 2443,
                                     columnNumber: 13
                                 }, this)
                             }, void 0, false, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 2371,
+                                lineNumber: 2442,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3209,12 +3262,12 @@ function PartijDetailPage() {
                                             invert: true
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2463,
+                                            lineNumber: 2534,
                                             columnNumber: 82
                                         }, void 0)
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 2463,
+                                        lineNumber: 2534,
                                         columnNumber: 13
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3229,7 +3282,7 @@ function PartijDetailPage() {
                                                         children: "LEEFTIJD"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2468,
+                                                        lineNumber: 2539,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3242,13 +3295,13 @@ function PartijDetailPage() {
                                                                 children: verschillen?.leeftijdVerschilTekst != null ? verschillen.leeftijdVerschilTekst : "-"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2471,
+                                                                lineNumber: 2542,
                                                                 columnNumber: 19
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2469,
+                                                        lineNumber: 2540,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3262,13 +3315,13 @@ function PartijDetailPage() {
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2473,
+                                                        lineNumber: 2544,
                                                         columnNumber: 17
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2467,
+                                                lineNumber: 2538,
                                                 columnNumber: 15
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3280,7 +3333,7 @@ function PartijDetailPage() {
                                                         children: "PARTIJEN"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2480,
+                                                        lineNumber: 2551,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3292,7 +3345,7 @@ function PartijDetailPage() {
                                                                 children: verschillen?.roodPartijen ?? "-"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2482,
+                                                                lineNumber: 2553,
                                                                 columnNumber: 25
                                                             }, this),
                                                             " • Blauw:",
@@ -3302,13 +3355,13 @@ function PartijDetailPage() {
                                                                 children: verschillen?.blauwPartijen ?? "-"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2483,
+                                                                lineNumber: 2554,
                                                                 columnNumber: 19
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2481,
+                                                        lineNumber: 2552,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3320,13 +3373,13 @@ function PartijDetailPage() {
                                                                 children: verschillen?.partijenVerschil ?? "-"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2486,
+                                                                lineNumber: 2557,
                                                                 columnNumber: 29
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2485,
+                                                        lineNumber: 2556,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3339,7 +3392,7 @@ function PartijDetailPage() {
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2488,
+                                                        lineNumber: 2559,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3351,7 +3404,7 @@ function PartijDetailPage() {
                                                                 children: recordRood?.winPct != null ? `${recordRood.winPct}%` : "-"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2492,
+                                                                lineNumber: 2563,
                                                                 columnNumber: 32
                                                             }, this),
                                                             " • Blauw",
@@ -3361,7 +3414,7 @@ function PartijDetailPage() {
                                                                 children: recordBlauw?.winPct != null ? `${recordBlauw.winPct}%` : "-"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2493,
+                                                                lineNumber: 2564,
                                                                 columnNumber: 19
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -3369,13 +3422,13 @@ function PartijDetailPage() {
                                                                 children: " (demo & no contest niet mee)"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2494,
+                                                                lineNumber: 2565,
                                                                 columnNumber: 19
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2491,
+                                                        lineNumber: 2562,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3383,13 +3436,13 @@ function PartijDetailPage() {
                                                         children: "(Fightpaspoort totaal, demo’s 3=1 voor verschil.)"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2496,
+                                                        lineNumber: 2567,
                                                         columnNumber: 17
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2479,
+                                                lineNumber: 2550,
                                                 columnNumber: 15
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3404,7 +3457,7 @@ function PartijDetailPage() {
                                                                 children: "GEWICHT"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2502,
+                                                                lineNumber: 2573,
                                                                 columnNumber: 19
                                                             }, this),
                                                             (()=>{
@@ -3418,14 +3471,14 @@ function PartijDetailPage() {
                                                                     tone: !hasAny ? "info" : okUnder ? "ok" : "warn"
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                    lineNumber: 2509,
+                                                                    lineNumber: 2580,
                                                                     columnNumber: 28
                                                                 }, this);
                                                             })()
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2501,
+                                                        lineNumber: 2572,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3440,7 +3493,7 @@ function PartijDetailPage() {
                                                                         children: gewichtInfo?.rKg != null ? `${gewichtInfo.rKg.toFixed(1)} kg` : "-"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2516,
+                                                                        lineNumber: 2587,
                                                                         columnNumber: 21
                                                                     }, this),
                                                                     gewichtInfo?.rKlasse ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -3451,13 +3504,13 @@ function PartijDetailPage() {
                                                                         ]
                                                                     }, void 0, true, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2517,
+                                                                        lineNumber: 2588,
                                                                         columnNumber: 45
                                                                     }, this) : null
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2514,
+                                                                lineNumber: 2585,
                                                                 columnNumber: 19
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3469,7 +3522,7 @@ function PartijDetailPage() {
                                                                         children: gewichtInfo?.bKg != null ? `${gewichtInfo.bKg.toFixed(1)} kg` : "-"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2521,
+                                                                        lineNumber: 2592,
                                                                         columnNumber: 21
                                                                     }, this),
                                                                     gewichtInfo?.bKlasse ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -3480,13 +3533,13 @@ function PartijDetailPage() {
                                                                         ]
                                                                     }, void 0, true, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2522,
+                                                                        lineNumber: 2593,
                                                                         columnNumber: 45
                                                                     }, this) : null
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2519,
+                                                                lineNumber: 2590,
                                                                 columnNumber: 19
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3498,7 +3551,7 @@ function PartijDetailPage() {
                                                                         children: gewichtInfo?.klasseMaxKg != null ? `${gewichtInfo.klasseMaxKg.toFixed(1)} kg` : "-"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2526,
+                                                                        lineNumber: 2597,
                                                                         columnNumber: 21
                                                                     }, this),
                                                                     gewichtInfo?.klasseNaam ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -3511,13 +3564,13 @@ function PartijDetailPage() {
                                                                         ]
                                                                     }, void 0, true, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2528,
+                                                                        lineNumber: 2599,
                                                                         columnNumber: 23
                                                                     }, this) : null
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2524,
+                                                                lineNumber: 2595,
                                                                 columnNumber: 19
                                                             }, this),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3528,37 +3581,37 @@ function PartijDetailPage() {
                                                                         children: gewichtInfo?.diffKg != null ? `${gewichtInfo.diffKg.toFixed(1)} kg` : "-"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2536,
+                                                                        lineNumber: 2607,
                                                                         columnNumber: 31
                                                                     }, this)
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2535,
+                                                                lineNumber: 2606,
                                                                 columnNumber: 19
                                                             }, this)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2513,
+                                                        lineNumber: 2584,
                                                         columnNumber: 17
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2500,
+                                                lineNumber: 2571,
                                                 columnNumber: 15
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 2465,
+                                        lineNumber: 2536,
                                         columnNumber: 13
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 2462,
+                                lineNumber: 2533,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3573,26 +3626,259 @@ function PartijDetailPage() {
                                         children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(PlateHeader, {
                                             title: "MELDINGEN — RULES",
                                             dot: "orange",
-                                            right: `${regels.length} meldingen`
+                                            right: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "flex items-center gap-2",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                        children: `${regels.length} meldingen`
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                        lineNumber: 2622,
+                                                        columnNumber: 21
+                                                    }, void 0),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+                                                        type: "button",
+                                                        onClick: ()=>setManualMeldingOpen((v)=>!v),
+                                                        className: "inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/20 bg-[var(--brand-orange)] text-black font-extrabold leading-none shadow hover:opacity-90",
+                                                        title: "Handmatige melding toevoegen",
+                                                        children: "+"
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                        lineNumber: 2623,
+                                                        columnNumber: 21
+                                                    }, void 0)
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                lineNumber: 2621,
+                                                columnNumber: 19
+                                            }, void 0)
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2546,
+                                            lineNumber: 2617,
                                             columnNumber: 15
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 2545,
+                                        lineNumber: 2616,
                                         columnNumber: 13
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: "p-4 pt-2",
                                         children: [
+                                            manualMeldingOpen ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "mb-4 rounded-xl border border-zinc-300 bg-zinc-100 p-3 shadow-sm",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "mb-3 flex flex-wrap items-center gap-2",
+                                                        children: [
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                className: "text-sm font-extrabold tracking-wide text-zinc-900",
+                                                                children: "Handmatige melding toevoegen"
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                lineNumber: 2640,
+                                                                columnNumber: 21
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                className: "rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] font-bold text-white",
+                                                                children: "controle_resultaten"
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                lineNumber: 2641,
+                                                                columnNumber: 21
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                        lineNumber: 2639,
+                                                        columnNumber: 19
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "grid gap-3 md:grid-cols-[170px_170px_1fr]",
+                                                        children: [
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("label", {
+                                                                        className: "mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-700",
+                                                                        children: "Resultaat"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                        lineNumber: 2646,
+                                                                        columnNumber: 23
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("select", {
+                                                                        value: manualMeldingResultaat,
+                                                                        onChange: (e)=>setManualMeldingResultaat(e.target.value),
+                                                                        className: "w-full rounded-md border border-zinc-400 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40",
+                                                                        children: [
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                                                                value: "ACTIE",
+                                                                                children: "ACTIE"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                                lineNumber: 2652,
+                                                                                columnNumber: 25
+                                                                            }, this),
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                                                                value: "DISPENSATIE",
+                                                                                children: "DISPENSATIE"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                                lineNumber: 2653,
+                                                                                columnNumber: 25
+                                                                            }, this),
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                                                                value: "AFGEKEURD",
+                                                                                children: "AFGEKEURD"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                                lineNumber: 2654,
+                                                                                columnNumber: 25
+                                                                            }, this)
+                                                                        ]
+                                                                    }, void 0, true, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                        lineNumber: 2647,
+                                                                        columnNumber: 23
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                lineNumber: 2645,
+                                                                columnNumber: 21
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("label", {
+                                                                        className: "mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-700",
+                                                                        children: "Hoek"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                        lineNumber: 2659,
+                                                                        columnNumber: 23
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("select", {
+                                                                        value: manualMeldingHoek,
+                                                                        onChange: (e)=>setManualMeldingHoek(e.target.value),
+                                                                        className: "w-full rounded-md border border-zinc-400 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40",
+                                                                        children: [
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                                                                value: "",
+                                                                                children: "Geen / partijbreed"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                                lineNumber: 2665,
+                                                                                columnNumber: 25
+                                                                            }, this),
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                                                                value: "rood",
+                                                                                children: "Rood"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                                lineNumber: 2666,
+                                                                                columnNumber: 25
+                                                                            }, this),
+                                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                                                                value: "blauw",
+                                                                                children: "Blauw"
+                                                                            }, void 0, false, {
+                                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                                lineNumber: 2667,
+                                                                                columnNumber: 25
+                                                                            }, this)
+                                                                        ]
+                                                                    }, void 0, true, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                        lineNumber: 2660,
+                                                                        columnNumber: 23
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                lineNumber: 2658,
+                                                                columnNumber: 21
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                                children: [
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("label", {
+                                                                        className: "mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-700",
+                                                                        children: "Melding"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                        lineNumber: 2672,
+                                                                        columnNumber: 23
+                                                                    }, this),
+                                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("textarea", {
+                                                                        value: manualMeldingText,
+                                                                        onChange: (e)=>setManualMeldingText(e.target.value),
+                                                                        placeholder: "Typ hier je eigen melding voor rapport, Excel en partijdetail…",
+                                                                        spellCheck: false,
+                                                                        className: "min-h-[92px] w-full rounded-md border border-zinc-400 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                                                                    }, void 0, false, {
+                                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                        lineNumber: 2673,
+                                                                        columnNumber: 23
+                                                                    }, this)
+                                                                ]
+                                                            }, void 0, true, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                lineNumber: 2671,
+                                                                columnNumber: 21
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                        lineNumber: 2644,
+                                                        columnNumber: 19
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "mt-3 flex flex-wrap items-center gap-2",
+                                                        children: [
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+                                                                type: "button",
+                                                                onClick: addManualMelding,
+                                                                disabled: manualMeldingSaving,
+                                                                className: "inline-flex items-center rounded-md bg-[var(--brand-orange)] px-4 py-2 text-sm font-extrabold text-black hover:opacity-90 disabled:opacity-50",
+                                                                children: manualMeldingSaving ? "Opslaan…" : "Opslaan in controle_resultaten"
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                lineNumber: 2684,
+                                                                columnNumber: 21
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+                                                                type: "button",
+                                                                onClick: ()=>{
+                                                                    setManualMeldingOpen(false);
+                                                                    setManualMeldingText("");
+                                                                    setManualMeldingResultaat("ACTIE");
+                                                                    setManualMeldingHoek("");
+                                                                },
+                                                                className: "inline-flex items-center rounded-md bg-zinc-800 px-4 py-2 text-sm font-semibold text-white hover:opacity-90",
+                                                                children: "Sluiten"
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                                lineNumber: 2692,
+                                                                columnNumber: 21
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                        lineNumber: 2683,
+                                                        columnNumber: 19
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
+                                                lineNumber: 2638,
+                                                columnNumber: 17
+                                            }, this) : null,
                                             regels.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                                 className: "text-sm text-zinc-700",
                                                 children: "Geen meldingen."
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2551,
+                                                lineNumber: 2709,
                                                 columnNumber: 17
                                             }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                                 className: "overflow-auto rounded-md border-2 border-zinc-300 bg-white",
@@ -3611,7 +3897,7 @@ function PartijDetailPage() {
                                                                         children: "Resultaat"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2558,
+                                                                        lineNumber: 2716,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -3619,7 +3905,7 @@ function PartijDetailPage() {
                                                                         children: "Regel"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2559,
+                                                                        lineNumber: 2717,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -3627,7 +3913,7 @@ function PartijDetailPage() {
                                                                         children: "Reden"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2560,
+                                                                        lineNumber: 2718,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -3635,7 +3921,7 @@ function PartijDetailPage() {
                                                                         children: "Aantekeningen"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2561,
+                                                                        lineNumber: 2719,
                                                                         columnNumber: 25
                                                                     }, this),
                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("th", {
@@ -3643,18 +3929,18 @@ function PartijDetailPage() {
                                                                         children: "Actie"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                        lineNumber: 2562,
+                                                                        lineNumber: 2720,
                                                                         columnNumber: 25
                                                                     }, this)
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                lineNumber: 2557,
+                                                                lineNumber: 2715,
                                                                 columnNumber: 23
                                                             }, this)
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2556,
+                                                            lineNumber: 2714,
                                                             columnNumber: 21
                                                         }, this),
                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("tbody", {
@@ -3675,7 +3961,7 @@ function PartijDetailPage() {
                                                                                         invert: true
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                        lineNumber: 2576,
+                                                                                        lineNumber: 2734,
                                                                                         columnNumber: 33
                                                                                     }, this),
                                                                                     !isApprovedOverride(r) && r.original_resultaat && String(r.original_resultaat).toLowerCase() !== String(r.resultaat ?? "").toLowerCase() ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -3686,7 +3972,7 @@ function PartijDetailPage() {
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                        lineNumber: 2579,
+                                                                                        lineNumber: 2737,
                                                                                         columnNumber: 35
                                                                                     }, this) : null,
                                                                                     r.review_status ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -3697,7 +3983,7 @@ function PartijDetailPage() {
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                        lineNumber: 2584,
+                                                                                        lineNumber: 2742,
                                                                                         columnNumber: 35
                                                                                     }, this) : null,
                                                                                     r.reviewed_by || r.reviewed_at ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -3708,18 +3994,18 @@ function PartijDetailPage() {
                                                                                         ]
                                                                                     }, void 0, true, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                        lineNumber: 2589,
+                                                                                        lineNumber: 2747,
                                                                                         columnNumber: 35
                                                                                     }, this) : null
                                                                                 ]
                                                                             }, void 0, true, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                lineNumber: 2575,
+                                                                                lineNumber: 2733,
                                                                                 columnNumber: 31
                                                                             }, this)
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                            lineNumber: 2574,
+                                                                            lineNumber: 2732,
                                                                             columnNumber: 29
                                                                         }, this),
                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -3727,7 +4013,7 @@ function PartijDetailPage() {
                                                                             children: r.rule_code ?? r.rule ?? "-"
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                            lineNumber: 2597,
+                                                                            lineNumber: 2755,
                                                                             columnNumber: 29
                                                                         }, this),
                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -3735,7 +4021,7 @@ function PartijDetailPage() {
                                                                             children: displayBoodschap(r)
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                            lineNumber: 2599,
+                                                                            lineNumber: 2757,
                                                                             columnNumber: 29
                                                                         }, this),
                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -3755,12 +4041,12 @@ function PartijDetailPage() {
                                                                                 className: "w-full min-h-[54px] px-2 py-2 rounded border border-zinc-400 bg-zinc-50 text-zinc-900 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                                                                             }, void 0, false, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                lineNumber: 2602,
+                                                                                lineNumber: 2760,
                                                                                 columnNumber: 31
                                                                             }, this)
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                            lineNumber: 2601,
+                                                                            lineNumber: 2759,
                                                                             columnNumber: 29
                                                                         }, this),
                                                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("td", {
@@ -3776,7 +4062,7 @@ function PartijDetailPage() {
                                                                                         children: "Goedkeuren"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                        lineNumber: 2621,
+                                                                                        lineNumber: 2779,
                                                                                         columnNumber: 35
                                                                                     }, this),
                                                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -3787,48 +4073,48 @@ function PartijDetailPage() {
                                                                                         children: "Afkeuren"
                                                                                     }, void 0, false, {
                                                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                        lineNumber: 2630,
+                                                                                        lineNumber: 2788,
                                                                                         columnNumber: 35
                                                                                     }, this)
                                                                                 ]
                                                                             }, void 0, true, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                lineNumber: 2620,
+                                                                                lineNumber: 2778,
                                                                                 columnNumber: 33
                                                                             }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
                                                                                 className: "text-xs text-zinc-400",
                                                                                 children: "—"
                                                                             }, void 0, false, {
                                                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                                lineNumber: 2640,
+                                                                                lineNumber: 2798,
                                                                                 columnNumber: 33
                                                                             }, this)
                                                                         }, void 0, false, {
                                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                            lineNumber: 2618,
+                                                                            lineNumber: 2776,
                                                                             columnNumber: 29
                                                                         }, this)
                                                                     ]
                                                                 }, r.id, true, {
                                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                                    lineNumber: 2573,
+                                                                    lineNumber: 2731,
                                                                     columnNumber: 27
                                                                 }, this);
                                                             })
                                                         }, void 0, false, {
                                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                            lineNumber: 2567,
+                                                            lineNumber: 2725,
                                                             columnNumber: 21
                                                         }, this)
                                                     ]
                                                 }, void 0, true, {
                                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                    lineNumber: 2554,
+                                                    lineNumber: 2712,
                                                     columnNumber: 19
                                                 }, this)
                                             }, void 0, false, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2553,
+                                                lineNumber: 2711,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3842,7 +4128,7 @@ function PartijDetailPage() {
                                                         children: rescraping ? "Fightpaspoort check…" : "Controleer Fightpaspoort"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2653,
+                                                        lineNumber: 2811,
                                                         columnNumber: 17
                                                     }, this),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -3853,37 +4139,37 @@ function PartijDetailPage() {
                                                         children: sendingDisp ? "Bezig… (versturen)" : dispSent ? "Verstuurd ✓" : "Stuur naar dispensatie"
                                                     }, void 0, false, {
                                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                        lineNumber: 2662,
+                                                        lineNumber: 2820,
                                                         columnNumber: 17
                                                     }, this)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                                lineNumber: 2652,
+                                                lineNumber: 2810,
                                                 columnNumber: 15
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                        lineNumber: 2549,
+                                        lineNumber: 2636,
                                         columnNumber: 13
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                lineNumber: 2544,
+                                lineNumber: 2615,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                        lineNumber: 2226,
+                        lineNumber: 2297,
                         columnNumber: 11
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 2207,
+                lineNumber: 2278,
                 columnNumber: 7
             }, this),
             editOpen ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3902,7 +4188,7 @@ function PartijDetailPage() {
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2685,
+                                    lineNumber: 2843,
                                     columnNumber: 19
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -3912,13 +4198,13 @@ function PartijDetailPage() {
                                     children: "✕"
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2686,
+                                    lineNumber: 2844,
                                     columnNumber: 19
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                            lineNumber: 2684,
+                            lineNumber: 2842,
                             columnNumber: 17
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3931,7 +4217,7 @@ function PartijDetailPage() {
                                             children: "VA nummer"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2694,
+                                            lineNumber: 2852,
                                             columnNumber: 21
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -3943,13 +4229,13 @@ function PartijDetailPage() {
                                             placeholder: "bijv. 12345"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2695,
+                                            lineNumber: 2853,
                                             columnNumber: 21
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2693,
+                                    lineNumber: 2851,
                                     columnNumber: 19
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3959,7 +4245,7 @@ function PartijDetailPage() {
                                             children: "Naam"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2709,
+                                            lineNumber: 2867,
                                             columnNumber: 21
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -3971,13 +4257,13 @@ function PartijDetailPage() {
                                             placeholder: "Bijv. Voornaam Achternaam"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2710,
+                                            lineNumber: 2868,
                                             columnNumber: 21
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2708,
+                                    lineNumber: 2866,
                                     columnNumber: 19
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -3987,7 +4273,7 @@ function PartijDetailPage() {
                                             children: "Sportschool"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2722,
+                                            lineNumber: 2880,
                                             columnNumber: 21
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -3999,13 +4285,13 @@ function PartijDetailPage() {
                                             placeholder: "Bijv. Team XYZ"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2723,
+                                            lineNumber: 2881,
                                             columnNumber: 21
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2721,
+                                    lineNumber: 2879,
                                     columnNumber: 19
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4015,7 +4301,7 @@ function PartijDetailPage() {
                                             children: "Discipline (partij)"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2735,
+                                            lineNumber: 2893,
                                             columnNumber: 21
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -4027,13 +4313,13 @@ function PartijDetailPage() {
                                             placeholder: "Bijv. THAIBOKSEN/MUAY THAI"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2736,
+                                            lineNumber: 2894,
                                             columnNumber: 21
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2734,
+                                    lineNumber: 2892,
                                     columnNumber: 19
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4043,7 +4329,7 @@ function PartijDetailPage() {
                                             children: "Klasse (partij)"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2748,
+                                            lineNumber: 2906,
                                             columnNumber: 21
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -4055,13 +4341,13 @@ function PartijDetailPage() {
                                             placeholder: "Bijv. JEUGD/YOUTH, N, C, B…"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2749,
+                                            lineNumber: 2907,
                                             columnNumber: 21
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2747,
+                                    lineNumber: 2905,
                                     columnNumber: 19
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4075,7 +4361,7 @@ function PartijDetailPage() {
                                             children: "Annuleren"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2761,
+                                            lineNumber: 2919,
                                             columnNumber: 21
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -4086,7 +4372,7 @@ function PartijDetailPage() {
                                             children: editSaving ? "Opslaan…" : "Opslaan"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2770,
+                                            lineNumber: 2928,
                                             columnNumber: 21
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -4098,13 +4384,13 @@ function PartijDetailPage() {
                                             children: editSaving ? "Bezig…" : "Opslaan + Autocheck"
                                         }, void 0, false, {
                                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                            lineNumber: 2779,
+                                            lineNumber: 2937,
                                             columnNumber: 21
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2760,
+                                    lineNumber: 2918,
                                     columnNumber: 19
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4112,34 +4398,34 @@ function PartijDetailPage() {
                                     children: "Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan + Autocheck” haalt daarna data Fightpaspoort opnieuw op."
                                 }, void 0, false, {
                                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                                    lineNumber: 2790,
+                                    lineNumber: 2948,
                                     columnNumber: 19
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                            lineNumber: 2691,
+                            lineNumber: 2849,
                             columnNumber: 17
                         }, this)
                     ]
                 }, editMountKey, true, {
                     fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                    lineNumber: 2683,
+                    lineNumber: 2841,
                     columnNumber: 15
                 }, this)
             }, void 0, false, {
                 fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-                lineNumber: 2682,
+                lineNumber: 2840,
                 columnNumber: 13
             }, this) : null
         ]
     }, void 0, true, {
         fileName: "[project]/app/dashboard/admin/controle/[matchmakingId]/[partijNr]/page.tsx",
-        lineNumber: 2206,
+        lineNumber: 2277,
         columnNumber: 5
     }, this);
 }
-_s3(PartijDetailPage, "Lqp7ul/ZKxa+xuivGHbJvaYHgTY=", false, function() {
+_s3(PartijDetailPage, "8Qdb2pEQLv0T3zx6j3ZlMHs6xn0=", false, function() {
     return [
         __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useParams"],
         __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useRouter"]

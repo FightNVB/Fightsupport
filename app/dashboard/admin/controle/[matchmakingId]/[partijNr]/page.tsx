@@ -24,11 +24,15 @@ type ControleResultaatRow = {
   id: string;
   controle_run_id: string;
   partij_nr: number | null;
+  matchmaking_id?: string | null;
+  bout_id?: string | null;
+  hoek?: string | null;
   rule: string;
   rule_code: string | null;
-  resultaat: "ok" | "actie" | "dispensatie" | "afgekeurd";
+  resultaat: "ok" | "actie" | "dispensatie" | "afgekeurd" | "ACTIE" | "DISPENSATIE" | "AFGEKEURD";
   boodschap: string | null;
   created_at: string | null;
+  severity?: string | null;
 
   aantekeningen?: string | null;
 
@@ -1173,6 +1177,12 @@ export default function PartijDetailPage() {
   const [sendingDisp, setSendingDisp] = useState(false);
   const [dispSent, setDispSent] = useState(false);
 
+  const [manualMeldingOpen, setManualMeldingOpen] = useState(false);
+  const [manualMeldingSaving, setManualMeldingSaving] = useState(false);
+  const [manualMeldingText, setManualMeldingText] = useState("");
+  const [manualMeldingResultaat, setManualMeldingResultaat] = useState<"ACTIE" | "DISPENSATIE" | "AFGEKEURD">("ACTIE");
+  const [manualMeldingHoek, setManualMeldingHoek] = useState<"" | "rood" | "blauw">("");
+
   // ✅ Rollen
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const isSuperadmin = useMemo(() => roleNames.map((r) => r.toLowerCase()).includes("superadmin"), [roleNames]);
@@ -1320,6 +1330,67 @@ export default function PartijDetailPage() {
     setRegels(rows);
     primeNoteDrafts(rows);
   }
+
+  async function addManualMelding() {
+    if (!run?.id || !partijNr || !matchmakingId) return;
+
+    const boodschap = String(manualMeldingText ?? "").trim();
+    if (!boodschap) {
+      setError("Vul eerst een melding in.");
+      return;
+    }
+
+    setManualMeldingSaving(true);
+    setError(null);
+    setMsg("");
+
+    try {
+      const resultaat = manualMeldingResultaat;
+      const severity =
+        resultaat === "AFGEKEURD"
+          ? "error"
+          : resultaat === "DISPENSATIE"
+          ? "warning"
+          : "warning";
+
+      const payload: AnyRow = {
+        controle_run_id: run.id,
+        run_id: run.id,
+        matchmaking_id: String(matchmakingId),
+        partij_nr: Number(partijNr),
+        bout_id: String(ctx?.bout_id ?? ctx?.id ?? ""),
+        rule: "Handmatige melding",
+        rule_code: "HANDMATIGE_MELDING",
+        resultaat,
+        original_resultaat: resultaat,
+        boodschap,
+        severity,
+        hoek: manualMeldingHoek || null,
+        review_status: "open",
+        reviewed_by: null,
+        reviewed_at: null,
+        actie_status: null,
+        actie: null,
+        aantekeningen: null,
+        review_note: null,
+      };
+
+      const { error: insErr } = await supabase.from("controle_resultaten").insert(payload);
+      if (insErr) throw insErr;
+
+      setManualMeldingText("");
+      setManualMeldingResultaat("ACTIE");
+      setManualMeldingHoek("");
+      setManualMeldingOpen(false);
+      await reloadRegels();
+      setMsg("✅ Handmatige melding opgeslagen.");
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setManualMeldingSaving(false);
+    }
+  }
+
 
   async function approveSingle(resultaatId: string) {
     if (!resultaatId) return;
@@ -2543,10 +2614,97 @@ export default function PartijDetailPage() {
           {/* Meldingen */}
           <div className="rounded-2xl overflow-hidden" style={{ ...plateBodyStyle(), padding: 0 }}>
             <div className="p-3">
-              <PlateHeader title="MELDINGEN — RULES" dot="orange" right={`${regels.length} meldingen`} />
+              <PlateHeader
+                title="MELDINGEN — RULES"
+                dot="orange"
+                right={
+                  <div className="flex items-center gap-2">
+                    <span>{`${regels.length} meldingen`}</span>
+                    <button
+                      type="button"
+                      onClick={() => setManualMeldingOpen((v) => !v)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/20 bg-[var(--brand-orange)] text-black font-extrabold leading-none shadow hover:opacity-90"
+                      title="Handmatige melding toevoegen"
+                    >
+                      +
+                    </button>
+                  </div>
+                }
+              />
             </div>
 
             <div className="p-4 pt-2">
+              {manualMeldingOpen ? (
+                <div className="mb-4 rounded-xl border border-zinc-300 bg-zinc-100 p-3 shadow-sm">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <div className="text-sm font-extrabold tracking-wide text-zinc-900">Handmatige melding toevoegen</div>
+                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] font-bold text-white">controle_resultaten</span>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-[170px_170px_1fr]">
+                    <div>
+                      <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-700">Resultaat</label>
+                      <select
+                        value={manualMeldingResultaat}
+                        onChange={(e) => setManualMeldingResultaat(e.target.value as "ACTIE" | "DISPENSATIE" | "AFGEKEURD")}
+                        className="w-full rounded-md border border-zinc-400 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                      >
+                        <option value="ACTIE">ACTIE</option>
+                        <option value="DISPENSATIE">DISPENSATIE</option>
+                        <option value="AFGEKEURD">AFGEKEURD</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-700">Hoek</label>
+                      <select
+                        value={manualMeldingHoek}
+                        onChange={(e) => setManualMeldingHoek(e.target.value as "" | "rood" | "blauw")}
+                        className="w-full rounded-md border border-zinc-400 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                      >
+                        <option value="">Geen / partijbreed</option>
+                        <option value="rood">Rood</option>
+                        <option value="blauw">Blauw</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-700">Melding</label>
+                      <textarea
+                        value={manualMeldingText}
+                        onChange={(e) => setManualMeldingText(e.target.value)}
+                        placeholder="Typ hier je eigen melding voor rapport, Excel en partijdetail…"
+                        spellCheck={false}
+                        className="min-h-[92px] w-full rounded-md border border-zinc-400 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={addManualMelding}
+                      disabled={manualMeldingSaving}
+                      className="inline-flex items-center rounded-md bg-[var(--brand-orange)] px-4 py-2 text-sm font-extrabold text-black hover:opacity-90 disabled:opacity-50"
+                    >
+                      {manualMeldingSaving ? "Opslaan…" : "Opslaan in controle_resultaten"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualMeldingOpen(false);
+                        setManualMeldingText("");
+                        setManualMeldingResultaat("ACTIE");
+                        setManualMeldingHoek("");
+                      }}
+                      className="inline-flex items-center rounded-md bg-zinc-800 px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                    >
+                      Sluiten
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {regels.length === 0 ? (
                 <div className="text-sm text-zinc-700">Geen meldingen.</div>
               ) : (
