@@ -5,7 +5,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "clean": "rimraf .next node_modules/.cache"
+    "clean": "rimraf .next node_modules/.cache",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
@@ -39,12 +41,15 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/react": "^18.3.11",
     "@types/react-big-calendar": "^1.16.3",
     "@types/react-dom": "^18.3.7",
     "@types/xlsx": "^0.0.35",
     "autoprefixer": "^10.4.19",
+    "jest": "^30.3.0",
     "postcss": "^8.4.38",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.6.3"
   }
 }
