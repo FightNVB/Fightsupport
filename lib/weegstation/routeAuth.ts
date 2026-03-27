@@ -64,7 +64,7 @@ export async function getWeegstationAuthContext(
 
   const { data: profile, error: profileErr } = await admin
     .from("user_profiles")
-    .select("id, bondteam")
+    .select("id, bondteam, role")
     .eq("id", user.id)
     .single();
 
@@ -72,31 +72,40 @@ export async function getWeegstationAuthContext(
     throw new Error(profileErr.message);
   }
 
-  const { data: userRoles, error: urErr } = await admin
-    .from("user_roles")
-    .select("role_id")
-    .eq("user_id", user.id);
-
-  if (urErr) {
-    throw new Error(urErr.message);
-  }
-
-  const roleIds = (userRoles ?? []).map((r: any) => r.role_id).filter(Boolean);
+  // ✅ Canonical role source: user_profiles.role (single role)
+  // Legacy fallback: user_roles + roles
   let roles: WeegstationRole[] = [];
 
-  if (roleIds.length > 0) {
-    const { data: rolesRows, error: rolesErr } = await admin
-      .from("roles")
-      .select("id, name")
-      .in("id", roleIds);
+  const profileRole = normalizeRoleName((profile as any)?.role);
+  if (profileRole) {
+    roles = [profileRole as WeegstationRole];
+  } else {
+    // Legacy fallback
+    const { data: userRoles, error: urErr } = await admin
+      .from("user_roles")
+      .select("role_id")
+      .eq("user_id", user.id);
 
-    if (rolesErr) {
-      throw new Error(rolesErr.message);
+    if (urErr) {
+      throw new Error(urErr.message);
     }
 
-    roles = (rolesRows ?? [])
-      .map((r: any) => normalizeRoleName(r?.name))
-      .filter(Boolean) as WeegstationRole[];
+    const roleIds = (userRoles ?? []).map((r: any) => r.role_id).filter(Boolean);
+
+    if (roleIds.length > 0) {
+      const { data: rolesRows, error: rolesErr } = await admin
+        .from("roles")
+        .select("id, name")
+        .in("id", roleIds);
+
+      if (rolesErr) {
+        throw new Error(rolesErr.message);
+      }
+
+      roles = (rolesRows ?? [])
+        .map((r: any) => normalizeRoleName(r?.name))
+        .filter(Boolean) as WeegstationRole[];
+    }
   }
 
   const isAdminLike = roles.some((r) =>
