@@ -41,7 +41,7 @@ export type WeighEvalResult = {
 
 const YOUTH_LOWER_OFFSET = 2.0;
 const ADULT_LOWER_OFFSET = 3.0;
-const TOP_OFFSET = 0.1;
+const UPPER_TOLERANCE = 0.1;
 const HEAVY_OPEN_MIN = 95.0;
 
 const MMA_LIMITS: Array<{ match: RegExp; max: number | null }> = [
@@ -154,25 +154,25 @@ function getAllowedWeightRange(params: {
     return { min: null, max: null };
   }
 
+  const max = Number((effectiveMaxGewicht + UPPER_TOLERANCE).toFixed(2));
+
   if (isMma) {
     return {
       min: null,
-      max: Number(effectiveMaxGewicht.toFixed(2)),
+      max,
     };
   }
 
-  const max = Number((effectiveMaxGewicht - TOP_OFFSET).toFixed(2));
-
   if (leeftijdType === "jeugd") {
     return {
-      min: Number((effectiveMaxGewicht - YOUTH_LOWER_OFFSET - TOP_OFFSET).toFixed(2)),
+      min: Number((effectiveMaxGewicht - YOUTH_LOWER_OFFSET).toFixed(2)),
       max,
     };
   }
 
   if (leeftijdType === "volwassene") {
     return {
-      min: Number((effectiveMaxGewicht - ADULT_LOWER_OFFSET - TOP_OFFSET).toFixed(2)),
+      min: Number((effectiveMaxGewicht - ADULT_LOWER_OFFSET).toFixed(2)),
       max,
     };
   }

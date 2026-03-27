@@ -262,24 +262,53 @@ function parseWeightClass(klasse: string | null | undefined, fallbackMax: number
   };
 }
 
-function isWeightOutsideClass(
-  weight: number | null | undefined,
-  klasse: string | null | undefined,
-  fallbackMax: number | string | null | undefined
-) {
-  if (weight == null || !Number.isFinite(weight)) return false;
+const WEIGHT_UPPER_TOLERANCE = 0.1;
+const YOUTH_LOWER_OFFSET = 2.0;
+const ADULT_LOWER_OFFSET = 3.0;
 
+function getWeightRangeForUi(
+  klasse: string | null | undefined,
+  fallbackMax: number | string | null | undefined,
+  leeftijdType?: string | null | undefined
+) {
   const parsed = parseWeightClass(klasse, fallbackMax);
 
   if (parsed.kind === "heavy") {
-    return Number(weight) < parsed.threshold;
+    return { min: parsed.threshold, max: null as number | null };
   }
 
-  if (parsed.kind === "max") {
-    return Number(weight) > parsed.max;
+  if (parsed.kind !== "max") {
+    return { min: null as number | null, max: null as number | null };
   }
 
-  return false;
+  const normalizedAge = String(leeftijdType ?? "").trim().toLowerCase();
+  const lowerOffset = normalizedAge.includes("jeugd") || normalizedAge.includes("junior")
+    ? YOUTH_LOWER_OFFSET
+    : normalizedAge.includes("volwass") || normalizedAge.includes("senior")
+      ? ADULT_LOWER_OFFSET
+      : null;
+
+  return {
+    min: lowerOffset == null ? null : Number((parsed.max - lowerOffset).toFixed(2)),
+    max: Number((parsed.max + WEIGHT_UPPER_TOLERANCE).toFixed(2)),
+  };
+}
+
+function isWeightOutsideClass(
+  weight: number | null | undefined,
+  klasse: string | null | undefined,
+  fallbackMax: number | string | null | undefined,
+  leeftijdType?: string | null | undefined
+) {
+  if (weight == null || !Number.isFinite(weight)) return false;
+
+  const range = getWeightRangeForUi(klasse, fallbackMax, leeftijdType);
+
+  if (range.max == null) {
+    return range.min != null ? Number(weight) < range.min : false;
+  }
+
+  return Number(weight) > range.max;
 }
 
 function isOpenHeavyWeightClass(
@@ -291,16 +320,19 @@ function isOpenHeavyWeightClass(
 
 function isTeLicht(
   gewogen: number | null | undefined,
-  doorgegeven: number | string | null | undefined,
+  leeftijdType: string | null | undefined,
   klasse?: string | null | undefined,
   fallbackMax?: number | string | null | undefined
 ) {
   if (isOpenHeavyWeightClass(klasse, fallbackMax)) return false;
 
   const w = toNum(gewogen);
-  const d = toNum(doorgegeven);
-  if (w == null || d == null) return false;
-  return w < d - 0.05;
+  if (w == null) return false;
+
+  const range = getWeightRangeForUi(klasse, fallbackMax, leeftijdType);
+  if (range.min == null) return false;
+
+  return w < range.min;
 }
 
 function getWeightClassHint(klasse: string | null | undefined, fallbackMax: number | string | null | undefined) {
@@ -1148,7 +1180,8 @@ export default function WeegstationDetailPage() {
     isWeightOutsideClass(
       activeWeightNumber,
       selectedRow.klasse_mm,
-      selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht
+      selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht,
+      selectedRow.leeftijd_type
     );
 
   const isTooLight =
@@ -1156,13 +1189,13 @@ export default function WeegstationDetailPage() {
     (selectedFighter?.corner === "red"
       ? isTeLicht(
           activeWeightNumber,
-          selectedRow.rood_doorgegeven_gewicht,
+          selectedRow.leeftijd_type,
           selectedRow.klasse_mm,
           selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht
         )
       : isTeLicht(
           activeWeightNumber,
-          selectedRow.blauw_doorgegeven_gewicht,
+          selectedRow.leeftijd_type,
           selectedRow.klasse_mm,
           selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht
         ));
