@@ -89,6 +89,22 @@ function normalizeMaxGewicht(v: any): number | null {
   return Math.abs(n);
 }
 
+function normalizeWeightNotation(v: any): string | null {
+  const s = String(v ?? "").trim();
+  return s.length ? s : null;
+}
+
+function normalizeWeightType(v: any): string | null {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return null;
+
+  if (s === "exact" || s === "up_to" || s === "open_above") {
+    return s;
+  }
+
+  return null;
+}
+
 function boutFingerprint(opts: {
   vaR: string | null;
   vaB: string | null;
@@ -443,6 +459,8 @@ export async function POST(req: Request) {
         is_toernooi: toBoolLoose(is_toernooi),
 
         max_gewicht: normalizeMaxGewicht((b as any)?.max_gewicht),
+        max_gewicht_notatie: normalizeWeightNotation((b as any)?.max_gewicht_notatie),
+        max_gewicht_type: normalizeWeightType((b as any)?.extra?.max_gewicht_type),
 
         raw_json: (b as any)?.extra ?? null,
 

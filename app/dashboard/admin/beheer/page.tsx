@@ -4,7 +4,15 @@ import React, { useEffect, useMemo, type CSSProperties, type ReactNode } from "r
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { ArrowLeft, Settings, CalendarDays, Link2, School, Cog } from "lucide-react";
+import {
+  ArrowLeft,
+  Settings,
+  CalendarDays,
+  Link2,
+  School,
+  Cog,
+  ArchiveRestore,
+} from "lucide-react";
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
@@ -175,6 +183,12 @@ export default function BeheerPortalPage() {
         subtitle: "Consistente matching voor scraper en controle",
         href: "/dashboard/admin/beheer/sportscholen/aliases",
         icon: School,
+      },
+      {
+        title: "Snapshots",
+        subtitle: "Opgeslagen matchmaking snapshots bekijken en inzien",
+        href: "/dashboard/admin/beheer/snapshots",
+        icon: ArchiveRestore,
       },
       {
         title: "Instellingen",
@@ -416,8 +430,7 @@ export default function BeheerPortalPage() {
                 gridTemplateColumns: "1.3fr 1fr",
                 gap: 20,
               }}
-            >              
-            </div>
+            ></div>
 
             <div
               style={{

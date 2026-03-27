@@ -972,22 +972,9 @@ function parseJaNee(v: any): "ja" | "nee" | null {
 function normResultaat(v: any): string {
   const s = String(v ?? "").trim().toLowerCase();
   if (!s) return "";
-
-  if (
-    s === "afkeur" ||
-    s === "afgekeur" ||
-    s === "afgekeurd" ||
-    s === "afkeuren" ||
-    s === "verbod" ||
-    s === "startverbod" ||
-    s.includes("afkeur") ||
-    s.includes("verbod")
-  ) {
-    return "afgekeurd";
-  }
-
-  if (s === "actie" || s === "waarschuwing" || s.includes("actie")) return "actie";
-  if (s === "dispensatie" || s === "disp" || s.includes("dispensatie")) return "dispensatie";
+  if (s === "afkeur" || s === "afgekeur" || s === "afgekeurd" || s === "afkeuren") return "afgekeurd";
+  if (s === "actie" || s === "waarschuwing") return "actie";
+  if (s === "dispensatie" || s === "disp") return "dispensatie";
   if (s === "ok" || s === "goedgekeurd") return "ok";
   return s;
 }
@@ -1945,11 +1932,11 @@ export default function PartijDetailPage() {
     try {
       router.back();
     } catch {
-      router.push(`/dashboard/admin/controle/${matchmakingId}`);
+      router.push(`/dashboard/officials/controle/${matchmakingId}`);
     }
   }
   function backToMatchmaking() {
-    router.push(`/dashboard/admin/controle/${matchmakingId}`);
+    router.push(`/dashboard/officials/controle/${matchmakingId}`);
   }
 
   async function sendToDispensatie() {

@@ -42,7 +42,7 @@ export type WeighEvalResult = {
 const YOUTH_LOWER_OFFSET = 2.0;
 const ADULT_LOWER_OFFSET = 3.0;
 const TOP_OFFSET = 0.1;
-const HEAVY_OPEN_FROM = 95.5;
+const HEAVY_OPEN_MIN = 95.0;
 
 const MMA_LIMITS: Array<{ match: RegExp; max: number | null }> = [
   { match: /straw/i, max: 52.2 },
@@ -90,6 +90,10 @@ function parseKlasseMaxGewicht(label: string | null | undefined): number | null 
   const s = String(label ?? "").trim().toLowerCase();
   if (!s) return null;
 
+  if (isHeavyweightOpenClass(label)) {
+    return null;
+  }
+
   const cleaned = s.replace(/\s/g, "");
   const match =
     cleaned.match(/(?:tot|max|onder|t\/m|\-)(\d+(?:[.,]\d+)?)(?:kg)?/) ||
@@ -122,6 +126,18 @@ function getMmaClassMax(klasse: string | null | undefined): number | null {
   return null;
 }
 
+function isHeavyweightOpenClass(label: string | null | undefined): boolean {
+  const s = String(label ?? "").trim().toLowerCase();
+  if (!s) return false;
+
+  return (
+    /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)/i.test(s) ||
+    /super\s*heavy/i.test(s) ||
+    /superzwaar/i.test(s) ||
+    /open\s*(klasse|class)/i.test(s)
+  );
+}
+
 function getAllowedWeightRange(params: {
   leeftijdType: "jeugd" | "volwassene" | "onbekend";
   effectiveMaxGewicht: number | null;
@@ -131,7 +147,7 @@ function getAllowedWeightRange(params: {
   const { leeftijdType, effectiveMaxGewicht, isMma, isHeavyweightOpen } = params;
 
   if (isHeavyweightOpen) {
-    return { min: null, max: null };
+    return { min: HEAVY_OPEN_MIN, max: null };
   }
 
   if (effectiveMaxGewicht == null) {
@@ -270,13 +286,9 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
   }
 
   const diff = Number(Math.abs(rood - blauw).toFixed(2));
-  const heavyByWeight = rood >= HEAVY_OPEN_FROM && blauw >= HEAVY_OPEN_FROM;
-
   const effectiveMaxInfo = getEffectiveMaxWeight(input, isMma);
-  const heavyByClass =
-    effectiveMaxInfo.value != null && effectiveMaxInfo.value >= HEAVY_OPEN_FROM && !isMma;
-
-  const isHeavyweightOpen = heavyByWeight || heavyByClass;
+  const heavyByClass = isHeavyweightOpenClass(input.klasse_mm);
+  const isHeavyweightOpen = heavyByClass;
 
   const allowedRange = getAllowedWeightRange({
     leeftijdType,
@@ -318,7 +330,9 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       "Geen bruikbare bovengrens gevonden; verschilregels zijn wel toegepast, maar niet-op-gewicht kon niet automatisch worden beoordeeld."
     );
   } else if (isHeavyweightOpen) {
-    messages.push("Zwaargewicht: vanaf 95.5 kg maakt gewichtsverschil niet meer uit.");
+    messages.push(
+      `95+ klasse: beide vechters moeten minimaal ${fmtKg(HEAVY_OPEN_MIN)} wegen. Daarboven geldt geen bovengrens en maakt onderling gewichtsverschil niet meer uit.`
+    );
   } else if (minToelaatbaarGewicht != null && maxToelaatbaarGewicht != null) {
     messages.push(
       `Toegestaan gewicht ${fmtKg(minToelaatbaarGewicht)} t/m ${fmtKg(maxToelaatbaarGewicht)}.`
@@ -405,13 +419,13 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       leeftijdType,
       diff,
       reglementStatus: hasAnyOffWeight ? "AFWIJKING_GEWICHT" : "OK",
-      praktijkStatus: "OK",
-      eindStatus: "OK",
+      praktijkStatus: hasAnyOffWeight ? "AFKEUR" : "OK",
+      eindStatus: hasAnyOffWeight ? "AFKEUR" : "OK",
       dispensatieNodig: false,
       dispensatieMogelijk: false,
       messages: hasAnyOffWeight
-        ? [...messages, "Partij blijft toegestaan; zwaargewicht opent verschilcontrole, maar niet-op-gewicht kan minpunt opleveren."]
-        : [...messages, "Zwaargewicht toegestaan."],
+        ? [...messages, "95+ klasse: minimaal één vechter weegt minder dan 95.0 kg en valt dus buiten de klasse."]
+        : [...messages, "95+ klasse toegestaan. Onderling gewichtsverschil speelt hier geen rol."],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,
       maxToelaatbaarGewicht,
@@ -425,7 +439,7 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       teZwaarRood,
       teZwaarBlauw,
       hasAnyOffWeight,
-      canProceedWithPenalty: hasAnyOffWeight,
+      canProceedWithPenalty: false,
       adminSanctieNodig: false,
       adminSanctieReason: null,
       isHeavyweightOpen,

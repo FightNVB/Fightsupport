@@ -70,7 +70,7 @@ const sectionRule = (top = false): CSSProperties => ({
 
 const steelFrameOuter: CSSProperties = {
   position: "relative",
-  padding: 7,
+  padding: 6,
   background: `
     linear-gradient(145deg,
       #ffffff 0%,
@@ -171,11 +171,11 @@ const darkPlate: CSSProperties = {
 };
 
 function inputBaseClass() {
-  return "w-full rounded-none border border-white/10 bg-[#0d1015] px-3 py-2 text-white outline-none transition placeholder:text-white/35 focus:border-[#ff4d00]/60 focus:ring-2 focus:ring-[#ff4d00]/20";
+  return "w-full rounded-none border border-white/10 bg-[#0d1015] px-3 py-[7px] text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#ff4d00]/60 focus:ring-2 focus:ring-[#ff4d00]/20";
 }
 
 function labelTextClass() {
-  return "mb-1.5 text-[12px] font-semibold uppercase tracking-[0.14em] text-white/88";
+  return "mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/88";
 }
 
 export default function UploadMatchmakingOfficialPage() {
@@ -360,27 +360,25 @@ export default function UploadMatchmakingOfficialPage() {
 
         .fs-upload-grid {
           display: grid;
-          grid-template-columns: 1.18fr 0.82fr;
-          gap: 18px;
-          align-items: start;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+          align-items: stretch;
+        }
+
+        .fs-upload-grid > * {
+          height: 100%;
         }
 
         .fs-form-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px 14px;
+          gap: 10px 12px;
         }
 
-        .fs-right-stack {
+        .fs-panel-fill {
+          height: 100%;
           display: flex;
           flex-direction: column;
-          gap: 18px;
-        }
-
-        .fs-button-stack {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
         }
 
         @media (max-width: 1120px) {
@@ -397,8 +395,8 @@ export default function UploadMatchmakingOfficialPage() {
 
         @media (max-width: 860px) {
           .title-row {
-            padding-top: 12px !important;
-            padding-bottom: 12px !important;
+            padding-top: 10px !important;
+            padding-bottom: 10px !important;
             padding-left: 14px !important;
             padding-right: 14px !important;
           }
@@ -406,7 +404,7 @@ export default function UploadMatchmakingOfficialPage() {
           .title-actions-wrap {
             position: static !important;
             justify-content: center !important;
-            margin-bottom: 10px !important;
+            margin-bottom: 8px !important;
             transform: none !important;
           }
 
@@ -429,18 +427,18 @@ export default function UploadMatchmakingOfficialPage() {
 
       <div
         style={{
-          maxWidth: 1360,
+          maxWidth: 1380,
           margin: "0 auto",
-          padding: "18px 20px 12px",
+          padding: "10px 14px 8px",
         }}
       >
         {!allowed && (
-          <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 10 }}>
             <SteelFrame>
               <div
                 style={{
                   ...darkPlate,
-                  padding: "14px 16px",
+                  padding: "12px 14px",
                   color: "#ffd7d7",
                   fontWeight: 700,
                   borderColor: "rgba(255,77,77,0.18)",
@@ -454,37 +452,32 @@ export default function UploadMatchmakingOfficialPage() {
 
         <div className="fs-upload-grid">
           <SteelFrame>
-            <div
-              style={{
-                ...darkPlate,
-                padding: "16px 16px 14px",
-              }}
-            >
-              <OrangeHotspot left={18} bottom={10} width={54} />
-              <OrangeHotspot right={38} top={12} width={34} small variant={2} />
+            <div className="fs-panel-fill" style={{ ...darkPlate, padding: "12px 14px" }}>
+              <OrangeHotspot left={18} bottom={10} width={50} />
+              <OrangeHotspot right={34} top={12} width={30} small variant={2} />
               <CardChromeOverlay />
 
               <SectionHeader
-                icon={<Upload size={24} strokeWidth={2.3} />}
+                icon={<Upload size={22} strokeWidth={2.3} />}
                 title="Upload gegevens"
-                subtitle="Vul de evenementgegevens in voor de official upload."
+                subtitle="Vul de evenementgegevens in en upload daarna direct het bestand."
               />
 
               {!!norm(profile.bondteam) && (
                 <div
                   style={{
-                    marginTop: 14,
+                    marginTop: 10,
                     border: "1px solid rgba(255,255,255,0.12)",
                     background:
                       "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.18) 100%)",
-                    padding: "10px 12px",
+                    padding: "8px 10px",
                     boxShadow:
                       "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.35)",
                   }}
                 >
                   <div
                     style={{
-                      fontSize: 10,
+                      fontSize: 9,
                       letterSpacing: 2,
                       textTransform: "uppercase",
                       color: "rgba(255,255,255,0.46)",
@@ -492,25 +485,12 @@ export default function UploadMatchmakingOfficialPage() {
                   >
                     Bondteam
                   </div>
-                  <div
-                    style={{
-                      marginTop: 4,
-                      fontSize: 15,
-                      fontWeight: 800,
-                      color: "#fff",
-                    }}
-                  >
-                    {norm(profile.bondteam)}
-                  </div>
+                  <div style={{ marginTop: 3, fontSize: 14, fontWeight: 800, color: "#fff" }}>{norm(profile.bondteam)}</div>
                 </div>
               )}
 
-              <div className="fs-form-grid" style={{ marginTop: 14 }}>
-                <InputBlock
-                  label="Evenement naam"
-                  required
-                  icon={<ShieldCheck size={15} />}
-                >
+              <div className="fs-form-grid" style={{ marginTop: 10 }}>
+                <InputBlock label="Evenement naam" required icon={<ShieldCheck size={14} />}>
                   <input
                     className={inputBaseClass()}
                     value={eventNaam}
@@ -519,11 +499,7 @@ export default function UploadMatchmakingOfficialPage() {
                   />
                 </InputBlock>
 
-                <InputBlock
-                  label="Datum"
-                  required
-                  icon={<CalendarDays size={15} />}
-                >
+                <InputBlock label="Datum" required icon={<CalendarDays size={14} />}>
                   <input
                     type="date"
                     className={inputBaseClass()}
@@ -532,10 +508,7 @@ export default function UploadMatchmakingOfficialPage() {
                   />
                 </InputBlock>
 
-                <InputBlock
-                  label="Locatie"
-                  icon={<MapPin size={15} />}
-                >
+                <InputBlock label="Locatie" icon={<MapPin size={14} />}>
                   <input
                     className={inputBaseClass()}
                     value={plaats}
@@ -544,31 +517,19 @@ export default function UploadMatchmakingOfficialPage() {
                   />
                 </InputBlock>
 
-                <InputBlock
-                  label="Matchmaker"
-                  icon={<UserRound size={15} />}
-                >
+                <InputBlock label="Matchmaker" icon={<UserRound size={14} />}>
                   <input
                     className={inputBaseClass()}
                     value={matchmaker}
                     onChange={(e) => setMatchmaker(e.target.value)}
                     placeholder="Naam matchmaker"
                   />
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontSize: 11.5,
-                      color: "rgba(255,255,255,0.55)",
-                    }}
-                  >
+                  <div style={{ marginTop: 4, fontSize: 10.5, color: "rgba(255,255,255,0.55)" }}>
                     Matchmaker of promotor verplicht
                   </div>
                 </InputBlock>
 
-                <InputBlock
-                  label="Promotor"
-                  icon={<Building2 size={15} />}
-                >
+                <InputBlock label="Promotor" icon={<Building2 size={14} />}>
                   <input
                     className={inputBaseClass()}
                     value={promotor}
@@ -577,217 +538,252 @@ export default function UploadMatchmakingOfficialPage() {
                   />
                 </InputBlock>
               </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTop: "1px solid rgba(255,255,255,0.10)",
+                  boxShadow: "inset 0 1px 0 rgba(0,0,0,0.45)",
+                }}
+              >
+                <div className={labelTextClass()}>
+                  Bestand <span style={{ color: "#ff6b35" }}>*</span>
+                </div>
+
+                <label
+                  style={{
+                    display: "block",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background:
+                      "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.18) 100%)",
+                    padding: 10,
+                    cursor: "pointer",
+                    boxShadow:
+                      "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.35)",
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    style={{ display: "none" }}
+                  />
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div
+                      style={{
+                        width: 50,
+                        height: 44,
+                        flexShrink: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#fff",
+                        border: "1px solid #7b2500",
+                        background:
+                          "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
+                        boxShadow:
+                          "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
+                      }}
+                    >
+                      <Upload size={20} strokeWidth={2.3} />
+                    </div>
+
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 900,
+                          color: "#f1f1f1",
+                          textShadow: "0 3px 5px rgba(0,0,0,0.8)",
+                        }}
+                      >
+                        Selecteer Excel bestand
+                      </div>
+                      <div style={{ marginTop: 3, fontSize: 11.5, color: "rgba(255,255,255,0.68)" }}>
+                        Toegestaan: .xlsx en .xls
+                      </div>
+                    </div>
+                  </div>
+                </label>
+
+                <div
+                  style={{
+                    marginTop: 6,
+                    minHeight: 16,
+                    fontSize: 12,
+                    color: file ? "#ffffff" : "rgba(255,255,255,0.58)",
+                  }}
+                >
+                  {file ? `Gekozen bestand: ${file.name}` : "Nog geen bestand geselecteerd."}
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <SteelActionButton
+                    label={busy ? "Bezig..." : "Upload naar controle"}
+                    onClick={onUpload}
+                    disabled={busy || !allowed}
+                  />
+                </div>
+              </div>
             </div>
           </SteelFrame>
 
-          <div className="fs-right-stack">
-            <SteelFrame>
+          <SteelFrame>
+            <div className="fs-panel-fill" style={{ ...darkPlate, padding: "12px 14px" }}>
+              <OrangeHotspot left={18} bottom={10} width={50} />
+              <OrangeHotspot right={34} top={12} width={30} small variant={2} />
+              <CardChromeOverlay />
+
+              <SectionHeader
+                icon={<FileSpreadsheet size={22} strokeWidth={2.2} />}
+                title="Excel template"
+                subtitle="Gebruik het juiste template voor een correcte upload naar FightSupport."
+              />
+
               <div
                 style={{
-                  ...darkPlate,
-                  padding: "16px 16px 14px",
+                  marginTop: 12,
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
                 }}
               >
-                <OrangeHotspot left={18} bottom={10} width={54} />
-                <OrangeHotspot right={38} top={12} width={34} small variant={2} />
-                <CardChromeOverlay />
-
-                <SectionHeader
-                  icon={<FileSpreadsheet size={24} strokeWidth={2.2} />}
-                  title="Excel bestand"
-                  subtitle="Download eerst het juiste template en upload daarna direct naar controle."
-                />
-
-                <div style={{ marginTop: 14 }}>
-                  <div className={labelTextClass()}>
-                    Bestand <span style={{ color: "#ff6b35" }}>*</span>
-                  </div>
-
-                  <label
+                <div
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background:
+                      "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.18) 100%)",
+                    padding: "12px 12px 10px",
+                    boxShadow:
+                      "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.35)",
+                  }}
+                >
+                  <div
                     style={{
-                      display: "block",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background:
-                        "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.18) 100%)",
-                      padding: 12,
-                      cursor: "pointer",
-                      boxShadow:
-                        "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.35)",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: 2,
+                      textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.82)",
                     }}
                   >
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                      style={{ display: "none" }}
-                    />
+                    Zo werkt het
+                  </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 58,
-                          height: 52,
-                          flexShrink: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#fff",
-                          border: "1px solid #7b2500",
-                          background:
-                            "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
-                          boxShadow:
-                            "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
-                        }}
-                      >
-                        <Upload size={24} strokeWidth={2.3} />
-                      </div>
+                  <div
+                    style={{
+                      marginTop: 10,
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                      color: "#e2e2e2",
+                    }}
+                  >
+                    <p>
+                      Voor een correcte upload naar <strong style={{ color: "#fff" }}>FightSupport</strong> gebruik je altijd het officiële template.
+                    </p>
+                    <p style={{ marginTop: 10 }}>
+                      Download eerst het template. Dit bestand komt automatisch in je downloadmap te staan.
+                    </p>
+                    <p style={{ marginTop: 10 }}>
+                      Vul daarna jouw matchmakinggegevens in, sla het bestand op en upload het vervolgens in het vak hiernaast.
+                    </p>
+                    <p style={{ marginTop: 10 }}>
+                      Zo weet je zeker dat de kolommen goed staan en dat de upload correct verwerkt kan worden.
+                    </p>
+                  </div>
+                </div>
 
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 15,
-                            fontWeight: 900,
-                            color: "#f1f1f1",
-                            textShadow: "0 3px 5px rgba(0,0,0,0.8)",
-                          }}
-                        >
-                          Selecteer Excel bestand
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 12,
-                            color: "rgba(255,255,255,0.68)",
-                          }}
-                        >
-                          Toegestaan: .xlsx en .xls
-                        </div>
-                      </div>
-                    </div>
-                  </label>
+                <div
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background:
+                      "linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(0,0,0,0.16) 100%)",
+                    padding: "12px 12px 10px",
+                    boxShadow:
+                      "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.35)",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: 2,
+                      textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.82)",
+                    }}
+                  >
+                    Download template
+                  </div>
 
                   <div
                     style={{
                       marginTop: 8,
-                      minHeight: 17,
                       fontSize: 12.5,
-                      color: file ? "#ffffff" : "rgba(255,255,255,0.58)",
+                      lineHeight: 1.5,
+                      color: "#d7d7d7",
                     }}
                   >
-                    {file ? `Gekozen bestand: ${file.name}` : "Nog geen bestand geselecteerd."}
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 16,
-                    paddingTop: 14,
-                    borderTop: "1px solid rgba(255,255,255,0.10)",
-                    boxShadow: "inset 0 1px 0 rgba(0,0,0,0.45)",
-                  }}
-                >
-                  <div
-                    style={{
-                      marginBottom: 10,
-                      fontSize: 11,
-                      fontWeight: 800,
-                      letterSpacing: 2,
-                      textTransform: "uppercase",
-                      color: "rgba(255,255,255,0.82)",
-                    }}
-                  >
-                    Stap 1 · Download Excel template
+                    Gebruik deze knop om direct het juiste Excel template te downloaden.
                   </div>
 
-                  <Link href="/templates/fightsupport-upload.xlsx" target="_blank">
-                    <button
-                      type="button"
-                      className="fs-metal-button"
-                      style={{
-                        width: "100%",
-                        height: 38,
-                        border: "1px solid #8f8f8f",
-                        background: `
-                          linear-gradient(180deg,
-                            #ffffff 0%,
-                            #eaeaea 12%,
-                            #cfcfcf 25%,
-                            #ffffff 40%,
-                            #9a9a9a 70%,
-                            #f0f0f0 100%)
-                        `,
-                        color: "#131313",
-                        fontSize: 15,
-                        fontWeight: 900,
-                        boxShadow: `
-                          inset 0 2px 1px rgba(255,255,255,1),
-                          inset 0 -3px 2px rgba(0,0,0,0.6),
-                          0 5px 12px rgba(0,0,0,0.38)
-                        `,
-                        cursor: "pointer",
-                        textShadow: "0 1px 0 rgba(255,255,255,0.34)",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <Download size={16} />
-                      Download template
-                    </button>
-                  </Link>
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 14,
-                    paddingTop: 14,
-                    borderTop: "1px solid rgba(255,255,255,0.10)",
-                    boxShadow: "inset 0 1px 0 rgba(0,0,0,0.45)",
-                  }}
-                >
-                  <div
-                    style={{
-                      marginBottom: 10,
-                      fontSize: 11,
-                      fontWeight: 800,
-                      letterSpacing: 2,
-                      textTransform: "uppercase",
-                      color: "rgba(255,255,255,0.82)",
-                    }}
-                  >
-                    Stap 2 · Upload naar controle
-                  </div>
-
-                  <div className="fs-button-stack">
-                    <SteelActionButton
-                      label={busy ? "Bezig..." : "Upload naar controle"}
-                      onClick={onUpload}
-                      disabled={busy || !allowed}
-                    />
+                  <div style={{ marginTop: 10 }}>
+                    <Link href="/templates/fightsupport-upload.xlsx" target="_blank">
+                      <button
+                        type="button"
+                        className="fs-metal-button"
+                        style={{
+                          width: "100%",
+                          height: 40,
+                          border: "1px solid #8f8f8f",
+                          background: `
+                            linear-gradient(180deg,
+                              #ffffff 0%,
+                              #eaeaea 12%,
+                              #cfcfcf 25%,
+                              #ffffff 40%,
+                              #9a9a9a 70%,
+                              #f0f0f0 100%)
+                          `,
+                          color: "#131313",
+                          fontSize: 14,
+                          fontWeight: 900,
+                          boxShadow: `
+                            inset 0 2px 1px rgba(255,255,255,1),
+                            inset 0 -3px 2px rgba(0,0,0,0.6),
+                            0 5px 12px rgba(0,0,0,0.38)
+                          `,
+                          cursor: "pointer",
+                          textShadow: "0 1px 0 rgba(255,255,255,0.34)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Download size={15} />
+                        Download template
+                      </button>
+                    </Link>
                   </div>
                 </div>
               </div>
-            </SteelFrame>
-          </div>
+            </div>
+          </SteelFrame>
         </div>
 
         {melding && (
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 10 }}>
             <SteelFrame>
               <div
                 style={{
                   ...darkPlate,
-                  padding: "13px 16px",
+                  padding: "11px 14px",
                   color: "#f3f3f3",
                   whiteSpace: "pre-wrap",
-                  fontSize: 13.5,
+                  fontSize: 12.5,
                   fontWeight: 700,
                 }}
               >
@@ -796,18 +792,6 @@ export default function UploadMatchmakingOfficialPage() {
             </SteelFrame>
           </div>
         )}
-
-        <div
-          style={{
-            marginTop: 12,
-            textAlign: "center",
-            fontSize: 9,
-            letterSpacing: 2,
-            color: "rgba(255,255,255,0.30)",
-          }}
-        >
-          © FIGHTSUPPORT
-        </div>
       </div>
     </main>
   );
@@ -845,8 +829,8 @@ function TopLogoBand() {
       <div
         style={{
           position: "relative",
-          width: 1120,
-          height: 88,
+          width: 1080,
+          height: 72,
           maxWidth: "96vw",
           filter:
             "drop-shadow(0 10px 18px rgba(0,0,0,0.70)) drop-shadow(0 0 16px rgba(255,95,0,0.12))",
@@ -862,10 +846,7 @@ function TopLogoBand() {
           fill
           priority
           className="object-contain"
-          style={{
-            objectFit: "contain",
-            transform: "scaleX(1.3)",
-          }}
+          style={{ objectFit: "contain", transform: "scaleX(1.24)" }}
         />
       </div>
     </div>
@@ -910,7 +891,7 @@ function TitleBand({
           left: "50%",
           transform: "translateX(-50%)",
           bottom: -4,
-          width: 150,
+          width: 140,
           height: 8,
           background:
             "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
@@ -925,37 +906,27 @@ function TitleBand({
           position: "relative",
           maxWidth: 1400,
           margin: "0 auto",
-          padding: "10px 18px 9px",
-          minHeight: 86,
+          padding: "8px 16px",
+          minHeight: 70,
         }}
       >
         <div
           className="title-actions-wrap"
           style={{
             position: "absolute",
-            right: 18,
+            right: 16,
             top: "50%",
             transform: "translateY(-50%)",
             zIndex: 2,
           }}
         >
-          <HeaderSilverButton
-            label={actionLabel}
-            icon={actionIcon}
-            onClick={onAction}
-          />
+          <HeaderSilverButton label={actionLabel} icon={actionIcon} onClick={onAction} />
         </div>
 
-        <div
-          className="title-center"
-          style={{
-            textAlign: "center",
-            paddingTop: 0,
-          }}
-        >
+        <div className="title-center" style={{ textAlign: "center", paddingTop: 0 }}>
           <div
             style={{
-              fontSize: 25,
+              fontSize: 22,
               fontWeight: 900,
               letterSpacing: 1,
               lineHeight: 1,
@@ -970,9 +941,9 @@ function TitleBand({
 
           <div
             style={{
-              marginTop: 6,
-              fontSize: 9,
-              letterSpacing: 2.5,
+              marginTop: 5,
+              fontSize: 8,
+              letterSpacing: 2.3,
               color: NVB_ORANGE,
               textTransform: "uppercase",
               textShadow: "0 0 8px rgba(255,106,0,0.28)",
@@ -981,15 +952,8 @@ function TitleBand({
             {subtitle}
           </div>
 
-          <div
-            style={{
-              marginTop: 6,
-              fontSize: 11,
-              color: "rgba(255,255,255,0.68)",
-            }}
-          >
-            Ingelogd als{" "}
-            <span style={{ color: "#ffffff", fontWeight: 700 }}>{email}</span>
+          <div style={{ marginTop: 5, fontSize: 10.5, color: "rgba(255,255,255,0.68)" }}>
+            Ingelogd als <span style={{ color: "#ffffff", fontWeight: 700 }}>{email}</span>
           </div>
         </div>
       </div>
@@ -997,14 +961,10 @@ function TitleBand({
   );
 }
 
-function SteelFrame({
-  children,
-}: {
-  children: ReactNode;
-}) {
+function SteelFrame({ children }: { children: ReactNode }) {
   return (
-    <div>
-      <div style={steelFrameOuter}>
+    <div style={{ height: "100%" }}>
+      <div style={{ ...steelFrameOuter, height: "100%" }}>
         <div
           style={{
             position: "absolute",
@@ -1018,9 +978,9 @@ function SteelFrame({
             mixBlendMode: "screen",
           }}
         />
-        <div style={steelFrameMid}>
-          <div style={steelFrameChannel}>
-            <div style={steelFrameInner}>{children}</div>
+        <div style={{ ...steelFrameMid, height: "100%" }}>
+          <div style={{ ...steelFrameChannel, height: "100%" }}>
+            <div style={{ ...steelFrameInner, height: "100%" }}>{children}</div>
           </div>
         </div>
       </div>
@@ -1038,25 +998,18 @@ function SectionHeader({
   subtitle: string;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 12,
-        alignItems: "flex-start",
-      }}
-    >
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
       <div
         style={{
-          width: 78,
-          height: 64,
+          width: 64,
+          height: 54,
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           color: "#fff",
           border: "1px solid #7b2500",
-          background:
-            "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
+          background: "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
           boxShadow:
             "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
         }}
@@ -1067,7 +1020,7 @@ function SectionHeader({
       <div style={{ minWidth: 0, flex: 1, paddingTop: 1 }}>
         <div
           style={{
-            fontSize: 22,
+            fontSize: 19,
             fontWeight: 900,
             lineHeight: 1,
             color: "#f1f1f1",
@@ -1081,22 +1034,13 @@ function SectionHeader({
           style={{
             width: "100%",
             height: 1,
-            marginTop: 8,
+            marginTop: 7,
             background:
               "linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08), transparent)",
           }}
         />
 
-        <div
-          style={{
-            marginTop: 8,
-            fontSize: 12.5,
-            color: "#d7d7d7",
-            lineHeight: 1.26,
-          }}
-        >
-          {subtitle}
-        </div>
+        <div style={{ marginTop: 7, fontSize: 11.5, color: "#d7d7d7", lineHeight: 1.25 }}>{subtitle}</div>
       </div>
     </div>
   );
@@ -1115,14 +1059,7 @@ function InputBlock({
 }) {
   return (
     <label style={{ display: "block" }}>
-      <div
-        className={labelTextClass()}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
+      <div className={labelTextClass()} style={{ display: "flex", alignItems: "center", gap: 6 }}>
         {icon ? <span style={{ color: NVB_ORANGE }}>{icon}</span> : null}
         <span>
           {label} {required ? <span style={{ color: "#ff6b35" }}>*</span> : null}
@@ -1150,7 +1087,7 @@ function SteelActionButton({
       className="fs-metal-button"
       style={{
         width: "100%",
-        height: 38,
+        height: 36,
         border: "1px solid #8f8f8f",
         background: `
           linear-gradient(180deg,
@@ -1162,7 +1099,7 @@ function SteelActionButton({
             #f0f0f0 100%)
         `,
         color: "#131313",
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: 900,
         boxShadow: `
           inset 0 2px 1px rgba(255,255,255,1),
@@ -1194,8 +1131,8 @@ function HeaderSilverButton({
       onClick={onClick}
       className="fs-metal-button"
       style={{
-        minWidth: 156,
-        height: 40,
+        minWidth: 138,
+        height: 36,
         border: "1px solid rgba(185,185,185,0.95)",
         background: `
           linear-gradient(180deg,
@@ -1207,7 +1144,7 @@ function HeaderSilverButton({
             #efefef 100%)
         `,
         color: "#121212",
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: 900,
         boxShadow: `
           inset 0 1px 0 rgba(255,255,255,1),
@@ -1220,7 +1157,7 @@ function HeaderSilverButton({
         alignItems: "center",
         justifyContent: "center",
         gap: 8,
-        padding: "0 18px",
+        padding: "0 16px",
         whiteSpace: "nowrap",
       }}
     >
@@ -1248,11 +1185,7 @@ function OrangeHotspot({
   variant?: 1 | 2 | 3;
 }) {
   const extraClass =
-    variant === 2
-      ? "fs-hotspot fs-hotspot-2"
-      : variant === 3
-        ? "fs-hotspot fs-hotspot-3"
-        : "fs-hotspot";
+    variant === 2 ? "fs-hotspot fs-hotspot-2" : variant === 3 ? "fs-hotspot fs-hotspot-3" : "fs-hotspot";
 
   return (
     <div
@@ -1264,7 +1197,7 @@ function OrangeHotspot({
         top,
         bottom,
         width,
-        height: small ? 8 : 10,
+        height: small ? 7 : 9,
         background:
           "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
         filter: "blur(1.5px)",

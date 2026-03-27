@@ -9,6 +9,7 @@ import {
   Scale,
   Trophy,
   ArrowLeft,
+  History,
 } from "lucide-react";
 
 type MenuAction = {
@@ -192,6 +193,12 @@ export default function AdminDashboardPage() {
       subtitle: "Matchmaking, rapportages en controleoverzicht",
       href: "/dashboard/admin/controle",
       icon: Scale,
+    },
+    {
+      label: "Audit / Logboek",
+      subtitle: "Historische acties, wijzigingen en systeemlog",
+      href: "/dashboard/admin/audit",
+      icon: History,
     },
     {
       label: "Instellingen",

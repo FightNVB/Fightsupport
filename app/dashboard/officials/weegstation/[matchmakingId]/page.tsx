@@ -31,23 +31,24 @@ type WeighInBout = {
   evenement_datum: string | null;
   discipline: string | null;
   klasse_mm: string | null;
-  max_gewicht: number | null;
+  max_gewicht: number | string | null;
+  max_gewicht_notatie?: string | null;
 
   rood_naam: string | null;
   rood_gym: string | null;
   rood_va: string | null;
   rood_leeftijd_event: number | null;
-  rood_doorgegeven_gewicht: number | null;
-  rood_gewogen_gewicht: number | null;
+  rood_doorgegeven_gewicht: number | string | null;
+  rood_gewogen_gewicht: number | string | null;
 
   blauw_naam: string | null;
   blauw_gym: string | null;
   blauw_va: string | null;
   blauw_leeftijd_event: number | null;
-  blauw_doorgegeven_gewicht: number | null;
-  blauw_gewogen_gewicht: number | null;
+  blauw_doorgegeven_gewicht: number | string | null;
+  blauw_gewogen_gewicht: number | string | null;
 
-  gewicht_verschil: number | null;
+  gewicht_verschil: number | string | null;
   leeftijd_type: string;
   reglement_status: string;
   praktijk_status: string;
@@ -197,17 +198,19 @@ function hasManualSanction(v: unknown): boolean {
   return s === "1" || s === "true" || s === "yes";
 }
 
-function fmtKg(v: number | null | undefined) {
-  if (v == null || !Number.isFinite(v)) return "-";
-  return `${Number(v).toFixed(1)} kg`;
+function fmtKg(v: number | string | null | undefined) {
+  const n = toNum(v);
+  if (n == null) return "-";
+  return `${n.toFixed(1)} kg`;
 }
 
-function fmtCompact(v: number | null | undefined) {
-  if (v == null || !Number.isFinite(v)) return "-";
-  return Number(v).toFixed(1);
+function fmtCompact(v: number | string | null | undefined) {
+  const n = toNum(v);
+  if (n == null) return "-";
+  return n.toFixed(1);
 }
 
-function parseWeightClass(klasse: string | null | undefined, fallbackMax: number | null | undefined): ParsedWeightClass {
+function parseWeightClass(klasse: string | null | undefined, fallbackMax: number | string | null | undefined): ParsedWeightClass {
   const raw = String(klasse ?? "").trim();
   const normalized = raw
     .toLowerCase()
@@ -244,11 +247,12 @@ function parseWeightClass(klasse: string | null | undefined, fallbackMax: number
     }
   }
 
-  if (fallbackMax != null && Number.isFinite(fallbackMax)) {
+  const fallback = toNum(fallbackMax);
+  if (fallback != null) {
     return {
       kind: "max",
-      max: Number(fallbackMax),
-      label: raw || `-${fallbackMax}`,
+      max: fallback,
+      label: raw || `-${fallback}`,
     };
   }
 
@@ -261,14 +265,14 @@ function parseWeightClass(klasse: string | null | undefined, fallbackMax: number
 function isWeightOutsideClass(
   weight: number | null | undefined,
   klasse: string | null | undefined,
-  fallbackMax: number | null | undefined
+  fallbackMax: number | string | null | undefined
 ) {
   if (weight == null || !Number.isFinite(weight)) return false;
 
   const parsed = parseWeightClass(klasse, fallbackMax);
 
   if (parsed.kind === "heavy") {
-    return Number(weight) <= parsed.threshold;
+    return Number(weight) < parsed.threshold;
   }
 
   if (parsed.kind === "max") {
@@ -278,11 +282,32 @@ function isWeightOutsideClass(
   return false;
 }
 
-function getWeightClassHint(klasse: string | null | undefined, fallbackMax: number | null | undefined) {
+function isOpenHeavyWeightClass(
+  klasse: string | null | undefined,
+  fallbackMax: number | string | null | undefined
+) {
+  return parseWeightClass(klasse, fallbackMax).kind === "heavy";
+}
+
+function isTeLicht(
+  gewogen: number | null | undefined,
+  doorgegeven: number | string | null | undefined,
+  klasse?: string | null | undefined,
+  fallbackMax?: number | string | null | undefined
+) {
+  if (isOpenHeavyWeightClass(klasse, fallbackMax)) return false;
+
+  const w = toNum(gewogen);
+  const d = toNum(doorgegeven);
+  if (w == null || d == null) return false;
+  return w < d - 0.05;
+}
+
+function getWeightClassHint(klasse: string | null | undefined, fallbackMax: number | string | null | undefined) {
   const parsed = parseWeightClass(klasse, fallbackMax);
 
   if (parsed.kind === "heavy") {
-    return `${parsed.threshold}+ kg (heavyweight)`;
+    return `${parsed.threshold}+ kg (heavyweight, minimum ${parsed.threshold} kg)`;
   }
 
   if (parsed.kind === "max") {
@@ -290,6 +315,22 @@ function getWeightClassHint(klasse: string | null | undefined, fallbackMax: numb
   }
 
   return safeText(klasse);
+}
+
+
+function getWeightRuleTitle(row: WeighInBout | null) {
+  const parsed = parseWeightClass(row?.klasse_mm, row?.max_gewicht);
+  if (parsed.kind === "heavy") return "Gewichtsklasse";
+  if (parsed.kind === "max") return "Max gewicht";
+  return "Gewichtsregel";
+}
+
+function getWeightRuleValue(row: WeighInBout | null) {
+  if (!row) return "-";
+  const parsed = parseWeightClass(row.klasse_mm, row.max_gewicht_notatie ?? row.max_gewicht);
+  if (parsed.kind === "heavy") return `${parsed.threshold}+ heavyweight`;
+  if (parsed.kind === "max") return `${parsed.max.toFixed(1)} kg`;
+  return safeText(row.max_gewicht_notatie ?? row.klasse_mm ?? row.max_gewicht);
 }
 
 function formatDate(v: string | null) {
@@ -303,67 +344,163 @@ function normalizeSearchText(value: unknown) {
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9+]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-function startsWithScore(text: string, query: string) {
-  const t = normalizeSearchText(text);
-  const q = normalizeSearchText(query);
-  if (!q) return 0;
-  if (t === q) return 8;
-  if (t.startsWith(q)) return 6;
-  if (t.includes(` ${q}`)) return 4;
-  if (t.includes(q)) return 2;
+function compactSearchText(value: unknown) {
+  return normalizeSearchText(value).replace(/\s+/g, "");
+}
+
+function splitSearchTokens(value: unknown) {
+  return normalizeSearchText(value).split(/\s+/).filter(Boolean);
+}
+
+function getSearchWeightRank(item: FighterResult) {
+  if (item.fighterGewogen == null) return 0;
+  if (item.opponentGewogen == null) return 1;
+  return 2;
+}
+
+function getFieldPrefixScore(field: string, query: string) {
+  if (!field || !query) return 0;
+  if (field === query) return 40;
+  if (field.startsWith(query)) return 34;
+
+  const words = field.split(" ").filter(Boolean);
+  if (words.some((word) => word === query)) return 30;
+  if (words.some((word) => word.startsWith(query))) return 26;
+  if (field.includes(` ${query}`)) return 22;
+  if (field.includes(query)) return 16;
   return 0;
+}
+
+function scoreTokenCoverage(tokens: string[], words: string[]) {
+  if (!tokens.length || !words.length) return 0;
+
+  let score = 0;
+  const used = new Set<number>();
+
+  for (const token of tokens) {
+    let best = 0;
+    let bestIndex = -1;
+
+    for (let i = 0; i < words.length; i++) {
+      if (used.has(i)) continue;
+      const word = words[i];
+      let candidate = 0;
+
+      if (word === token) candidate = 18;
+      else if (word.startsWith(token)) candidate = 15;
+      else if (word.includes(token)) candidate = 9;
+      else if (token.length >= 3 && token.startsWith(word)) candidate = 7;
+
+      if (candidate > best) {
+        best = candidate;
+        bestIndex = i;
+      }
+    }
+
+    if (best > 0 && bestIndex >= 0) {
+      used.add(bestIndex);
+      score += best;
+    }
+  }
+
+  if (used.size === tokens.length) {
+    score += 12;
+  }
+
+  return score;
 }
 
 function scoreFighterSearch(item: FighterResult, query: string) {
   const q = normalizeSearchText(query);
   if (!q) return 0;
 
-  const queryParts = q.split(/\s+/).filter(Boolean);
+  const queryTokens = splitSearchTokens(q);
+  const compactQuery = compactSearchText(q);
+
   const fighterName = normalizeSearchText(item.fighterName);
   const fighterGym = normalizeSearchText(item.fighterGym);
-  const fighterVa = normalizeSearchText(item.fighterVa).replace(/\s+/g, "");
-  const partijNr = normalizeSearchText(String(item.partijNr));
+  const fighterVa = compactSearchText(item.fighterVa);
+  const partijNr = compactSearchText(String(item.partijNr));
   const opponentName = normalizeSearchText(item.opponentName);
+  const opponentGym = normalizeSearchText(item.opponentGym);
+  const cornerLabel = item.corner === "red" ? "rood rode hoek red" : "blauw blauwe hoek blue";
+
+  const fighterNameWords = fighterName.split(" ").filter(Boolean);
+  const fighterGymWords = fighterGym.split(" ").filter(Boolean);
+  const opponentNameWords = opponentName.split(" ").filter(Boolean);
+  const opponentGymWords = opponentGym.split(" ").filter(Boolean);
 
   let score = 0;
 
-  if (fighterName === q) score = Math.max(score, 100);
-  else if (fighterName.startsWith(q)) score = Math.max(score, 80);
-  else if (fighterName.includes(` ${q}`)) score = Math.max(score, 70);
-  else if (fighterName.includes(q)) score = Math.max(score, 60);
-
-  if (queryParts.length > 1 && queryParts.every((part) => fighterName.includes(part))) {
-    score = Math.max(score, 75);
+  if (fighterVa && fighterVa === compactQuery) score = Math.max(score, 180);
+  else if (fighterVa && fighterVa.startsWith(compactQuery) && compactQuery.length >= 3) {
+    score = Math.max(score, 150);
   }
 
-  if (fighterGym === q) score = Math.max(score, 45);
-  else if (fighterGym.startsWith(q)) score = Math.max(score, 36);
-  else if (fighterGym.includes(` ${q}`)) score = Math.max(score, 30);
-  else if (fighterGym.includes(q)) score = Math.max(score, 24);
+  if (partijNr && partijNr === compactQuery) score = Math.max(score, 138);
 
-  if (fighterVa === q.replace(/\s+/g, "")) score = Math.max(score, 90);
-  if (partijNr === q) score = Math.max(score, 50);
+  if (fighterName === q) score = Math.max(score, 170);
+  else if (fighterName.startsWith(q)) score = Math.max(score, 150);
+  else if (fighterNameWords.some((word) => word === q)) score = Math.max(score, 142);
+  else if (fighterNameWords.some((word) => word.startsWith(q))) score = Math.max(score, 132);
+  else if (fighterName.includes(` ${q}`)) score = Math.max(score, 122);
+  else if (fighterName.includes(q)) score = Math.max(score, 112);
 
-  if (opponentName === q) score = Math.max(score, 18);
-  else if (opponentName.startsWith(q)) score = Math.max(score, 14);
-  else if (opponentName.includes(` ${q}`)) score = Math.max(score, 10);
-  else if (opponentName.includes(q)) score = Math.max(score, 8);
+  const fighterTokenCoverage = scoreTokenCoverage(queryTokens, fighterNameWords);
+  if (fighterTokenCoverage > 0) {
+    score = Math.max(score, 98 + fighterTokenCoverage);
+  }
 
-  if (score === 0) {
-    const broadFields = [fighterName, fighterGym, fighterVa, partijNr, opponentName].filter(Boolean);
-    for (const field of broadFields) {
-      score = Math.max(score, startsWithScore(field, q));
-      if (queryParts.length > 1 && queryParts.every((part) => field.includes(part))) {
-        score = Math.max(score, 5);
-      }
+  const gymTokenCoverage = scoreTokenCoverage(queryTokens, fighterGymWords);
+  if (fighterGym === q) score = Math.max(score, 126);
+  else if (fighterGym.startsWith(q)) score = Math.max(score, 114);
+  else if (fighterGymWords.some((word) => word === q)) score = Math.max(score, 108);
+  else if (fighterGymWords.some((word) => word.startsWith(q))) score = Math.max(score, 102);
+  else if (fighterGym.includes(` ${q}`)) score = Math.max(score, 94);
+  else if (fighterGym.includes(q)) score = Math.max(score, 84);
+  if (gymTokenCoverage > 0) {
+    score = Math.max(score, 78 + gymTokenCoverage);
+  }
+
+  const opponentTokenCoverage = scoreTokenCoverage(queryTokens, opponentNameWords);
+  if (opponentName === q) score = Math.max(score, 92);
+  else if (opponentName.startsWith(q)) score = Math.max(score, 84);
+  else if (opponentNameWords.some((word) => word === q)) score = Math.max(score, 78);
+  else if (opponentNameWords.some((word) => word.startsWith(q))) score = Math.max(score, 72);
+  else if (opponentName.includes(` ${q}`)) score = Math.max(score, 66);
+  else if (opponentName.includes(q)) score = Math.max(score, 60);
+  if (opponentTokenCoverage > 0) {
+    score = Math.max(score, 52 + opponentTokenCoverage);
+  }
+
+  const broadFields = [fighterName, fighterGym, opponentName, opponentGym, cornerLabel].filter(Boolean);
+  for (const field of broadFields) {
+    score = Math.max(score, getFieldPrefixScore(field, q));
+  }
+
+  const combinedFields = [fighterName, fighterGym, fighterVa, partijNr, opponentName, opponentGym, cornerLabel]
+    .filter(Boolean)
+    .join(" ");
+
+  if (queryTokens.length > 1 && queryTokens.every((token) => combinedFields.includes(token))) {
+    score = Math.max(score, 74 + queryTokens.length * 6);
+  }
+
+  if (score === 0 && compactQuery.length >= 2) {
+    const compactCombined = compactSearchText(combinedFields);
+    if (compactCombined.includes(compactQuery)) {
+      score = Math.max(score, 42);
     }
   }
 
-  if (item.fighterGewogen == null) score += 6;
-  else if (item.opponentGewogen == null) score += 2;
+  if (score === 0) return 0;
+
+  if (item.fighterGewogen == null) score += 24;
+  else if (item.opponentGewogen == null) score += 8;
 
   return score;
 }
@@ -888,10 +1025,10 @@ export default function WeegstationDetailPage() {
   const searchSuggestions = useMemo(() => {
     const q = search.trim();
 
-    const base = [...fighterResults].sort((a, b) => {
-      const aMissing = a.fighterGewogen == null ? 0 : 1;
-      const bMissing = b.fighterGewogen == null ? 0 : 1;
-      if (aMissing !== bMissing) return aMissing - bMissing;
+    const sortBaseResults = (a: FighterResult, b: FighterResult) => {
+      const aWeightRank = getSearchWeightRank(a);
+      const bWeightRank = getSearchWeightRank(b);
+      if (aWeightRank !== bWeightRank) return aWeightRank - bWeightRank;
 
       const aCompletion = getRowCompletionRank(a.bout);
       const bCompletion = getRowCompletionRank(b.bout);
@@ -901,30 +1038,32 @@ export default function WeegstationDetailPage() {
       const bCorner = b.corner === "red" ? 0 : 1;
       if (a.partijNr !== b.partijNr) return a.partijNr - b.partijNr;
       return aCorner - bCorner;
-    });
+    };
 
-    if (!q) return base.slice(0, 18);
+    const base = [...fighterResults].sort(sortBaseResults);
+
+    if (!q) return base.slice(0, 24);
 
     return base
       .map((item) => ({ item, score: scoreFighterSearch(item, q) }))
       .filter((x) => x.score > 0)
       .sort((a, b) => {
-        const aMissing = a.item.fighterGewogen == null ? 0 : 1;
-        const bMissing = b.item.fighterGewogen == null ? 0 : 1;
-        if (aMissing !== bMissing) return aMissing - bMissing;
+        const aWeightRank = getSearchWeightRank(a.item);
+        const bWeightRank = getSearchWeightRank(b.item);
+        if (aWeightRank !== bWeightRank) return aWeightRank - bWeightRank;
+
+        if (b.score !== a.score) return b.score - a.score;
 
         const aCompletion = getRowCompletionRank(a.item.bout);
         const bCompletion = getRowCompletionRank(b.item.bout);
         if (aCompletion !== bCompletion) return aCompletion - bCompletion;
-
-        if (b.score !== a.score) return b.score - a.score;
 
         const aCorner = a.item.corner === "red" ? 0 : 1;
         const bCorner = b.item.corner === "red" ? 0 : 1;
         if (a.item.partijNr !== b.item.partijNr) return a.item.partijNr - b.item.partijNr;
         return aCorner - bCorner;
       })
-      .slice(0, 18)
+      .slice(0, 24)
       .map((x) => x.item);
   }, [fighterResults, search]);
 
@@ -988,19 +1127,47 @@ export default function WeegstationDetailPage() {
       : selectedDraft?.strafpuntBlauw ?? "0";
 
   const activeWeightNumber = toNum(activeWeightValue);
-  const selectedIsOverMaxWeight =
+  const selectedWeightClass = selectedRow
+    ? parseWeightClass(selectedRow.klasse_mm, selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht)
+    : null;
+  const selectedIsOpenHeavyClass = selectedWeightClass?.kind === "heavy";
+  const selectedIsOutsideWeightClass =
     !!selectedRow &&
-    isWeightOutsideClass(activeWeightNumber, selectedRow.klasse_mm, selectedRow.max_gewicht);
+    isWeightOutsideClass(
+      activeWeightNumber,
+      selectedRow.klasse_mm,
+      selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht
+    );
+
+  const isTooLight =
+    !!selectedRow &&
+    (selectedFighter?.corner === "red"
+      ? isTeLicht(
+          activeWeightNumber,
+          selectedRow.rood_doorgegeven_gewicht,
+          selectedRow.klasse_mm,
+          selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht
+        )
+      : isTeLicht(
+          activeWeightNumber,
+          selectedRow.blauw_doorgegeven_gewicht,
+          selectedRow.klasse_mm,
+          selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht
+        ));
+
+  const selectedEvalPenaltyApplies =
+    !!selectedEval &&
+    !!selectedEval.canProceedWithPenalty &&
+    !selectedEval.adminSanctieNodig &&
+    (selectedFighter?.corner === "red"
+      ? !!selectedEval.nietOpGewichtRood
+      : !!selectedEval.nietOpGewichtBlauw);
 
   const selectedCanAssignPenalty =
     !!selectedRow &&
-    (selectedIsOverMaxWeight ||
-      (!!selectedEval &&
-        !!selectedEval.canProceedWithPenalty &&
-        !selectedEval.adminSanctieNodig &&
-        (selectedFighter?.corner === "red"
-          ? !!selectedEval.nietOpGewichtRood
-          : !!selectedEval.nietOpGewichtBlauw)));
+    (selectedIsOutsideWeightClass ||
+      isTooLight ||
+      (!selectedIsOpenHeavyClass && selectedEvalPenaltyApplies));
 
   const selectedDispState =
     selectedRow && selectedEval ? getLiveDispState(selectedRow, selectedEval) : null;
@@ -1318,7 +1485,7 @@ export default function WeegstationDetailPage() {
                   <Search className="h-5 w-5 text-white/55" />
                   <input
                     type="text"
-                    placeholder="Zoek op naam, gym, VA of partij..."
+                    placeholder="Slim zoeken: naam, gym, VA, partij of hoek..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     onKeyDown={(e) => {
@@ -1340,7 +1507,7 @@ export default function WeegstationDetailPage() {
                 </label>
 
                 <div className="mb-3 text-xs font-semibold text-white/45">
-                  Klik op één vechter. Nog niet gewogen staat altijd bovenaan.
+                  Slim zoeken op naam, gym, VA, partij of hoek. Ongewogen vechters blijven bovenaan.
                 </div>
 
                 <div className="flex-1 overflow-y-auto" style={{ maxHeight: 650 }}>
@@ -1614,13 +1781,13 @@ export default function WeegstationDetailPage() {
                           style={{ background: "rgba(255,255,255,0.68)", border: `1px solid ${FS_LINE_LIGHT}` }}
                         >
                           <div className="text-[11px] font-black uppercase tracking-[0.06em] text-zinc-500">
-                            Klasse / max
+                            Klasse / gewichtsregel
                           </div>
                           <div className="mt-1 text-base font-extrabold text-zinc-900">
-                            {safeText(selectedRow.klasse_mm)}
+                            {getWeightRuleValue(selectedRow)}
                           </div>
                           <div className="mt-2 text-xs text-zinc-500">
-                            Klasse: {getWeightClassHint(selectedRow.klasse_mm, selectedRow.max_gewicht)}
+                            {getWeightRuleTitle(selectedRow)}: {getWeightClassHint(selectedRow.klasse_mm, selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht)}
                           </div>
                         </div>
                       </div>
@@ -1664,7 +1831,7 @@ export default function WeegstationDetailPage() {
                         ))}
                       </div>
 
-                      {selectedIsOverMaxWeight && (
+                      {selectedIsOutsideWeightClass && (
                         <div
                           className="mt-3 rounded-[8px] p-3 text-sm font-bold text-red-900"
                           style={{
@@ -1674,9 +1841,9 @@ export default function WeegstationDetailPage() {
                         >
                           Deze vechter valt buiten de gewichtsklasse ({getWeightClassHint(
                             selectedRow.klasse_mm,
-                            selectedRow.max_gewicht
+                            selectedRow.max_gewicht_notatie ?? selectedRow.max_gewicht
                           )}).
-                          Daarom moet minpunt toekennen beschikbaar blijven.
+                          Bij 95+ telt alleen het minimum van 95,0 kg en is er geen bovengrens.
                         </div>
                       )}
 

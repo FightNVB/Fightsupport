@@ -1,5 +1,5 @@
 // ---------------------------------------------------------
-// MATCHCONTROL PARSER – VERSIE 12.6 – HOEKGEWICHT VS AFGESPROKEN GEWICHT
+// MATCHCONTROL PARSER – VERSIE 12.7 – HERKENNING -95 VS 95+
 // ---------------------------------------------------------
 //
 // ✅ .xlsx via ExcelJS (styles + waarden)
@@ -13,6 +13,12 @@
 // - afgesproken gewicht is partijniveau, net als discipline/klasse
 // - max/min gewicht mag NOOIT als rood_gewicht of blauw_gewicht worden gelezen
 //
+// ✅ NIEUW:
+// - "-95"  = maximaal / tot en met 95 kilo
+// - "95+"  = open klasse / zwaarder dan 95 kilo
+// - parser bewaart nu ook de oorspronkelijke notatie zodat weegstation
+//   later verschil kan maken tussen -95 en 95+
+//
 // Dependencies:
 // npm i exceljs xlsx
 //
@@ -20,6 +26,14 @@
 import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
 import { randomUUID } from "crypto";
+
+type WeightNotationType = "exact" | "up_to" | "open_above";
+
+type ParsedWeightMeta = {
+  value: number;
+  label: string;
+  type: WeightNotationType;
+};
 
 export interface ParsedBout {
   bout_uid?: string | null;
@@ -30,18 +44,23 @@ export interface ParsedBout {
   va_rood: string | null;
   rood_geboortedatum: string | null;
   rood_gewicht: string | null;
+  rood_gewicht_notatie?: string | null;
 
   blauw_naam: string | null;
   blauw_gym: string | null;
   va_blauw: string | null;
   blauw_geboortedatum: string | null;
   blauw_gewicht: string | null;
+  blauw_gewicht_notatie?: string | null;
 
   discipline: string | null;
   klasse: string | null;
 
   max_gewicht: number | null;
+  max_gewicht_notatie?: string | null;
+
   min_gewicht: number | null;
+  min_gewicht_notatie?: string | null;
 
   record_rood_w: number;
   record_rood_l: number;
@@ -101,46 +120,39 @@ function extractDate(raw: any): string | null {
   return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
 }
 
-/**
- * Alleen pure max/min-notaties zoals:
- * - "-60" -> "60"
- * - "- 60 kg" -> "60"
- */
-function extractMaxWeightOnly(raw: any): string | null {
-  if (raw == null) return null;
-
-  const s = String(raw)
-    .toLowerCase()
-    .replace(",", ".")
-    .trim();
-
-  const m = s.match(/^\s*-\s*(\d+(?:\.\d+)?)\s*(kg)?\s*$/i);
-  if (!m) return null;
-
-  const n = Number(m[1]);
-  if (!Number.isFinite(n)) return null;
-  if (n < 10 || n > 200) return null;
-
-  return String(n);
+function formatWeightNumber(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  if (Number.isInteger(n)) return String(n);
+  return String(n).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 }
 
 /**
- * Universele gewicht-parser:
- * - 56 -> "56"
- * - 56kg -> "56"
- * - 56 kg -> "56"
- * - KG 56 -> "56"
- * - Gewicht 56 kg -> "56"
- * - -60 -> "60"
+ * Parseert gewicht/notatie.
+ *
+ * exact:
+ * - 56
+ * - 56kg
+ * - 56 kg
+ * - KG 56
+ * - Gewicht 56 kg
+ *
+ * klasse-notatie:
+ * - -95
+ * - - 95 kg
+ * - 95+
+ * - 95 + kg
+ * - +95
  */
-function extractWeight(raw: any): string | null {
+function extractWeightMeta(raw: any, opts?: { allowClassNotation?: boolean }): ParsedWeightMeta | null {
+  const allowClassNotation = Boolean(opts?.allowClassNotation);
+
   if (raw == null) return null;
 
-  const maxW = extractMaxWeightOnly(raw);
-  if (maxW) return maxW;
-
   if (typeof raw === "number" && Number.isFinite(raw)) {
-    if (raw >= 10 && raw <= 200) return String(raw);
+    if (raw >= 10 && raw <= 200) {
+      const label = formatWeightNumber(raw);
+      return { value: raw, label, type: "exact" };
+    }
     return null;
   }
 
@@ -152,6 +164,49 @@ function extractWeight(raw: any): string | null {
   if (!v) return null;
   if (isProbablyDate(v)) return null;
 
+  if (allowClassNotation) {
+    const plusAfter = v.match(/^\s*(\d+(?:\.\d+)?)\s*\+\s*(kg)?\s*$/i);
+    if (plusAfter) {
+      const n = Number(plusAfter[1]);
+      if (Number.isFinite(n) && n >= 10 && n <= 200) {
+        return {
+          value: n,
+          label: `${formatWeightNumber(n)}+`,
+          type: "open_above",
+        };
+      }
+    }
+
+    const plusBefore = v.match(/^\s*\+\s*(\d+(?:\.\d+)?)\s*(kg)?\s*$/i);
+    if (plusBefore) {
+      const n = Number(plusBefore[1]);
+      if (Number.isFinite(n) && n >= 10 && n <= 200) {
+        return {
+          value: n,
+          label: `${formatWeightNumber(n)}+`,
+          type: "open_above",
+        };
+      }
+    }
+
+    const minusPrefix = v.match(/^\s*-\s*(\d+(?:\.\d+)?)\s*(kg)?\s*$/i);
+    if (minusPrefix) {
+      const n = Number(minusPrefix[1]);
+      if (Number.isFinite(n) && n >= 10 && n <= 200) {
+        return {
+          value: n,
+          label: `-${formatWeightNumber(n)}`,
+          type: "up_to",
+        };
+      }
+    }
+  } else {
+    // In echte vechtergewichten willen we 95+ of -95 NIET als exact 95 lezen.
+    if (/^\s*-\s*\d/.test(v)) return null;
+    if (/^\s*\+\s*\d/.test(v)) return null;
+    if (/\d\s*\+\s*(kg)?\s*$/i.test(v)) return null;
+  }
+
   const m = v.match(/(\d+(?:\.\d+)?)/);
   if (!m) return null;
 
@@ -159,14 +214,87 @@ function extractWeight(raw: any): string | null {
   if (!Number.isFinite(n)) return null;
   if (n < 10 || n > 200) return null;
 
-  return String(n);
+  return {
+    value: n,
+    label: formatWeightNumber(n),
+    type: "exact",
+  };
+}
+
+/**
+ * Alleen class-achtige notaties:
+ * - -60
+ * - - 60 kg
+ * - 95+
+ * - +95
+ */
+function extractClassWeightMetaOnly(raw: any): ParsedWeightMeta | null {
+  if (raw == null) return null;
+
+  const v = String(raw)
+    .toLowerCase()
+    .replace(",", ".")
+    .trim();
+
+  if (!v) return null;
+  if (isProbablyDate(v)) return null;
+
+  const plusAfter = v.match(/^\s*(\d+(?:\.\d+)?)\s*\+\s*(kg)?\s*$/i);
+  if (plusAfter) {
+    const n = Number(plusAfter[1]);
+    if (Number.isFinite(n) && n >= 10 && n <= 200) {
+      return {
+        value: n,
+        label: `${formatWeightNumber(n)}+`,
+        type: "open_above",
+      };
+    }
+  }
+
+  const plusBefore = v.match(/^\s*\+\s*(\d+(?:\.\d+)?)\s*(kg)?\s*$/i);
+  if (plusBefore) {
+    const n = Number(plusBefore[1]);
+    if (Number.isFinite(n) && n >= 10 && n <= 200) {
+      return {
+        value: n,
+        label: `${formatWeightNumber(n)}+`,
+        type: "open_above",
+      };
+    }
+  }
+
+  const minusPrefix = v.match(/^\s*-\s*(\d+(?:\.\d+)?)\s*(kg)?\s*$/i);
+  if (minusPrefix) {
+    const n = Number(minusPrefix[1]);
+    if (Number.isFinite(n) && n >= 10 && n <= 200) {
+      return {
+        value: n,
+        label: `-${formatWeightNumber(n)}`,
+        type: "up_to",
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Alleen exacte gewichten voor echte vechter-gewichten.
+ */
+function extractWeight(raw: any): string | null {
+  const meta = extractWeightMeta(raw, { allowClassNotation: false });
+  if (!meta) return null;
+  return meta.type === "exact" ? meta.label : null;
 }
 
 function parseWeightNumber(v: any): number | null {
-  const w = extractWeight(v);
-  if (!w) return null;
-  const n = Number(w);
-  return Number.isFinite(n) ? n : null;
+  const meta = extractWeightMeta(v, { allowClassNotation: false });
+  if (!meta || meta.type !== "exact") return null;
+  return Number.isFinite(meta.value) ? meta.value : null;
+}
+
+function parseAgreedWeightMeta(v: any): ParsedWeightMeta | null {
+  return extractWeightMeta(v, { allowClassNotation: true });
 }
 
 function extractRecord(raw: any) {
@@ -212,7 +340,7 @@ function looksLikeName(v: string) {
   if (looksLikeRecord(s)) return false;
   if (isProbablyDate(s)) return false;
   if (extractVA(s)) return false;
-  if (extractWeight(s)) return false;
+  if (extractWeightMeta(s, { allowClassNotation: true })) return false;
   return /^[A-Za-zÀ-ÿ'’.\- ]{3,}$/.test(s);
 }
 
@@ -230,18 +358,22 @@ function makeEmptyBout(): ParsedBout {
     va_rood: null,
     rood_geboortedatum: null,
     rood_gewicht: null,
+    rood_gewicht_notatie: null,
 
     blauw_naam: null,
     blauw_gym: null,
     va_blauw: null,
     blauw_geboortedatum: null,
     blauw_gewicht: null,
+    blauw_gewicht_notatie: null,
 
     discipline: null,
     klasse: null,
 
     max_gewicht: null,
+    max_gewicht_notatie: null,
     min_gewicht: null,
+    min_gewicht_notatie: null,
 
     record_rood_w: 0,
     record_rood_l: 0,
@@ -254,6 +386,54 @@ function makeEmptyBout(): ParsedBout {
     is_toernooi: false,
     extra: {},
   };
+}
+
+function applyCornerWeightMeta(
+  bout: ParsedBout,
+  corner: "rood" | "blauw",
+  meta: ParsedWeightMeta | null
+) {
+  if (!meta) return;
+
+  if (corner === "rood") {
+    if (meta.type === "exact") {
+      bout.rood_gewicht = meta.label;
+      bout.rood_gewicht_notatie = meta.label;
+    } else {
+      bout.rood_gewicht = null;
+      bout.rood_gewicht_notatie = meta.label;
+      bout.extra.rood_gewicht_type = meta.type;
+    }
+    return;
+  }
+
+  if (meta.type === "exact") {
+    bout.blauw_gewicht = meta.label;
+    bout.blauw_gewicht_notatie = meta.label;
+  } else {
+    bout.blauw_gewicht = null;
+    bout.blauw_gewicht_notatie = meta.label;
+    bout.extra.blauw_gewicht_type = meta.type;
+  }
+}
+
+function applyAgreedWeightMeta(
+  bout: ParsedBout,
+  kind: "max" | "min",
+  meta: ParsedWeightMeta | null
+) {
+  if (!meta) return;
+
+  if (kind === "max") {
+    bout.max_gewicht = meta.value;
+    bout.max_gewicht_notatie = meta.label;
+    bout.extra.max_gewicht_type = meta.type;
+    return;
+  }
+
+  bout.min_gewicht = meta.value;
+  bout.min_gewicht_notatie = meta.label;
+  bout.extra.min_gewicht_type = meta.type;
 }
 
 function isVsMarker(v: any): boolean {
@@ -299,23 +479,6 @@ function detectTemplateCols(headerRow: any[]): TemplateCols | null {
 
   const at = (col1: number) => h[col1 - 1] ?? "";
 
-  // Uploadtemplate staat vast:
-  // A partij nr
-  // B discipline
-  // C klasse
-  // D naam atleet 1
-  // E sportschool (1)
-  // F fightpaspoort nr (1)
-  // G KG (1)  -> rood_gewicht
-  // H VS/T
-  // I naam atleet 2
-  // J sportschool (2)
-  // K fightpaspoort nr (2)
-  // L KG (2)  -> blauw_gewicht
-  // M Max KG  -> max_gewicht
-  //
-  // Zodra deze vaste templateheader wordt herkend, gebruiken we NOOIT
-  // een losse zoekstrategie voor gewichtskolommen.
   const fixedTemplateMatch =
     at(1).includes("partij") &&
     at(2).includes("discipline") &&
@@ -444,20 +607,20 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
     const naam1 = normCell(row.getCell(cols.naam1).value) || null;
     const gym1 = normCell(row.getCell(cols.gym1).value) || null;
     const va1 = extractVA(row.getCell(cols.va1).value) || null;
-    const kg1 = cols.kg1 > 0 ? extractWeight(row.getCell(cols.kg1).value) : null;
+    const kg1Meta = cols.kg1 > 0 ? extractWeightMeta(row.getCell(cols.kg1).value, { allowClassNotation: true }) : null;
 
     const vsVal = row.getCell(cols.vs).value;
 
     const naam2 = normCell(row.getCell(cols.naam2).value) || null;
     const gym2 = normCell(row.getCell(cols.gym2).value) || null;
     const va2 = extractVA(row.getCell(cols.va2).value) || null;
-    const kg2 = cols.kg2 > 0 ? extractWeight(row.getCell(cols.kg2).value) : null;
+    const kg2Meta = cols.kg2 > 0 ? extractWeightMeta(row.getCell(cols.kg2).value, { allowClassNotation: true }) : null;
 
     const maxKgVal = cols.maxKg ? row.getCell(cols.maxKg).value : null;
     const minKgVal = cols.minKg ? row.getCell(cols.minKg).value : null;
 
-    const maxKgNum = parseWeightNumber(maxKgVal);
-    const minKgNum = parseWeightNumber(minKgVal);
+    const maxKgMeta = parseAgreedWeightMeta(maxKgVal);
+    const minKgMeta = parseAgreedWeightMeta(minKgVal);
 
     const tCode = parseTCode(vsVal);
 
@@ -465,21 +628,21 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
       !naam1 &&
       !gym1 &&
       !va1 &&
-      !kg1 &&
+      !kg1Meta &&
       !naam2 &&
       !gym2 &&
       !va2 &&
-      !kg2 &&
+      !kg2Meta &&
       !discipline &&
       !klasse &&
       !tCode &&
-      maxKgNum == null &&
-      minKgNum == null;
+      !maxKgMeta &&
+      !minKgMeta;
 
     if (isEmptyLine) continue;
 
-    if (isVsMarker(vsVal) && (naam2 || va2 || gym2 || kg2)) {
-      bouts.push({
+    if (isVsMarker(vsVal) && (naam2 || va2 || gym2 || kg2Meta)) {
+      const bout = {
         bout_uid: randomUUID(),
         partij_nr: Number.isFinite(partijNr) ? partijNr : null,
 
@@ -487,19 +650,24 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         rood_gym: gym1,
         va_rood: va1,
         rood_geboortedatum: null,
-        rood_gewicht: kg1,
+        rood_gewicht: kg1Meta?.type === "exact" ? kg1Meta.label : null,
+        rood_gewicht_notatie: kg1Meta?.label ?? null,
 
         blauw_naam: naam2,
         blauw_gym: gym2,
         va_blauw: va2,
         blauw_geboortedatum: null,
-        blauw_gewicht: kg2,
+        blauw_gewicht: kg2Meta?.type === "exact" ? kg2Meta.label : null,
+        blauw_gewicht_notatie: kg2Meta?.label ?? null,
 
         discipline,
         klasse,
 
-        max_gewicht: maxKgNum,
-        min_gewicht: minKgNum,
+        max_gewicht: maxKgMeta?.value ?? null,
+        max_gewicht_notatie: maxKgMeta?.label ?? null,
+
+        min_gewicht: minKgMeta?.value ?? null,
+        min_gewicht_notatie: minKgMeta?.label ?? null,
 
         record_rood_w: 0,
         record_rood_l: 0,
@@ -513,8 +681,14 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         extra: {
           template: "admin_vs_t",
           t_code: tCode,
+          rood_gewicht_type: kg1Meta?.type ?? null,
+          blauw_gewicht_type: kg2Meta?.type ?? null,
+          max_gewicht_type: maxKgMeta?.type ?? null,
+          min_gewicht_type: minKgMeta?.type ?? null,
         },
-      });
+      };
+
+      bouts.push(bout);
       continue;
     }
 
@@ -524,11 +698,11 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         naam: naam1,
         gym: gym1,
         va: va1,
-        kg: kg1,
+        kg_meta: kg1Meta,
         discipline,
         klasse,
-        max_gewicht: maxKgNum,
-        min_gewicht: minKgNum,
+        max_gewicht_meta: maxKgMeta,
+        min_gewicht_meta: minKgMeta,
       });
     }
   }
@@ -541,8 +715,8 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
 
     const d = list.find((x) => x?.discipline)?.discipline ?? null;
     const k = list.find((x) => x?.klasse)?.klasse ?? null;
-    const mk = list.find((x) => x?.max_gewicht != null)?.max_gewicht ?? null;
-    const nk = list.find((x) => x?.min_gewicht != null)?.min_gewicht ?? null;
+    const mk = list.find((x) => x?.max_gewicht_meta != null)?.max_gewicht_meta ?? null;
+    const nk = list.find((x) => x?.min_gewicht_meta != null)?.min_gewicht_meta ?? null;
 
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
@@ -557,19 +731,24 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
           rood_gym: a?.gym ?? null,
           va_rood: a?.va ?? null,
           rood_geboortedatum: null,
-          rood_gewicht: a?.kg ?? null,
+          rood_gewicht: a?.kg_meta?.type === "exact" ? a.kg_meta.label : null,
+          rood_gewicht_notatie: a?.kg_meta?.label ?? null,
 
           blauw_naam: b?.naam ?? null,
           blauw_gym: b?.gym ?? null,
           va_blauw: b?.va ?? null,
           blauw_geboortedatum: null,
-          blauw_gewicht: b?.kg ?? null,
+          blauw_gewicht: b?.kg_meta?.type === "exact" ? b.kg_meta.label : null,
+          blauw_gewicht_notatie: b?.kg_meta?.label ?? null,
 
           discipline: d,
           klasse: k,
 
-          max_gewicht: mk,
-          min_gewicht: nk,
+          max_gewicht: mk?.value ?? null,
+          max_gewicht_notatie: mk?.label ?? null,
+
+          min_gewicht: nk?.value ?? null,
+          min_gewicht_notatie: nk?.label ?? null,
 
           record_rood_w: 0,
           record_rood_l: 0,
@@ -584,6 +763,10 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
             toernooi_code: code,
             toernooi_format: "roundrobin",
             template: "admin_vs_t",
+            rood_gewicht_type: a?.kg_meta?.type ?? null,
+            blauw_gewicht_type: b?.kg_meta?.type ?? null,
+            max_gewicht_type: mk?.type ?? null,
+            min_gewicht_type: nk?.type ?? null,
           },
         });
       }
@@ -983,21 +1166,6 @@ function isAgreedWeightHeader(h: string): boolean {
   );
 }
 
-/**
- * Alleen echte VECHTERGEWICHT-kolommen.
- * Dus:
- * - "gewicht"
- * - "kg"
- * - "gewicht rood"
- * - "gewicht blauw"
- * - "kg rood"
- * - "kg blauw"
- *
- * Maar NIET:
- * - "max gewicht"
- * - "min gewicht"
- * - "afgesproken gewicht"
- */
 function isFighterWeightHeader(h: string): boolean {
   const s = norm(h);
   if (!s) return false;
@@ -1291,7 +1459,7 @@ function scanRowByColorForCorner(
    8. GEWICHT FALLBACK IN RANGE
 ========================================================= */
 
-function extractWeightFromCornerRange(row: RowLike, map: ColMap, skipCols: number[] = []): string | null {
+function extractWeightMetaFromCornerRange(row: RowLike, map: ColMap, skipCols: number[] = []): ParsedWeightMeta | null {
   const start = map.start ?? 1;
   const end = map.end ?? start;
   const skip = new Set(skipCols.filter((x) => Number.isFinite(x)));
@@ -1311,8 +1479,8 @@ function extractWeightFromCornerRange(row: RowLike, map: ColMap, skipCols: numbe
     if (looksLikeGym(txt)) continue;
     if (isAgreedWeightHeader(lower)) continue;
 
-    const w = extractWeight(cell.value ?? txt);
-    if (w) return w;
+    const meta = extractWeightMeta(cell.value ?? txt, { allowClassNotation: true });
+    if (meta) return meta;
   }
 
   return null;
@@ -1439,25 +1607,25 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
     if (maxGewCol) {
       const raw = row.getCell(maxGewCol).value;
       const txt = cellTextLike(row.getCell(maxGewCol));
-      const mw = parseWeightNumber(raw ?? txt);
-      if (mw != null) bout.max_gewicht = mw;
+      const meta = parseAgreedWeightMeta(raw ?? txt);
+      applyAgreedWeightMeta(bout, "max", meta);
     }
 
     if (minGewCol) {
       const raw = row.getCell(minGewCol).value;
       const txt = cellTextLike(row.getCell(minGewCol));
-      const mw = parseWeightNumber(raw ?? txt);
-      if (mw != null) bout.min_gewicht = mw;
+      const meta = parseAgreedWeightMeta(raw ?? txt);
+      applyAgreedWeightMeta(bout, "min", meta);
     }
 
-    // fallback alleen voor -60 / -57 etc
+    // fallback alleen voor klasse-notaties zoals -60 / -95 / 95+
     if (bout.max_gewicht == null) {
       for (let c = 1; c <= Math.min(maxCol, 40); c++) {
         const txt = cellTextLike(row.getCell(c));
         const val = row.getCell(c).value;
-        const mw = extractMaxWeightOnly(txt) || extractMaxWeightOnly(val);
-        if (mw) {
-          bout.max_gewicht = Number(mw);
+        const meta = extractClassWeightMetaOnly(txt) || extractClassWeightMetaOnly(val);
+        if (meta) {
+          applyAgreedWeightMeta(bout, "max", meta);
           break;
         }
       }
@@ -1485,9 +1653,11 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
     bout.rood_geboortedatum = extractDate(roodGebRaw);
 
     const roodGewRaw = red.gew ? row.getCell(red.gew).value : null;
-    bout.rood_gewicht = extractWeight(roodGewRaw);
-    if (!bout.rood_gewicht) {
-      bout.rood_gewicht = extractWeightFromCornerRange(row, red, skipWeightCols);
+    const roodGewMetaDirect = extractWeightMeta(roodGewRaw, { allowClassNotation: true });
+    applyCornerWeightMeta(bout, "rood", roodGewMetaDirect);
+    if (!bout.rood_gewicht && !bout.rood_gewicht_notatie) {
+      const fallbackMeta = extractWeightMetaFromCornerRange(row, red, skipWeightCols);
+      applyCornerWeightMeta(bout, "rood", fallbackMeta);
     }
 
     const roodVaRaw = red.va ? cellTextLike(row.getCell(red.va)) : "";
@@ -1510,9 +1680,11 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
     bout.blauw_geboortedatum = extractDate(blauwGebRaw);
 
     const blauwGewRaw = blue.gew ? row.getCell(blue.gew).value : null;
-    bout.blauw_gewicht = extractWeight(blauwGewRaw);
-    if (!bout.blauw_gewicht) {
-      bout.blauw_gewicht = extractWeightFromCornerRange(row, blue, skipWeightCols);
+    const blauwGewMetaDirect = extractWeightMeta(blauwGewRaw, { allowClassNotation: true });
+    applyCornerWeightMeta(bout, "blauw", blauwGewMetaDirect);
+    if (!bout.blauw_gewicht && !bout.blauw_gewicht_notatie) {
+      const fallbackMeta = extractWeightMetaFromCornerRange(row, blue, skipWeightCols);
+      applyCornerWeightMeta(bout, "blauw", fallbackMeta);
     }
 
     const blauwVaRaw = blue.va ? cellTextLike(row.getCell(blue.va)) : "";
@@ -1561,7 +1733,9 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
       bout.rood_gym ||
       bout.blauw_gym ||
       bout.rood_gewicht ||
+      bout.rood_gewicht_notatie ||
       bout.blauw_gewicht ||
+      bout.blauw_gewicht_notatie ||
       bout.max_gewicht != null ||
       bout.min_gewicht != null;
 

@@ -6,7 +6,6 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
-
 import NvbDarkButton from "@/components/NvbDarkButton";
 import NvbLightButton from "@/components/NvbLightButton";
 
@@ -56,6 +55,19 @@ function parseISODateOnly(d?: any): Date | null {
   const s = String(d).trim();
   const dt = new Date(s.length === 10 ? `${s}T00:00:00` : s);
   return isNaN(dt.getTime()) ? null : dt;
+}
+
+function formatDateNl(d?: any): string {
+  const dt = parseISODateOnly(d);
+  if (!dt) {
+    const raw = String(d ?? "").trim();
+    if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) return raw;
+    return raw;
+  }
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const yyyy = dt.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
 }
 
 function calcAgeYearsOnDate(eventDate: Date, birthDate: Date): number | null {
@@ -162,25 +174,52 @@ function hasDispensatieResultaat(resultaten: ResRow[]): boolean {
   return resultaten.some((r) => normResultaat(r?.resultaat) === "dispensatie");
 }
 
+function statusPriority(status: PartijStatus): number {
+  if (status === "afgekeurd") return 4;
+  if (status === "dispensatie") return 3;
+  if (status === "actie") return 2;
+  if (status === "ok") return 1;
+  return 0;
+}
+
 function statusFromResultaten(resultaten: ResRow[]): PartijStatus {
-  let s: PartijStatus = "geen_info";
+  let best: PartijStatus = "geen_info";
   for (const r of resultaten) {
     const res = normResultaat(r?.resultaat);
-    if (res === "afgekeurd") return "afgekeurd";
-    if (res === "dispensatie") s = s === "geen_info" || s === "ok" ? "dispensatie" : s;
-    if (res === "actie") s = s === "geen_info" || s === "ok" ? "actie" : s;
-    if (res === "ok") s = s === "geen_info" ? "ok" : s;
+    const mapped: PartijStatus =
+      res === "afgekeurd"
+        ? "afgekeurd"
+        : res === "dispensatie"
+        ? "dispensatie"
+        : res === "actie"
+        ? "actie"
+        : res === "ok"
+        ? "ok"
+        : "geen_info";
+
+    if (statusPriority(mapped) > statusPriority(best)) best = mapped;
   }
-  return s;
+  return best;
 }
 
 function statusFromResultatenOrOk(
   resultaten: ResRow[] | undefined,
   ctxRow: AnyRow
 ): PartijStatus {
+  if (resultaten && resultaten.length > 0) {
+    const resStatus = statusFromResultaten(resultaten);
+    if (resStatus !== "geen_info") return resStatus;
+  }
   if (!isContextCompleet(ctxRow)) return "geen_info";
-  if (!resultaten || resultaten.length === 0) return "ok";
-  return statusFromResultaten(resultaten);
+  return "ok";
+}
+
+function isLicentieRow(r: ResRow) {
+  const code = String(r.rule_code ?? "").toLowerCase();
+  const rule = String(r.rule ?? "").toLowerCase();
+  const msg = String(r.boodschap ?? "").toLowerCase();
+  const hay = `${code} ${rule} ${msg}`;
+  return hay.includes("licentie") || hay.includes("license");
 }
 
 function HeaderBadge({
@@ -563,6 +602,7 @@ export default function ControleMatchmakingPage() {
   const [dispRequestByPartij, setDispRequestByPartij] = useState<Record<number, boolean>>({});
   const [dispResultaatByPartij, setDispResultaatByPartij] = useState<Record<number, boolean>>({});
   const [countByPartij, setCountByPartij] = useState<Record<number, number>>({});
+  const [licentieStatusByPartij, setLicentieStatusByPartij] = useState<Record<number, "ok" | "issue">>({});
 
   const [verbodByPartij, setVerbodByPartij] = useState<Record<number, boolean>>({});
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -583,6 +623,9 @@ export default function ControleMatchmakingPage() {
   const [fBlauwKg, setFBlauwKg] = useState("");
   const [fMaxKg, setFMaxKg] = useState("");
 
+  const [releaseBusy, setReleaseBusy] = useState(false);
+  const [releaseMsg, setReleaseMsg] = useState<string | null>(null);
+
   async function getAccessToken(): Promise<string | null> {
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
@@ -590,8 +633,8 @@ export default function ControleMatchmakingPage() {
 
   const subtitle = useMemo(() => {
     const naam = (evenementNaam ?? "").trim();
-    const datum = (evenementDatum ?? "").trim();
-    if (naam && datum) return `${naam}  ${datum}`;
+    const datum = formatDateNl(evenementDatum);
+    if (naam && datum) return `${naam} ${datum}`;
     if (naam) return naam;
     if (datum) return datum;
     return "-";
@@ -603,7 +646,7 @@ export default function ControleMatchmakingPage() {
         height: "1px",
         background:
           "linear-gradient(to right, transparent, rgba(220,220,220,0.22), transparent)",
-      }) as React.CSSProperties,
+      }) as CSSProperties,
     []
   );
 
@@ -717,7 +760,7 @@ export default function ControleMatchmakingPage() {
     }
   }
 
-  async function deletePartij(partijNr: number) {
+  async function deletePartij(partijNr: number, boutId?: string | null) {
     if (!confirm(`Partij ${partijNr} verwijderen?`)) return;
 
     setBusyPartij((prev) => ({ ...prev, [partijNr]: "delete" }));
@@ -736,6 +779,8 @@ export default function ControleMatchmakingPage() {
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
           partij_nr: partijNr,
+          controle_run_id: run?.id ?? null,
+          bout_id: boutId ?? null,
         }),
       });
 
@@ -752,6 +797,48 @@ export default function ControleMatchmakingPage() {
         delete next[partijNr];
         return next;
       });
+    }
+  }
+
+  async function stuurDoorNaarOfficials() {
+    if (!matchmakingId || releaseBusy) return;
+
+    setReleaseBusy(true);
+    setReleaseMsg(null);
+    setError(null);
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/officials/release-matchmaking", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(json?.error ?? "Doorsturen naar officials mislukt.");
+      }
+
+      const successMsg =
+        json?.message ??
+        "✅ Matchmaking is doorgestuurd naar officials en staat nu in het official overzicht.";
+
+      setReleaseMsg(successMsg);
+      setMsg(successMsg);
+    } catch (e: any) {
+      const message = e?.message ?? String(e) ?? "Onbekende fout.";
+      setReleaseMsg(`❌ ${message}`);
+      setError(message);
+    } finally {
+      setReleaseBusy(false);
     }
   }
 
@@ -773,6 +860,7 @@ export default function ControleMatchmakingPage() {
         setDispResultaatByPartij({});
         setCountByPartij({});
         setVerbodByPartij({});
+        setLicentieStatusByPartij({});
         return;
       }
 
@@ -866,6 +954,7 @@ export default function ControleMatchmakingPage() {
         setDispResultaatByPartij({});
         setCountByPartij({});
         setVerbodByPartij({});
+        setLicentieStatusByPartij({});
         return;
       }
 
@@ -898,6 +987,7 @@ export default function ControleMatchmakingPage() {
       const verbodMap: Record<number, boolean> = {};
       const countMap: Record<number, number> = {};
       const dispResultMap: Record<number, boolean> = {};
+      const licMap: Record<number, "ok" | "issue"> = {};
 
       for (const pnStr of Object.keys(ctxByPn)) {
         const pn = Number(pnStr);
@@ -908,12 +998,25 @@ export default function ControleMatchmakingPage() {
         verbodMap[pn] = rr.some(isVerbodRow);
         countMap[pn] = rr.length;
         dispResultMap[pn] = hasDispensatieResultaat(rr);
+
+        const licRows = rr.filter(isLicentieRow);
+        if (licRows.length > 0) {
+          const hasLicIssue = licRows.some((x) => {
+            const res = normResultaat(x.resultaat);
+            return res === "afgekeurd" || res === "actie" || res === "dispensatie";
+          });
+          const hasLicOk = licRows.some((x) => normResultaat(x.resultaat) === "ok");
+
+          if (hasLicIssue) licMap[pn] = "issue";
+          else if (hasLicOk) licMap[pn] = "ok";
+        }
       }
 
       setStatusByPartij(statusMap);
       setVerbodByPartij(verbodMap);
       setCountByPartij(countMap);
       setDispResultaatByPartij(dispResultMap);
+      setLicentieStatusByPartij(licMap);
 
       try {
         const { data: dispHits } = await supabase
@@ -973,12 +1076,23 @@ export default function ControleMatchmakingPage() {
     for (const r of rows) {
       const pn = Number(r.partij_nr);
       if (!Number.isFinite(pn)) continue;
+
+      const licStatus = licentieStatusByPartij[pn];
+      if (licStatus === "ok") {
+        m[pn] = false;
+        continue;
+      }
+      if (licStatus === "issue") {
+        m[pn] = true;
+        continue;
+      }
+
       const rood = isMissingLicentie(r, "rood");
       const blauw = isMissingLicentie(r, "blauw");
       if (rood || blauw) m[pn] = true;
     }
     return m;
-  }, [rows]);
+  }, [rows, licentieStatusByPartij]);
 
   const anyDispensatieByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
@@ -1177,85 +1291,36 @@ export default function ControleMatchmakingPage() {
               }}
             >
               <div
-                className="flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3"
+                className="flex items-center justify-between gap-6 px-5 py-5"
                 style={{
-                  background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
-                  border: "2px solid rgba(63,63,70,0.55)",
-                  boxShadow: "0 14px 30px rgba(0,0,0,0.14)",
+                  background: "linear-gradient(180deg, #34343a 0%, #23232a 100%)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  boxShadow: "0 18px 34px rgba(0,0,0,0.22)",
                   color: "#fff",
                 }}
               >
-                <div className="min-w-[220px]">
-                  <div
-                    className={inter.className}
-                    style={{
-                      color: NVB_ORANGE,
-                      letterSpacing: "0.14em",
-                      fontSize: 14,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    FIGHTSUPPORT
-                  </div>
-                  <div
-                    className={inter.className}
-                    style={{
-                      color: "rgba(255,255,255,0.80)",
-                      fontSize: 12,
-                      letterSpacing: "0.06em",
-                      fontWeight: 500,
-                    }}
-                  >
-                    Vechtsport ondersteuning
-                  </div>
-                </div>
-
-                <div className="shrink-0">
-                  <NvbLightButton
-                    label="← Terug naar Overzicht"
-                    onClick={() => router.push("/dashboard/admin/controle")}
+                <div className="flex items-center gap-4 min-w-[240px]">
+                  <Image
+                    src="/branding/fightsupport/excel-logo.png"
+                    width={180}
+                    height={48}
+                    alt="FightSupport"
+                    priority
+                    style={{ width: "auto", height: "44px", objectFit: "contain" }}
                   />
                 </div>
 
-                <div className="flex-1 flex justify-center">
-                  <div
-                    className="rounded-[22px] p-[4px]"
-                    style={{
-                      background:
-                        "linear-gradient(135deg, #f5f5f5 0%, #bdbdbd 28%, #8e8e8e 55%, #f0f0f0 72%, #6f6f6f 100%)",
-                      boxShadow: `
-                        0 0 0 2px rgba(255,255,255,0.45),
-                        0 0 0 6px rgba(120,120,120,0.22),
-                        0 14px 30px rgba(0,0,0,0.55),
-                        0 0 28px rgba(220,220,220,0.22)
-                      `,
-                    }}
-                  >
-                    <div
-                      className="rounded-[18px] px-4 py-3"
-                      style={{
-                        background:
-                          "linear-gradient(180deg, rgba(0,0,0,0.68) 0%, rgba(0,0,0,0.40) 100%)",
-                        border: "1px solid rgba(255,255,255,0.10)",
-                      }}
-                    >
-                      <Image
-                        src="/branding/fightsupport/excel-logo.png"
-                        width={380}
-                        height={150}
-                        alt="FightSupport"
-                        priority
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2 justify-end min-w-[320px]">
+                <div className="flex flex-1 items-center justify-end gap-3 flex-wrap">
                   <DarkActionButton
-                    label="CSV Sportdata"
-                    tone="purple"
-                    onClick={openSportdataCsv}
+                    label={releaseBusy ? "Doorsturen…" : "→ Bondteam"}
+                    tone="orange"
+                    onClick={stuurDoorNaarOfficials}
+                    disabled={releaseBusy}
+                  />
+                  <DarkActionButton
+                    label="Rapportage"
+                    tone="orange"
+                    onClick={openReportHtml}
                   />
                   <DarkActionButton
                     label="Excel"
@@ -1263,58 +1328,99 @@ export default function ControleMatchmakingPage() {
                     onClick={openExcel}
                   />
                   <DarkActionButton
-                    label="Rapportage"
-                    tone="orange"
-                    onClick={openReportHtml}
+                    label="CSV Sportdata"
+                    tone="purple"
+                    onClick={openSportdataCsv}
                   />
-
-                  <div className="ml-2">
-                    <NvbDarkButton
-                      label="Partij toevoegen"
-                      onClick={() => setShowAdd(true)}
-                    />
-                  </div>
                 </div>
               </div>
 
-              <div className="my-3" style={separator} />
-
-              <div className="text-center">
+              {releaseMsg ? (
                 <div
-                  className={inter.className}
+                  className="mt-4 rounded-2xl border px-4 py-3 text-sm font-semibold"
+                  style={{
+                    background: releaseMsg.startsWith("✅")
+                      ? "rgba(34,197,94,0.10)"
+                      : "rgba(239,68,68,0.10)",
+                    color: releaseMsg.startsWith("✅") ? "#166534" : "#991b1b",
+                    borderColor: releaseMsg.startsWith("✅")
+                      ? "rgba(34,197,94,0.35)"
+                      : "rgba(239,68,68,0.35)",
+                  }}
+                >
+                  {releaseMsg}
+                </div>
+              ) : null}
+
+              <div className="pt-6">
+                <div
+                  className={`${inter.className} text-center`}
                   style={{
                     color: NVB_ORANGE,
-                    fontSize: 46,
+                    fontSize: 22,
                     fontWeight: 900,
-                    letterSpacing: "0.02em",
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
                   }}
                 >
-                  Matchmaking
+                  Matchmaking controle
+                </div>
+
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => router.push("/dashboard/admin/controle")}
+                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-zinc-900 transition hover:translate-y-[-1px]`}
+                    style={{
+                      background: "linear-gradient(180deg, #f2f2f2 0%, #cfcfcf 48%, #a8a8a8 100%)",
+                      border: "1px solid rgba(82,82,91,0.45)",
+                      borderRadius: 0,
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 10px 18px rgba(0,0,0,0.12)",
+                      minWidth: 180,
+                    }}
+                  >
+                    ← Terug naar overzicht
+                  </button>
+
+                  <div
+                    className={inter.className}
+                    style={{
+                      fontSize: 24,
+                      fontWeight: 900,
+                      letterSpacing: "0.02em",
+                      color: "#1f1f23",
+                      display: "inline-block",
+                      padding: "12px 22px",
+                      borderRadius: 0,
+                      background: "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
+                      border: "1px solid rgba(42,42,46,0.22)",
+                      boxShadow: "0 12px 24px rgba(0,0,0,0.08)",
+                    }}
+                  >
+                    {safeText(subtitle, "Onbekend evenement")}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAdd(true)}
+                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px]`}
+                    style={{
+                      background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
+                      border: "1px solid rgba(150,40,0,0.55)",
+                      borderRadius: 0,
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(255,77,0,0.18)",
+                      minWidth: 180,
+                    }}
+                  >
+                    Partij toevoegen
+                  </button>
                 </div>
 
                 <div
                   className={inter.className}
                   style={{
-                    marginTop: 10,
-                    fontSize: 24,
-                    fontWeight: 900,
-                    letterSpacing: "0.02em",
-                    color: "#1f1f23",
-                    display: "inline-block",
-                    padding: "8px 14px",
-                    borderRadius: 14,
-                    background: "rgba(255,255,255,0.72)",
-                    border: "2px solid rgba(42,42,46,0.25)",
-                    boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
-                  }}
-                >
-                  {safeText(subtitle, "Onbekend evenement")}
-                </div>
-
-                <div
-                  className={inter.className}
-                  style={{
-                    marginTop: 8,
+                    marginTop: 12,
+                    textAlign: "center",
                     fontSize: 12,
                     color: "rgba(42,42,46,0.78)",
                     letterSpacing: "0.06em",
@@ -1324,7 +1430,7 @@ export default function ControleMatchmakingPage() {
                 </div>
               </div>
 
-              <div className="my-3" style={separator} />
+              <div className="my-4" style={separator} />
 
               {loading ? (
                 <div className="text-zinc-700">Laden…</div>
@@ -1606,7 +1712,19 @@ export default function ControleMatchmakingPage() {
                                     label={busy === "delete" ? "… Verwijderen" : "Verwijderen"}
                                     tone="red"
                                     disabled={busy === "delete"}
-                                    onClick={() => Number.isFinite(pn) && deletePartij(pn)}
+                                    onClick={() =>
+                                      Number.isFinite(pn) &&
+                                      deletePartij(
+                                        pn,
+                                        typeof r?.bout_id === "string"
+                                          ? r.bout_id
+                                          : typeof r?.bout_uid === "string"
+                                            ? r.bout_uid
+                                            : typeof r?.id === "string"
+                                              ? r.id
+                                              : null
+                                      )
+                                    }
                                   />
                                 </div>
                               </td>

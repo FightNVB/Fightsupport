@@ -83,73 +83,156 @@ function metalText(): CSSProperties {
   };
 }
 
-// ✅ Ronde tijd is afhankelijk van Discipline + Klasse (zie Excel screenshot)
-function rondeTijdFromKlasse(discipline: any, klasseMM: any): string | null {
-  const d = String(discipline ?? "").trim().toLowerCase();
-  const kRaw = String(klasseMM ?? "").trim().toLowerCase();
-  if (!kRaw) return null;
-
-  const k = kRaw
-    .replace(/\s+/g, " ")
+// ✅ Ronde tijd + format op basis van discipline, klasse en jongste deelnemer
+function normalizeRuleToken(v: any): string {
+  return String(v ?? "")
+    .toLowerCase()
     .replace(/\./g, "")
     .replace(/\(|\)/g, "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
+}
 
-  const isMma = d.includes("mma");
-
-  // minutes per ronde
-  const kickMap: Record<string, number> = {
-    "a titel": 3,
-    "a title": 3,
-    "a k1": 3,
-    "b": 2,
-    "c": 2,
-    "n": 1.5,
-    "16/17 jr": 1.5,
-    "16/17 jaar": 1.5,
-    "jeugd": 1,
-    "demo": 1,
-  };
-
-  const mmaMap: Record<string, number> = {
-    "mma pro": 5,
-    "pro": 5,
-    "mma am": 3,
-    "mma amateur": 3,
-    "am": 3,
-    "amateur": 3,
-  };
-
-  let minutes: number | null = null;
-
-  if (isMma) {
-    // match exact, else contains
-    minutes = mmaMap[k] ?? null;
-    if (minutes == null) {
-      if (k.includes("pro")) minutes = 5;
-      if (minutes == null && (k.includes("am") || k.includes("amateur"))) minutes = 3;
-    }
-  } else {
-    minutes = kickMap[k] ?? null;
-    if (minutes == null) {
-      // toleranter
-      if (k.startsWith("a") && k.includes("titel")) minutes = 3;
-      if (minutes == null && k.startsWith("a") && k.includes("k1")) minutes = 3;
-      if (minutes == null && (k === "n" || k.includes("nieuweling") || k.includes("newcomer"))) minutes = 1.5;
-      if (minutes == null && k.includes("jeugd")) minutes = 1;
-      if (minutes == null && k.includes("demo")) minutes = 1;
-      if (minutes == null && k.includes("16/17")) minutes = 1.5;
-      if (minutes == null && k === "b") minutes = 2;
-      if (minutes == null && k === "c") minutes = 2;
-    }
-  }
-
-  if (minutes == null) return null;
-
+function formatMinutesToClock(minutes: number | null): string | null {
+  if (minutes == null || !Number.isFinite(minutes)) return null;
   const totalSeconds = Math.round(minutes * 60);
   const mm = Math.floor(totalSeconds / 60);
   const ss = totalSeconds % 60;
   return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+
+function leeftijdOpEventGetal(ctx: AnyRow | null | undefined, side: "rood" | "blauw"): number | null {
+  if (!ctx) return null;
+
+  const direct = toInt(
+    ctx?.[`${side}_leeftijd_event`] ??
+      ctx?.[`${side}_leeftijd_op_event`] ??
+      ctx?.[`${side}_age_event`] ??
+      ctx?.[`${side}_age`]
+  );
+  if (direct != null) return direct;
+
+  const eventDate = parseISODateOnly(ctx?.evenement_datum);
+  const birthDate = parseISODateOnly(
+    ctx?.[`${side}_geboortedatum_fp`] ??
+      ctx?.[`${side}_geboortedatum_mm`] ??
+      ctx?.[`${side}_geboortedatum`] ??
+      ctx?.[`${side}_dob`]
+  );
+
+  if (!eventDate || !birthDate) return null;
+  return calcAgeYearsOnDate(eventDate, birthDate);
+}
+
+function wedstrijddetailsFromCtx(ctx: AnyRow | null | undefined): {
+  rondeTijd: string | null;
+  format: string | null;
+  rustTijd: string | null;
+} {
+  if (!ctx) return { rondeTijd: null, format: null, rustTijd: null };
+
+  const discipline = normalizeRuleToken(ctx?.discipline ?? ctx?.discipline_mm);
+  const klasse = normalizeRuleToken(ctx?.klasse_mm ?? ctx?.klasse);
+  const isMma = discipline.includes("mma") || klasse.includes("mma");
+
+  const roodLeeftijd = leeftijdOpEventGetal(ctx, "rood");
+  const blauwLeeftijd = leeftijdOpEventGetal(ctx, "blauw");
+  const knownAges = [roodLeeftijd, blauwLeeftijd].filter((v): v is number => typeof v === "number");
+  const jongste = knownAges.length ? Math.min(...knownAges) : null;
+
+  const isJeugdKlasse =
+    klasse === "j" ||
+    klasse === "j+" ||
+    /\bj\b/.test(klasse) ||
+    klasse.includes("jeugd") ||
+    klasse.includes("16/17") ||
+    klasse.includes("16 17") ||
+    klasse.includes("jr") ||
+    (jongste != null && jongste < 18);
+
+  if (isMma) {
+    if (jongste != null && jongste < 18) {
+      if (jongste >= 16) {
+        return {
+          rondeTijd: formatMinutesToClock(2.5),
+          format: "3 x 2:30",
+          rustTijd: "1:00",
+        };
+      }
+      if (jongste >= 14) {
+        return {
+          rondeTijd: formatMinutesToClock(2),
+          format: "3 x 2:00",
+          rustTijd: "1:00",
+        };
+      }
+      if (jongste >= 12) {
+        return {
+          rondeTijd: formatMinutesToClock(1.5),
+          format: "3 x 1:30",
+          rustTijd: "1:00",
+        };
+      }
+    }
+
+    if (
+      klasse === "p" ||
+      klasse === "pro" ||
+      klasse.includes(" mma pro") ||
+      klasse.startsWith("pro ") ||
+      klasse.endsWith(" pro") ||
+      klasse.includes("profession")
+    ) {
+      return {
+        rondeTijd: formatMinutesToClock(5),
+        format: "3 x 5:00",
+        rustTijd: null,
+      };
+    }
+
+    return {
+      rondeTijd: formatMinutesToClock(3),
+      format: "3 x 3:00",
+      rustTijd: null,
+    };
+  }
+
+  if (isJeugdKlasse) {
+    const rondeMin = jongste != null && jongste >= 16 ? 1.5 : 1;
+    return {
+      rondeTijd: formatMinutesToClock(rondeMin),
+      format: `3 x ${formatMinutesToClock(rondeMin)}`,
+      rustTijd: null,
+    };
+  }
+
+  let rondeMin: number | null = null;
+
+  if (
+    klasse === "n" ||
+    klasse.includes("nieuweling") ||
+    klasse.includes("newcomer")
+  ) {
+    rondeMin = 1.5;
+  } else if (klasse === "c") {
+    rondeMin = 2;
+  } else if (klasse === "b") {
+    rondeMin = 2;
+  } else if (
+    klasse === "a" ||
+    klasse.includes("a titel") ||
+    klasse.includes("a title") ||
+    klasse.includes("a k1")
+  ) {
+    rondeMin = 3;
+  }
+
+  return {
+    rondeTijd: formatMinutesToClock(rondeMin),
+    format: rondeMin != null ? `3 x ${formatMinutesToClock(rondeMin)}` : null,
+    rustTijd: null,
+  };
 }
 function metalFrameStyle(accent: "none" | "orange" | "red" | "blue" = "none"): CSSProperties {
   // ✅ Middeleeuws/stoer staal: dikke rand, bevel, diepe schaduw.
@@ -889,9 +972,22 @@ function parseJaNee(v: any): "ja" | "nee" | null {
 function normResultaat(v: any): string {
   const s = String(v ?? "").trim().toLowerCase();
   if (!s) return "";
-  if (s === "afkeur" || s === "afgekeur" || s === "afgekeurd" || s === "afkeuren") return "afgekeurd";
-  if (s === "actie" || s === "waarschuwing") return "actie";
-  if (s === "dispensatie" || s === "disp") return "dispensatie";
+
+  if (
+    s === "afkeur" ||
+    s === "afgekeur" ||
+    s === "afgekeurd" ||
+    s === "afkeuren" ||
+    s === "verbod" ||
+    s === "startverbod" ||
+    s.includes("afkeur") ||
+    s.includes("verbod")
+  ) {
+    return "afgekeurd";
+  }
+
+  if (s === "actie" || s === "waarschuwing" || s.includes("actie")) return "actie";
+  if (s === "dispensatie" || s === "disp" || s.includes("dispensatie")) return "dispensatie";
   if (s === "ok" || s === "goedgekeurd") return "ok";
   return s;
 }
@@ -903,10 +999,18 @@ function asUuid(v: any): string | null {
   return s;
 }
 
+function isApprovedOverride(row: ControleResultaatRow): boolean {
+  return String(row?.review_status ?? "").trim().toLowerCase() === "goedgekeurd" || normResultaat(row?.resultaat) === "ok";
+}
+
 function displayResultaat(row: ControleResultaatRow): {
   label: string;
   tone: "ok" | "warn" | "disp" | "err" | "info";
 } {
+  if (isApprovedOverride(row)) {
+    return { label: "OK", tone: "ok" };
+  }
+
   const code = (row.rule_code ?? "").toUpperCase();
   const msg = String(row.boodschap ?? "").toLowerCase();
 
@@ -922,7 +1026,6 @@ function displayResultaat(row: ControleResultaatRow): {
   }
 
   if (code.startsWith("LICENTIE_") || code.startsWith("KEURMERK_")) {
-    if (normResultaat(row.resultaat) === "afgekeurd") return { label: "AFKEUR", tone: "err" };
     return { label: "AFKEUR", tone: "err" };
   }
 
@@ -932,6 +1035,11 @@ function displayResultaat(row: ControleResultaatRow): {
   if (r === "actie") return { label: "ACTIE", tone: "warn" };
   if (r === "ok") return { label: "OK", tone: "ok" };
   return { label: String(r).toUpperCase(), tone: "info" };
+}
+
+function displayBoodschap(row: ControleResultaatRow): string {
+  if (isApprovedOverride(row)) return "OK";
+  return String(row?.boodschap ?? "-") || "-";
 }
 
 // ✅ UitslagenTable met paging (per 6 + Verder)
@@ -1565,14 +1673,51 @@ export default function PartijDetailPage() {
     };
   }, [ctx, uitslagenRood, uitslagenBlauw]);
 
-  // ✅ Gewicht info: toon gewichtklasse alleen bij MAX gewicht (niet bij rood/blauw)
+  // ✅ Gewicht info:
+  // 1) eerst max_gewicht uit controle_bout_context / matchmaking_bouts_raw
+  // 2) als dat leeg is: fallback berekenen uit de huidige gewichten
+  //    - jeugd: max 2 kg verschil
+  //    - volwassen: max 3 kg verschil
+  //    - MMA: gebruik gewichtsklasses
   const gewichtInfo = useMemo(() => {
     if (!ctx) return null;
 
-    const rKg = toNumKg(ctx?.rood_gewicht_mm);
-    const bKg = toNumKg(ctx?.blauw_gewicht_mm);
-    const discipline = String(ctx?.discipline ?? "").toLowerCase();
-    const isMma = discipline.includes("mma");
+    const norm = (v: any) =>
+      String(v ?? "")
+        .toLowerCase()
+        .replace(/\./g, "")
+        .replace(/\(|\)/g, "")
+        .replace(/_/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const rKg = toNumKg(ctx?.rood_gewicht_mm ?? ctx?.rood_gewicht ?? ctx?.gewicht_rood_mm);
+    const bKg = toNumKg(ctx?.blauw_gewicht_mm ?? ctx?.blauw_gewicht ?? ctx?.gewicht_blauw_mm);
+    const explicitMaxKg = toNumKg(
+      ctx?.max_gewicht ??
+        ctx?.max_gewicht_mm ??
+        ctx?.gewicht_max_mm ??
+        ctx?.matchmaking_bouts_raw_max_gewicht
+    );
+
+    const discipline = norm(ctx?.discipline ?? ctx?.discipline_mm);
+    const klasse = norm(ctx?.klasse_mm ?? ctx?.klasse);
+    const isMma = discipline.includes("mma") || klasse.includes("mma");
+
+    const roodLeeftijd = leeftijdOpEventGetal(ctx, "rood");
+    const blauwLeeftijd = leeftijdOpEventGetal(ctx, "blauw");
+    const knownAges = [roodLeeftijd, blauwLeeftijd].filter((v): v is number => typeof v === "number");
+    const jongste = knownAges.length ? Math.min(...knownAges) : null;
+
+    const isJeugd =
+      klasse === "j" ||
+      klasse === "j+" ||
+      /j/.test(klasse) ||
+      klasse.includes("jeugd") ||
+      klasse.includes("16/17") ||
+      klasse.includes("16 17") ||
+      klasse.includes("jr") ||
+      (jongste != null && jongste < 18);
 
     const MMA_CLASSES = [
       { name: "Strawweight", min: 0, max: 52.2 },
@@ -1616,16 +1761,53 @@ export default function PartijDetailPage() {
       return hit ?? null;
     };
 
-    const maxFighterKg = rKg != null || bKg != null ? Math.max(rKg ?? -Infinity, bKg ?? -Infinity) : null;
-    const klasse = findClass(maxFighterKg);
-    const klasseNaam = klasse?.name ?? null;
-    const klasseMaxKg = klasse?.max ?? null;
+    const diffKg = rKg != null && bKg != null ? Math.abs(rKg - bKg) : null;
+    const zwaarsteKg = rKg != null && bKg != null ? Math.max(rKg, bKg) : rKg ?? bKg ?? null;
+    const lichtsteKg = rKg != null && bKg != null ? Math.min(rKg, bKg) : rKg ?? bKg ?? null;
 
+    let inferredMaxKg: number | null = null;
+    let inferredKlasseNaam: string | null = null;
+
+    if (explicitMaxKg != null) {
+      inferredMaxKg = explicitMaxKg;
+      inferredKlasseNaam = findClass(explicitMaxKg)?.name ?? null;
+    } else if (isMma) {
+      const targetClass = findClass(zwaarsteKg);
+      inferredMaxKg = targetClass?.max ?? zwaarsteKg ?? null;
+      inferredKlasseNaam = targetClass?.name ?? null;
+    } else if (lichtsteKg != null || zwaarsteKg != null) {
+      const marge = isJeugd ? 2 : 3;
+      const kandidaatMax =
+        lichtsteKg != null && zwaarsteKg != null
+          ? Math.min(zwaarsteKg, lichtsteKg + marge)
+          : zwaarsteKg ?? lichtsteKg ?? null;
+
+      inferredMaxKg = kandidaatMax;
+      inferredKlasseNaam = isJeugd ? `Jeugd (${marge} kg verschil)` : `Volwassen (${marge} kg verschil)`;
+    }
+
+    const klasseMaxKg = inferredMaxKg;
+    const klasseNaam = inferredKlasseNaam;
     const rKlasse = findClass(rKg)?.name ?? null;
     const bKlasse = findClass(bKg)?.name ?? null;
-    const diffKg = rKg != null && bKg != null ? Math.abs(rKg - bKg) : null;
+    const roodBovenMax = klasseMaxKg != null && rKg != null ? rKg > klasseMaxKg : false;
+    const blauwBovenMax = klasseMaxKg != null && bKg != null ? bKg > klasseMaxKg : false;
 
-    return { rKg, bKg, maxFighterKg, klasseMaxKg, klasseNaam, rKlasse, bKlasse, diffKg, isMma };
+    return {
+      rKg,
+      bKg,
+      maxGewichtKg: klasseMaxKg,
+      klasseMaxKg,
+      klasseNaam,
+      rKlasse,
+      bKlasse,
+      diffKg,
+      roodBovenMax,
+      blauwBovenMax,
+      isMma,
+      isJeugd,
+      bron: explicitMaxKg != null ? "context/raw" : isMma ? "mma-gewichtsklasse" : "gewichtsverschil-regel",
+    };
   }, [ctx]);
 
   const keurmerkInfo = useMemo(() => {
@@ -1842,7 +2024,7 @@ export default function PartijDetailPage() {
       });
 
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error ?? "Automatische controle mislukt");
+      if (!r.ok) throw new Error(j?.error ?? "Automatische check mislukt");
 
       window.location.reload();
     } catch (e: any) {
@@ -1980,9 +2162,9 @@ export default function PartijDetailPage() {
       });
 
       const j2 = await r2.json().catch(() => ({}));
-      if (!r2.ok) throw new Error(j2?.error ?? "Automatische controle mislukt");
+      if (!r2.ok) throw new Error(j2?.error ?? "Automatische check mislukt");
 
-      setMsg("✅ Opgeslagen + automatische controle gestart.");
+      setMsg("✅ Opgeslagen + Automatische check gestart.");
       closeEdit();
       window.location.reload();
     } catch (e: any) {
@@ -2161,9 +2343,9 @@ export default function PartijDetailPage() {
                     <div className="text-zinc-600">Ronde tijd</div>
                     <div className="text-zinc-900 font-semibold text-right">
                       {(() => {
-                        const computed = rondeTijdFromKlasse(header.discipline, header.klasseMM);
+                        const details = wedstrijddetailsFromCtx(ctx as any);
                         const fallback = String((ctx as any)?.ronde_tijd ?? (ctx as any)?.rondetijd ?? "").trim();
-                        return computed ?? (fallback || "-");
+                        return details.rondeTijd ?? (fallback || "-");
                       })()}
                     </div>
 
@@ -2334,7 +2516,7 @@ export default function PartijDetailPage() {
                   {(() => {
                     const rKg = gewichtInfo?.rKg ?? null;
                     const bKg = gewichtInfo?.bKg ?? null;
-                    const klasseMaxKg = gewichtInfo?.klasseMaxKg ?? null;
+                    const klasseMaxKg = gewichtInfo?.maxGewichtKg ?? null;
                     const okUnder = klasseMaxKg == null || ((rKg == null || rKg <= klasseMaxKg) && (bKg == null || bKg <= klasseMaxKg));
                     const hasAny = rKg != null || bKg != null || klasseMaxKg != null;
                     return <Badge text={!hasAny ? "-" : okUnder ? "OK" : "CHECK"} tone={!hasAny ? "info" : okUnder ? "ok" : "warn"} />;
@@ -2353,7 +2535,7 @@ export default function PartijDetailPage() {
                     {gewichtInfo?.bKlasse ? <span className="text-white/60"> — {gewichtInfo.bKlasse}</span> : null}
                   </div>
                   <div>
-                    Klasse max gewicht:{" "}
+                    Max gewicht:{" "}
                     <span className="text-white font-extrabold">{gewichtInfo?.klasseMaxKg != null ? `${gewichtInfo.klasseMaxKg.toFixed(1)} kg` : "-"}</span>
                     {gewichtInfo?.klasseNaam ? (
                       <span className="text-white/60">
@@ -2405,7 +2587,7 @@ export default function PartijDetailPage() {
                             <td className="px-3 py-2 align-top">
                               <div className="flex flex-col gap-1">
                                 <Badge text={disp.label} tone={disp.tone} invert />
-                                {r.original_resultaat &&
+                                {!isApprovedOverride(r) && r.original_resultaat &&
                                 String(r.original_resultaat).toLowerCase() !== String(r.resultaat ?? "").toLowerCase() ? (
                                   <span className="text-[10px] opacity-70">
                                     Origineel: {String(r.original_resultaat).toUpperCase()}
@@ -2427,7 +2609,7 @@ export default function PartijDetailPage() {
 
                             <td className="px-3 py-2 align-top font-mono text-xs">{r.rule_code ?? r.rule ?? "-"}</td>
 
-                            <td className="px-3 py-2 align-top">{r.boodschap ?? "-"}</td>
+                            <td className="px-3 py-2 align-top">{displayBoodschap(r)}</td>
 
                             <td className="px-3 py-2 align-top">
                               <textarea
@@ -2487,7 +2669,7 @@ export default function PartijDetailPage() {
                   disabled={rescraping}
                   className="inline-flex items-center px-4 py-2 rounded bg-[var(--brand-orange)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
                 >
-                  {rescraping ? "Automatische controle…" : "Fightpaspoort controle"}
+                  {rescraping ? "Fightpaspoort check…" : "Controleer Fightpaspoort"}
                 </button>
 
                 <button
@@ -2602,7 +2784,7 @@ export default function PartijDetailPage() {
                       type="button"
                       onClick={saveEditOnly}
                       disabled={editSaving}
-                      className="px-4 py-2 rounded bg-[var(--brand-orange)] text-black font-extrabold hover:opacity-90 disabled:opacity-50"
+                      className="px-4 py-2 rounded bg-[#2a2a2e] text-white font-semibold hover:opacity-90 disabled:opacity-50"
                     >
                       {editSaving ? "Opslaan…" : "Opslaan"}
                     </button>
@@ -2611,15 +2793,15 @@ export default function PartijDetailPage() {
                       type="button"
                       onClick={saveAndRescrapeFromModal}
                       disabled={editSaving}
-                      className="px-4 py-2 rounded bg-white text-black font-extrabold hover:opacity-90 disabled:opacity-50"
-                      title="Opslaan en automatische controle starten"
+                      className="px-4 py-2 rounded bg-[#2a2a2e] text-white font-semibold hover:opacity-90 disabled:opacity-50"
+                      title="Opslaan en autocheck"
                     >
-                      {editSaving ? "Bezig…" : "Opslaan + Automatische controle"}
+                      {editSaving ? "Bezig…" : "Opslaan + Autocheck"}
                     </button>
                   </div>
 
                   <div className="text-xs text-zinc-600">
-                    Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan + Automatische controle” haalt daarna Fightpaspoort info opnieuw op.
+                    Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan + Autocheck” haalt daarna data Fightpaspoort opnieuw op.
                   </div>
                 </div>
               </div>

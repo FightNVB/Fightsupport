@@ -1,4 +1,4 @@
-// ControlEngine/scrapers/fp_bundle/scraper_fp_bundle.js
+// ControlEngine/scrapers/fp_bundle/scraper_fp_bundle_mm.js
 // ✅ MASTER tab logt 1x in en blijft open (sessie warm)
 // ✅ Per VA: worker opent NIEUWE TAB DIRECT op fighter-url:
 //     https://fightpassport.nl/#va_vechter/<va>
@@ -6,10 +6,8 @@
 // ✅ Ziet hij mismatch header? -> TAB SLUITEN -> NIEUWE TAB OPENEN met dezelfde fighter-url (retry)
 // ✅ GEEN SYS42, GEEN dashboard “fixes”
 //
-// FULLFIGHTER -> fighters_raw
-// UITSLAGEN  -> uitslagen_raw snapshot per (mm, run, va)
-// ⚠️ DB verwachting uitslagen unique:
-// UNIQUE (matchmaking_id, controle_run_id, va_nummer, datum, evenement, tegenstander)
+// FULLFIGHTER -> matchmaker_fighters_raw
+// UITSLAGEN  -> matchmaker_uitslagen_raw snapshot per (mm, va)
 
 import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
@@ -39,6 +37,17 @@ function normalizeVaStrict(v) {
   const s = String(v ?? "").trim();
   const digits = s.replace(/\D/g, "");
   return /^\d{3,5}$/.test(digits) ? digits : null;
+}
+
+function normalizeVaLoose(v) {
+  const s = String(v ?? "").trim().replace(/\D/g, "");
+  if (!s) return null;
+  const noZeros = s.replace(/^0+/, "");
+  return noZeros || "0";
+}
+
+function sameVa(a, b) {
+  return normalizeVaLoose(a) === normalizeVaLoose(b);
 }
 
 function safeSlug(v) {
@@ -130,9 +139,6 @@ async function isLoginPage(page) {
   return false;
 }
 
-/**
- * Hard close page: stopLoading + close (best effort)
- */
 async function hardClosePage(page) {
   if (!page) return;
   try {
@@ -145,12 +151,6 @@ async function hardClosePage(page) {
   } catch {}
 }
 
-/**
- * Compat worker-context:
- * - Puppeteer nieuw: createBrowserContext()
- * - Puppeteer klassiek: createIncognitoBrowserContext()
- * - Geen support: null (fallback)
- */
 async function createWorkerContext(browser) {
   if (browser && typeof browser.createBrowserContext === "function") {
     return await browser.createBrowserContext();
@@ -177,7 +177,6 @@ async function closeWorkerContext(ctx) {
 /* -------------------------------------------------------
    CORE: Open tab DIRECT fighter-url, verify header,
    else close and reopen until correct.
-   (context-aware, fallback naar browser.newPage)
 ------------------------------------------------------- */
 async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   const {
@@ -211,7 +210,7 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
     const info = await readHeaderInfo(p);
     const gotVa = info?.gotVa ?? null;
     const koptekst1 = info?.koptekst1 ?? "";
-    const ok = gotVa && String(gotVa) === String(va);
+    const ok = sameVa(gotVa, va);
 
     if (ok) return p;
 
@@ -372,7 +371,7 @@ async function scrapeZeroMeting(page) {
 async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id, controle_run_id) {
   if (!header?.va_nummer) return;
 
-  if (String(header.va_nummer) !== String(requestedVA)) {
+  if (!sameVa(header.va_nummer, requestedVA)) {
     console.log("[fullfighter] ⚠️ VA mismatch!", {
       requested: String(requestedVA),
       got: String(header.va_nummer),
@@ -390,29 +389,25 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
   const payload = {
     matchmaking_id: matchmaking_id ?? null,
     controle_run_id: controle_run_id ?? null,
-
     va_nummer: String(header.va_nummer),
     naam: header.naam,
     geboortedatum: geboortedatum_correct,
     geslacht: header.geslacht,
-
     licentie: details?.licentie || null,
     heeft_startverbod: details?.heeft_startverbod === "Ja" ? "Ja" : "Nee",
-
     totaal_wedstrijden: details?.totaal ?? null,
     gewonnen: details?.gewonnen ?? null,
-
     nulmeting_totaal: zero?.totaal ?? null,
     nulmeting_opmerking: zero?.opmerking || null,
     nulmeting_klasse: zero?.klasse || null,
   };
 
-  const { error } = await supabase.from("fighters_raw").upsert(payload, {
+  const { error } = await supabase.from("matchmaker_fighters_raw").upsert(payload, {
     onConflict: "matchmaking_id,va_nummer",
   });
 
-  if (error) console.log("[fullfighter] ❌ fighters_raw upsert fout:", error.message);
-  else console.log("[fullfighter] ✅ fighters_raw upsert OK:", header.va_nummer);
+  if (error) console.log("[fullfighter] ❌ matchmaker_fighters_raw upsert fout:", error.message);
+  else console.log("[fullfighter] ✅ matchmaker_fighters_raw upsert OK:", header.va_nummer);
 }
 
 async function doFullfighter(page, va, matchmaking_id, controle_run_id) {
@@ -436,10 +431,8 @@ function parseNlDate(v) {
   if (!v) return null;
   const s = String(v).trim();
 
-  // ✅ ExcelJS helper kan al ISO leveren: 2024-07-14
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // ✅ NL formaat: 14-07-2024 / 14/07/2024 / 14.07.2024
   const m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (!m) return null;
 
@@ -459,45 +452,7 @@ function toStr(v) {
 }
 
 async function fetchPartijNrByVa(matchmaking_id) {
-  const { data, error } = await supabase
-    .from("matchmaking_bouts_raw")
-    .select("partij_nr, va_rood, va_blauw")
-    .eq("matchmaking_id", matchmaking_id);
-
-  if (error) throw error;
-
-  // Zelf-contained normalisatie (niet afhankelijk van andere helpers)
-  const normVa = (v) => {
-    const s = String(v ?? "").trim().replace(/\D+/g, "");
-    if (!s) return null;
-    const noZeros = s.replace(/^0+/, "");
-    return noZeros ? noZeros : null;
-  };
-
-  const tmp = new Map(); // va -> Set(partij_nr)
-
-  for (const r of data ?? []) {
-    const nr = r?.partij_nr ?? null;
-    if (!nr) continue;
-
-    const vaR = normVa(r?.va_rood);
-    const vaB = normVa(r?.va_blauw);
-
-    if (vaR) {
-      if (!tmp.has(vaR)) tmp.set(vaR, new Set());
-      tmp.get(vaR).add(nr);
-    }
-    if (vaB) {
-      if (!tmp.has(vaB)) tmp.set(vaB, new Set());
-      tmp.get(vaB).add(nr);
-    }
-  }
-
-  const out = new Map(); // va -> number[]
-  for (const [va, set] of tmp.entries()) {
-    out.set(va, Array.from(set).sort((a, b) => a - b));
-  }
-  return out;
+  return new Map();
 }
 
 async function openUitslagenTile(page, va) {
@@ -532,11 +487,6 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
   return null;
 }
 
-/**
- * downloadExcel:
- * - herklik download knop 1x als er na 8s nog niets verschijnt
- * - wacht ook op .crdownload -> uiteindelijk .xlsx
- */
 async function downloadExcel(page, matchmaking_id, va) {
   const mm = safeSlug(matchmaking_id);
   const vaSafe = String(va ?? "").replace(/[^0-9]/g, "");
@@ -589,7 +539,7 @@ async function downloadExcel(page, matchmaking_id, va) {
   return null;
 }
 
-async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
+async function parseExcel(filePath, va, matchmaking_id) {
   const rows = await readXlsxToRows(filePath, { sheetIndex: 0 });
 
   const headerRow = rows[4] || [];
@@ -633,13 +583,10 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
 
     out.push({
       matchmaking_id,
-      controle_run_id,
       va_nummer: String(va),
-
       datum: isoDatum,
       evenement: toStr(row[idxEvenement]) ?? null,
       tegenstander: toStr(row[idxTegenstander]) ?? null,
-
       sportschool: idxSportschool !== -1 ? (toStr(row[idxSportschool]) ?? null) : null,
       discipline: toStr(row[idxDiscipline]) ?? null,
       klasse: idxKlasse !== -1 ? (toStr(row[idxKlasse]) ?? null) : null,
@@ -653,8 +600,7 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
   for (const r of out) {
     const k = [
       r.matchmaking_id,
-      r.controle_run_id,
-      r.va_nummer,
+      normalizeVaLoose(r.va_nummer),
       r.datum,
       r.evenement,
       r.tegenstander,
@@ -680,14 +626,19 @@ async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, 
   const vaStr = String(va ?? "").trim();
   const data = Array.isArray(rows) ? rows : [];
 
-  const partijList = partijNrByVaMap?.get?.(vaStr) ?? [];
-  const partij_nr = Array.isArray(partijList) && partijList.length ? Number(partijList[0]) : null;
+  let partij_nr = null;
+  try {
+    const direct = partijNrByVaMap?.get?.(vaStr);
+    const loose = partijNrByVaMap?.get?.(normalizeVaLoose(vaStr));
+    partij_nr = direct ?? loose ?? null;
+  } catch {
+    partij_nr = null;
+  }
 
   const { error: delErr } = await supabase
-    .from("uitslagen_raw")
+    .from("matchmaker_uitslagen_raw")
     .delete()
     .eq("matchmaking_id", matchmaking_id)
-    .eq("controle_run_id", controle_run_id)
     .eq("va_nummer", vaStr);
 
   if (delErr) throw delErr;
@@ -696,15 +647,14 @@ async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, 
   const normalized = data.map((row) => ({
     ...row,
     matchmaking_id,
-    controle_run_id,
+    controle_run_id: controle_run_id ?? null,
     va_nummer: vaStr,
     partij_nr,
   }));
 
-  const { error: insErr } = await supabase.from("uitslagen_raw").upsert(normalized, {
-    onConflict: "matchmaking_id,controle_run_id,va_nummer,datum,evenement,tegenstander",
-    ignoreDuplicates: false,
-  });
+  const { error: insErr } = await supabase
+    .from("matchmaker_uitslagen_raw")
+    .insert(normalized);
 
   if (insErr) throw insErr;
 
@@ -715,7 +665,6 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
   console.log(`[uitslagen] ▶️ start VA ${va}`);
 
   const MAX_TRIES = Number(process.env.UITSLAGEN_TRIES ?? "1");
-  let lastMeta = null;
 
   for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
     await openUitslagenTile(page, va);
@@ -726,12 +675,17 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
       console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
       return { ok: true, n: 0, reason: "no_file" };
     }
-    
-    const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
-    lastMeta = parsed?.meta ?? null;
+
+    const parsed = await parseExcel(file, va, matchmaking_id);
 
     if (parsed?.meta?.ok) {
-      const res = await saveUitslagenSnapshot(parsed.rows, matchmaking_id, controle_run_id, va, partijNrByVaMap);
+      const res = await saveUitslagenSnapshot(
+        parsed.rows,
+        matchmaking_id,
+        controle_run_id,
+        va,
+        partijNrByVaMap
+      );
       const n = res?.saved ?? parsed.rows.length ?? 0;
       console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
       return { ok: true, n, reason: "ok" };
@@ -748,14 +702,13 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
     await wait(600 + attempt * 400);
   }
 
-// headers missing => behandel als "geen uitslagen"
-await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
-console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
-return { ok: true, n: 0, reason: "no_uitslagen" };
+  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
+  console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
+  return { ok: true, n: 0, reason: "no_uitslagen" };
 }
 
 /* -------------------------------------------------------
-   RUN (worker pool) - per worker context (killbaar)
+   RUN (worker pool)
 ------------------------------------------------------- */
 async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
   const partijNrByVaMap = await fetchPartijNrByVa(matchmaking_id);
@@ -769,7 +722,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
 
   console.log("[bundle] ✅ Master logged in (cookies captured)");
 
-  // 🔒 MASTER REFRESH LOCK
   let masterRefreshPromise = null;
 
   async function refreshMasterSessionLocked(reason = "") {
@@ -806,7 +758,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     const STAGGER = Number(process.env.STAGGER_MS ?? "350");
     await wait(workerIdx * STAGGER);
 
-    // ✅ eigen context per worker (compat)
     let ctx = await createWorkerContext(browser);
 
     async function resetWorkerContext(reason) {
@@ -843,20 +794,17 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           continue;
         }
 
-        // FULLFIGHTER
         await withTimeout(
           () => doFullfighter(page, va, matchmaking_id, controle_run_id),
           FULLFIGHTER_TIMEOUT_MS,
           `fullfighter ${va}`,
           async () => {
-            // kill worker context => stopt echt alles (minimaliseert ghost upserts)
             await resetWorkerContext(`fullfighter timeout VA ${va}`);
             page = null;
           }
         );
         fullfighterStatus = "ok";
 
-        // UITSLAGEN
         const uRes = await withTimeout(
           () => doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrByVaMap),
           UITSLAGEN_TIMEOUT_MS,
@@ -867,7 +815,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           }
         );
         uitslagenStatus = uRes?.ok ? `ok(n=${uRes?.n ?? 0})` : `fail(${uRes?.reason ?? "unknown"})`;
-
       } catch (e) {
         const msg = e?.message ?? String(e);
 
@@ -894,7 +841,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           if (fullfighterStatus === "skip") fullfighterStatus = "error";
           if (uitslagenStatus === "skip") uitslagenStatus = "error";
         }
-
       } finally {
         console.log(`[bundle] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`);
 
@@ -907,7 +853,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
       }
     }
 
-    // worker klaar
     await closeWorkerContext(ctx).catch(() => {});
   }
 
@@ -949,7 +894,7 @@ const WORKERS = Number(process.env.WORKERS ?? "5");
 const workers =
   Number.isFinite(WORKERS) && WORKERS > 0 ? Math.min(10, Math.max(1, Math.floor(WORKERS))) : 5;
 
-console.log("SCRAPER — FP_BUNDLE (reopen tab until header matches)", {
+console.log("SCRAPER — FP_BUNDLE_MM (reopen tab until header matches)", {
   matchmaking_id,
   controle_run_id,
   count: vaList.length,
@@ -966,10 +911,10 @@ console.log("SCRAPER — FP_BUNDLE (reopen tab until header matches)", {
 
 runBundle(matchmaking_id, controle_run_id, vaList, workers)
   .then(() => {
-    console.log("✅ FP bundle klaar");
+    console.log("✅ FP bundle MM klaar");
     process.exit(0);
   })
   .catch((e) => {
-    console.error("❌ FP bundle hard failed:", e?.stack ?? e?.message ?? String(e));
+    console.error("❌ FP bundle MM hard failed:", e?.stack ?? e?.message ?? String(e));
     process.exit(1);
   });

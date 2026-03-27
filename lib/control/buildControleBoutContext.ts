@@ -104,6 +104,30 @@ function resolveMaxGewicht(partij: any): number | null {
   );
 }
 
+function resolveMaxGewichtNotatie(partij: any): string | null {
+  return toNullableStr(
+    partij?.max_gewicht_notatie ??
+      partij?.max_gewicht_notatie_mm ??
+      partij?.gewicht_notatie ??
+      partij?.gewichtsklasse_notatie ??
+      null
+  );
+}
+
+function resolveMaxGewichtType(partij: any): string | null {
+  const s = String(
+    partij?.max_gewicht_type ??
+      partij?.extra?.max_gewicht_type ??
+      ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (!s) return null;
+  if (s === "exact" || s === "up_to" || s === "open_above") return s;
+  return null;
+}
+
 type EvenementInfo = {
   evenement_naam: string | null;
   evenement_datum: string | null;
@@ -515,6 +539,9 @@ export async function buildControleBoutContext(
     const blauw_mma_current_klasse = resolveMmaCurrentKlasse(fb, uitslagenB);
 
     const max_gewicht = resolveMaxGewicht(partij);
+    const max_gewicht_notatie = resolveMaxGewichtNotatie(partij);
+    const max_gewicht_type = resolveMaxGewichtType(partij);
+
     const rood_demo_totaal = Math.max(getDemoTotaalFromRecord(recRClass), countDemoUitslagen(uitslagenR));
     const blauw_demo_totaal = Math.max(getDemoTotaalFromRecord(recBClass), countDemoUitslagen(uitslagenB));
 
@@ -533,6 +560,8 @@ export async function buildControleBoutContext(
       is_toernooi: toNullableBool(partij?.is_toernooi ?? partij?.toernooi),
 
       max_gewicht,
+      max_gewicht_notatie,
+      max_gewicht_type,
 
       rood_naam_mm: toNullableStr(partij?.rood_naam),
       rood_gym_mm: toNullableStr(partij?.rood_gym),

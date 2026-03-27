@@ -196,7 +196,7 @@ export default function MatchmakerDashboardPage() {
     {
       label: "Matchmaking bouwen",
       subtitle: "Inschrijvingen verwerken en partijen opbouwen",
-      href: "/dashboard/matchmaker/inschrijvingen",
+      href: "/dashboard/matchmaker/matchmaking",
       icon: Users,
     },
     {
