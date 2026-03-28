@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, CheckCircle, RefreshCcw } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle, FileText, RefreshCcw } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
@@ -174,6 +174,7 @@ export default function LineupPage() {
   const [bouts, setBouts] = useState<Bout[]>([]);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const [header, setHeader] = useState<{
     evenement_naam: string | null;
@@ -330,6 +331,35 @@ export default function LineupPage() {
     }
   }
 
+  async function downloadPdf() {
+    setExportingPdf(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await authedFetch("/api/officials/lineup/finalize-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error ?? "PDF genereren mislukt");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `lineup_${matchmakingId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setNotice("✅ Lineup PDF gedownload.");
+    } catch (e: any) {
+      setError(e?.message ?? "PDF genereren mislukt.");
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   return (
     <div style={pageWrap}>
       {/* Top bar */}
@@ -375,6 +405,14 @@ export default function LineupPage() {
               >
                 <CheckCircle size={12} style={{ marginRight: 4, display: "inline" }} />
                 {confirming ? "Bezig…" : "Lineup bevestigen"}
+              </button>
+              <button
+                style={orangeBtn}
+                onClick={() => void downloadPdf()}
+                disabled={exportingPdf || busy}
+              >
+                <FileText size={12} style={{ marginRight: 4, display: "inline" }} />
+                {exportingPdf ? "Bezig…" : "PDF Download"}
               </button>
               <Link
                 href={`/dashboard/officials/uitslagen/${encodeURIComponent(matchmakingId)}`}
