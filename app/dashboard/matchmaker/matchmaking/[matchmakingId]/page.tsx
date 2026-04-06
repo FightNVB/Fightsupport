@@ -79,13 +79,40 @@ function calcAgeYearsOnDate(eventDate: Date, birthDate: Date): number | null {
 }
 
 function ageAtEvent(ctx: AnyRow, side: "rood" | "blauw"): string {
-  const event = parseISODateOnly(ctx?.evenement_datum);
+  const event = parseISODateOnly(
+    ctx?.evenement_datum ?? ctx?.event_datum ?? ctx?.datum ?? null
+  );
   const birth = parseISODateOnly(
-    ctx?.[`${side}_geboortedatum_fp`] ?? ctx?.[`${side}_geboortedatum_mm`]
+    ctx?.[`${side}_geboortedatum_fp`] ??
+      ctx?.[`${side}_geboortedatum_mm`] ??
+      ctx?.[`${side}_geboortedatum`] ??
+      null
   );
   if (!event || !birth) return "-";
   const years = calcAgeYearsOnDate(event, birth);
   return years == null ? "-" : String(years);
+}
+
+function ageAtEventNumber(ctx: AnyRow, side: "rood" | "blauw"): number | null {
+  const event = parseISODateOnly(
+    ctx?.evenement_datum ?? ctx?.event_datum ?? ctx?.datum ?? null
+  );
+  const birth = parseISODateOnly(
+    ctx?.[`${side}_geboortedatum_fp`] ??
+      ctx?.[`${side}_geboortedatum_mm`] ??
+      ctx?.[`${side}_geboortedatum`] ??
+      null
+  );
+  if (!event || !birth) return null;
+  return calcAgeYearsOnDate(event, birth);
+}
+
+function minAgeAtEvent(ctx: AnyRow): number {
+  const rood = ageAtEventNumber(ctx, "rood");
+  const blauw = ageAtEventNumber(ctx, "blauw");
+  const nums = [rood, blauw].filter((x): x is number => x != null && Number.isFinite(x));
+  if (!nums.length) return 999;
+  return Math.min(...nums);
 }
 
 function safeText(v: any, fallback = "-") {
@@ -145,17 +172,16 @@ function isMissingLicentie(ctx: AnyRow, side: "rood" | "blauw"): boolean {
 
 function isContextCompleet(ctx: AnyRow): boolean {
   if (!ctx) return false;
-  const required = [
-    ctx?.rood_va_mm,
-    ctx?.blauw_va_mm,
-    ctx?.rood_naam_fp,
-    ctx?.blauw_naam_fp,
-    ctx?.rood_geboortedatum_fp,
-    ctx?.blauw_geboortedatum_fp,
-    ctx?.rood_geslacht,
-    ctx?.blauw_geslacht,
-    ctx?.evenement_datum,
-  ];
+
+  const roodVa = ctx?.rood_va_mm ?? ctx?.rood_va ?? ctx?.va_rood ?? null;
+  const blauwVa = ctx?.blauw_va_mm ?? ctx?.blauw_va ?? ctx?.va_blauw ?? null;
+
+  const roodNaam = ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? ctx?.rood_naam ?? null;
+  const blauwNaam = ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? ctx?.blauw_naam ?? null;
+
+  const eventDatum = ctx?.evenement_datum ?? ctx?.event_datum ?? ctx?.datum ?? null;
+
+  const required = [roodVa, blauwVa, roodNaam, blauwNaam, eventDatum];
   return required.every((v) => v != null && String(v).trim() !== "");
 }
 
@@ -301,12 +327,14 @@ function FilterButton({
   onClick,
   count,
   tone,
+  disabled,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
   count: number;
   tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "neutral" | "purple" | "blue";
+  disabled?: boolean;
 }) {
   const base =
     "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-extrabold border transition";
@@ -353,7 +381,8 @@ function FilterButton({
     <button
       type="button"
       onClick={onClick}
-      className={`${base} ${active ? activeCls : inactiveCls}`}
+      disabled={!!disabled}
+      className={`${base} ${active ? activeCls : inactiveCls} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       <span>{label}</span>
       <span className={`tabular-nums px-2 py-0.5 rounded-full ${active ? "bg-white" : "bg-zinc-100"}`}>
@@ -379,10 +408,14 @@ function isVerbodRow(r: ResRow) {
 }
 
 function isGeenTegenstander(ctx: AnyRow): boolean {
-  const blauwVa = String(ctx?.blauw_va_mm ?? "").trim();
-  const blauwNaam = String(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? "").trim();
-  const roodVa = String(ctx?.rood_va_mm ?? "").trim();
-  const roodNaam = String(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? "").trim();
+  const blauwVa = String(ctx?.blauw_va_mm ?? ctx?.blauw_va ?? ctx?.va_blauw ?? "").trim();
+  const blauwNaam = String(
+    ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? ctx?.blauw_naam ?? ""
+  ).trim();
+  const roodVa = String(ctx?.rood_va_mm ?? ctx?.rood_va ?? ctx?.va_rood ?? "").trim();
+  const roodNaam = String(
+    ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? ctx?.rood_naam ?? ""
+  ).trim();
   const heeftRood = !!(roodVa || roodNaam);
   const heeftBlauw = !!(blauwVa || blauwNaam);
   return (heeftRood && !heeftBlauw) || (!heeftRood && heeftBlauw);
@@ -577,6 +610,99 @@ function Field({
   );
 }
 
+function getStableRowKey(r: AnyRow): string {
+  if (typeof r?.id === "string" && r.id.trim()) return `ctx-${r.id.trim()}`;
+  if (typeof r?.bout_id === "string" && r.bout_id.trim()) return `bout-${r.bout_id.trim()}`;
+  if (typeof r?.matchmaker_bout_id === "string" && r.matchmaker_bout_id.trim())
+    return `mmb-${r.matchmaker_bout_id.trim()}`;
+  if (typeof r?.raw_bout_id === "string" && r.raw_bout_id.trim()) return `raw-${r.raw_bout_id.trim()}`;
+  if (typeof r?.source_bout_id === "string" && r.source_bout_id.trim())
+    return `src-${r.source_bout_id.trim()}`;
+  return `partij-${String(r?.partij_nr ?? Math.random())}`;
+}
+
+function getControleContextId(r: AnyRow): string | null {
+  if (typeof r?.id === "string" && r.id.trim()) return r.id.trim();
+  return null;
+}
+
+function getBoutIdForReorder(r: AnyRow): string | null {
+  const candidates = [
+    r?.matchmaker_bout_id,
+    r?.bout_id,
+    r?.raw_bout_id,
+    r?.source_bout_id,
+    r?.id,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+function arrayMove<T>(list: T[], from: number, to: number): T[] {
+  const copy = [...list];
+  const [item] = copy.splice(from, 1);
+  copy.splice(to, 0, item);
+  return copy;
+}
+
+function toNumberLoose(v: any): number | null {
+  if (v == null) return null;
+  const s = String(v).trim().replace(",", ".");
+  if (!s) return null;
+  const m = s.match(/-?\d+(\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getBoutWeightForSort(r: AnyRow): number {
+  const maxKg = toNumberLoose(r?.max_gewicht);
+  if (maxKg != null) return maxKg;
+
+  const rood = toNumberLoose(r?.rood_gewicht);
+  const blauw = toNumberLoose(r?.blauw_gewicht);
+
+  if (rood != null && blauw != null) return Math.max(rood, blauw);
+  if (rood != null) return rood;
+  if (blauw != null) return blauw;
+  return 999;
+}
+
+function klasseRank(raw: any): number {
+  const s = String(raw ?? "").trim().toUpperCase();
+
+  if (!s) return 999;
+  if (s.includes("N")) return 1;
+  if (s.includes("C")) return 2;
+  if (s.includes("B")) return 3;
+  if (s.includes("A")) return 4;
+
+  return 999;
+}
+
+function autoSortLineupRows(input: AnyRow[]): AnyRow[] {
+  return [...input].sort((a, b) => {
+    const ageDiff = minAgeAtEvent(a) - minAgeAtEvent(b);
+    if (ageDiff !== 0) return ageDiff;
+
+    const klasseDiff = klasseRank(a?.klasse_mm ?? a?.klasse) - klasseRank(b?.klasse_mm ?? b?.klasse);
+    if (klasseDiff !== 0) return klasseDiff;
+
+    const weightDiff = getBoutWeightForSort(a) - getBoutWeightForSort(b);
+    if (weightDiff !== 0) return weightDiff;
+
+    const aPn = Number(a?.partij_nr ?? 99999);
+    const bPn = Number(b?.partij_nr ?? 99999);
+    return aPn - bPn;
+  });
+}
+
 export default function MatchmakerMatchmakingPage() {
   const params = useParams();
   const router = useRouter();
@@ -591,6 +717,11 @@ export default function MatchmakerMatchmakingPage() {
   const [evenementDatum, setEvenementDatum] = useState<string | null>(null);
 
   const [rows, setRows] = useState<AnyRow[]>([]);
+  const [lineupMode, setLineupMode] = useState(false);
+  const [orderedRows, setOrderedRows] = useState<AnyRow[]>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [saveOrderBusy, setSaveOrderBusy] = useState(false);
+
   const [statusByPartij, setStatusByPartij] = useState<Record<number, PartijStatus>>({});
   const [runMeldingen, setRunMeldingen] = useState<ResRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -658,8 +789,109 @@ export default function MatchmakerMatchmakingPage() {
     window.open(`/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
   }
 
+  function openLineupExcel() {
+    window.open(`/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
+  }
+
   function openSportdataCsv() {
     window.open(`/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
+  }
+
+  function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
+    const sorted = [...nextRows].sort(
+      (a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0)
+    );
+    setOrderedRows(sorted);
+  }
+
+  function movePartij(fromIndex: number, toIndex: number) {
+    if (toIndex < 0 || toIndex >= orderedRows.length) return;
+    setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
+  }
+
+  function applyAutoLineup() {
+    setOrderedRows(autoSortLineupRows(orderedRows));
+    setMsg(
+      "✅ Lineup automatisch gesorteerd op jongste eerst, daarna klasse N → C → B → A, daarna gewicht."
+    );
+  }
+
+  function getVisualPartijNr(row: AnyRow, indexInView: number) {
+    if (!lineupMode) return Number(row?.partij_nr ?? indexInView + 1);
+    return indexInView + 1;
+  }
+
+  function hasOrderChanges() {
+    if (orderedRows.length !== rows.length) return false;
+    for (let i = 0; i < orderedRows.length; i += 1) {
+      const visualNr = i + 1;
+      const currentNr = Number(orderedRows[i]?.partij_nr ?? 0);
+      if (currentNr !== visualNr) return true;
+    }
+    return false;
+  }
+
+  async function saveLineupOrder() {
+    setError(null);
+    setMsg("");
+
+    if (!matchmakingId) {
+      setError("matchmakingId ontbreekt.");
+      return;
+    }
+
+    const items = orderedRows.map((r, index) => ({
+      ctx_row_id: getControleContextId(r),
+      bout_id: getBoutIdForReorder(r),
+      old_partij_nr:
+        typeof r?.partij_nr === "number"
+          ? r.partij_nr
+          : typeof r?.partij_nr === "string" && /^\d+$/.test(r.partij_nr.trim())
+          ? Number(r.partij_nr.trim())
+          : null,
+      partij_nr: index + 1,
+    }));
+
+    const invalid = items.find((x) => !x.ctx_row_id && !x.bout_id && x.old_partij_nr == null);
+    if (invalid) {
+      setError("Niet alle partijen hebben een geldige bronkoppeling voor reorder.");
+      return;
+    }
+
+    setSaveOrderBusy(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/controle/reorder-partijen", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          items,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Volgorde opslaan mislukt.");
+
+      setMsg("✅ Lineup opgeslagen. Volgorde en partijnummers zijn aangepast.");
+      setLineupMode(false);
+      setReloadTick((x) => x + 1);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setSaveOrderBusy(false);
+    }
+  }
+
+  function cancelLineupMode() {
+    setLineupMode(false);
+    syncOrderedRowsFromRows(rows);
+    setDragId(null);
   }
 
   async function addPartijSubmit() {
@@ -850,6 +1082,7 @@ export default function MatchmakerMatchmakingPage() {
     try {
       if (!matchmakingId) {
         setRows([]);
+        setOrderedRows([]);
         setRun(null);
         setEvenementNaam(null);
         setEvenementDatum(null);
@@ -923,18 +1156,17 @@ export default function MatchmakerMatchmakingPage() {
           : null
       );
 
-      let ctxQuery = supabase
-        .from("matchmaker_matches")
+      const { data: ctxRows, error: ctxErr } = await supabase
+        .from("matchmaker_bouts_raw")
         .select("*")
-        .eq("matchmaking_id", matchmakingId);
+        .eq("matchmaking_id", matchmakingId)
+        .order("partij_nr", { ascending: true });
 
-      if (latestControleRunId) ctxQuery = ctxQuery.eq("controle_run_id", latestControleRunId);
-
-      const { data: ctxRows, error: ctxErr } = await ctxQuery.order("partij_nr", { ascending: true });
       if (ctxErr) throw ctxErr;
 
       const ctxList = (ctxRows ?? []) as AnyRow[];
       setRows(ctxList);
+      syncOrderedRowsFromRows(ctxList);
 
       const map: Record<number, PartijStatus> = {};
       const ctxByPn: Record<number, AnyRow> = {};
@@ -1061,6 +1293,13 @@ export default function MatchmakerMatchmakingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchmakingId, reloadTick]);
 
+  useEffect(() => {
+    if (!lineupMode) {
+      syncOrderedRowsFromRows(rows);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
   const galaDuur = useMemo(() => buildGalaDuurSamenvatting(runMeldingen), [runMeldingen]);
   const compactRunMeldingen = useMemo(
     () => buildCompactRunMeldingen(runMeldingen),
@@ -1068,8 +1307,9 @@ export default function MatchmakerMatchmakingPage() {
   );
 
   const rowsByPartijNr = useMemo(() => {
+    if (lineupMode) return orderedRows;
     return [...rows].sort((a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0));
-  }, [rows]);
+  }, [rows, orderedRows, lineupMode]);
 
   const missingLicentieByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
@@ -1197,17 +1437,17 @@ export default function MatchmakerMatchmakingPage() {
     const q = search.trim().toLowerCase();
 
     const base = rowsByPartijNr.filter((r) => {
-      const pn = Number(r.partij_nr);
-      if (!Number.isFinite(pn)) return false;
+      const originalPn = Number(r.partij_nr);
+      if (!Number.isFinite(originalPn) && !lineupMode) return false;
 
       if (filter === "dispensatie") {
-        return !!anyDispensatieByPartij[pn];
+        return !!anyDispensatieByPartij[originalPn];
       }
-      if (filter === "verbod") return !!verbodByPartij[pn];
-      if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
+      if (filter === "verbod") return !!verbodByPartij[originalPn];
+      if (filter === "geen_licentie") return !!missingLicentieByPartij[originalPn];
 
       if (filter !== "all") {
-        const s = statusByPartij[pn] ?? "geen_info";
+        const s = statusByPartij[originalPn] ?? "geen_info";
         if (s !== filter) return false;
       }
 
@@ -1223,13 +1463,19 @@ export default function MatchmakerMatchmakingPage() {
         r.rood_naam,
         r.rood_gym_fp,
         r.rood_gym_mm,
+        r.rood_gym,
         r.rood_va_mm,
+        r.rood_va,
+        r.va_rood,
         r.blauw_naam_fp,
         r.blauw_naam_mm,
         r.blauw_naam,
         r.blauw_gym_fp,
         r.blauw_gym_mm,
+        r.blauw_gym,
         r.blauw_va_mm,
+        r.blauw_va,
+        r.va_blauw,
       ]
         .map((v) => String(v ?? "").trim().toLowerCase())
         .filter(Boolean);
@@ -1245,6 +1491,7 @@ export default function MatchmakerMatchmakingPage() {
     verbodByPartij,
     missingLicentieByPartij,
     search,
+    lineupMode,
   ]);
 
   return (
@@ -1315,22 +1562,36 @@ export default function MatchmakerMatchmakingPage() {
                     label={releaseBusy ? "Doorsturen…" : "→ Bondteam"}
                     tone="orange"
                     onClick={stuurDoorNaarOfficials}
-                    disabled={releaseBusy}
+                    disabled={releaseBusy || lineupMode}
+                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
                   />
                   <DarkActionButton
                     label="Rapportage"
                     tone="orange"
                     onClick={openReportHtml}
+                    disabled={lineupMode}
+                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                   />
                   <DarkActionButton
                     label="Excel"
                     tone="green"
                     onClick={openExcel}
+                    disabled={lineupMode}
+                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                  />
+                  <DarkActionButton
+                    label="Lineup Excel"
+                    tone="silver"
+                    onClick={openLineupExcel}
+                    disabled={lineupMode}
+                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                   />
                   <DarkActionButton
                     label="CSV Sportdata"
                     tone="purple"
                     onClick={openSportdataCsv}
+                    disabled={lineupMode}
+                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                   />
                 </div>
               </div>
@@ -1363,7 +1624,7 @@ export default function MatchmakerMatchmakingPage() {
                     textTransform: "uppercase",
                   }}
                 >
-                  Matchmaking 
+                  Matchmaking
                 </div>
 
                 <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
@@ -1403,7 +1664,8 @@ export default function MatchmakerMatchmakingPage() {
                   <button
                     type="button"
                     onClick={() => setShowAdd(true)}
-                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px]`}
+                    disabled={lineupMode}
+                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
                     style={{
                       background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
                       border: "1px solid rgba(150,40,0,0.55)",
@@ -1411,6 +1673,7 @@ export default function MatchmakerMatchmakingPage() {
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(255,77,0,0.18)",
                       minWidth: 180,
                     }}
+                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                   >
                     Partij toevoegen
                   </button>
@@ -1428,10 +1691,134 @@ export default function MatchmakerMatchmakingPage() {
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
+                      pointerEvents: lineupMode ? "none" : "auto",
+                      opacity: lineupMode ? 0.5 : 1,
                     }}
+                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                   >
                     ⚖ Weegstation
                   </Link>
+                </div>
+
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
+                  <div
+                    className="inline-flex items-center gap-3 rounded-full px-4 py-2"
+                    style={{
+                      background: lineupMode
+                        ? "linear-gradient(180deg, rgba(255,77,0,0.16) 0%, rgba(255,77,0,0.10) 100%)"
+                        : "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
+                      border: lineupMode
+                        ? "1px solid rgba(255,77,0,0.45)"
+                        : "1px solid rgba(42,42,46,0.20)",
+                      boxShadow: "0 10px 22px rgba(0,0,0,0.07)",
+                    }}
+                  >
+                    <span className={`${inter.className} text-sm font-extrabold text-zinc-900`}>
+                      Lineup bouwen
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (lineupMode) {
+                          cancelLineupMode();
+                        } else {
+                          syncOrderedRowsFromRows(rows);
+                          setLineupMode(true);
+                        }
+                      }}
+                      aria-pressed={lineupMode}
+                      className="relative h-8 w-16 rounded-full transition"
+                      style={{
+                        background: lineupMode
+                          ? "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)"
+                          : "linear-gradient(180deg, #d6d6d6 0%, #bababa 100%)",
+                        border: lineupMode
+                          ? "1px solid rgba(150,40,0,0.55)"
+                          : "1px solid rgba(82,82,91,0.35)",
+                        boxShadow:
+                          "inset 0 1px 0 rgba(255,255,255,0.45), 0 6px 14px rgba(0,0,0,0.12)",
+                      }}
+                    >
+                      <span
+                        className="absolute top-[3px] h-[24px] w-[24px] rounded-full transition-all"
+                        style={{
+                          left: lineupMode ? "36px" : "4px",
+                          background:
+                            "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(226,226,226,0.96) 100%)",
+                          border: "1px solid rgba(82,82,91,0.25)",
+                          boxShadow: "0 4px 10px rgba(0,0,0,0.18)",
+                        }}
+                      />
+                    </button>
+
+                    <span className={`${inter.className} text-xs font-semibold ${lineupMode ? "text-orange-700" : "text-zinc-600"}`}>
+                      {lineupMode ? "AAN" : "UIT"}
+                    </span>
+                  </div>
+
+                  {lineupMode ? (
+                    <>
+                      <div
+                        className={`${inter.className} rounded-xl px-4 py-2 text-sm font-semibold`}
+                        style={{
+                          background: "rgba(255,255,255,0.92)",
+                          border: "1px solid rgba(255,77,0,0.22)",
+                          color: "#7c2d12",
+                        }}
+                      >
+                        Sleep partijen of gebruik de pijltjes. Nummering wordt automatisch 1 t/m {orderedRows.length}.
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={applyAutoLineup}
+                        disabled={saveOrderBusy}
+                        className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-zinc-900 transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
+                        style={{
+                          background: "linear-gradient(180deg, #f2f2f2 0%, #d5d5d5 48%, #bbbbbb 100%)",
+                          border: "1px solid rgba(82,82,91,0.35)",
+                          borderRadius: 0,
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
+                          minWidth: 220,
+                        }}
+                      >
+                        Automatisch sorteren
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={saveLineupOrder}
+                        disabled={saveOrderBusy || !hasOrderChanges()}
+                        className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
+                        style={{
+                          background: "linear-gradient(180deg, #1f7a35 0%, #15803d 55%, #166534 100%)",
+                          border: "1px solid rgba(21,128,61,0.55)",
+                          borderRadius: 0,
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(21,128,61,0.18)",
+                          minWidth: 180,
+                        }}
+                      >
+                        {saveOrderBusy ? "Opslaan..." : "Lineup opslaan"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={cancelLineupMode}
+                        disabled={saveOrderBusy}
+                        className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-zinc-900 transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
+                        style={{
+                          background: "linear-gradient(180deg, #f2f2f2 0%, #d5d5d5 48%, #bbbbbb 100%)",
+                          border: "1px solid rgba(82,82,91,0.35)",
+                          borderRadius: 0,
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
+                          minWidth: 180,
+                        }}
+                      >
+                        Annuleren
+                      </button>
+                    </>
+                  ) : null}
                 </div>
 
                 <div
@@ -1456,7 +1843,7 @@ export default function MatchmakerMatchmakingPage() {
                 <div className="text-red-700">{error}</div>
               ) : rows.length === 0 ? (
                 <div className="text-zinc-700">
-                  Geen context gevonden (context nog niet gevuld?).
+                  Geen partijen gevonden.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1553,7 +1940,8 @@ export default function MatchmakerMatchmakingPage() {
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Zoek op naam, sportschool of VA…"
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500"
+                        disabled={lineupMode}
+                        className="w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500 disabled:opacity-50"
                         style={{
                           background: "linear-gradient(180deg, #ffffff 0%, #f4f6f9 100%)",
                           border: "2px solid rgba(63,63,70,0.35)",
@@ -1564,14 +1952,14 @@ export default function MatchmakerMatchmakingPage() {
                       />
                     </div>
 
-                    <FilterButton label="Alle" count={filterCounts.all} tone="neutral" active={filter === "all"} onClick={() => setFilter("all")} />
-                    <FilterButton label="Verbod" count={filterCounts.verbod} tone="purple" active={filter === "verbod"} onClick={() => setFilter("verbod")} />
-                    <FilterButton label="Geen licentie" count={filterCounts.geen_licentie} tone="blue" active={filter === "geen_licentie"} onClick={() => setFilter("geen_licentie")} />
-                    <FilterButton label="Afkeur" count={filterCounts.afgekeurd} tone="red" active={filter === "afgekeurd"} onClick={() => setFilter("afgekeurd")} />
-                    <FilterButton label="Dispensatie" count={filterCounts.dispensatie} tone="orange" active={filter === "dispensatie"} onClick={() => setFilter("dispensatie")} />
-                    <FilterButton label="Actie" count={filterCounts.actie} tone="yellow" active={filter === "actie"} onClick={() => setFilter("actie")} />
-                    <FilterButton label="OK" count={filterCounts.ok} tone="green" active={filter === "ok"} onClick={() => setFilter("ok")} />
-                    <FilterButton label="Geen info" count={filterCounts.geen_info} tone="white" active={filter === "geen_info"} onClick={() => setFilter("geen_info")} />
+                    <FilterButton label="Alle" count={filterCounts.all} tone="neutral" active={filter === "all"} onClick={() => !lineupMode && setFilter("all")} disabled={lineupMode} />
+                    <FilterButton label="Verbod" count={filterCounts.verbod} tone="purple" active={filter === "verbod"} onClick={() => !lineupMode && setFilter("verbod")} disabled={lineupMode} />
+                    <FilterButton label="Geen licentie" count={filterCounts.geen_licentie} tone="blue" active={filter === "geen_licentie"} onClick={() => !lineupMode && setFilter("geen_licentie")} disabled={lineupMode} />
+                    <FilterButton label="Afkeur" count={filterCounts.afgekeurd} tone="red" active={filter === "afgekeurd"} onClick={() => !lineupMode && setFilter("afgekeurd")} disabled={lineupMode} />
+                    <FilterButton label="Dispensatie" count={filterCounts.dispensatie} tone="orange" active={filter === "dispensatie"} onClick={() => !lineupMode && setFilter("dispensatie")} disabled={lineupMode} />
+                    <FilterButton label="Actie" count={filterCounts.actie} tone="yellow" active={filter === "actie"} onClick={() => !lineupMode && setFilter("actie")} disabled={lineupMode} />
+                    <FilterButton label="OK" count={filterCounts.ok} tone="green" active={filter === "ok"} onClick={() => !lineupMode && setFilter("ok")} disabled={lineupMode} />
+                    <FilterButton label="Geen info" count={filterCounts.geen_info} tone="white" active={filter === "geen_info"} onClick={() => !lineupMode && setFilter("geen_info")} disabled={lineupMode} />
 
                     <div className="ml-auto text-xs text-zinc-600">
                       Toon: <span className="font-semibold text-zinc-900">{filteredRows.length}</span>
@@ -1588,10 +1976,10 @@ export default function MatchmakerMatchmakingPage() {
                         }}
                       >
                         <tr>
-                          <th className="py-3 px-4 text-left w-24">#</th>
+                          <th className="py-3 px-4 text-left w-32">#</th>
                           <th className="py-3 px-4 text-left">Vechters</th>
                           <th className="py-3 px-4 text-left w-[320px]">Info</th>
-                          <th className="py-3 px-4 text-left w-[260px]">Acties</th>
+                          <th className="py-3 px-4 text-left w-[320px]">Acties</th>
                         </tr>
                       </thead>
 
@@ -1599,54 +1987,164 @@ export default function MatchmakerMatchmakingPage() {
                         {filteredRows.map((r, i) => {
                           const zebraWhite = i % 2 === 0;
 
-                          const roodNaam = safeText(r.rood_naam_fp ?? r.rood_naam_mm, "-");
-                          const blauwNaam = safeText(r.blauw_naam_fp ?? r.blauw_naam_mm, "-");
+                          const roodNaam = safeText(
+                            r.rood_naam_fp ?? r.rood_naam_mm ?? r.rood_naam,
+                            "-"
+                          );
+                          const blauwNaam = safeText(
+                            r.blauw_naam_fp ?? r.blauw_naam_mm ?? r.blauw_naam,
+                            "-"
+                          );
 
-                          const roodGym = safeText(r.rood_gym_mm, "-");
-                          const blauwGym = safeText(r.blauw_gym_mm, "-");
+                          const roodGym = safeText(r.rood_gym_mm ?? r.rood_gym, "-");
+                          const blauwGym = safeText(r.blauw_gym_mm ?? r.blauw_gym, "-");
 
-                          const roodVA = safeText(r.rood_va_mm, "-");
-                          const blauwVA = safeText(r.blauw_va_mm, "-");
+                          const roodVA = safeText(r.rood_va_mm ?? r.rood_va ?? r.va_rood, "-");
+                          const blauwVA = safeText(r.blauw_va_mm ?? r.blauw_va ?? r.va_blauw, "-");
 
                           const roodAge = ageAtEvent(r, "rood");
                           const blauwAge = ageAtEvent(r, "blauw");
 
-                          const pn = Number(r.partij_nr);
-                          const status = Number.isFinite(pn)
-                            ? statusByPartij[pn] ?? "geen_info"
+                          const originalPn = Number(r.partij_nr);
+                          const visualPn = getVisualPartijNr(r, i);
+                          const status = Number.isFinite(originalPn)
+                            ? statusByPartij[originalPn] ?? "geen_info"
                             : "geen_info";
 
                           const discipline = safeText(r.discipline, "-");
-                          const klasse = safeText(r.klasse_mm, "-");
-                          const eventDatum = safeText(r.evenement_datum, "-");
+                          const klasse = safeText(r.klasse_mm ?? r.klasse, "-");
+                          const eventDatum = safeText(
+                            r.evenement_datum ?? r.event_datum ?? r.datum,
+                            "-"
+                          );
+                          const sortWeight = getBoutWeightForSort(r);
 
                           const dividerClass = zebraWhite
                             ? "border-t border-gray-400/70"
                             : "border-t border-zinc-300";
 
-                          const heeftVerbod = Number.isFinite(pn) ? !!verbodByPartij[pn] : false;
-                          const heeftDispensatie = Number.isFinite(pn) ? !!anyDispensatieByPartij[pn] : false;
+                          const heeftVerbod = Number.isFinite(originalPn) ? !!verbodByPartij[originalPn] : false;
+                          const heeftDispensatie = Number.isFinite(originalPn) ? !!anyDispensatieByPartij[originalPn] : false;
                           const geenTegenstander = isGeenTegenstander(r);
-                          const busy = Number.isFinite(pn) ? busyPartij[pn] : null;
+                          const busy = Number.isFinite(originalPn) ? busyPartij[originalPn] : null;
+
+                          const stableId = getStableRowKey(r);
+                          const currentIndex = orderedRows.findIndex(
+                            (x) => getStableRowKey(x) === stableId
+                          );
 
                           return (
                             <tr
-                              key={r.id ?? `${r.partij_nr}-${i}`}
+                              key={stableId}
+                              draggable={lineupMode}
+                              onDragStart={() => {
+                                if (!lineupMode) return;
+                                setDragId(stableId);
+                              }}
+                              onDragOver={(e) => {
+                                if (!lineupMode) return;
+                                e.preventDefault();
+                              }}
+                              onDrop={(e) => {
+                                if (!lineupMode || !dragId) return;
+                                e.preventDefault();
+                                const fromIndex = orderedRows.findIndex(
+                                  (x) => getStableRowKey(x) === dragId
+                                );
+                                const toIndex = orderedRows.findIndex(
+                                  (x) => getStableRowKey(x) === stableId
+                                );
+                                if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
+                                  setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
+                                }
+                                setDragId(null);
+                              }}
+                              onDragEnd={() => setDragId(null)}
                               style={{
                                 backgroundColor: zebraWhite ? "#ffffff" : "#0d0d0d",
                                 color: zebraWhite ? "#000" : "#fff",
+                                cursor: lineupMode ? "grab" : "default",
+                                outline:
+                                  lineupMode && dragId === stableId
+                                    ? "2px solid rgba(255,77,0,0.55)"
+                                    : "none",
                               }}
                             >
                               <td className="py-3 px-4 font-semibold align-top">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="tabular-nums">{r.partij_nr ?? "-"}</span>
-                                  <StatusBadge status={status} />
-                                  {heeftDispensatie && status !== "dispensatie" ? (
-                                    <Chip label="DISPENSATIE" tone="orange" />
-                                  ) : null}
-                                  {heeftVerbod ? <Chip label="VERBOD" tone="purple" /> : null}
-                                  {Number.isFinite(pn) && missingLicentieByPartij[pn] ? (
-                                    <Chip label="GEEN LICENTIE" tone="blue" />
+                                <div className="flex flex-col gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="tabular-nums">{visualPn}</span>
+                                    {lineupMode && Number.isFinite(originalPn) && originalPn !== visualPn ? (
+                                      <span
+                                        className="px-2 py-1 rounded text-[10px] font-extrabold"
+                                        style={{
+                                          background: zebraWhite
+                                            ? "rgba(255,77,0,0.10)"
+                                            : "rgba(255,255,255,0.12)",
+                                          color: zebraWhite ? "#c2410c" : "#ffd0be",
+                                          border: zebraWhite
+                                            ? "1px solid rgba(255,77,0,0.22)"
+                                            : "1px solid rgba(255,255,255,0.18)",
+                                        }}
+                                      >
+                                        was {originalPn}
+                                      </span>
+                                    ) : null}
+                                    <StatusBadge status={status} />
+                                    {heeftDispensatie && status !== "dispensatie" ? (
+                                      <Chip label="DISPENSATIE" tone="orange" />
+                                    ) : null}
+                                    {heeftVerbod ? <Chip label="VERBOD" tone="purple" /> : null}
+                                    {Number.isFinite(originalPn) && missingLicentieByPartij[originalPn] ? (
+                                      <Chip label="GEEN LICENTIE" tone="blue" />
+                                    ) : null}
+                                  </div>
+
+                                  {lineupMode ? (
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => currentIndex >= 0 && movePartij(currentIndex, currentIndex - 1)}
+                                        disabled={currentIndex <= 0}
+                                        className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
+                                        style={{
+                                          background: zebraWhite
+                                            ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
+                                            : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
+                                          border: zebraWhite
+                                            ? "1px solid rgba(82,82,91,0.35)"
+                                            : "1px solid rgba(255,255,255,0.10)",
+                                          color: zebraWhite ? "#111827" : "#fff",
+                                        }}
+                                      >
+                                        ↑
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => currentIndex >= 0 && movePartij(currentIndex, currentIndex + 1)}
+                                        disabled={currentIndex < 0 || currentIndex >= orderedRows.length - 1}
+                                        className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
+                                        style={{
+                                          background: zebraWhite
+                                            ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
+                                            : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
+                                          border: zebraWhite
+                                            ? "1px solid rgba(82,82,91,0.35)"
+                                            : "1px solid rgba(255,255,255,0.10)",
+                                          color: zebraWhite ? "#111827" : "#fff",
+                                        }}
+                                      >
+                                        ↓
+                                      </button>
+
+                                      <span
+                                        className="text-[11px] font-bold opacity-80"
+                                        style={{ letterSpacing: "0.04em" }}
+                                      >
+                                        SLEEP
+                                      </span>
+                                    </div>
                                   ) : null}
                                 </div>
                               </td>
@@ -1700,13 +2198,19 @@ export default function MatchmakerMatchmakingPage() {
                                     <span className="opacity-90">{klasse}</span>
                                   </div>
                                   <div>
+                                    <span className="font-semibold">Sorteergewicht:</span>{" "}
+                                    <span className="opacity-90">
+                                      {Number.isFinite(sortWeight) && sortWeight !== 999 ? `${sortWeight} kg` : "-"}
+                                    </span>
+                                  </div>
+                                  <div>
                                     <span className="font-semibold">Event datum:</span>{" "}
                                     <span className="opacity-90">{eventDatum}</span>
                                   </div>
                                   <div>
                                     <span className="font-semibold">Meldingen:</span>{" "}
                                     <span className="opacity-90">
-                                      {Number.isFinite(pn) ? (countByPartij[pn] ?? 0) : 0}
+                                      {Number.isFinite(originalPn) ? (countByPartij[originalPn] ?? 0) : 0}
                                     </span>
                                   </div>
                                 </div>
@@ -1721,7 +2225,10 @@ export default function MatchmakerMatchmakingPage() {
                                       background: "rgba(0,0,0,0.55)",
                                       border: `1px solid rgba(255,77,0,0.85)`,
                                       color: "rgba(255,210,190,0.95)",
+                                      pointerEvents: lineupMode ? "none" : "auto",
+                                      opacity: lineupMode ? 0.45 : 1,
                                     }}
+                                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                                   >
                                     Detail
                                   </Link>
@@ -1729,19 +2236,11 @@ export default function MatchmakerMatchmakingPage() {
                                   <DarkActionButton
                                     label={busy === "delete" ? "… Verwijderen" : "Verwijderen"}
                                     tone="red"
-                                    disabled={busy === "delete"}
+                                    disabled={busy === "delete" || lineupMode}
+                                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                                     onClick={() =>
-                                      Number.isFinite(pn) &&
-                                      deletePartij(
-                                        pn,
-                                        typeof r?.bout_id === "string"
-                                          ? r.bout_id
-                                          : typeof r?.bout_uid === "string"
-                                            ? r.bout_uid
-                                            : typeof r?.id === "string"
-                                              ? r.id
-                                              : null
-                                      )
+                                      Number.isFinite(originalPn) &&
+                                      deletePartij(originalPn, getBoutIdForReorder(r))
                                     }
                                   />
                                 </div>

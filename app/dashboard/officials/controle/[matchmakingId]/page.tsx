@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { Scale } from "lucide-react";
 import Image from "next/image";
@@ -20,13 +26,45 @@ const inter = Inter({
 
 const NVB_ORANGE = "#ff4d00";
 
-function metalText(): CSSProperties {
-  return {
-    background: "linear-gradient(180deg, #ffffff 0%, #d6d6d6 45%, #9a9a9a 100%)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-  };
-}
+type AnyRow = Record<string, any>;
+
+type ControleRun = {
+  id: string;
+  matchmaking_id: string;
+  status: string;
+  gestart_op: string | null;
+  afgerond_op: string | null;
+  run_type: string | null;
+};
+
+type PartijStatus =
+  | "verbod"
+  | "afgekeurd"
+  | "dispensatie"
+  | "actie"
+  | "ok"
+  | "geen_info";
+
+type ResRow = {
+  partij_nr: number | null;
+  hoek?: "rood" | "blauw" | null;
+  resultaat: "ok" | "actie" | "dispensatie" | "afgekeurd" | "verbod" | string;
+  rule: string | null;
+  rule_code?: string | null;
+  boodschap: string | null;
+  review_status?: string | null;
+  original_resultaat?: string | null;
+};
+
+type FilterKey =
+  | "all"
+  | "verbod"
+  | "afgekeurd"
+  | "dispensatie"
+  | "actie"
+  | "ok"
+  | "geen_info"
+  | "geen_licentie";
 
 function metalFrameStyle(accent: "none" | "orange" = "orange"): CSSProperties {
   const accentGlow =
@@ -73,40 +111,6 @@ const silverBackplate: CSSProperties = {
     "radial-gradient(circle at 50% 0%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.16) 38%, rgba(0,0,0,0.08) 72%, rgba(0,0,0,0.22) 100%), linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(236,238,242,0.98) 100%)",
 };
 
-type AnyRow = Record<string, any>;
-
-type ControleRun = {
-  id: string;
-  matchmaking_id: string;
-  status: string;
-  gestart_op: string | null;
-  afgerond_op: string | null;
-  run_type: string | null;
-};
-
-type PartijStatus = "verbod" | "afgekeurd" | "dispensatie" | "actie" | "ok" | "geen_info";
-
-type ResRow = {
-  partij_nr: number | null;
-  hoek?: "rood" | "blauw" | null;
-  resultaat: "ok" | "actie" | "dispensatie" | "afgekeurd" | "verbod" | string;
-  rule: string | null;
-  rule_code?: string | null;
-  boodschap: string | null;
-  review_status?: string | null;
-  original_resultaat?: string | null;
-};
-
-type FilterKey =
-  | "all"
-  | "verbod"
-  | "afgekeurd"
-  | "dispensatie"
-  | "actie"
-  | "ok"
-  | "geen_info"
-  | "geen_licentie";
-
 function parseISODateOnly(d?: any): Date | null {
   if (!d) return null;
   const s = String(d).trim();
@@ -132,6 +136,25 @@ function ageAtEvent(ctx: AnyRow, side: "rood" | "blauw"): string {
   return years == null ? "-" : String(years);
 }
 
+function ageAtEventNumber(ctx: AnyRow, side: "rood" | "blauw"): number | null {
+  const event = parseISODateOnly(ctx?.evenement_datum);
+  const birth = parseISODateOnly(
+    ctx?.[`${side}_geboortedatum_fp`] ?? ctx?.[`${side}_geboortedatum_mm`]
+  );
+  if (!event || !birth) return null;
+  return calcAgeYearsOnDate(event, birth);
+}
+
+function minAgeAtEvent(ctx: AnyRow): number {
+  const rood = ageAtEventNumber(ctx, "rood");
+  const blauw = ageAtEventNumber(ctx, "blauw");
+  const nums = [rood, blauw].filter(
+    (x): x is number => x != null && Number.isFinite(x)
+  );
+  if (!nums.length) return 999;
+  return Math.min(...nums);
+}
+
 function safeText(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
   return s.length ? s : fallback;
@@ -143,11 +166,15 @@ function licenseValueToOk(v: any): boolean | null {
   if (typeof v === "number") return v > 0;
   const s = String(v).trim().toLowerCase();
   if (!s) return null;
-  if (["ja", "yes", "true", "geldig", "ok", "actief", "active"].includes(s)) return true;
-  if (["nee", "no", "false", "ongeldig", "verlopen", "niet", "inactive", "inactief"].includes(s))
+  if (["ja", "yes", "true", "geldig", "ok", "actief", "active"].includes(s))
+    return true;
+  if (
+    ["nee", "no", "false", "ongeldig", "verlopen", "niet", "inactive", "inactief"].includes(s)
+  )
     return false;
   if (s.includes("valid") || s.includes("geldig") || s.includes("ok")) return true;
-  if (s.includes("invalid") || s.includes("ongeldig") || s.includes("verlop")) return false;
+  if (s.includes("invalid") || s.includes("ongeldig") || s.includes("verlop"))
+    return false;
   return null;
 }
 
@@ -164,9 +191,12 @@ function isMissingLicentie(ctx: AnyRow, side: "rood" | "blauw"): boolean {
   ];
   const keys = [
     ...preferred.filter((k) => k in (ctx as any)),
-    ...Object.keys(ctx).filter((k) => k.startsWith(prefix) && k.toLowerCase().includes("licen")),
+    ...Object.keys(ctx).filter(
+      (k) => k.startsWith(prefix) && k.toLowerCase().includes("licen")
+    ),
   ];
   if (keys.length === 0) return false;
+
   for (const k of keys) {
     const ok = licenseValueToOk((ctx as any)[k]);
     if (ok === true) return false;
@@ -203,8 +233,16 @@ function isBelgischeGymInfoRow(r: Partial<ResRow> | null | undefined): boolean {
   const msg = String((r as any)?.boodschap ?? "").toUpperCase();
   if (code.includes("KEURMERK_BE")) return true;
   if (code.includes("BELG") && code.includes("INFO")) return true;
-  if (rule.includes("BELGI") && (rule.includes("KEURMERK") || rule.includes("SPORTSCHOOL"))) return true;
-  if (msg.includes("BELGI") && (msg.includes("BKBMO") || msg.includes("BKMO") || msg.includes("BOKSBOEKJE"))) return true;
+  if (
+    rule.includes("BELGI") &&
+    (rule.includes("KEURMERK") || rule.includes("SPORTSCHOOL"))
+  )
+    return true;
+  if (
+    msg.includes("BELGI") &&
+    (msg.includes("BKBMO") || msg.includes("BKMO") || msg.includes("BOKSBOEKJE"))
+  )
+    return true;
   return false;
 }
 
@@ -214,20 +252,26 @@ function displayResultaatLabel(r: ResRow): string {
   return s ? s.toUpperCase() : "";
 }
 
-function normResultaatRow(r: ResRow): string {
-  if (isBelgischeGymInfoRow(r)) return "ok";
-  return normResultaat(r?.resultaat);
-}
-
 function normResultaat(v: any): string {
   const s = String(v ?? "").trim().toLowerCase();
   if (!s) return "";
-  if (s === "afkeur" || s === "afgekeur" || s === "afgekeurd" || s === "afkeuren") return "afgekeurd";
+  if (
+    s === "afkeur" ||
+    s === "afgekeur" ||
+    s === "afgekeurd" ||
+    s === "afkeuren"
+  )
+    return "afgekeurd";
   if (s === "actie" || s === "waarschuwing") return "actie";
   if (s === "dispensatie" || s === "disp") return "dispensatie";
   if (s === "ok" || s === "goedgekeurd") return "ok";
   if (s === "info") return "ok";
   return s;
+}
+
+function normResultaatRow(r: ResRow): string {
+  if (isBelgischeGymInfoRow(r)) return "ok";
+  return normResultaat(r?.resultaat);
 }
 
 function statusFromResultaten(resultaten: ResRow[]): PartijStatus {
@@ -237,6 +281,9 @@ function statusFromResultaten(resultaten: ResRow[]): PartijStatus {
     if (res === "afgekeurd") return "afgekeurd";
     if (res === "dispensatie") {
       s = s === "geen_info" ? "dispensatie" : s;
+    }
+    if (res === "actie") {
+      s = s === "geen_info" || s === "ok" ? "actie" : s;
     }
     if (res === "ok") s = s === "geen_info" ? "ok" : s;
   }
@@ -279,7 +326,9 @@ function HeaderBadge({
       : "bg-gray-500 text-zinc-900";
 
   return (
-    <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${cls}`}>
+    <span
+      className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${cls}`}
+    >
       <span>{label}</span>
       <span className="tabular-nums">{value}</span>
     </span>
@@ -310,11 +359,7 @@ function Chip({
       ? "bg-white/90 text-black"
       : "bg-gray-500 text-zinc-900";
 
-  return (
-    <span className={`px-2 py-1 rounded text-[11px] font-extrabold ${cls}`}>
-      {label}
-    </span>
-  );
+  return <span className={`px-2 py-1 rounded text-[11px] font-extrabold ${cls}`}>{label}</span>;
 }
 
 function StatusBadge({ status }: { status: PartijStatus }) {
@@ -331,12 +376,14 @@ function FilterButton({
   onClick,
   count,
   tone,
+  disabled,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
   count: number;
   tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "neutral" | "purple" | "blue";
+  disabled?: boolean;
 }) {
   const base =
     "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-extrabold border transition";
@@ -383,7 +430,10 @@ function FilterButton({
     <button
       type="button"
       onClick={onClick}
-      className={`${base} ${active ? activeCls : inactiveCls}`}
+      disabled={!!disabled}
+      className={`${base} ${active ? activeCls : inactiveCls} ${
+        disabled ? "opacity-50 cursor-not-allowed" : ""
+      }`}
     >
       <span>{label}</span>
       <span className={`tabular-nums px-2 py-0.5 rounded-full ${active ? "bg-white" : "bg-zinc-100"}`}>
@@ -457,13 +507,13 @@ function isGalaDuurRow(r: ResRow) {
 
 const KLASSE_MINUTEN: Record<string, number> = {
   "a titel": 31,
-  "a": 21,
-  "b": 14,
-  "c": 13,
-  "n": 11.5,
+  a: 21,
+  b: 14,
+  c: 13,
+  n: 11.5,
   "16/17": 10.5,
-  "j": 8.5,
-  "demo": 6,
+  j: 8.5,
+  demo: 6,
   "mma pro": 17,
   "mma amateur": 17,
   "mma jeugd": 17,
@@ -485,14 +535,11 @@ function matchKlasseMinuten(klasse: string): number | null {
   if (stripped.includes("titel")) return KLASSE_MINUTEN["a titel"];
   if (stripped.includes("k1") || stripped.includes("k-1")) return KLASSE_MINUTEN["a"];
   if (/16|17/.test(stripped)) return KLASSE_MINUTEN["16/17"];
-
   if (stripped === "j") return KLASSE_MINUTEN["j"];
   if (stripped.includes("jeugd") || stripped.includes("youth") || stripped.includes("junior"))
     return KLASSE_MINUTEN["j"];
-
   if (stripped === "n" || stripped.includes("nieuweling") || stripped.includes("novice"))
     return KLASSE_MINUTEN["n"];
-
   if (stripped === "c") return KLASSE_MINUTEN["c"];
   if (stripped === "b") return KLASSE_MINUTEN["b"];
   if (stripped === "a") return KLASSE_MINUTEN["a"];
@@ -507,15 +554,14 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
 } {
   let totalMins = 0;
   const unknownSet = new Set<string>();
+
   for (const r of rows) {
     const klasse = String(r.klasse_mm ?? r.klasse ?? "").trim();
     const mins = matchKlasseMinuten(klasse);
-    if (mins !== null) {
-      totalMins += mins;
-    } else if (klasse && klasse !== "-") {
-      unknownSet.add(klasse);
-    }
+    if (mins !== null) totalMins += mins;
+    else if (klasse && klasse !== "-") unknownSet.add(klasse);
   }
+
   return { totalMins, unknownKlasses: Array.from(unknownSet) };
 }
 
@@ -524,12 +570,19 @@ function buildGalaDuurFromMins(totalMins: number) {
   const maxMin = 510;
   const needsApproval = totalMins > approvalMin;
   const overMax = totalMins > maxMin;
+
   let extra = "";
   if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
   else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
   else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
+
   const q = formatQuarterHoursFromMinutes(totalMins);
-  return { mins: totalMins, needsApproval, overMax, text: `Tijdsduur evenement: ${q}. ${extra}` };
+  return {
+    mins: totalMins,
+    needsApproval,
+    overMax,
+    text: `Tijdsduur evenement: ${q}. ${extra}`,
+  };
 }
 
 function buildGalaDuurSamenvatting(runMeldingen: ResRow[]) {
@@ -538,15 +591,19 @@ function buildGalaDuurSamenvatting(runMeldingen: ResRow[]) {
   const mins = parseMinutesFromText(hit.boodschap);
   const approvalMin = 390;
   const maxMin = 510;
+
   if (!mins) {
     return { mins: null as number | null, needsApproval: true, overMax: false, text: hit.boodschap };
   }
+
   const needsApproval = mins > approvalMin;
   const overMax = mins > maxMin;
+
   let extra = "";
-  if (overMax) extra = `⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.`;
-  else if (needsApproval) extra = `⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.`;
-  else extra = `Binnen 6.5 uur (geen goedkeuring nodig).`;
+  if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
+  else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
+  else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
+
   const q = formatQuarterHoursFromMinutes(mins);
   return { mins, needsApproval, overMax, text: `Tijdsduur evenement: ${q}. ${extra}` };
 }
@@ -582,7 +639,8 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[], galaDuurMinsOverride?:
           ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
           : "Binnen 6.5 uur (geen goedkeuring nodig)."
       }`
-    : galaRows.find((r) => r?.boodschap)?.boodschap ?? "Gala-duur kon niet worden berekend.";
+    : galaRows.find((r) => r?.boodschap)?.boodschap ??
+      "Gala-duur kon niet worden berekend.";
 
   const merged: ResRow = {
     partij_nr: null,
@@ -683,6 +741,88 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+function getStableRowKey(r: AnyRow): string {
+  if (typeof r?.id === "string" && r.id.trim()) return `ctx-${r.id.trim()}`;
+  if (typeof r?.bout_id === "string" && r.bout_id.trim()) return `bout-${r.bout_id.trim()}`;
+  if (typeof r?.matchmaker_bout_id === "string" && r.matchmaker_bout_id.trim())
+    return `mmb-${r.matchmaker_bout_id.trim()}`;
+  if (typeof r?.raw_bout_id === "string" && r.raw_bout_id.trim()) return `raw-${r.raw_bout_id.trim()}`;
+  if (typeof r?.source_bout_id === "string" && r.source_bout_id.trim())
+    return `src-${r.source_bout_id.trim()}`;
+  return `partij-${String(r?.partij_nr ?? Math.random())}`;
+}
+
+function getControleContextId(r: AnyRow): string | null {
+  if (typeof r?.id === "string" && r.id.trim()) return r.id.trim();
+  return null;
+}
+
+function getBoutIdForReorder(r: AnyRow): string | null {
+  const candidates = [r?.matchmaker_bout_id, r?.bout_id, r?.raw_bout_id, r?.source_bout_id];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
+function arrayMove<T>(list: T[], from: number, to: number): T[] {
+  const copy = [...list];
+  const [item] = copy.splice(from, 1);
+  copy.splice(to, 0, item);
+  return copy;
+}
+
+function toNumberLoose(v: any): number | null {
+  if (v == null) return null;
+  const s = String(v).trim().replace(",", ".");
+  if (!s) return null;
+  const m = s.match(/-?\d+(\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getBoutWeightForSort(r: AnyRow): number {
+  const maxKg = toNumberLoose(r?.max_gewicht);
+  if (maxKg != null) return maxKg;
+
+  const rood = toNumberLoose(r?.rood_gewicht);
+  const blauw = toNumberLoose(r?.blauw_gewicht);
+
+  if (rood != null && blauw != null) return Math.max(rood, blauw);
+  if (rood != null) return rood;
+  if (blauw != null) return blauw;
+  return 999;
+}
+
+function klasseRank(raw: any): number {
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (!s) return 999;
+  if (s.includes("N")) return 1;
+  if (s.includes("C")) return 2;
+  if (s.includes("B")) return 3;
+  if (s.includes("A")) return 4;
+  return 999;
+}
+
+function autoSortLineupRows(input: AnyRow[]): AnyRow[] {
+  return [...input].sort((a, b) => {
+    const ageDiff = minAgeAtEvent(a) - minAgeAtEvent(b);
+    if (ageDiff !== 0) return ageDiff;
+
+    const klasseDiff =
+      klasseRank(a?.klasse_mm ?? a?.klasse) - klasseRank(b?.klasse_mm ?? b?.klasse);
+    if (klasseDiff !== 0) return klasseDiff;
+
+    const weightDiff = getBoutWeightForSort(a) - getBoutWeightForSort(b);
+    if (weightDiff !== 0) return weightDiff;
+
+    const aPn = Number(a?.partij_nr ?? 99999);
+    const bPn = Number(b?.partij_nr ?? 99999);
+    return aPn - bPn;
+  });
+}
+
 export default function ControleMatchmakingPage() {
   const params = useParams();
   const router = useRouter();
@@ -694,6 +834,11 @@ export default function ControleMatchmakingPage() {
   const [evenementNaam, setEvenementNaam] = useState<string | null>(null);
   const [evenementDatum, setEvenementDatum] = useState<string | null>(null);
   const [rows, setRows] = useState<AnyRow[]>([]);
+  const [orderedRows, setOrderedRows] = useState<AnyRow[]>([]);
+  const [lineupMode, setLineupMode] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [saveOrderBusy, setSaveOrderBusy] = useState(false);
+
   const [statusByPartij, setStatusByPartij] = useState<Record<number, PartijStatus>>({});
   const [runMeldingen, setRunMeldingen] = useState<ResRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -739,10 +884,115 @@ export default function ControleMatchmakingPage() {
     () =>
       ({
         height: "1px",
-        background: "linear-gradient(to right, transparent, rgba(220,220,220,0.22), transparent)",
+        background:
+          "linear-gradient(to right, transparent, rgba(220,220,220,0.22), transparent)",
       }) as React.CSSProperties,
     []
   );
+
+  function openLineupExcel() {
+    window.open(
+      `/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+      "_blank"
+    );
+  }
+
+  function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
+    const sorted = [...nextRows].sort(
+      (a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0)
+    );
+    setOrderedRows(sorted);
+  }
+
+  function movePartij(fromIndex: number, toIndex: number) {
+    if (toIndex < 0 || toIndex >= orderedRows.length) return;
+    setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
+  }
+
+  function applyAutoLineup() {
+    setOrderedRows(autoSortLineupRows(orderedRows));
+    setMsg(
+      "✅ Lineup automatisch gesorteerd op jongste eerst, daarna klasse N → C → B → A, daarna gewicht."
+    );
+  }
+
+  function getVisualPartijNr(row: AnyRow, indexInView: number) {
+    if (!lineupMode) return Number(row?.partij_nr ?? indexInView + 1);
+    return indexInView + 1;
+  }
+
+  function hasOrderChanges() {
+    if (orderedRows.length !== rows.length) return false;
+    for (let i = 0; i < orderedRows.length; i += 1) {
+      const visualNr = i + 1;
+      const currentNr = Number(orderedRows[i]?.partij_nr ?? 0);
+      if (currentNr !== visualNr) return true;
+    }
+    return false;
+  }
+
+  async function saveLineupOrder() {
+    setError(null);
+    setMsg("");
+
+    if (!matchmakingId) {
+      setError("matchmakingId ontbreekt.");
+      return;
+    }
+
+    const items = orderedRows.map((r, index) => ({
+      ctx_row_id: getControleContextId(r),
+      bout_id: getBoutIdForReorder(r),
+      old_partij_nr:
+        typeof r?.partij_nr === "number"
+          ? r.partij_nr
+          : typeof r?.partij_nr === "string" && /^\d+$/.test(r.partij_nr.trim())
+          ? Number(r.partij_nr.trim())
+          : null,
+      partij_nr: index + 1,
+    }));
+
+    const invalid = items.find((x) => !x.ctx_row_id && !x.bout_id && x.old_partij_nr == null);
+    if (invalid) {
+      setError("Niet alle partijen hebben een geldige bronkoppeling voor reorder.");
+      return;
+    }
+
+    setSaveOrderBusy(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/controle/reorder-partijen", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          items,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Volgorde opslaan mislukt.");
+
+      setMsg("✅ Lineup opgeslagen.");
+      setLineupMode(false);
+      setReloadTick((x) => x + 1);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setSaveOrderBusy(false);
+    }
+  }
+
+  function cancelLineupMode() {
+    setLineupMode(false);
+    syncOrderedRowsFromRows(rows);
+    setDragId(null);
+  }
 
   async function addPartijSubmit() {
     setError(null);
@@ -751,6 +1001,7 @@ export default function ControleMatchmakingPage() {
       setError("matchmakingId ontbreekt.");
       return;
     }
+
     const required = [
       ["Discipline", fDiscipline],
       ["Klasse", fKlasse],
@@ -764,15 +1015,18 @@ export default function ControleMatchmakingPage() {
       ["Blauw KG", fBlauwKg],
       ["Max gewicht", fMaxKg],
     ] as const;
+
     const miss = required.find(([, v]) => !String(v ?? "").trim());
     if (miss) {
       setError(`Veld ontbreekt: ${miss[0]}`);
       return;
     }
+
     const toNum = (s: string) => {
       const n = Number(String(s).replace(",", "."));
       return Number.isFinite(n) ? n : null;
     };
+
     const payload = {
       matchmaking_id: matchmakingId,
       discipline: fDiscipline.trim(),
@@ -787,21 +1041,33 @@ export default function ControleMatchmakingPage() {
       blauw_gewicht: toNum(fBlauwKg),
       max_gewicht: toNum(fMaxKg),
     };
-    if (payload.rood_gewicht == null || payload.blauw_gewicht == null || payload.max_gewicht == null) {
+
+    if (
+      payload.rood_gewicht == null ||
+      payload.blauw_gewicht == null ||
+      payload.max_gewicht == null
+    ) {
       setError("KG velden moeten een geldig getal zijn (bijv. 71.5).");
       return;
     }
+
     setAddBusy(true);
     try {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
+
       const resp = await authedFetch("/api/matchmaking/add-bout", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(payload),
       });
+
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(json?.error ?? "Partij toevoegen mislukt");
+
       setMsg("✅ Partij toegevoegd.");
       setShowAdd(false);
       setFDiscipline("");
@@ -823,20 +1089,32 @@ export default function ControleMatchmakingPage() {
     }
   }
 
-  async function deletePartij(partijNr: number) {
+  async function deletePartij(partijNr: number, boutId?: string | null) {
     if (!confirm(`Partij ${partijNr} verwijderen?`)) return;
     setBusyPartij((prev) => ({ ...prev, [partijNr]: "delete" }));
     setError(null);
+
     try {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
+
       const resp = await authedFetch("/api/matchmaking/delete-partij", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ matchmaking_id: matchmakingId, partij_nr: partijNr }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          partij_nr: partijNr,
+          controle_run_id: run?.id ?? null,
+          bout_id: boutId ?? null,
+        }),
       });
+
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(json?.error ?? "Verwijderen mislukt.");
+
       setMsg(`✅ Partij ${partijNr} verwijderd.`);
       setReloadTick((x) => x + 1);
     } catch (e: any) {
@@ -854,14 +1132,16 @@ export default function ControleMatchmakingPage() {
     setLoading(true);
     setError(null);
     setMsg("");
+
     try {
       if (!matchmakingId) {
         setRows([]);
+        setOrderedRows([]);
         setRun(null);
         setEvenementNaam(null);
         setEvenementDatum(null);
         setStatusByPartij({});
-        setRunMeldingen([] as ResRow[]);
+        setRunMeldingen([]);
         setHasDispByPartij({});
         setDispRequestByPartij({});
         setCountByPartij({});
@@ -876,21 +1156,26 @@ export default function ControleMatchmakingPage() {
           .eq("matchmaking_id", matchmakingId)
           .order("uploaded_at", { ascending: false })
           .limit(1);
+
         if (upErr) throw upErr;
+
         const up = (ups ?? [])?.[0] as any;
         let naam = String(up?.evenement_naam ?? "").trim() || null;
         let datum = String(up?.evenement_datum ?? "").trim() || null;
         const eventId = String(up?.event_id ?? "").trim() || null;
+
         if (eventId && (!naam || !datum)) {
           const { data: ev, error: evErr } = await supabase
             .from("events")
             .select("naam, datum")
             .eq("id", eventId)
             .maybeSingle();
+
           if (evErr) throw evErr;
           if (!naam) naam = String((ev as any)?.naam ?? "").trim() || null;
           if (!datum) datum = String((ev as any)?.datum ?? "").trim() || null;
         }
+
         setEvenementNaam(naam);
         setEvenementDatum(datum);
       } catch {
@@ -904,6 +1189,7 @@ export default function ControleMatchmakingPage() {
         .eq("matchmaking_id", matchmakingId)
         .order("created_at", { ascending: false })
         .limit(1);
+
       if (lastErr) throw lastErr;
 
       const latestControleRunId = lastCtxRows?.[0]?.controle_run_id
@@ -927,16 +1213,22 @@ export default function ControleMatchmakingPage() {
         .from("controle_bout_context")
         .select("*")
         .eq("matchmaking_id", matchmakingId);
+
       if (latestControleRunId) ctxQuery = ctxQuery.eq("controle_run_id", latestControleRunId);
 
-      const { data: ctxRows, error: ctxErr } = await ctxQuery.order("partij_nr", { ascending: true });
+      const { data: ctxRows, error: ctxErr } = await ctxQuery.order("partij_nr", {
+        ascending: true,
+      });
+
       if (ctxErr) throw ctxErr;
 
       const ctxList = (ctxRows ?? []) as AnyRow[];
       setRows(ctxList);
+      syncOrderedRowsFromRows(ctxList);
 
       const map: Record<number, PartijStatus> = {};
       const ctxByPn: Record<number, AnyRow> = {};
+
       for (const r of ctxList) {
         const pn = Number(r.partij_nr);
         if (!Number.isFinite(pn)) continue;
@@ -956,8 +1248,11 @@ export default function ControleMatchmakingPage() {
 
       const { data: resRows, error: resErr } = await supabase
         .from("controle_resultaten")
-        .select("partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap, review_status, original_resultaat")
+        .select(
+          "partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap, review_status, original_resultaat"
+        )
         .eq("controle_run_id", latestControleRunId);
+
       if (resErr) throw resErr;
 
       const allRes = (resRows ?? []) as ResRow[];
@@ -996,9 +1291,7 @@ export default function ControleMatchmakingPage() {
         const rr = resByPn[pn] ?? [];
 
         let status = statusFromResultatenOrOk(rr, ctx);
-        if (dispMap[pn]) {
-          status = "dispensatie";
-        }
+        if (dispMap[pn]) status = "dispensatie";
 
         statusMap[pn] = status;
         verbodMap[pn] = rr.some(isVerbodRow);
@@ -1022,6 +1315,11 @@ export default function ControleMatchmakingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchmakingId, reloadTick]);
 
+  useEffect(() => {
+    if (!lineupMode) syncOrderedRowsFromRows(rows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
   const galaDuurCalc = useMemo(() => {
     if (rows.length === 0) return null;
     const result = calcGalaDuurFromRows(rows);
@@ -1039,8 +1337,9 @@ export default function ControleMatchmakingPage() {
   );
 
   const rowsByPartijNr = useMemo(() => {
+    if (lineupMode) return orderedRows;
     return [...rows].sort((a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0));
-  }, [rows]);
+  }, [rows, orderedRows, lineupMode]);
 
   const missingLicentieByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
@@ -1062,10 +1361,12 @@ export default function ControleMatchmakingPage() {
       geen = 0,
       verbod = 0,
       geen_licentie = 0;
+
     for (const r of rows) {
       const pn = Number(r.partij_nr);
       if (!Number.isFinite(pn)) continue;
       const s = statusByPartij[pn] ?? "geen_info";
+
       if (s === "afgekeurd") afk++;
       else if (s === "actie") actie++;
       else if (s === "ok") ok++;
@@ -1074,10 +1375,12 @@ export default function ControleMatchmakingPage() {
 
       if (verbodByPartij[pn]) verbod++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
+
       const cnt = countByPartij[pn] ?? 0;
       meldingen_totaal += cnt;
       if (cnt > 0) partijen_met_melding++;
     }
+
     return {
       totaal: rows.length,
       meldingen_totaal,
@@ -1100,10 +1403,12 @@ export default function ControleMatchmakingPage() {
       geen = 0,
       verbod = 0,
       geen_licentie = 0;
+
     for (const r of rows) {
       const pn = Number(r.partij_nr);
       if (!Number.isFinite(pn)) continue;
       const s = statusByPartij[pn] ?? "geen_info";
+
       if (s === "afgekeurd") afk++;
       else if (s === "actie") actie++;
       else if (s === "ok") ok++;
@@ -1113,15 +1418,27 @@ export default function ControleMatchmakingPage() {
       if (verbodByPartij[pn]) verbod++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
     }
-    return { all: rows.length, verbod, afgekeurd: afk, dispensatie: disp, actie, ok, geen_info: geen, geen_licentie };
+
+    return {
+      all: rows.length,
+      verbod,
+      afgekeurd: afk,
+      dispensatie: disp,
+      actie,
+      ok,
+      geen_info: geen,
+      geen_licentie,
+    };
   }, [rows, statusByPartij, verbodByPartij, missingLicentieByPartij]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
+
     const base = rowsByPartijNr.filter((r) => {
       const pn = Number(r.partij_nr);
-      if (!Number.isFinite(pn)) return false;
-      if (filter === "dispensatie") return !!hasDispByPartij[pn] || !!dispRequestByPartij[pn] || statusByPartij[pn] === "dispensatie";
+      if (!Number.isFinite(pn) && !lineupMode) return false;
+      if (filter === "dispensatie")
+        return !!hasDispByPartij[pn] || !!dispRequestByPartij[pn] || statusByPartij[pn] === "dispensatie";
       if (filter === "verbod") return !!verbodByPartij[pn];
       if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
       if (filter !== "all") {
@@ -1130,9 +1447,11 @@ export default function ControleMatchmakingPage() {
       }
       return true;
     });
+
     if (!q) return base;
-    const hay = (r: AnyRow) => {
-      return [
+
+    const hay = (r: AnyRow) =>
+      [
         r.rood_naam_fp,
         r.rood_naam_mm,
         r.rood_naam,
@@ -1149,7 +1468,7 @@ export default function ControleMatchmakingPage() {
         .map((v) => String(v ?? "").trim().toLowerCase())
         .filter(Boolean)
         .join(" ");
-    };
+
     return base.filter((r) => hay(r).includes(q));
   }, [
     rowsByPartijNr,
@@ -1160,6 +1479,7 @@ export default function ControleMatchmakingPage() {
     verbodByPartij,
     missingLicentieByPartij,
     search,
+    lineupMode,
   ]);
 
   return (
@@ -1169,9 +1489,9 @@ export default function ControleMatchmakingPage() {
           <div
             className="rounded-2xl px-4 py-4 md:px-5"
             style={{
-              background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
-              border: "2px solid rgba(63,63,70,0.55)",
-              boxShadow: "0 14px 30px rgba(0,0,0,0.14)",
+              background: "linear-gradient(180deg, #34343a 0%, #23232a 100%)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow: "0 18px 34px rgba(0,0,0,0.22)",
               color: "#fff",
             }}
           >
@@ -1184,39 +1504,32 @@ export default function ControleMatchmakingPage() {
               </div>
 
               <div className="flex justify-center xl:flex-1">
-                <div
-                  className="rounded-[18px] p-[4px]"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, #f5f5f5 0%, #bdbdbd 28%, #8e8e8e 55%, #f0f0f0 72%, #6f6f6f 100%)",
-                    boxShadow:
-                      "0 0 0 2px rgba(255,255,255,0.45), 0 0 0 6px rgba(120,120,120,0.18), 0 12px 26px rgba(0,0,0,0.40)",
-                  }}
-                >
-                  <div
-                    className="rounded-[14px] px-3 py-2"
-                    style={{
-                      background: "linear-gradient(180deg, rgba(0,0,0,0.68) 0%, rgba(0,0,0,0.40) 100%)",
-                      border: "1px solid rgba(255,255,255,0.10)",
-                    }}
-                  >
-                    <Image
-                      src="/branding/fightsupport/excel-logo.png"
-                      width={450}
-                      height={200}
-                      alt="FightSupport"
-                      priority
-                      className="mx-auto"
-                    />
-                  </div>
-                </div>
+                <Image
+                  src="/branding/fightsupport/excel-logo.png"
+                  width={180}
+                  height={48}
+                  alt="FightSupport"
+                  priority
+                  style={{ width: "auto", height: "44px", objectFit: "contain" }}
+                />
               </div>
 
               <div className="flex flex-col items-stretch gap-3 xl:items-end">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <DarkActionButton
+                    label="Lineup Excel"
+                    tone="silver"
+                    onClick={openLineupExcel}
+                    disabled={lineupMode}
+                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                  />
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setShowWeegstationModal(true)}
-                  className="group rounded-xl border border-black/10 bg-white px-3 py-2 text-left shadow-[0_8px_20px_rgba(0,0,0,0.10)] transition hover:-translate-y-0.5 hover:shadow-[0_12px_26px_rgba(0,0,0,0.14)]"
+                  disabled={lineupMode}
+                  className="group rounded-xl border border-black/10 bg-white px-3 py-2 text-left shadow-[0_8px_20px_rgba(0,0,0,0.10)] transition hover:-translate-y-0.5 hover:shadow-[0_12px_26px_rgba(0,0,0,0.14)] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
                     <div
@@ -1269,40 +1582,193 @@ export default function ControleMatchmakingPage() {
             </div>
           </div>
 
-          <div className="mt-5 text-center">
+          <div className="pt-6">
             <div
-              className={inter.className}
+              className={`${inter.className} text-center`}
               style={{
                 color: NVB_ORANGE,
-                fontSize: 46,
+                fontSize: 22,
                 fontWeight: 900,
-                letterSpacing: "0.02em",
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
               }}
             >
-              Matchmaking
+              Matchmaking controle
             </div>
+
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              <div
+                className={inter.className}
+                style={{
+                  fontSize: 24,
+                  fontWeight: 900,
+                  letterSpacing: "0.02em",
+                  color: "#1f1f23",
+                  display: "inline-block",
+                  padding: "12px 22px",
+                  borderRadius: 0,
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
+                  border: "1px solid rgba(42,42,46,0.22)",
+                  boxShadow: "0 12px 24px rgba(0,0,0,0.08)",
+                }}
+              >
+                {safeText(subtitle, "Onbekend evenement")}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAdd(true)}
+                disabled={lineupMode}
+                className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
+                style={{
+                  background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
+                  border: "1px solid rgba(150,40,0,0.55)",
+                  borderRadius: 0,
+                  boxShadow:
+                    "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(255,77,0,0.18)",
+                  minWidth: 180,
+                }}
+                title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+              >
+                Partij toevoegen
+              </button>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
+              <div
+                className="inline-flex items-center gap-3 rounded-full px-4 py-2"
+                style={{
+                  background: lineupMode
+                    ? "linear-gradient(180deg, rgba(255,77,0,0.16) 0%, rgba(255,77,0,0.10) 100%)"
+                    : "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
+                  border: lineupMode
+                    ? "1px solid rgba(255,77,0,0.45)"
+                    : "1px solid rgba(42,42,46,0.20)",
+                  boxShadow: "0 10px 22px rgba(0,0,0,0.07)",
+                }}
+              >
+                <span className={`${inter.className} text-sm font-extrabold text-zinc-900`}>
+                  Lineup bouwen
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (lineupMode) {
+                      cancelLineupMode();
+                    } else {
+                      syncOrderedRowsFromRows(rows);
+                      setLineupMode(true);
+                    }
+                  }}
+                  aria-pressed={lineupMode}
+                  className="relative h-8 w-16 rounded-full transition"
+                  style={{
+                    background: lineupMode
+                      ? "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)"
+                      : "linear-gradient(180deg, #d6d6d6 0%, #bababa 100%)",
+                    border: lineupMode
+                      ? "1px solid rgba(150,40,0,0.55)"
+                      : "1px solid rgba(82,82,91,0.35)",
+                    boxShadow:
+                      "inset 0 1px 0 rgba(255,255,255,0.45), 0 6px 14px rgba(0,0,0,0.12)",
+                  }}
+                >
+                  <span
+                    className="absolute top-[3px] h-[24px] w-[24px] rounded-full transition-all"
+                    style={{
+                      left: lineupMode ? "36px" : "4px",
+                      background:
+                        "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(226,226,226,0.96) 100%)",
+                      border: "1px solid rgba(82,82,91,0.25)",
+                      boxShadow: "0 4px 10px rgba(0,0,0,0.18)",
+                    }}
+                  />
+                </button>
+
+                <span
+                  className={`${inter.className} text-xs font-semibold ${
+                    lineupMode ? "text-orange-700" : "text-zinc-600"
+                  }`}
+                >
+                  {lineupMode ? "AAN" : "UIT"}
+                </span>
+              </div>
+
+              {lineupMode ? (
+                <>
+                  <div
+                    className={`${inter.className} rounded-xl px-4 py-2 text-sm font-semibold`}
+                    style={{
+                      background: "rgba(255,255,255,0.92)",
+                      border: "1px solid rgba(255,77,0,0.22)",
+                      color: "#7c2d12",
+                    }}
+                  >
+                    Sleep partijen of gebruik de pijltjes. Nummering wordt automatisch 1 t/m{" "}
+                    {orderedRows.length}.
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={applyAutoLineup}
+                    disabled={saveOrderBusy}
+                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-zinc-900 transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
+                    style={{
+                      background: "linear-gradient(180deg, #f2f2f2 0%, #d5d5d5 48%, #bbbbbb 100%)",
+                      border: "1px solid rgba(82,82,91,0.35)",
+                      borderRadius: 0,
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
+                      minWidth: 220,
+                    }}
+                  >
+                    Automatisch sorteren
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={saveLineupOrder}
+                    disabled={saveOrderBusy || !hasOrderChanges()}
+                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
+                    style={{
+                      background: "linear-gradient(180deg, #1f7a35 0%, #15803d 55%, #166534 100%)",
+                      border: "1px solid rgba(21,128,61,0.55)",
+                      borderRadius: 0,
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(21,128,61,0.18)",
+                      minWidth: 180,
+                    }}
+                  >
+                    {saveOrderBusy ? "Opslaan..." : "Lineup opslaan"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={cancelLineupMode}
+                    disabled={saveOrderBusy}
+                    className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-zinc-900 transition hover:translate-y-[-1px] disabled:opacity-50 disabled:cursor-not-allowed`}
+                    style={{
+                      background: "linear-gradient(180deg, #f2f2f2 0%, #d5d5d5 48%, #bbbbbb 100%)",
+                      border: "1px solid rgba(82,82,91,0.35)",
+                      borderRadius: 0,
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
+                      minWidth: 180,
+                    }}
+                  >
+                    Annuleren
+                  </button>
+                </>
+              ) : null}
+            </div>
+
             <div
               className={inter.className}
               style={{
-                marginTop: 10,
-                fontSize: 24,
-                fontWeight: 900,
-                letterSpacing: "0.02em",
-                color: "#1f1f23",
-                display: "inline-block",
-                padding: "8px 14px",
-                borderRadius: 14,
-                background: "rgba(255,255,255,0.72)",
-                border: "2px solid rgba(42,42,46,0.25)",
-                boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
-              }}
-            >
-              {safeText(subtitle, "Onbekend evenement")}
-            </div>
-            <div
-              className={inter.className}
-              style={{
-                marginTop: 8,
+                marginTop: 12,
+                textAlign: "center",
                 fontSize: 12,
                 color: "rgba(42,42,46,0.78)",
                 letterSpacing: "0.06em",
@@ -1312,7 +1778,7 @@ export default function ControleMatchmakingPage() {
             </div>
           </div>
 
-          <div className="my-3" style={separator} />
+          <div className="my-4" style={separator} />
 
           <div
             className="rounded-3xl border-2 border-zinc-500/60 p-4 md:p-5 shadow-[0_22px_60px_rgba(24,24,27,0.12)] ring-1 ring-white/50"
@@ -1353,7 +1819,8 @@ export default function ControleMatchmakingPage() {
                     className="mt-3 rounded-xl bg-white p-0 overflow-hidden"
                     style={{
                       border: "3px solid #2b2b2b",
-                      boxShadow: "0 12px 26px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.65)",
+                      boxShadow:
+                        "0 12px 26px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.65)",
                     }}
                   >
                     <div
@@ -1373,7 +1840,8 @@ export default function ControleMatchmakingPage() {
                             className="rounded-md bg-white p-3"
                             style={{
                               border: "2px solid rgba(43,43,43,0.35)",
-                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.70), 0 10px 18px rgba(0,0,0,0.05)",
+                              boxShadow:
+                                "inset 0 1px 0 rgba(255,255,255,0.70), 0 10px 18px rgba(0,0,0,0.05)",
                             }}
                           >
                             <div className="flex items-start gap-2">
@@ -1381,7 +1849,9 @@ export default function ControleMatchmakingPage() {
                                 <div className="text-zinc-900 font-semibold leading-tight">
                                   {r.rule ?? "(run)"}
                                   {r.rule_code ? (
-                                    <span className="ml-2 text-xs text-zinc-600 font-semibold">({r.rule_code})</span>
+                                    <span className="ml-2 text-xs text-zinc-600 font-semibold">
+                                      ({r.rule_code})
+                                    </span>
                                   ) : null}
                                 </div>
                               </div>
@@ -1389,7 +1859,9 @@ export default function ControleMatchmakingPage() {
                                 {displayResultaatLabel(r)}
                               </span>
                             </div>
-                            {r.boodschap ? <div className="mt-1 text-zinc-700 leading-snug">{r.boodschap}</div> : null}
+                            {r.boodschap ? (
+                              <div className="mt-1 text-zinc-700 leading-snug">{r.boodschap}</div>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -1406,25 +1878,27 @@ export default function ControleMatchmakingPage() {
                     <input
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
+                      disabled={lineupMode}
                       placeholder="Zoek op naam, sportschool of VA…"
-                      className="w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500"
+                      className="w-full rounded-lg px-3 py-2 text-sm outline-none placeholder:text-zinc-500 disabled:opacity-50"
                       style={{
                         background: "linear-gradient(180deg, #ffffff 0%, #f4f6f9 100%)",
                         border: "2px solid rgba(63,63,70,0.35)",
                         color: "#111827",
-                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.90), 0 8px 18px rgba(0,0,0,0.10)",
+                        boxShadow:
+                          "inset 0 1px 0 rgba(255,255,255,0.90), 0 8px 18px rgba(0,0,0,0.10)",
                       }}
                     />
                   </div>
 
-                  <FilterButton label="Alle" count={filterCounts.all} tone="neutral" active={filter === "all"} onClick={() => setFilter("all")} />
-                  <FilterButton label="Verbod" count={filterCounts.verbod} tone="purple" active={filter === "verbod"} onClick={() => setFilter("verbod")} />
-                  <FilterButton label="Geen licentie" count={filterCounts.geen_licentie} tone="blue" active={filter === "geen_licentie"} onClick={() => setFilter("geen_licentie")} />
-                  <FilterButton label="Afkeur" count={filterCounts.afgekeurd} tone="red" active={filter === "afgekeurd"} onClick={() => setFilter("afgekeurd")} />
-                  <FilterButton label="Dispensatie" count={filterCounts.dispensatie} tone="orange" active={filter === "dispensatie"} onClick={() => setFilter("dispensatie")} />
-                  <FilterButton label="Actie" count={filterCounts.actie} tone="yellow" active={filter === "actie"} onClick={() => setFilter("actie")} />
-                  <FilterButton label="OK" count={filterCounts.ok} tone="green" active={filter === "ok"} onClick={() => setFilter("ok")} />
-                  <FilterButton label="Geen info" count={filterCounts.geen_info} tone="white" active={filter === "geen_info"} onClick={() => setFilter("geen_info")} />
+                  <FilterButton label="Alle" count={filterCounts.all} tone="neutral" active={filter === "all"} onClick={() => setFilter("all")} disabled={lineupMode} />
+                  <FilterButton label="Verbod" count={filterCounts.verbod} tone="purple" active={filter === "verbod"} onClick={() => setFilter("verbod")} disabled={lineupMode} />
+                  <FilterButton label="Geen licentie" count={filterCounts.geen_licentie} tone="blue" active={filter === "geen_licentie"} onClick={() => setFilter("geen_licentie")} disabled={lineupMode} />
+                  <FilterButton label="Afkeur" count={filterCounts.afgekeurd} tone="red" active={filter === "afgekeurd"} onClick={() => setFilter("afgekeurd")} disabled={lineupMode} />
+                  <FilterButton label="Dispensatie" count={filterCounts.dispensatie} tone="orange" active={filter === "dispensatie"} onClick={() => setFilter("dispensatie")} disabled={lineupMode} />
+                  <FilterButton label="Actie" count={filterCounts.actie} tone="yellow" active={filter === "actie"} onClick={() => setFilter("actie")} disabled={lineupMode} />
+                  <FilterButton label="OK" count={filterCounts.ok} tone="green" active={filter === "ok"} onClick={() => setFilter("ok")} disabled={lineupMode} />
+                  <FilterButton label="Geen info" count={filterCounts.geen_info} tone="white" active={filter === "geen_info"} onClick={() => setFilter("geen_info")} disabled={lineupMode} />
 
                   <div className="ml-auto text-xs text-zinc-600">
                     Toon: <span className="font-semibold text-zinc-900">{filteredRows.length}</span>
@@ -1441,10 +1915,10 @@ export default function ControleMatchmakingPage() {
                       }}
                     >
                       <tr>
-                        <th className="py-3 px-4 text-left w-24">#</th>
+                        <th className="py-3 px-4 text-left w-32">#</th>
                         <th className="py-3 px-4 text-left">Vechters</th>
                         <th className="py-3 px-4 text-left w-[320px]">Info</th>
-                        <th className="py-3 px-4 text-left w-[260px]">Acties</th>
+                        <th className="py-3 px-4 text-left w-[320px]">Acties</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1458,36 +1932,161 @@ export default function ControleMatchmakingPage() {
                         const blauwVA = safeText(r.blauw_va_mm, "-");
                         const roodAge = ageAtEvent(r, "rood");
                         const blauwAge = ageAtEvent(r, "blauw");
-                        const pn = Number(r.partij_nr);
-                        const status = Number.isFinite(pn) ? statusByPartij[pn] ?? "geen_info" : "geen_info";
+
+                        const originalPn = Number(r.partij_nr);
+                        const visualPn = getVisualPartijNr(r, i);
+                        const status = Number.isFinite(originalPn)
+                          ? statusByPartij[originalPn] ?? "geen_info"
+                          : "geen_info";
+
                         const discipline = safeText(r.discipline, "-");
-                        const klasse = safeText(r.klasse_mm, "-");
+                        const klasse = safeText(r.klasse_mm ?? r.klasse, "-");
                         const eventDatum = safeText(r.evenement_datum, "-");
-                        const dividerClass = zebraWhite ? "border-t border-gray-400/70" : "border-t border-zinc-300";
-                        const heeftVerbod = Number.isFinite(pn) ? !!verbodByPartij[pn] : false;
+                        const sortWeight = getBoutWeightForSort(r);
+                        const dividerClass = zebraWhite
+                          ? "border-t border-gray-400/70"
+                          : "border-t border-zinc-300";
+                        const heeftVerbod = Number.isFinite(originalPn)
+                          ? !!verbodByPartij[originalPn]
+                          : false;
                         const geenTegenstander = isGeenTegenstander(r);
-                        const busy = Number.isFinite(pn) ? busyPartij[pn] : null;
+                        const busy = Number.isFinite(originalPn) ? busyPartij[originalPn] : null;
+
+                        const stableId = getStableRowKey(r);
+                        const currentIndex = orderedRows.findIndex(
+                          (x) => getStableRowKey(x) === stableId
+                        );
 
                         return (
                           <tr
-                            key={r.id ?? `${r.partij_nr}-${i}`}
+                            key={stableId}
+                            draggable={lineupMode}
+                            onDragStart={() => {
+                              if (!lineupMode) return;
+                              setDragId(stableId);
+                            }}
+                            onDragOver={(e) => {
+                              if (!lineupMode) return;
+                              e.preventDefault();
+                            }}
+                            onDrop={(e) => {
+                              if (!lineupMode || !dragId) return;
+                              e.preventDefault();
+                              const fromIndex = orderedRows.findIndex(
+                                (x) => getStableRowKey(x) === dragId
+                              );
+                              const toIndex = orderedRows.findIndex(
+                                (x) => getStableRowKey(x) === stableId
+                              );
+                              if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
+                                setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
+                              }
+                              setDragId(null);
+                            }}
+                            onDragEnd={() => setDragId(null)}
                             style={{
                               backgroundColor: zebraWhite ? "#ffffff" : "#0d0d0d",
                               color: zebraWhite ? "#000" : "#fff",
+                              cursor: lineupMode ? "grab" : "default",
+                              outline:
+                                lineupMode && dragId === stableId
+                                  ? "2px solid rgba(255,77,0,0.55)"
+                                  : "none",
                             }}
                           >
                             <td className="py-3 px-4 font-semibold align-top">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="tabular-nums">{r.partij_nr ?? "-"}</span>
-                                <StatusBadge status={status} />
-                                {heeftVerbod ? <Chip label="VERBOD" tone="purple" /> : null}
-                                {Number.isFinite(pn) && missingLicentieByPartij[pn] ? <Chip label="GEEN LICENTIE" tone="blue" /> : null}
+                              <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="tabular-nums">{visualPn}</span>
+
+                                  {lineupMode &&
+                                  Number.isFinite(originalPn) &&
+                                  originalPn !== visualPn ? (
+                                    <span
+                                      className="px-2 py-1 rounded text-[10px] font-extrabold"
+                                      style={{
+                                        background: zebraWhite
+                                          ? "rgba(255,77,0,0.10)"
+                                          : "rgba(255,255,255,0.12)",
+                                        color: zebraWhite ? "#c2410c" : "#ffd0be",
+                                        border: zebraWhite
+                                          ? "1px solid rgba(255,77,0,0.22)"
+                                          : "1px solid rgba(255,255,255,0.18)",
+                                      }}
+                                    >
+                                      was {originalPn}
+                                    </span>
+                                  ) : null}
+
+                                  <StatusBadge status={status} />
+                                  {heeftVerbod ? <Chip label="VERBOD" tone="purple" /> : null}
+                                  {Number.isFinite(originalPn) &&
+                                  missingLicentieByPartij[originalPn] ? (
+                                    <Chip label="GEEN LICENTIE" tone="blue" />
+                                  ) : null}
+                                </div>
+
+                                {lineupMode ? (
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        currentIndex >= 0 && movePartij(currentIndex, currentIndex - 1)
+                                      }
+                                      disabled={currentIndex <= 0}
+                                      className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
+                                      style={{
+                                        background: zebraWhite
+                                          ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
+                                          : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
+                                        border: zebraWhite
+                                          ? "1px solid rgba(82,82,91,0.35)"
+                                          : "1px solid rgba(255,255,255,0.10)",
+                                        color: zebraWhite ? "#111827" : "#fff",
+                                      }}
+                                    >
+                                      ↑
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        currentIndex >= 0 && movePartij(currentIndex, currentIndex + 1)
+                                      }
+                                      disabled={
+                                        currentIndex < 0 || currentIndex >= orderedRows.length - 1
+                                      }
+                                      className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
+                                      style={{
+                                        background: zebraWhite
+                                          ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
+                                          : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
+                                        border: zebraWhite
+                                          ? "1px solid rgba(82,82,91,0.35)"
+                                          : "1px solid rgba(255,255,255,0.10)",
+                                        color: zebraWhite ? "#111827" : "#fff",
+                                      }}
+                                    >
+                                      ↓
+                                    </button>
+
+                                    <span
+                                      className="text-[11px] font-bold opacity-80"
+                                      style={{ letterSpacing: "0.04em" }}
+                                    >
+                                      SLEEP
+                                    </span>
+                                  </div>
+                                ) : null}
                               </div>
                             </td>
 
                             <td className="py-3 px-4 align-top">
                               <div className="flex items-center gap-3 min-w-0">
-                                <span className="inline-block w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: "#ef4444" }} />
+                                <span
+                                  className="inline-block w-3 h-3 rounded-full shrink-0"
+                                  style={{ backgroundColor: "#ef4444" }}
+                                />
                                 <div className="min-w-0 text-sm">
                                   <span className="font-semibold">{roodNaam}</span>{" "}
                                   <span className="opacity-80">({roodAge} jaar)</span>{" "}
@@ -1495,9 +2094,14 @@ export default function ControleMatchmakingPage() {
                                   <span className="opacity-80">• FP/VA: {roodVA}</span>
                                 </div>
                               </div>
+
                               <div className={`my-2 ${dividerClass}`} />
+
                               <div className="flex items-center gap-3 min-w-0">
-                                <span className="inline-block w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: "#3b82f6" }} />
+                                <span
+                                  className="inline-block w-3 h-3 rounded-full shrink-0"
+                                  style={{ backgroundColor: "#3b82f6" }}
+                                />
                                 <div className="min-w-0 text-sm">
                                   <span className="font-semibold">{blauwNaam}</span>{" "}
                                   <span className="opacity-80">({blauwAge} jaar)</span>{" "}
@@ -1505,9 +2109,12 @@ export default function ControleMatchmakingPage() {
                                   <span className="opacity-80">• FP/VA: {blauwVA}</span>
                                 </div>
                               </div>
+
                               {geenTegenstander ? (
                                 <div className="mt-2 text-xs font-extrabold">
-                                  <span className="px-2 py-1 rounded bg-red-500 text-zinc-900">GEEN TEGENSTANDER</span>
+                                  <span className="px-2 py-1 rounded bg-red-500 text-zinc-900">
+                                    GEEN TEGENSTANDER
+                                  </span>
                                 </div>
                               ) : null}
                             </td>
@@ -1515,17 +2122,30 @@ export default function ControleMatchmakingPage() {
                             <td className="py-3 px-4 align-top">
                               <div className="space-y-1 text-sm">
                                 <div>
-                                  <span className="font-semibold">Discipline:</span> <span className="opacity-90">{discipline}</span>
+                                  <span className="font-semibold">Discipline:</span>{" "}
+                                  <span className="opacity-90">{discipline}</span>
                                 </div>
                                 <div>
-                                  <span className="font-semibold">Klasse:</span> <span className="opacity-90">{klasse}</span>
+                                  <span className="font-semibold">Klasse:</span>{" "}
+                                  <span className="opacity-90">{klasse}</span>
                                 </div>
                                 <div>
-                                  <span className="font-semibold">Event datum:</span> <span className="opacity-90">{eventDatum}</span>
+                                  <span className="font-semibold">Sorteergewicht:</span>{" "}
+                                  <span className="opacity-90">
+                                    {Number.isFinite(sortWeight) && sortWeight !== 999
+                                      ? `${sortWeight} kg`
+                                      : "-"}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="font-semibold">Event datum:</span>{" "}
+                                  <span className="opacity-90">{eventDatum}</span>
                                 </div>
                                 <div>
                                   <span className="font-semibold">Meldingen:</span>{" "}
-                                  <span className="opacity-90">{Number.isFinite(pn) ? countByPartij[pn] ?? 0 : 0}</span>
+                                  <span className="opacity-90">
+                                    {Number.isFinite(originalPn) ? countByPartij[originalPn] ?? 0 : 0}
+                                  </span>
                                 </div>
                               </div>
                             </td>
@@ -1533,21 +2153,31 @@ export default function ControleMatchmakingPage() {
                             <td className="py-3 px-4 align-top">
                               <div className="flex flex-wrap gap-2">
                                 <Link
-                                  href={`/dashboard/officials/controle/${encodeURIComponent(matchmakingId)}/${encodeURIComponent(String(r.partij_nr ?? ""))}`}
+                                  href={`/dashboard/officials/controle/${encodeURIComponent(
+                                    matchmakingId
+                                  )}/${encodeURIComponent(String(r.partij_nr ?? ""))}`}
                                   className="px-3 py-1.5 rounded font-extrabold text-sm"
                                   style={{
                                     background: "rgba(0,0,0,0.55)",
                                     border: `1px solid rgba(255,77,0,0.85)`,
                                     color: "rgba(255,210,190,0.95)",
+                                    pointerEvents: lineupMode ? "none" : "auto",
+                                    opacity: lineupMode ? 0.45 : 1,
                                   }}
+                                  title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                                 >
                                   Detail
                                 </Link>
+
                                 <DarkActionButton
                                   label={busy === "delete" ? "… Verwijderen" : "Verwijderen"}
                                   tone="red"
-                                  disabled={busy === "delete"}
-                                  onClick={() => Number.isFinite(pn) && deletePartij(pn)}
+                                  disabled={busy === "delete" || lineupMode}
+                                  title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                                  onClick={() =>
+                                    Number.isFinite(originalPn) &&
+                                    deletePartij(originalPn, getBoutIdForReorder(r))
+                                  }
                                 />
                               </div>
                             </td>
@@ -1620,8 +2250,8 @@ export default function ControleMatchmakingPage() {
                           Wil je nu naar het weegstation?
                         </h2>
                         <p className="mt-3 text-sm leading-6 text-white/80 md:text-[15px]">
-                          De matchmaking is doorgestuurd. Je kunt direct verdergaan naar het weegstation,
-                          of op deze pagina blijven.
+                          De matchmaking is doorgestuurd. Je kunt direct verdergaan naar het
+                          weegstation, of op deze pagina blijven.
                         </p>
                       </div>
                     </div>
@@ -1666,7 +2296,11 @@ export default function ControleMatchmakingPage() {
 
           {showAdd && (
             <div className="fixed inset-0 z-[999] flex items-center justify-center px-4">
-              <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => !addBusy && setShowAdd(false)} />
+              <div
+                className="absolute inset-0"
+                style={{ background: "rgba(0,0,0,0.65)" }}
+                onClick={() => !addBusy && setShowAdd(false)}
+              />
               <div className="relative w-full max-w-[980px] rounded-2xl border-[3px] border-zinc-700/40 bg-white shadow-2xl overflow-hidden">
                 <div
                   className="px-6 py-4 flex items-center justify-between"
@@ -1681,49 +2315,100 @@ export default function ControleMatchmakingPage() {
                       Discipline / klasse + rood vs blauw (VA nummers als tekst) + max gewicht
                     </div>
                   </div>
-                  <button className="text-white/70 hover:text-white font-bold" onClick={() => !addBusy && setShowAdd(false)}>
+                  <button
+                    className="text-white/70 hover:text-white font-bold"
+                    onClick={() => !addBusy && setShowAdd(false)}
+                  >
                     ✕
                   </button>
                 </div>
 
                 <div className="px-6 py-5 space-y-4">
                   {error ? <div className="text-red-700 text-sm">{error}</div> : null}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <Field label="Discipline" value={fDiscipline} onChange={setFDiscipline} placeholder="Kickboksen / Muay Thai / MMA..." />
-                    <Field label="Klasse" value={fKlasse} onChange={setFKlasse} placeholder="N / C / B / A..." />
+                    <Field
+                      label="Discipline"
+                      value={fDiscipline}
+                      onChange={setFDiscipline}
+                      placeholder="Kickboksen / Muay Thai / MMA..."
+                    />
+                    <Field
+                      label="Klasse"
+                      value={fKlasse}
+                      onChange={setFKlasse}
+                      placeholder="N / C / B / A..."
+                    />
                   </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="rounded-xl border-2 border-zinc-300 bg-white p-4">
                       <div className="text-zinc-900 font-extrabold mb-3">Rood</div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <Field label="Naam rood" value={fRoodNaam} onChange={setFRoodNaam} />
                         <Field label="Sportschool rood" value={fRoodGym} onChange={setFRoodGym} />
-                        <Field label="VA nummer rood" value={fRoodVa} onChange={setFRoodVa} placeholder="tekst" />
-                        <Field label="KG rood" value={fRoodKg} onChange={setFRoodKg} type="number" placeholder="bijv. 71.5" />
+                        <Field
+                          label="VA nummer rood"
+                          value={fRoodVa}
+                          onChange={setFRoodVa}
+                          placeholder="tekst"
+                        />
+                        <Field
+                          label="KG rood"
+                          value={fRoodKg}
+                          onChange={setFRoodKg}
+                          type="number"
+                          placeholder="bijv. 71.5"
+                        />
                       </div>
                     </div>
+
                     <div className="rounded-xl border-2 border-zinc-300 bg-white p-4">
                       <div className="text-zinc-900 font-extrabold mb-3">Blauw</div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <Field label="Naam blauw" value={fBlauwNaam} onChange={setFBlauwNaam} />
                         <Field label="Sportschool blauw" value={fBlauwGym} onChange={setFBlauwGym} />
-                        <Field label="VA nummer blauw" value={fBlauwVa} onChange={setFBlauwVa} placeholder="tekst" />
-                        <Field label="KG blauw" value={fBlauwKg} onChange={setFBlauwKg} type="number" placeholder="bijv. 71.5" />
+                        <Field
+                          label="VA nummer blauw"
+                          value={fBlauwVa}
+                          onChange={setFBlauwVa}
+                          placeholder="tekst"
+                        />
+                        <Field
+                          label="KG blauw"
+                          value={fBlauwKg}
+                          onChange={setFBlauwKg}
+                          type="number"
+                          placeholder="bijv. 71.5"
+                        />
                       </div>
                     </div>
                   </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <Field label="Max gewicht (KG)" value={fMaxKg} onChange={setFMaxKg} type="number" placeholder="bijv. 72.0" />
+                    <Field
+                      label="Max gewicht (KG)"
+                      value={fMaxKg}
+                      onChange={setFMaxKg}
+                      type="number"
+                      placeholder="bijv. 72.0"
+                    />
                     <div className="md:col-span-2 text-xs text-zinc-700 flex items-center">
-                      Tip: als je "max gewicht" als tolerantie bedoelt (bv 3kg), zeg het even — dan maak ik er 2 velden van:
-                      "gewichtsklasse" + "max afwijking".
+                      Tip: als je "max gewicht" als tolerantie bedoelt (bv 3kg), zeg het even —
+                      dan maak ik er 2 velden van: "gewichtsklasse" + "max afwijking".
                     </div>
                   </div>
                 </div>
 
                 <div className="px-6 py-4 border-t border-zinc-300 flex items-center justify-end gap-3">
-                  <NvbLightButton label="Annuleren" onClick={() => !addBusy && setShowAdd(false)} />
-                  <NvbDarkButton label={addBusy ? "Bezig..." : "Partij toevoegen"} onClick={addPartijSubmit} />
+                  <NvbLightButton
+                    label="Annuleren"
+                    onClick={() => !addBusy && setShowAdd(false)}
+                  />
+                  <NvbDarkButton
+                    label={addBusy ? "Bezig..." : "Partij toevoegen"}
+                    onClick={addPartijSubmit}
+                  />
                 </div>
               </div>
             </div>

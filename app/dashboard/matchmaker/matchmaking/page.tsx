@@ -7,8 +7,8 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 
@@ -112,6 +112,8 @@ function Small({
 }
 
 export default function MatchmakingOverzichtPage() {
+  const router = useRouter();
+
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -425,9 +427,7 @@ export default function MatchmakingOverzichtPage() {
                     <Small origin="left center">
                       <NvbLightButton
                         label="← Terug naar menu"
-                        onClick={() =>
-                          (window.location.href = "/dashboard/matchmaker")
-                        }
+                        onClick={() => router.push("/dashboard/matchmaker")}
                       />
                     </Small>
 
@@ -454,7 +454,12 @@ export default function MatchmakingOverzichtPage() {
                     width={320}
                     height={120}
                     priority
-                    className="h-auto w-[240px] md:w-[280px] xl:w-[320px] drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+                    style={{
+                      width: "auto",
+                      height: "auto",
+                      maxWidth: "320px",
+                    }}
+                    className="w-[240px] md:w-[280px] xl:w-[320px] drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
                   />
                 </div>
 
@@ -781,28 +786,32 @@ export default function MatchmakingOverzichtPage() {
                                     </td>
                                     <td className="px-4 py-3">
                                       <div className="flex flex-wrap items-center gap-3">
-                                        <Link
-                                          href={`/dashboard/matchmaker/matchmaking/upload?matchmaking_id=${r.id}`}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            router.push(
+                                              `/dashboard/matchmaker/matchmaking/${r.id}/match`
+                                            )
+                                          }
                                           className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
                                         >
-                                          Upload
-                                        </Link>
+                                          Match
+                                        </button>
 
-                                        <Link
-                                          href={`/dashboard/matchmaker/matchmaking/${r.id}/match?matchmaking_id=${r.id}`}
-                                          className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
-                                        >
-                                          Matchen
-                                        </Link>
-
-                                        <Link
-                                          href={`/dashboard/matchmaker/matchmaking/${r.id}`}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            router.push(
+                                              `/dashboard/matchmaker/matchmaking/${r.id}`
+                                            )
+                                          }
                                           className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black"
                                         >
                                           Matchmaking
-                                        </Link>
+                                        </button>
 
                                         <button
+                                          type="button"
                                           onClick={() => deleteMM(r.id)}
                                           disabled={rowBusy}
                                           className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"

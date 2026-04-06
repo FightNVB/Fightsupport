@@ -27,15 +27,6 @@ function normGender(v: any): string | null {
   return String(v);
 }
 
-function mapUitslagen(rows: any[]) {
-  return rows.map((r) => ({
-    datum: r.datum ?? null,
-    discipline: r.discipline ?? null,
-    klasse: r.klasse ?? null,
-    uitslag: r.uitslag ?? null,
-  }));
-}
-
 function toNullableStr(v: any): string | null {
   const s = String(v ?? "").trim();
   return s.length ? s : null;
@@ -128,42 +119,6 @@ function resolveMaxGewichtType(partij: any): string | null {
   return null;
 }
 
-type EvenementInfo = {
-  evenement_naam: string | null;
-  evenement_datum: string | null;
-  event_id: string | null;
-};
-
-async function fetchEvenementInfo(matchmaking_id: string): Promise<EvenementInfo> {
-  const { data, error } = await supabaseAdmin
-    .from("matchmaking_uploads")
-    .select("evenement_naam, evenement_datum, event_id")
-    .eq("matchmaking_id", matchmaking_id)
-    .order("uploaded_at", { ascending: false })
-    .limit(1);
-
-  if (error) throw error;
-
-  let evenement_naam: string | null = toNullableStr((data as any)?.[0]?.evenement_naam ?? null);
-  let evenement_datum: string | null = toIsoDateOnly((data as any)?.[0]?.evenement_datum ?? null);
-  const event_id: string | null = toNullableStr((data as any)?.[0]?.event_id ?? null);
-
-  if (event_id && (!evenement_naam || !evenement_datum)) {
-    const { data: ev, error: evErr } = await supabaseAdmin
-      .from("events")
-      .select("naam, datum")
-      .eq("id", event_id)
-      .maybeSingle();
-
-    if (evErr) throw evErr;
-
-    if (!evenement_naam) evenement_naam = toNullableStr((ev as any)?.naam ?? null);
-    if (!evenement_datum) evenement_datum = toIsoDateOnly((ev as any)?.datum ?? null);
-  }
-
-  return { evenement_naam, evenement_datum, event_id };
-}
-
 function parseMmaFromUitslagKlasse(v: any): "PRO" | "AMATEUR" | null {
   const s = String(v ?? "").trim().toUpperCase();
   if (!s) return null;
@@ -187,7 +142,10 @@ function latestUitslagByDatum(uitslagen: any[]): any | null {
   return uitslagen[uitslagen.length - 1] ?? null;
 }
 
-function resolveMmaCurrentKlasse(fighter: any, uitslagen: any[]): "PRO" | "AMATEUR" | null {
+function resolveMmaCurrentKlasse(
+  fighter: any,
+  uitslagen: any[]
+): "PRO" | "AMATEUR" | null {
   const direct =
     fighter?.mma_current_klasse ??
     fighter?.mma_klasse ??
@@ -307,13 +265,85 @@ function countDemoUitslagen(rows: any[]): number {
   return total;
 }
 
+function asPartijNr(v: any): number | null {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.trunc(n);
+  return i > 0 ? i : null;
+}
+
+function buildPartijNrSequence(rows: any[]): Map<string, number> {
+  const out = new Map<string, number>();
+  let nextAuto = 1;
+
+  for (const row of rows ?? []) {
+    const uid = String(row?.bout_uid ?? "").trim();
+    if (!uid) continue;
+
+    const pn = asPartijNr(row?.partij_nr);
+    if (pn != null) {
+      out.set(uid, pn);
+      nextAuto = Math.max(nextAuto, pn + 1);
+      continue;
+    }
+
+    out.set(uid, nextAuto++);
+  }
+
+  return out;
+}
+
+type EvenementInfo = {
+  evenement_naam: string | null;
+  evenement_datum: string | null;
+  event_id: string | null;
+};
+
+async function fetchEvenementInfo(matchmaking_id: string): Promise<EvenementInfo> {
+  const { data, error } = await supabaseAdmin
+    .from("matchmaking_uploads")
+    .select("evenement_naam, evenement_datum, event_id")
+    .eq("matchmaking_id", matchmaking_id)
+    .order("uploaded_at", { ascending: false })
+    .limit(1);
+
+  if (error) throw error;
+
+  let evenement_naam: string | null = toNullableStr(
+    (data as any)?.[0]?.evenement_naam ?? null
+  );
+  let evenement_datum: string | null = toIsoDateOnly(
+    (data as any)?.[0]?.evenement_datum ?? null
+  );
+  const event_id: string | null = toNullableStr((data as any)?.[0]?.event_id ?? null);
+
+  if (event_id && (!evenement_naam || !evenement_datum)) {
+    const { data: ev, error: evErr } = await supabaseAdmin
+      .from("events")
+      .select("naam, datum")
+      .eq("id", event_id)
+      .maybeSingle();
+
+    if (evErr) throw evErr;
+
+    if (!evenement_naam) evenement_naam = toNullableStr((ev as any)?.naam ?? null);
+    if (!evenement_datum) evenement_datum = toIsoDateOnly((ev as any)?.datum ?? null);
+  }
+
+  return { evenement_naam, evenement_datum, event_id };
+}
+
 export async function buildControleBoutContext(
   matchmaking_id: string,
   controle_run_id: string,
   opts?: { partij_nr?: number | null }
 ) {
-  if (!matchmaking_id) throw new Error("[buildControleBoutContext] matchmaking_id ontbreekt");
-  if (!controle_run_id) throw new Error("[buildControleBoutContext] controle_run_id ontbreekt");
+  if (!matchmaking_id) {
+    throw new Error("[buildControleBoutContext] matchmaking_id ontbreekt");
+  }
+  if (!controle_run_id) {
+    throw new Error("[buildControleBoutContext] controle_run_id ontbreekt");
+  }
 
   const scopedPartijNr =
     opts?.partij_nr != null && Number.isFinite(Number(opts.partij_nr))
@@ -330,14 +360,14 @@ export async function buildControleBoutContext(
     .from("matchmaking_bouts_raw")
     .select("*")
     .eq("matchmaking_id", matchmaking_id)
-    .order("partij_nr", { ascending: true });
+    .order("partij_nr", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: true });
 
   if (scopedPartijNr != null) {
     boutsQ = boutsQ.eq("partij_nr", scopedPartijNr);
   }
 
   const { data: bouts, error: bErr } = await boutsQ;
-
   if (bErr) throw bErr;
   if (!bouts?.length) return;
 
@@ -346,10 +376,14 @@ export async function buildControleBoutContext(
   const evenement_naam = evInfo.evenement_naam;
 
   if (!evenement_datum) {
-    console.warn("[buildControleBoutContext] evenement_datum is NULL", { matchmaking_id });
+    console.warn("[buildControleBoutContext] evenement_datum is NULL", {
+      matchmaking_id,
+    });
   }
   if (!evenement_naam) {
-    console.warn("[buildControleBoutContext] evenement_naam is NULL", { matchmaking_id });
+    console.warn("[buildControleBoutContext] evenement_naam is NULL", {
+      matchmaking_id,
+    });
   }
 
   const vas = new Set<string>();
@@ -402,7 +436,9 @@ export async function buildControleBoutContext(
     .eq("matchmaking_id", matchmaking_id)
     .eq("controle_run_id", controle_run_id);
 
-  if (scopedPartijNr != null) delCtxQ = delCtxQ.eq("partij_nr", scopedPartijNr);
+  if (scopedPartijNr != null) {
+    delCtxQ = delCtxQ.eq("partij_nr", scopedPartijNr);
+  }
 
   const { error: delCtxErr } = await delCtxQ;
   if (delCtxErr) throw delCtxErr;
@@ -413,15 +449,83 @@ export async function buildControleBoutContext(
     .eq("matchmaking_id", matchmaking_id)
     .eq("controle_run_id", controle_run_id);
 
-  if (scopedPartijNr != null) delUitsQ = delUitsQ.eq("partij_nr", scopedPartijNr);
+  if (scopedPartijNr != null) {
+    delUitsQ = delUitsQ.eq("partij_nr", scopedPartijNr);
+  }
 
   const { error: delUitsErr } = await delUitsQ;
   if (delUitsErr) throw delUitsErr;
 
+  const partijNrByBoutUid = buildPartijNrSequence(bouts);
+
   const rowsToInsert: any[] = [];
   const uitslagenToInsert: any[] = [];
+  const duplicatePartijNrs = new Map<number, string[]>();
 
   for (const partij of bouts as any[]) {
+    let bout_id: string | null = null;
+
+    if (typeof partij?.bout_uid === "string" && partij.bout_uid.trim()) {
+      bout_id = partij.bout_uid.trim();
+    } else {
+      const newUid = crypto.randomUUID();
+
+      console.error(
+        "[buildControleBoutContext] bout_uid ontbreekt -> nieuwe bout_uid",
+        {
+          matchmaking_id,
+          controle_run_id,
+          partij_nr: partij?.partij_nr ?? null,
+          upload_id: partij?.upload_id ?? null,
+          rood_naam: partij?.rood_naam ?? null,
+          blauw_naam: partij?.blauw_naam ?? null,
+          new_uid: newUid,
+        }
+      );
+
+      const rawPartijNr = asPartijNr(partij?.partij_nr);
+
+      if (rawPartijNr != null) {
+        try {
+          await supabaseAdmin
+            .from("matchmaking_bouts_raw")
+            .update({ bout_uid: newUid })
+            .eq("matchmaking_id", matchmaking_id)
+            .eq("partij_nr", rawPartijNr)
+            .is("bout_uid", null);
+        } catch (e) {
+          console.warn(
+            "[buildControleBoutContext] herstel bout_uid mislukt (non-fatal)",
+            e
+          );
+        }
+      }
+
+      partij.bout_uid = newUid;
+      bout_id = newUid;
+    }
+
+    const partijNr =
+      partijNrByBoutUid.get(String(bout_id ?? "").trim()) ??
+      asPartijNr(partij?.partij_nr);
+
+    if (partijNr == null) {
+      console.warn(
+        "[buildControleBoutContext] partij zonder bruikbaar partij_nr overgeslagen",
+        {
+          matchmaking_id,
+          controle_run_id,
+          bout_id,
+          rood_naam: partij?.rood_naam ?? null,
+          blauw_naam: partij?.blauw_naam ?? null,
+        }
+      );
+      continue;
+    }
+
+    if (!duplicatePartijNrs.has(partijNr)) duplicatePartijNrs.set(partijNr, []);
+    duplicatePartijNrs.get(partijNr)!.push(String(bout_id));
+
     const vaR = toVaStrict((partij as any)?.va_rood ?? null);
     const vaB = toVaStrict((partij as any)?.va_blauw ?? null);
 
@@ -442,83 +546,43 @@ export async function buildControleBoutContext(
     const uitslagenR = vaR ? uitslagenByVa.get(vaR) ?? [] : [];
     const uitslagenB = vaB ? uitslagenByVa.get(vaB) ?? [] : [];
 
-    const partijNr = partij?.partij_nr ?? null;
-
-    let bout_id: string | null = null;
-
-    if (typeof partij?.bout_uid === "string" && partij.bout_uid.trim()) {
-      bout_id = partij.bout_uid.trim();
-    } else {
-      const newUid = crypto.randomUUID();
-
-      console.error("[buildControleBoutContext] FATAAL: bout_uid ontbreekt -> nieuwe bout_uid", {
-        matchmaking_id,
-        controle_run_id,
-        partij_nr: partijNr,
-        upload_id: partij?.upload_id ?? null,
-        rood_naam: partij?.rood_naam ?? null,
-        blauw_naam: partij?.blauw_naam ?? null,
-        bout_uid_type: typeof partij?.bout_uid,
-        bout_uid_preview: String(partij?.bout_uid ?? "").slice(0, 120),
-        new_uid: newUid,
-      });
-
-      if (partijNr != null) {
-        try {
-          await supabaseAdmin
-            .from("matchmaking_bouts_raw")
-            .update({ bout_uid: newUid })
-            .eq("matchmaking_id", matchmaking_id)
-            .eq("partij_nr", partijNr)
-            .is("bout_uid", null);
-        } catch (e) {
-          console.warn("[buildControleBoutContext] herstel bout_uid mislukt (non-fatal)", e);
-        }
+    if (vaR) {
+      for (const u of uitslagenR) {
+        uitslagenToInsert.push({
+          matchmaking_id,
+          controle_run_id,
+          partij_nr: partijNr,
+          bout_id,
+          hoek: "rood",
+          va_nummer: vaR,
+          datum: u?.datum ? toIsoDateOnly(u.datum) : null,
+          discipline: u?.discipline ?? null,
+          klasse: u?.klasse ?? null,
+          uitslag: u?.uitslag ?? null,
+          evenement: u?.evenement ?? null,
+          tegenstander: u?.tegenstander ?? null,
+          evenement_datum: toIsoDateOnly(u?.evenement_datum ?? u?.datum),
+        });
       }
-
-      (partij as any).bout_uid = newUid;
-      bout_id = newUid;
     }
 
-    if (partijNr != null) {
-      if (vaR) {
-        for (const u of uitslagenR) {
-          uitslagenToInsert.push({
-            matchmaking_id,
-            controle_run_id,
-            partij_nr: partijNr,
-            bout_id,
-            hoek: "rood",
-            va_nummer: vaR,
-            datum: u?.datum ? toIsoDateOnly(u.datum) : null,
-            discipline: u?.discipline ?? null,
-            klasse: u?.klasse ?? null,
-            uitslag: u?.uitslag ?? null,
-            evenement: u?.evenement ?? null,
-            tegenstander: u?.tegenstander ?? null,
-            evenement_datum: toIsoDateOnly(u?.evenement_datum ?? u?.datum),
-          });
-        }
-      }
-
-      if (vaB) {
-        for (const u of uitslagenB) {
-          uitslagenToInsert.push({
-            matchmaking_id,
-            controle_run_id,
-            partij_nr: partijNr,
-            bout_id,
-            hoek: "blauw",
-            va_nummer: vaB,
-            datum: u?.datum ? toIsoDateOnly(u.datum) : null,
-            discipline: u?.discipline ?? null,
-            klasse: u?.klasse ?? null,
-            uitslag: u?.uitslag ?? null,
-            evenement: u?.evenement ?? null,
-            tegenstander: u?.tegenstander ?? null,
-            evenement_datum: toIsoDateOnly(u?.evenement_datum ?? u?.datum),
-          });
-        }
+    if (vaB) {
+      for (const u of uitslagenB) {
+        uitslagenToInsert.push({
+          matchmaking_id,
+          controle_run_id,
+          partij_nr: partijNr,
+          bout_id,
+          hoek: "blauw",
+          va_nummer: vaB,
+          datum: u?.datum ? toIsoDateOnly(u.datum) : null,
+          discipline: u?.discipline ?? null,
+          klasse: u?.klasse ?? null,
+          uitslag: u?.uitslag ?? null,
+          evenement: u?.evenement ?? null,
+          tegenstander: u?.tegenstander ?? null,
+          evenement_datum: toIsoDateOnly(u?.evenement_datum ?? u?.datum),
+        });
       }
     }
 
@@ -526,14 +590,17 @@ export async function buildControleBoutContext(
     const fb = vaB ? fighterByVa.get(vaB) : null;
 
     const currentClass = partij?.klasse ?? partij?.klasse_mm ?? null;
-
     const recRClass = buildClassAwareRecord(uitslagenR, currentClass);
     const recBClass = buildClassAwareRecord(uitslagenB, currentClass);
 
     const rood_leeftijd_event =
-      fr?.geboortedatum && evenement_datum ? calcAgeYears(fr.geboortedatum, evenement_datum) : null;
+      fr?.geboortedatum && evenement_datum
+        ? calcAgeYears(fr.geboortedatum, evenement_datum)
+        : null;
     const blauw_leeftijd_event =
-      fb?.geboortedatum && evenement_datum ? calcAgeYears(fb.geboortedatum, evenement_datum) : null;
+      fb?.geboortedatum && evenement_datum
+        ? calcAgeYears(fb.geboortedatum, evenement_datum)
+        : null;
 
     const rood_mma_current_klasse = resolveMmaCurrentKlasse(fr, uitslagenR);
     const blauw_mma_current_klasse = resolveMmaCurrentKlasse(fb, uitslagenB);
@@ -542,17 +609,20 @@ export async function buildControleBoutContext(
     const max_gewicht_notatie = resolveMaxGewichtNotatie(partij);
     const max_gewicht_type = resolveMaxGewichtType(partij);
 
-    const rood_demo_totaal = Math.max(getDemoTotaalFromRecord(recRClass), countDemoUitslagen(uitslagenR));
-    const blauw_demo_totaal = Math.max(getDemoTotaalFromRecord(recBClass), countDemoUitslagen(uitslagenB));
+    const rood_demo_totaal = Math.max(
+      getDemoTotaalFromRecord(recRClass),
+      countDemoUitslagen(uitslagenR)
+    );
+    const blauw_demo_totaal = Math.max(
+      getDemoTotaalFromRecord(recBClass),
+      countDemoUitslagen(uitslagenB)
+    );
 
     rowsToInsert.push({
       controle_run_id,
-
       upload_id: partij?.upload_id ?? null,
-      partij_nr: partij?.partij_nr ?? null,
-
+      partij_nr: partijNr,
       matchmaking_id: partij?.matchmaking_id ?? matchmaking_id,
-
       bout_id,
 
       discipline: partij?.discipline ?? null,
@@ -579,12 +649,16 @@ export async function buildControleBoutContext(
       evenement_datum: evenement_datum ?? null,
 
       rood_naam_fp: fr?.naam ?? null,
-      rood_geboortedatum_fp: fr?.geboortedatum ? toIsoDateOnly(fr.geboortedatum) : null,
+      rood_geboortedatum_fp: fr?.geboortedatum
+        ? toIsoDateOnly(fr.geboortedatum)
+        : null,
       rood_geslacht: normGender(fr?.geslacht),
       rood_leeftijd_event,
 
       blauw_naam_fp: fb?.naam ?? null,
-      blauw_geboortedatum_fp: fb?.geboortedatum ? toIsoDateOnly(fb.geboortedatum) : null,
+      blauw_geboortedatum_fp: fb?.geboortedatum
+        ? toIsoDateOnly(fb.geboortedatum)
+        : null,
       blauw_geslacht: normGender(fb?.geslacht),
       blauw_leeftijd_event,
 
@@ -592,12 +666,20 @@ export async function buildControleBoutContext(
       blauw_mma_current_klasse,
 
       rood_totaal_wedstrijden_scrape:
-        fr?.totaal_wedstrijden ?? fr?.totaal ?? fr?.totaal_wedstrijden_scrape ?? null,
-      rood_gewonnen_scrape: fr?.gewonnen ?? fr?.wins ?? fr?.gewonnen_scrape ?? null,
+        fr?.totaal_wedstrijden ??
+        fr?.totaal ??
+        fr?.totaal_wedstrijden_scrape ??
+        null,
+      rood_gewonnen_scrape:
+        fr?.gewonnen ?? fr?.wins ?? fr?.gewonnen_scrape ?? null,
 
       blauw_totaal_wedstrijden_scrape:
-        fb?.totaal_wedstrijden ?? fb?.totaal ?? fb?.totaal_wedstrijden_scrape ?? null,
-      blauw_gewonnen_scrape: fb?.gewonnen ?? fb?.wins ?? fb?.gewonnen_scrape ?? null,
+        fb?.totaal_wedstrijden ??
+        fb?.totaal ??
+        fb?.totaal_wedstrijden_scrape ??
+        null,
+      blauw_gewonnen_scrape:
+        fb?.gewonnen ?? fb?.wins ?? fb?.gewonnen_scrape ?? null,
 
       rood_licentie: fr?.licentie ?? null,
       rood_heeft_startverbod:
@@ -630,17 +712,31 @@ export async function buildControleBoutContext(
     });
   }
 
+  const duplicateSummary = [...duplicatePartijNrs.entries()]
+    .filter(([, ids]) => ids.length > 1)
+    .map(([partij_nr, ids]) => ({ partij_nr, bout_ids: ids }));
+
+  if (duplicateSummary.length > 0) {
+    console.warn("[buildControleBoutContext] dubbele partij_nrs gevonden", {
+      matchmaking_id,
+      controle_run_id,
+      duplicates: duplicateSummary,
+    });
+  }
+
   if (uitslagenToInsert.length > 0) {
     const chunkSize = 500;
     for (let i = 0; i < uitslagenToInsert.length; i += chunkSize) {
       const chunk = uitslagenToInsert.slice(i, i + chunkSize);
+
       const { error: uInsErr } = await supabaseAdmin
         .from("controle_uitslagen")
         .upsert(chunk, {
           onConflict:
-            "controle_run_id,partij_nr,hoek,va_nummer,datum,discipline,klasse,uitslag,evenement,tegenstander,evenement_datum",
+            "controle_run_id,bout_id,hoek,va_nummer,datum,discipline,klasse,uitslag,evenement,tegenstander,evenement_datum",
           ignoreDuplicates: true,
         });
+
       if (uInsErr) throw uInsErr;
     }
   }
@@ -648,7 +744,9 @@ export async function buildControleBoutContext(
   if (rowsToInsert.length > 0) {
     const { error: insErr } = await supabaseAdmin
       .from("controle_bout_context")
-      .upsert(rowsToInsert, { onConflict: "controle_run_id,partij_nr" });
+      .upsert(rowsToInsert, {
+        onConflict: "controle_run_id,bout_id",
+      });
 
     if (insErr) throw insErr;
   }
@@ -659,5 +757,6 @@ export async function buildControleBoutContext(
     partij_nr: scopedPartijNr,
     rows: rowsToInsert.length,
     uitslagen: uitslagenToInsert.length,
+    duplicates: duplicateSummary.length,
   });
 }

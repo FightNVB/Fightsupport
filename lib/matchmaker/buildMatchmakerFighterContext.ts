@@ -98,7 +98,7 @@ export async function buildMatchmakerFighterContext(
   if (insErr) throw insErr;
 
   const { data: scrapedRows, error: rawErr } = await supabaseAdmin
-    .from("matchmaker_fighter_raw")
+    .from("matchmaker_fighters_raw")
     .select("*")
     .eq("matchmaking_id", mmId)
     .order("scraped_at", { ascending: false, nullsFirst: false })

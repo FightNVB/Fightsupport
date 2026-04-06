@@ -1,5 +1,5 @@
 // ---------------------------------------------------------
-// MATCHCONTROL PARSER – VERSIE 12.7 – HERKENNING -95 VS 95+
+// FIGHTSUPPORT PARSER – VERSIE 12.9 –
 // ---------------------------------------------------------
 //
 // ✅ .xlsx via ExcelJS (styles + waarden)
@@ -13,11 +13,12 @@
 // - afgesproken gewicht is partijniveau, net als discipline/klasse
 // - max/min gewicht mag NOOIT als rood_gewicht of blauw_gewicht worden gelezen
 //
-// ✅ NIEUW:
-// - "-95"  = maximaal / tot en met 95 kilo
-// - "95+"  = open klasse / zwaarder dan 95 kilo
-// - parser bewaart nu ook de oorspronkelijke notatie zodat weegstation
-//   later verschil kan maken tussen -95 en 95+
+// ✅ NIEUW in 12.9:
+// - parser raakt niet in de war door klasse-notatie in gewichtcellen
+// - "45kg", "45 kilo", "45", "-45", "-45kg" => max_gewicht 45 in afgesproken/context
+// - "95+" / "+95" blijft open klasse / heavyweight
+// - als klasse-notatie per ongeluk in een hoek-gewichtcel staat,
+//   wordt die NIET als vechtergewicht opgeslagen maar als partijgewicht
 //
 // Dependencies:
 // npm i exceljs xlsx
@@ -126,6 +127,23 @@ function formatWeightNumber(n: number): string {
   return String(n).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 }
 
+function compactSpaces(v: string): string {
+  return v.replace(/\s+/g, " ").trim();
+}
+
+function cleanNamePart(v: any): string {
+  return compactSpaces(String(v ?? "").replace(/\s+/g, " ").trim());
+}
+
+function joinNameParts(...parts: Array<string | null | undefined>): string | null {
+  const out = parts
+    .map((x) => cleanNamePart(x ?? ""))
+    .filter(Boolean);
+
+  if (!out.length) return null;
+  return compactSpaces(out.join(" "));
+}
+
 /**
  * Parseert gewicht/notatie.
  *
@@ -133,6 +151,7 @@ function formatWeightNumber(n: number): string {
  * - 56
  * - 56kg
  * - 56 kg
+ * - 56 kilo
  * - KG 56
  * - Gewicht 56 kg
  *
@@ -159,6 +178,7 @@ function extractWeightMeta(raw: any, opts?: { allowClassNotation?: boolean }): P
   const v = String(raw)
     .toLowerCase()
     .replace(",", ".")
+    .replace(/\bkilo\b/g, "kg")
     .trim();
 
   if (!v) return null;
@@ -201,7 +221,6 @@ function extractWeightMeta(raw: any, opts?: { allowClassNotation?: boolean }): P
       }
     }
   } else {
-    // In echte vechtergewichten willen we 95+ of -95 NIET als exact 95 lezen.
     if (/^\s*-\s*\d/.test(v)) return null;
     if (/^\s*\+\s*\d/.test(v)) return null;
     if (/\d\s*\+\s*(kg)?\s*$/i.test(v)) return null;
@@ -234,6 +253,7 @@ function extractClassWeightMetaOnly(raw: any): ParsedWeightMeta | null {
   const v = String(raw)
     .toLowerCase()
     .replace(",", ".")
+    .replace(/\bkilo\b/g, "kg")
     .trim();
 
   if (!v) return null;
@@ -318,6 +338,7 @@ function extractVA(raw: any): string | null {
 
   if (isProbablyDate(v)) return null;
   if (v.toLowerCase().includes("kg")) return null;
+  if (v.toLowerCase().includes("kilo")) return null;
   if (extractRecord(v)) return null;
 
   let digits = v.replace(/\D+/g, "");
@@ -341,7 +362,7 @@ function looksLikeName(v: string) {
   if (isProbablyDate(s)) return false;
   if (extractVA(s)) return false;
   if (extractWeightMeta(s, { allowClassNotation: true })) return false;
-  return /^[A-Za-zÀ-ÿ'’.\- ]{3,}$/.test(s);
+  return /^[A-Za-zÀ-ÿ'’.\- ]{2,}$/.test(s);
 }
 
 function looksLikeGym(v: string) {
@@ -372,6 +393,7 @@ function makeEmptyBout(): ParsedBout {
 
     max_gewicht: null,
     max_gewicht_notatie: null,
+
     min_gewicht: null,
     min_gewicht_notatie: null,
 
@@ -434,6 +456,39 @@ function applyAgreedWeightMeta(
   bout.min_gewicht = meta.value;
   bout.min_gewicht_notatie = meta.label;
   bout.extra.min_gewicht_type = meta.type;
+}
+
+/**
+ * Belangrijk:
+ * Als in een vechter-gewicht cel per ongeluk klasse-notatie staat
+ * (zoals -45 of 95+), dan slaan we dat NIET op als hoekgewicht
+ * maar als partijgewicht/max-notatie.
+ */
+function applySmartWeightFromCornerCell(
+  bout: ParsedBout,
+  corner: "rood" | "blauw",
+  meta: ParsedWeightMeta | null,
+  source?: string
+) {
+  if (!meta) return;
+
+  if (meta.type === "exact") {
+    applyCornerWeightMeta(bout, corner, meta);
+    return;
+  }
+
+  // Klasse-notatie in hoekcel => behandel als partijgewicht / afgesproken gewicht
+  if (bout.max_gewicht == null) {
+    applyAgreedWeightMeta(bout, "max", meta);
+    bout.extra.corner_weight_reinterpreted_as_max = true;
+    bout.extra.corner_weight_reinterpreted_from = source ?? corner;
+    return;
+  }
+
+  // Als max al bestaat, alleen notatie loggen maar NIET op hoekgewicht zetten
+  bout.extra.corner_weight_class_notation_ignored = true;
+  bout.extra.corner_weight_class_notation_source = source ?? corner;
+  bout.extra.corner_weight_class_notation_value = meta.label;
 }
 
 function isVsMarker(v: any): boolean {
@@ -642,50 +697,51 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
     if (isEmptyLine) continue;
 
     if (isVsMarker(vsVal) && (naam2 || va2 || gym2 || kg2Meta)) {
-      const bout = {
-        bout_uid: randomUUID(),
-        partij_nr: Number.isFinite(partijNr) ? partijNr : null,
+      const bout = makeEmptyBout();
+      bout.bout_uid = randomUUID();
+      bout.partij_nr = Number.isFinite(partijNr) ? partijNr : null;
 
-        rood_naam: naam1,
-        rood_gym: gym1,
-        va_rood: va1,
-        rood_geboortedatum: null,
-        rood_gewicht: kg1Meta?.type === "exact" ? kg1Meta.label : null,
-        rood_gewicht_notatie: kg1Meta?.label ?? null,
+      bout.rood_naam = naam1;
+      bout.rood_gym = gym1;
+      bout.va_rood = va1;
+      bout.rood_geboortedatum = null;
 
-        blauw_naam: naam2,
-        blauw_gym: gym2,
-        va_blauw: va2,
-        blauw_geboortedatum: null,
-        blauw_gewicht: kg2Meta?.type === "exact" ? kg2Meta.label : null,
-        blauw_gewicht_notatie: kg2Meta?.label ?? null,
+      if (kg1Meta) {
+        applySmartWeightFromCornerCell(bout, "rood", kg1Meta, "template_kg1");
+      }
 
-        discipline,
-        klasse,
+      bout.blauw_naam = naam2;
+      bout.blauw_gym = gym2;
+      bout.va_blauw = va2;
+      bout.blauw_geboortedatum = null;
 
-        max_gewicht: maxKgMeta?.value ?? null,
-        max_gewicht_notatie: maxKgMeta?.label ?? null,
+      if (kg2Meta) {
+        applySmartWeightFromCornerCell(bout, "blauw", kg2Meta, "template_kg2");
+      }
 
-        min_gewicht: minKgMeta?.value ?? null,
-        min_gewicht_notatie: minKgMeta?.label ?? null,
+      bout.discipline = discipline;
+      bout.klasse = klasse;
 
-        record_rood_w: 0,
-        record_rood_l: 0,
-        record_rood_d: 0,
+      if (maxKgMeta) applyAgreedWeightMeta(bout, "max", maxKgMeta);
+      if (minKgMeta) applyAgreedWeightMeta(bout, "min", minKgMeta);
 
-        record_blauw_w: 0,
-        record_blauw_l: 0,
-        record_blauw_d: 0,
+      bout.record_rood_w = 0;
+      bout.record_rood_l = 0;
+      bout.record_rood_d = 0;
 
-        is_toernooi: false,
-        extra: {
-          template: "admin_vs_t",
-          t_code: tCode,
-          rood_gewicht_type: kg1Meta?.type ?? null,
-          blauw_gewicht_type: kg2Meta?.type ?? null,
-          max_gewicht_type: maxKgMeta?.type ?? null,
-          min_gewicht_type: minKgMeta?.type ?? null,
-        },
+      bout.record_blauw_w = 0;
+      bout.record_blauw_l = 0;
+      bout.record_blauw_d = 0;
+
+      bout.is_toernooi = false;
+      bout.extra = {
+        ...bout.extra,
+        template: "admin_vs_t",
+        t_code: tCode,
+        rood_gewicht_type: kg1Meta?.type ?? null,
+        blauw_gewicht_type: kg2Meta?.type ?? null,
+        max_gewicht_type: bout.extra.max_gewicht_type ?? maxKgMeta?.type ?? null,
+        min_gewicht_type: bout.extra.min_gewicht_type ?? minKgMeta?.type ?? null,
       };
 
       bouts.push(bout);
@@ -723,52 +779,49 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         const a = list[i];
         const b = list[j];
 
-        bouts.push({
-          bout_uid: randomUUID(),
-          partij_nr: nextPartijNr++,
+        const bout = makeEmptyBout();
+        bout.bout_uid = randomUUID();
+        bout.partij_nr = nextPartijNr++;
 
-          rood_naam: a?.naam ?? null,
-          rood_gym: a?.gym ?? null,
-          va_rood: a?.va ?? null,
-          rood_geboortedatum: null,
-          rood_gewicht: a?.kg_meta?.type === "exact" ? a.kg_meta.label : null,
-          rood_gewicht_notatie: a?.kg_meta?.label ?? null,
+        bout.rood_naam = a?.naam ?? null;
+        bout.rood_gym = a?.gym ?? null;
+        bout.va_rood = a?.va ?? null;
+        bout.rood_geboortedatum = null;
+        if (a?.kg_meta) applySmartWeightFromCornerCell(bout, "rood", a.kg_meta, "template_toernooi_rood");
 
-          blauw_naam: b?.naam ?? null,
-          blauw_gym: b?.gym ?? null,
-          va_blauw: b?.va ?? null,
-          blauw_geboortedatum: null,
-          blauw_gewicht: b?.kg_meta?.type === "exact" ? b.kg_meta.label : null,
-          blauw_gewicht_notatie: b?.kg_meta?.label ?? null,
+        bout.blauw_naam = b?.naam ?? null;
+        bout.blauw_gym = b?.gym ?? null;
+        bout.va_blauw = b?.va ?? null;
+        bout.blauw_geboortedatum = null;
+        if (b?.kg_meta) applySmartWeightFromCornerCell(bout, "blauw", b.kg_meta, "template_toernooi_blauw");
 
-          discipline: d,
-          klasse: k,
+        bout.discipline = d;
+        bout.klasse = k;
 
-          max_gewicht: mk?.value ?? null,
-          max_gewicht_notatie: mk?.label ?? null,
+        if (mk) applyAgreedWeightMeta(bout, "max", mk);
+        if (nk) applyAgreedWeightMeta(bout, "min", nk);
 
-          min_gewicht: nk?.value ?? null,
-          min_gewicht_notatie: nk?.label ?? null,
+        bout.record_rood_w = 0;
+        bout.record_rood_l = 0;
+        bout.record_rood_d = 0;
 
-          record_rood_w: 0,
-          record_rood_l: 0,
-          record_rood_d: 0,
+        bout.record_blauw_w = 0;
+        bout.record_blauw_l = 0;
+        bout.record_blauw_d = 0;
 
-          record_blauw_w: 0,
-          record_blauw_l: 0,
-          record_blauw_d: 0,
+        bout.is_toernooi = true;
+        bout.extra = {
+          ...bout.extra,
+          toernooi_code: code,
+          toernooi_format: "roundrobin",
+          template: "admin_vs_t",
+          rood_gewicht_type: a?.kg_meta?.type ?? null,
+          blauw_gewicht_type: b?.kg_meta?.type ?? null,
+          max_gewicht_type: bout.extra.max_gewicht_type ?? mk?.type ?? null,
+          min_gewicht_type: bout.extra.min_gewicht_type ?? nk?.type ?? null,
+        };
 
-          is_toernooi: true,
-          extra: {
-            toernooi_code: code,
-            toernooi_format: "roundrobin",
-            template: "admin_vs_t",
-            rood_gewicht_type: a?.kg_meta?.type ?? null,
-            blauw_gewicht_type: b?.kg_meta?.type ?? null,
-            max_gewicht_type: mk?.type ?? null,
-            min_gewicht_type: nk?.type ?? null,
-          },
-        });
+        bouts.push(bout);
       }
     }
   }
@@ -1025,6 +1078,12 @@ function detectHeaderRow(sheet: SheetLike, maxScanRows = 50, maxCol = 80): numbe
     if (joined.includes("blauw") || joined.includes("blue")) score += 3;
     if (joined.includes("vs") || joined.includes("v.s")) score += 2;
 
+    const voorCount = cells.filter((c) => c === "voornaam" || c.includes("voornaam")).length;
+    const achCount = cells.filter((c) => c === "achternaam" || c.includes("achternaam")).length;
+    if (voorCount >= 1) score += 4;
+    if (achCount >= 1) score += 4;
+    if (voorCount >= 2 && achCount >= 2) score += 6;
+
     let dataLike = 0;
     for (const c of cells) {
       if (extractVA(c)) dataLike++;
@@ -1104,6 +1163,7 @@ type ColMap = {
   gew?: number | null;
   va?: number | null;
   rec?: number | null;
+  leeftijd?: number | null;
   start?: number;
   end?: number;
 };
@@ -1116,15 +1176,22 @@ function headerCornerFromText(h: string): Corner {
   return null;
 }
 
-function headerLooksLikeName(h: string) {
+function isStrictVoornaamHeader(h: string): boolean {
   const s = norm(h);
-  return (
-    s.includes("naam") ||
-    s.includes("vechter") ||
-    s.includes("fighter") ||
-    s.includes("voornaam") ||
-    (s.includes("voor") && !s.includes("voordeel"))
-  );
+  return s === "voornaam" || s.includes("voornaam");
+}
+
+function isStrictAchternaamHeader(h: string): boolean {
+  const s = norm(h);
+  return s === "achternaam" || s.includes("achternaam");
+}
+
+function isGenericNaamHeader(h: string): boolean {
+  const s = norm(h);
+  if (!s) return false;
+  if (isStrictVoornaamHeader(s)) return false;
+  if (isStrictAchternaamHeader(s)) return false;
+  return s === "naam" || s.includes(" naam") || s.startsWith("naam ") || s.includes("fighter") || s.includes("vechter");
 }
 
 function isMaxWeightHeader(h: string): boolean {
@@ -1191,7 +1258,21 @@ function findInRange(headers0: string[], start0: number, end0: number, patterns:
   for (let i = start0; i <= end0 && i < headers0.length; i++) {
     const h = headers0[i];
     if (!h) continue;
-    if (patterns.some((p) => h.includes(p))) return i + 1;
+    if (patterns.some((p) => h === p || h.includes(p))) return i + 1;
+  }
+  return null;
+}
+
+function findVoornaamColInRange(headers0: string[], start0: number, end0: number): number | null {
+  for (let i = start0; i <= end0 && i < headers0.length; i++) {
+    if (isStrictVoornaamHeader(headers0[i] || "")) return i + 1;
+  }
+  return null;
+}
+
+function findAchternaamColInRange(headers0: string[], start0: number, end0: number): number | null {
+  for (let i = start0; i <= end0 && i < headers0.length; i++) {
+    if (isStrictAchternaamHeader(headers0[i] || "")) return i + 1;
   }
   return null;
 }
@@ -1200,11 +1281,7 @@ function findNameColInRange(headers0: string[], start0: number, end0: number): n
   for (let i = start0; i <= end0 && i < headers0.length; i++) {
     const h = headers0[i] || "";
     if (!h) continue;
-
-    if (h.includes("voornaam") || h.includes("achternaam")) continue;
-
-    if (h === "naam" || h.includes("vechter") || h.includes("fighter")) return i + 1;
-    if (h.includes("naam") && !h.includes("voor") && !h.includes("ach")) return i + 1;
+    if (isGenericNaamHeader(h)) return i + 1;
   }
   return null;
 }
@@ -1305,29 +1382,57 @@ function buildCornerMaps(opts: { sheet: SheetLike; headerRowIndex: number; maxCo
   const vsColIdx = headers0.findIndex((h) => h && (h === "vs" || h.includes("vs") || h.includes("v.s")));
   const vsCol = vsColIdx >= 0 ? vsColIdx + 1 : null;
 
-  const nameCols: number[] = [];
+  const voornaamCols: number[] = [];
+  const achternaamCols: number[] = [];
+  const naamCols: number[] = [];
+
   for (let i = 0; i < headers0.length; i++) {
-    if (headers0[i] && headerLooksLikeName(headers0[i])) nameCols.push(i + 1);
+    const h = headers0[i] || "";
+    if (!h) continue;
+
+    if (isStrictVoornaamHeader(h)) {
+      voornaamCols.push(i + 1);
+      continue;
+    }
+    if (isStrictAchternaamHeader(h)) {
+      achternaamCols.push(i + 1);
+      continue;
+    }
+    if (isGenericNaamHeader(h)) {
+      naamCols.push(i + 1);
+    }
   }
 
   const above = findCornerStartsFromRowAbove({ sheet, headerRowIndex, maxCol });
 
-  const voornaamCols: number[] = [];
-  for (let i = 0; i < headers0.length; i++) {
-    const h = headers0[i] || "";
-    if (!h) continue;
-    if (h === "voornaam" || (h.includes("voornaam") && !h.includes("achternaam"))) {
-      voornaamCols.push(i + 1);
-    }
-  }
+  const redStartByDup =
+    voornaamCols[0] ||
+    naamCols[0] ||
+    achternaamCols[0] ||
+    null;
 
-  const redStartByDup = voornaamCols[0] || null;
-  const blueStartByDup = voornaamCols.length >= 2 ? voornaamCols[1] : null;
+  const blueStartByDup =
+    voornaamCols.length >= 2
+      ? voornaamCols[1]
+      : naamCols.length >= 2
+      ? naamCols[1]
+      : achternaamCols.length >= 2
+      ? achternaamCols[1]
+      : null;
 
-  const redNameByCorner = nameCols.find((c) => headerCorners0[c - 1] === "rood") || null;
-  const blueNameByCorner = nameCols.find((c) => headerCorners0[c - 1] === "blauw") || null;
+  const redNameByCorner =
+    voornaamCols.find((c) => headerCorners0[c - 1] === "rood") ||
+    naamCols.find((c) => headerCorners0[c - 1] === "rood") ||
+    achternaamCols.find((c) => headerCorners0[c - 1] === "rood") ||
+    null;
 
-  const redStart = above.redStart || redStartByDup || redNameByCorner || nameCols[0] || 2;
+  const blueNameByCorner =
+    voornaamCols.find((c) => headerCorners0[c - 1] === "blauw") ||
+    naamCols.find((c) => headerCorners0[c - 1] === "blauw") ||
+    achternaamCols.find((c) => headerCorners0[c - 1] === "blauw") ||
+    null;
+
+  const redStart = above.redStart || redStartByDup || redNameByCorner || 2;
 
   let blueStart = above.blueStart || blueStartByDup || blueNameByCorner || null;
   if (!blueStart) blueStart = Math.min(maxCol, redStart + 7);
@@ -1366,37 +1471,38 @@ function buildCornerMaps(opts: { sheet: SheetLike; headerRowIndex: number; maxCo
   const blu0s = blueRange.start - 1;
   const blu0e = blueRange.end - 1;
 
-  const pVoor = ["voornaam", "voor"];
-  const pAch = ["achternaam", "ach", "achter"];
   const pGym = ["gym", "sportschool", "school", "vereniging", "club", "team"];
   const pGeb = ["geboorte", "geboortedatum", "geb", "dob", "birth"];
   const pVA = ["va", "va nr", "paspoort", "passport", "id", "nva"];
   const pRec = ["record", "rec", "erv", "ervaring", "exp"];
+  const pLeeftijd = ["leeftijd", "age"];
 
   const red: ColMap = {
     start: redRange.start,
     end: redRange.end,
-    voor: findInRange(headers0, red0s, red0e, pVoor),
-    ach: findInRange(headers0, red0s, red0e, pAch),
+    voor: findVoornaamColInRange(headers0, red0s, red0e),
+    ach: findAchternaamColInRange(headers0, red0s, red0e),
     naam: findNameColInRange(headers0, red0s, red0e),
     gym: findInRange(headers0, red0s, red0e, pGym),
     geb: findInRange(headers0, red0s, red0e, pGeb),
     gew: findWeightColInRange(headers0, red0s, red0e),
     va: findInRange(headers0, red0s, red0e, pVA),
     rec: findInRange(headers0, red0s, red0e, pRec),
+    leeftijd: findInRange(headers0, red0s, red0e, pLeeftijd),
   };
 
   const blue: ColMap = {
     start: blueRange.start,
     end: blueRange.end,
-    voor: findInRange(headers0, blu0s, blu0e, pVoor),
-    ach: findInRange(headers0, blu0s, blu0e, pAch),
+    voor: findVoornaamColInRange(headers0, blu0s, blu0e),
+    ach: findAchternaamColInRange(headers0, blu0s, blu0e),
     naam: findNameColInRange(headers0, blu0s, blu0e),
     gym: findInRange(headers0, blu0s, blu0e, pGym),
     geb: findInRange(headers0, blu0s, blu0e, pGeb),
     gew: findWeightColInRange(headers0, blu0s, blu0e),
     va: findInRange(headers0, blu0s, blu0e, pVA),
     rec: findInRange(headers0, blu0s, blu0e, pRec),
+    leeftijd: findInRange(headers0, blu0s, blu0e, pLeeftijd),
   };
 
   return { red, blue, styleCol, classCol, partijCol, maxGewCol, minGewCol };
@@ -1406,23 +1512,87 @@ function buildCornerMaps(opts: { sheet: SheetLike; headerRowIndex: number; maxCo
    6. NAAM OPHALEN
 ========================================================= */
 
+function isUsableNamePiece(v: string): boolean {
+  const s = cleanNamePart(v);
+  if (!s) return false;
+  if (looksLikeGym(s)) return false;
+  if (extractVA(s)) return false;
+  if (extractDate(s)) return false;
+  if (looksLikeRecord(s)) return false;
+  if (extractWeightMeta(s, { allowClassNotation: true })) return false;
+  return looksLikeName(s);
+}
+
+function findNeighborNamePart(
+  row: RowLike,
+  map: ColMap,
+  anchorCol: number,
+  direction: -1 | 1
+): string | null {
+  const start = map.start ?? 1;
+  const end = map.end ?? start;
+
+  const c = anchorCol + direction;
+  if (c < start || c > end) return null;
+
+  const raw = cellTextLike(row.getCell(c));
+  if (!raw) return null;
+  if (!isUsableNamePiece(raw)) return null;
+
+  return cleanNamePart(raw);
+}
+
 function extractNameFromRow(row: RowLike, map: ColMap): string | null {
-  const vNaam = map.naam ? cellTextLike(row.getCell(map.naam)) : "";
-  if (vNaam && looksLikeName(vNaam)) return vNaam.trim();
+  const start = map.start ?? 1;
+  const end = map.end ?? start;
 
-  const vVoor = map.voor ? cellTextLike(row.getCell(map.voor)) : "";
-  const vAch = map.ach ? cellTextLike(row.getCell(map.ach)) : "";
+  const vVoor = map.voor ? cleanNamePart(cellTextLike(row.getCell(map.voor))) : "";
+  const vAch = map.ach ? cleanNamePart(cellTextLike(row.getCell(map.ach))) : "";
+  const vNaam = map.naam ? cleanNamePart(cellTextLike(row.getCell(map.naam))) : "";
 
-  if (vVoor && vAch) return `${vVoor} ${vAch}`.trim();
-  if (vVoor && vVoor.includes(" ")) return vVoor.trim();
+  const voorOk = isUsableNamePiece(vVoor);
+  const achOk = isUsableNamePiece(vAch);
+  const naamOk = isUsableNamePiece(vNaam);
 
-  if (vVoor && !vAch && map.voor) {
-    const adj = cellTextLike(row.getCell(map.voor + 1));
-    if (adj && looksLikeName(adj) && !extractVA(adj) && !extractDate(adj)) {
-      return `${vVoor} ${adj}`.trim();
-    }
-    return vVoor.trim();
+  if (voorOk && achOk) {
+    return joinNameParts(vVoor, vAch);
   }
+
+  if (voorOk && !achOk && map.voor) {
+    const right = findNeighborNamePart(row, map, map.voor, 1);
+    if (right) return joinNameParts(vVoor, right);
+
+    const left = findNeighborNamePart(row, map, map.voor, -1);
+    if (left) return joinNameParts(left, vVoor);
+
+    return vVoor;
+  }
+
+  if (achOk && !voorOk && map.ach) {
+    const left = findNeighborNamePart(row, map, map.ach, -1);
+    if (left) return joinNameParts(left, vAch);
+
+    const right = findNeighborNamePart(row, map, map.ach, 1);
+    if (right) return joinNameParts(vAch, right);
+
+    return vAch;
+  }
+
+  if (naamOk) {
+    return vNaam;
+  }
+
+  const pieces: string[] = [];
+  for (let c = start; c <= end; c++) {
+    const txt = cleanNamePart(cellTextLike(row.getCell(c)));
+    if (!txt) continue;
+    if (!isUsableNamePiece(txt)) continue;
+    pieces.push(txt);
+    if (pieces.length >= 2) break;
+  }
+
+  if (pieces.length >= 2) return joinNameParts(pieces[0], pieces[1]);
+  if (pieces.length === 1) return pieces[0];
 
   return null;
 }
@@ -1437,6 +1607,8 @@ function scanRowByColorForCorner(
   corner: "rood" | "blauw"
 ): { name?: string; gym?: string; va?: string } {
   const out: any = {};
+  const namePieces: string[] = [];
+
   for (let c = 1; c <= maxCol; c++) {
     const cell = row.getCell(c);
     const v = cellTextLike(cell);
@@ -1445,13 +1617,22 @@ function scanRowByColorForCorner(
     const cc = getCellCornerFromLike(cell);
     if (cc !== corner) continue;
 
-    if (!out.name && looksLikeName(v)) out.name = v;
+    if (isUsableNamePiece(v)) {
+      namePieces.push(cleanNamePart(v));
+      if (namePieces.length === 2 && !out.name) {
+        out.name = joinNameParts(namePieces[0], namePieces[1]);
+      } else if (namePieces.length === 1 && !out.name) {
+        out.name = cleanNamePart(v);
+      }
+    }
+
     if (!out.gym && looksLikeGym(v)) out.gym = v;
     if (!out.va) {
       const va = extractVA(v);
       if (va) out.va = va;
     }
   }
+
   return out;
 }
 
@@ -1603,7 +1784,6 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
     bout.is_toernooi = isToernooi;
     if (isToernooi) bout.extra.is_toernooi = true;
 
-    // afgesproken gewicht apart lezen
     if (maxGewCol) {
       const raw = row.getCell(maxGewCol).value;
       const txt = cellTextLike(row.getCell(maxGewCol));
@@ -1618,7 +1798,9 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
       applyAgreedWeightMeta(bout, "min", meta);
     }
 
-    // fallback alleen voor klasse-notaties zoals -60 / -95 / 95+
+    // Fallback:
+    // Als expliciete max/min kolommen leeg zijn, maar ergens staat een klasse-notatie
+    // zoals -45 of 95+, gebruik dat als max-context.
     if (bout.max_gewicht == null) {
       for (let c = 1; c <= Math.min(maxCol, 40); c++) {
         const txt = cellTextLike(row.getCell(c));
@@ -1654,10 +1836,14 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
 
     const roodGewRaw = red.gew ? row.getCell(red.gew).value : null;
     const roodGewMetaDirect = extractWeightMeta(roodGewRaw, { allowClassNotation: true });
-    applyCornerWeightMeta(bout, "rood", roodGewMetaDirect);
+    if (roodGewMetaDirect) {
+      applySmartWeightFromCornerCell(bout, "rood", roodGewMetaDirect, "row_direct_rood");
+    }
     if (!bout.rood_gewicht && !bout.rood_gewicht_notatie) {
       const fallbackMeta = extractWeightMetaFromCornerRange(row, red, skipWeightCols);
-      applyCornerWeightMeta(bout, "rood", fallbackMeta);
+      if (fallbackMeta) {
+        applySmartWeightFromCornerCell(bout, "rood", fallbackMeta, "row_fallback_rood");
+      }
     }
 
     const roodVaRaw = red.va ? cellTextLike(row.getCell(red.va)) : "";
@@ -1681,10 +1867,14 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
 
     const blauwGewRaw = blue.gew ? row.getCell(blue.gew).value : null;
     const blauwGewMetaDirect = extractWeightMeta(blauwGewRaw, { allowClassNotation: true });
-    applyCornerWeightMeta(bout, "blauw", blauwGewMetaDirect);
+    if (blauwGewMetaDirect) {
+      applySmartWeightFromCornerCell(bout, "blauw", blauwGewMetaDirect, "row_direct_blauw");
+    }
     if (!bout.blauw_gewicht && !bout.blauw_gewicht_notatie) {
       const fallbackMeta = extractWeightMetaFromCornerRange(row, blue, skipWeightCols);
-      applyCornerWeightMeta(bout, "blauw", fallbackMeta);
+      if (fallbackMeta) {
+        applySmartWeightFromCornerCell(bout, "blauw", fallbackMeta, "row_fallback_blauw");
+      }
     }
 
     const blauwVaRaw = blue.va ? cellTextLike(row.getCell(blue.va)) : "";

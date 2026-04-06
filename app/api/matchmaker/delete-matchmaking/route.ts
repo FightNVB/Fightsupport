@@ -1,4 +1,3 @@
-// app/api/matchmaker/delete-matchmaking/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/matchmaker/access";
 import {
@@ -12,6 +11,14 @@ async function deleteEq(table: string, column: string, value: string) {
   const { error } = await supabaseAdmin.from(table).delete().eq(column, value);
   if (error) {
     throw new Error(`[${table}] delete eq ${column} failed: ${error.message}`);
+  }
+}
+
+async function bestEffortDeleteEq(table: string, column: string, value: string) {
+  try {
+    await deleteEq(table, column, value);
+  } catch (e: any) {
+    console.warn(`[matchmaker/delete-matchmaking] skip ${table}:`, e?.message);
   }
 }
 
@@ -32,7 +39,6 @@ export async function POST(req: Request) {
 
     console.log("[matchmaker/delete-matchmaking] start", { matchmaking_id });
 
-    // optioneel ophalen voor logging / controle
     const { data: insRows, error: insErr } = await supabaseAdmin
       .from("matchmaker_inschrijvingen")
       .select("id, upload_id, va_nummer")
@@ -47,36 +53,40 @@ export async function POST(req: Request) {
 
     if (runErr) throw runErr;
 
-    // 1) eerst alle child-tabellen met matchmaking_id opruimen
-    await deleteEq("matchmaker_fighter_context", "matchmaking_id", matchmaking_id);
-    await deleteEq("matchmaker_fighters_raw", "matchmaking_id", matchmaking_id);
-    await deleteEq("matchmaker_uitslagen_raw", "matchmaking_id", matchmaking_id);
-    await deleteEq("matchmaker_controle_runs", "matchmaking_id", matchmaking_id);
+    // 1) zwaarste children eerst
+    await bestEffortDeleteEq("dispensatie_requests", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("dispensatie_hits", "matchmaking_id", matchmaking_id);
 
-    // als je deze tabellen ook al hebt / gebruikt, laat ze staan
-    // anders kun je deze blokken verwijderen
-    try {
-      await deleteEq("matchmaker_bout_context", "matchmaking_id", matchmaking_id);
-    } catch (e: any) {
-      console.warn("[matchmaker/delete-matchmaking] skip matchmaker_bout_context:", e?.message);
-    }
+    await bestEffortDeleteEq("matchmaker_controle_resultaten", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaker_bout_context", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("controle_audit_events", "matchmaking_id", matchmaking_id);
 
-    try {
-      await deleteEq("matchmaker_controle_resultaten", "matchmaking_id", matchmaking_id);
-    } catch (e: any) {
-      console.warn("[matchmaker/delete-matchmaking] skip matchmaker_controle_resultaten:", e?.message);
-    }
+    await bestEffortDeleteEq("matchmaker_bouts_raw", "matchmaking_id", matchmaking_id);
 
-    // 2) inschrijvingen weg
-    await deleteEq("matchmaker_inschrijvingen", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("lineup_bouts", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("weigh_in_bouts", "matchmaking_id", matchmaking_id);
 
-    // 3) uploads weg
-    // Gebruik hier de tabelnaam die jij echt gebruikt.
-    // Laat matchmaker_uploads staan als dat jouw echte tabel is.
-    await deleteEq("matchmaker_uploads", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaker_fighter_context", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaker_fighters_raw", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaker_uitslagen_raw", "matchmaking_id", matchmaking_id);
 
-    // 4) hoofdrecord weg
-await deleteEq("matchmaker_matchmakings", "id", matchmaking_id)
+    await bestEffortDeleteEq("matchmaker_controle_runs", "matchmaking_id", matchmaking_id);
+
+    // oudere of alternatieve tabellen veilig mee opruimen
+    await bestEffortDeleteEq("controle_resultaten", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("controle_bout_context", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaking_bouts_raw", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaker_matches", "matchmaking_id", matchmaking_id);
+
+    // 2) inschrijvingen
+    await bestEffortDeleteEq("matchmaker_inschrijvingen", "matchmaking_id", matchmaking_id);
+
+    // 3) uploads
+    await bestEffortDeleteEq("matchmaking_uploads", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaker_uploads", "matchmaking_id", matchmaking_id);
+
+    // 4) hoofdrecord
+    await deleteEq("matchmaker_matchmakings", "id", matchmaking_id);
 
     return NextResponse.json({
       ok: true,

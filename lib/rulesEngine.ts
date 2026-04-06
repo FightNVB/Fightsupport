@@ -259,7 +259,7 @@ function leeftijdsVerschilJeugd(dobR: dayjs.Dayjs | null, dobB: dayjs.Dayjs | nu
   }
 
   const older = dobR.isBefore(dobB) ? dobR : dobB;
-  const younger = dobR.isBefore(dobB) ? dobB : dobR;
+  const younger = dobR.isBefore(dobB) ? dobB : dobB.isBefore(dobR) ? dobR : dobB;
 
   const diffMonths = Math.abs(younger.diff(older, "month"));
   const afterMonths = older.add(diffMonths, "month");
@@ -569,8 +569,6 @@ export async function rulesEngine(opts: {
 
   const rowsRaw = Array.isArray(ctxRows) ? ctxRows : ctxRows ? [ctxRows] : [];
 
-  // Alleen de bedoelde partij verwerken.
-  // Eerst op bout_id als die aanwezig is, anders fallback op partij_nr.
   const rows = rowsRaw.filter((ctx) => {
     const ctxBoutId = unwrapUuid(ctx?.bout_id);
     const ctxPartijNr = asInt(ctx?.partij_nr);
@@ -589,7 +587,6 @@ export async function rulesEngine(opts: {
   const hits: RuleHit[] = [];
   const pushHit = (h: RuleHit) => hits.push(h);
 
-  // 1) VA list verzamelen
   const vaSet = new Set<string>();
   for (const ctx of rows) {
     const vr = String(ctx?.rood_va_mm ?? "").trim();
@@ -599,7 +596,6 @@ export async function rulesEngine(opts: {
   }
   const vaList = [...vaSet];
 
-  // 2) uitslagen_raw 1x ophalen
   const uitslagenByVa = await fetchUitslagenByVa({
     matchmaking_id,
     controle_run_id,
@@ -610,7 +606,6 @@ export async function rulesEngine(opts: {
     const partij_nr = asInt(ctx?.partij_nr);
     const bout_id = unwrapUuid(ctx?.bout_id);
 
-    // VA ontbreekt
     const vaRood = String(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.va_rood_mm ?? "").trim();
     const vaBlauw = String(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.va_blauw_mm ?? "").trim();
 
@@ -648,6 +643,40 @@ export async function rulesEngine(opts: {
     const volwassenen = isVolwassenePair(ctx);
     const mma = isMmaBout(ctx);
     const mmaJeugd = jeugd && mma;
+
+    // 40+ sportmedisch advies
+    {
+      const ageR = ageOnEventFromCtx(ctx, "rood");
+      const ageB = ageOnEventFromCtx(ctx, "blauw");
+
+      if (typeof ageR === "number" && ageR >= 40) {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          hoek: "rood",
+          rule: "Sportmedisch advies vereist 40+ (rood)",
+          rule_code: "SPORTMEDISCH_ADVIES_40PLUS_ROOD",
+          resultaat: "ACTIE",
+          severity: "warning",
+          boodschap: `Rood is op eventdatum ${ageR} jaar. Vanaf 40 jaar is sportmedisch advies van een sportarts nodig.`,
+        });
+      }
+
+      if (typeof ageB === "number" && ageB >= 40) {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          hoek: "blauw",
+          rule: "Sportmedisch advies vereist 40+ (blauw)",
+          rule_code: "SPORTMEDISCH_ADVIES_40PLUS_BLAUW",
+          resultaat: "ACTIE",
+          severity: "warning",
+          boodschap: `Blauw is op eventdatum ${ageB} jaar. Vanaf 40 jaar is sportmedisch advies van een sportarts nodig.`,
+        });
+      }
+    }
 
     // jeugd vs volwassen mix
     {
@@ -913,9 +942,9 @@ export async function rulesEngine(opts: {
           bout_id,
           rule: "MMA onder 12 jaar verboden",
           rule_code: "MMA_LEEFTIJD_AFKEUR",
-          resultaat: "AFKEUR",
+          resultaat: "VERBOD",
           severity: "error",
-          boodschap: `Minimale leeftijd in de partij is ${minAge} — MMA wedstrijden zijn verboden onder 12 jaar — AFKEUR.`,
+          boodschap: `Minimale leeftijd in de partij is ${minAge} — MMA wedstrijden zijn verboden onder 12 jaar — VERBODEN.`,
         });
       }
     }
@@ -1178,7 +1207,6 @@ export async function rulesEngine(opts: {
     }
   }
 
-  // gala tijd alleen bij full-run
   if (!scopedBoutId && scopedPartijNr == null) {
     const bt = estimateGalaTimeFromContextRows(rows);
 

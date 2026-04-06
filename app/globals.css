@@ -413,3 +413,53 @@ footer,
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+
+/* =========================================================
+   PDF / PRINT HELPERS VOOR RAPPORTEN
+   ========================================================= */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-max {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .cover-page,
+  .page-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .avoid-break {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+
+  table {
+    page-break-inside: auto !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+}

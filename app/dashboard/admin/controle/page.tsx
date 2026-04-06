@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { authedFetch } from "@/lib/api/authedFetch";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -31,33 +30,45 @@ interface ControleRun {
   run_type: string | null;
 }
 
-interface UploadRow {
-  id: string;
+type RowSource = "upload" | "app";
+
+interface OverzichtRow {
+  row_id: string;
+  source: RowSource;
+
+  matchmaking_id: string | null;
   evenement_naam: string | null;
   evenement_datum: string | null;
   locatie: string | null;
-  matchmaking_id: string | null;
   matchmaker: string | null;
   promotor: string | null;
   bondteam: string | null;
+
   official_release?: boolean | null;
   official_released_at?: string | null;
+
   uploaded_at?: string | null;
   uploaded_by?: string | null;
   hoofdofficial_user_id?: string | null;
+
+  bron_status?: string | null;
   laatste_run: ControleRun | null;
 }
 
-type TabKey = "controle" | "bondteam";
+type TabKey = "upload" | "app" | "bond";
 
 function formatDate(v: string | null) {
   if (!v) return "-";
-  return new Date(v).toLocaleDateString("nl-NL");
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("nl-NL");
 }
 
 function formatDateTime(v: string | null | undefined) {
   if (!v) return "-";
-  return new Date(v).toLocaleString("nl-NL");
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("nl-NL");
 }
 
 function getMonthKey(v: string | null) {
@@ -105,6 +116,7 @@ function normalizeStatus(status: string | null | undefined) {
 function formatStatusLabel(status: string | null | undefined) {
   const s = normalizeStatus(status);
   if (s === "niet gecontroleerd") return "Niet gecontroleerd";
+  if (s === "concept") return "Concept";
   return status ?? "Niet gecontroleerd";
 }
 
@@ -145,7 +157,7 @@ function TabButton({
 }
 
 export default function ControleOverzichtPage() {
-  const [rows, setRows] = useState<UploadRow[]>([]);
+  const [rows, setRows] = useState<OverzichtRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -166,7 +178,7 @@ export default function ControleOverzichtPage() {
   const [filterBondteam, setFilterBondteam] = useState<string>("");
   const [filterName, setFilterName] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<TabKey>("controle");
+  const [activeTab, setActiveTab] = useState<TabKey>("upload");
 
   useEffect(() => {
     void load();
@@ -211,15 +223,50 @@ export default function ControleOverzichtPage() {
       return;
     }
 
-    const matchmakingIds = (uploads ?? [])
-      .map((u: any) => u.matchmaking_id)
-      .filter(Boolean) as string[];
+    const { data: appRows, error: appError } = await supabase
+      .from("matchmaker_matchmakings")
+      .select(
+        `
+        id,
+        naam,
+        datum,
+        locatie,
+        promotor,
+        bondteam,
+        matchmaker_naam,
+        status,
+        official_release,
+        official_released_at,
+        created_at,
+        updated_at
+      `
+      )
+      .order("created_at", { ascending: false });
 
-    const { data: runs } = matchmakingIds.length
+    if (appError) {
+      console.error("Fout bij laden matchmaker_matchmakings:", appError);
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+
+    const uploadMatchmakingIds = (uploads ?? [])
+      .map((u: any) => String(u.matchmaking_id ?? "").trim())
+      .filter(Boolean);
+
+    const appMatchmakingIds = (appRows ?? [])
+      .map((r: any) => String(r.id ?? "").trim())
+      .filter(Boolean);
+
+    const allMatchmakingIds = Array.from(
+      new Set([...uploadMatchmakingIds, ...appMatchmakingIds])
+    );
+
+    const { data: runs } = allMatchmakingIds.length
       ? await supabase
           .from("controle_runs")
           .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type")
-          .in("matchmaking_id", matchmakingIds)
+          .in("matchmaking_id", allMatchmakingIds)
       : { data: [] as any[] };
 
     const runMap = new Map<string, ControleRun>();
@@ -233,12 +280,57 @@ export default function ControleOverzichtPage() {
       }
     });
 
-    const merged: UploadRow[] = (uploads ?? []).map((u: any) => ({
-      ...u,
-      laatste_run: u.matchmaking_id ? runMap.get(u.matchmaking_id) ?? null : null,
-    }));
+    const mergedUploads: OverzichtRow[] = (uploads ?? []).map((u: any) => {
+      const mmId = String(u.matchmaking_id ?? "").trim() || null;
+      return {
+        row_id: `upload:${u.id}`,
+        source: "upload",
+        matchmaking_id: mmId,
+        evenement_naam: u.evenement_naam ?? null,
+        evenement_datum: u.evenement_datum ?? null,
+        locatie: u.locatie ?? null,
+        matchmaker: u.matchmaker ?? null,
+        promotor: u.promotor ?? null,
+        bondteam: u.bondteam ?? null,
+        official_release: u.official_release ?? false,
+        official_released_at: u.official_released_at ?? null,
+        uploaded_at: u.uploaded_at ?? null,
+        uploaded_by: u.uploaded_by ?? null,
+        hoofdofficial_user_id: u.hoofdofficial_user_id ?? null,
+        bron_status: null,
+        laatste_run: mmId ? runMap.get(mmId) ?? null : null,
+      };
+    });
 
-    setRows(merged);
+    const mergedApps: OverzichtRow[] = (appRows ?? []).map((r: any) => {
+      const mmId = String(r.id ?? "").trim() || null;
+      return {
+        row_id: `app:${r.id}`,
+        source: "app",
+        matchmaking_id: mmId,
+        evenement_naam: r.naam ?? null,
+        evenement_datum: r.datum ?? null,
+        locatie: r.locatie ?? null,
+        matchmaker: r.matchmaker_naam ?? null,
+        promotor: r.promotor ?? null,
+        bondteam: r.bondteam ?? null,
+        official_release: r.official_release ?? false,
+        official_released_at: r.official_released_at ?? null,
+        uploaded_at: r.created_at ?? null,
+        uploaded_by: null,
+        hoofdofficial_user_id: null,
+        bron_status: r.status ?? null,
+        laatste_run: mmId ? runMap.get(mmId) ?? null : null,
+      };
+    });
+
+    const combined = [...mergedUploads, ...mergedApps].sort((a, b) => {
+      const aTime = new Date(a.uploaded_at ?? a.evenement_datum ?? 0).getTime();
+      const bTime = new Date(b.uploaded_at ?? b.evenement_datum ?? 0).getTime();
+      return bTime - aTime;
+    });
+
+    setRows(combined);
     setLoading(false);
   }
 
@@ -327,9 +419,9 @@ export default function ControleOverzichtPage() {
     }
   }
 
-  function openEdit(r: UploadRow) {
-    setRowMessage(r.id, "");
-    setEditId(r.id);
+  function openEdit(r: OverzichtRow) {
+    setRowMessage(r.row_id, "");
+    setEditId(r.row_id);
     setEditMatchmaker(r.matchmaker ?? "");
     setEditPromotor(r.promotor ?? "");
     setEditBondteam(r.bondteam ?? "");
@@ -342,54 +434,73 @@ export default function ControleOverzichtPage() {
     setEditBondteam("");
   }
 
-  async function saveEdit(uploadId: string) {
+  async function saveEdit(row: OverzichtRow) {
     try {
-      setRowMessage(uploadId, "");
+      setRowMessage(row.row_id, "");
 
       if (!editMatchmaker.trim()) {
-        setRowMessage(uploadId, "⚠️ Matchmaker is verplicht.");
+        setRowMessage(row.row_id, "⚠️ Matchmaker is verplicht.");
         return;
       }
 
-      setSavingEditId(uploadId);
+      setSavingEditId(row.row_id);
 
-      const { error } = await supabase
-        .from("matchmaking_uploads")
-        .update({
-          matchmaker: editMatchmaker.trim(),
-          promotor: editPromotor.trim() || null,
-          bondteam: editBondteam.trim() || null,
-        })
-        .eq("id", uploadId);
+      if (row.source === "upload") {
+        const uploadId = row.row_id.replace(/^upload:/, "");
+        const { error } = await supabase
+          .from("matchmaking_uploads")
+          .update({
+            matchmaker: editMatchmaker.trim(),
+            promotor: editPromotor.trim() || null,
+            bondteam: editBondteam.trim() || null,
+          })
+          .eq("id", uploadId);
 
-      if (error) {
-        console.error("Update upload meta error:", error);
-        setRowMessage(uploadId, "❌ Bewerken opslaan mislukt.");
-        return;
+        if (error) {
+          console.error("Update upload meta error:", error);
+          setRowMessage(row.row_id, "❌ Bewerken opslaan mislukt.");
+          return;
+        }
+      } else {
+        const appId = row.row_id.replace(/^app:/, "");
+        const { error } = await supabase
+          .from("matchmaker_matchmakings")
+          .update({
+            matchmaker_naam: editMatchmaker.trim(),
+            promotor: editPromotor.trim() || null,
+            bondteam: editBondteam.trim() || null,
+          })
+          .eq("id", appId);
+
+        if (error) {
+          console.error("Update app matchmaking error:", error);
+          setRowMessage(row.row_id, "❌ Bewerken opslaan mislukt.");
+          return;
+        }
       }
 
-      setRowMessage(uploadId, "✅ Bewerking opgeslagen.");
+      setRowMessage(row.row_id, "✅ Bewerking opgeslagen.");
       await load();
       closeEdit();
     } catch (e) {
       console.error(e);
-      setRowMessage(uploadId, "❌ Onverwachte fout bij opslaan.");
+      setRowMessage(row.row_id, "❌ Onverwachte fout bij opslaan.");
     } finally {
       setSavingEditId(null);
     }
   }
 
-  async function saveSnapshot(row: UploadRow) {
+  async function saveSnapshot(row: OverzichtRow) {
     try {
       const matchmakingId = String(row.matchmaking_id ?? "").trim();
 
       if (!matchmakingId) {
-        setRowMessage(row.id, "❌ Geen matchmaking_id.");
+        setRowMessage(row.row_id, "❌ Geen matchmaking_id.");
         return;
       }
 
-      setRowMessage(row.id, "");
-      setSnapshotSavingId(row.id);
+      setRowMessage(row.row_id, "");
+      setSnapshotSavingId(row.row_id);
 
       const res = await authedFetch("/api/admin/beheer/save-matchmaking", {
         method: "POST",
@@ -404,19 +515,19 @@ export default function ControleOverzichtPage() {
       if (!res.ok) {
         console.error("save-matchmaking failed:", res.status, json);
         setRowMessage(
-          row.id,
+          row.row_id,
           json?.error ? `❌ ${json.error}` : "❌ Snapshot opslaan mislukt."
         );
         return;
       }
 
       setRowMessage(
-        row.id,
+        row.row_id,
         json?.message ?? "✅ Matchmaking opgeslagen in beheer-database."
       );
     } catch (e) {
       console.error(e);
-      setRowMessage(row.id, "❌ Onverwachte fout bij snapshot opslaan.");
+      setRowMessage(row.row_id, "❌ Onverwachte fout bij snapshot opslaan.");
     } finally {
       setSnapshotSavingId(null);
     }
@@ -431,16 +542,21 @@ export default function ControleOverzichtPage() {
   const statusOptions = useMemo(() => {
     return Array.from(
       new Set(
-        rows.map((r) => normalizeStatus(r.laatste_run?.status ?? "Niet gecontroleerd"))
+        rows.map((r) =>
+          normalizeStatus(r.laatste_run?.status ?? r.bron_status ?? "Niet gecontroleerd")
+        )
       )
     ).sort((a, b) => a.localeCompare(b, "nl"));
   }, [rows]);
 
   const tabRows = useMemo(() => {
-    if (activeTab === "bondteam") {
+    if (activeTab === "bond") {
       return rows.filter((r) => !!r.official_release);
     }
-    return rows.filter((r) => !r.official_release);
+    if (activeTab === "app") {
+      return rows.filter((r) => r.source === "app" && !r.official_release);
+    }
+    return rows.filter((r) => r.source === "upload" && !r.official_release);
   }, [rows, activeTab]);
 
   const filteredRows = useMemo(() => {
@@ -452,7 +568,9 @@ export default function ControleOverzichtPage() {
       const rowBondteam = (r.bondteam ?? "").trim().toLowerCase();
       const rowMatchmaker = (r.matchmaker ?? "").trim().toLowerCase();
       const rowEvent = (r.evenement_naam ?? "").trim().toLowerCase();
-      const rowStatus = normalizeStatus(r.laatste_run?.status ?? "Niet gecontroleerd");
+      const rowStatus = normalizeStatus(
+        r.laatste_run?.status ?? r.bron_status ?? "Niet gecontroleerd"
+      );
 
       if (filterMonth && rowMonth !== filterMonth) return false;
       if (filterStatus && rowStatus !== filterStatus) return false;
@@ -480,12 +598,18 @@ export default function ControleOverzichtPage() {
     setFilterStatus("");
   }
 
-  const bondteamCount = useMemo(
+  const bondCount = useMemo(
     () => rows.filter((r) => !!r.official_release).length,
     [rows]
   );
-  const controleCount = useMemo(
-    () => rows.filter((r) => !r.official_release).length,
+
+  const appCount = useMemo(
+    () => rows.filter((r) => r.source === "app" && !r.official_release).length,
+    [rows]
+  );
+
+  const uploadCount = useMemo(
+    () => rows.filter((r) => r.source === "upload" && !r.official_release).length,
     [rows]
   );
 
@@ -555,14 +679,21 @@ export default function ControleOverzichtPage() {
                 </div>
 
                 <div className="justify-self-center">
-                  <Image
-                    src="/branding/fightsupport/excel-logo.png"
-                    alt="FightSupport"
-                    width={320}
-                    height={120}
-                    priority
-                    className="h-auto w-[240px] md:w-[280px] xl:w-[320px] drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
-                  />
+                  <div className="w-[240px] md:w-[280px] xl:w-[320px]">
+                    <img
+                      src="/branding/fightsupport/excel-logo.png"
+                      alt="FightSupport"
+                      width={320}
+                      height={120}
+                      loading="eager"
+                      style={{
+                        width: "100%",
+                        height: "auto",
+                        display: "block",
+                        filter: "drop-shadow(0 8px 22px rgba(0,0,0,0.45))",
+                      }}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex min-w-[240px] flex-col items-end gap-2 justify-self-end">
@@ -591,16 +722,22 @@ export default function ControleOverzichtPage() {
                 <div className="px-2 py-2 md:px-3">
                   <div className="mb-5 flex flex-wrap items-center justify-center gap-3">
                     <TabButton
-                      active={activeTab === "controle"}
-                      label="Controle overzicht"
-                      count={controleCount}
-                      onClick={() => setActiveTab("controle")}
+                      active={activeTab === "upload"}
+                      label="Ontvangen via upload"
+                      count={uploadCount}
+                      onClick={() => setActiveTab("upload")}
                     />
                     <TabButton
-                      active={activeTab === "bondteam"}
-                      label="Naar bondteam gestuurd"
-                      count={bondteamCount}
-                      onClick={() => setActiveTab("bondteam")}
+                      active={activeTab === "app"}
+                      label="MM in app gemaakt"
+                      count={appCount}
+                      onClick={() => setActiveTab("app")}
+                    />
+                    <TabButton
+                      active={activeTab === "bond"}
+                      label="Naar bond"
+                      count={bondCount}
+                      onClick={() => setActiveTab("bond")}
                     />
                   </div>
 
@@ -621,9 +758,11 @@ export default function ControleOverzichtPage() {
                             Filters
                           </div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            {activeTab === "bondteam"
-                              ? "Overzicht van matchmakings die naar bondteam / officials zijn gestuurd"
-                              : "Filter op maand, bondteam, naam of status"}
+                            {activeTab === "bond"
+                              ? "Overzicht van matchmakings die naar bond zijn gestuurd"
+                              : activeTab === "app"
+                              ? "Overzicht van matchmakings die in de app zijn gemaakt"
+                              : "Overzicht van ontvangen matchmakings via upload"}
                           </div>
                         </div>
 
@@ -766,7 +905,7 @@ export default function ControleOverzichtPage() {
                               <th className="px-4 py-3 text-left">Promotor</th>
                               <th className="px-4 py-3 text-left">Bondteam</th>
                               <th className="px-4 py-3 text-left">Status</th>
-                              {activeTab === "bondteam" ? (
+                              {activeTab === "bond" ? (
                                 <th className="px-4 py-3 text-left">Doorgestuurd</th>
                               ) : null}
                               <th className="px-4 py-3 text-left">Acties</th>
@@ -777,13 +916,15 @@ export default function ControleOverzichtPage() {
                             {filteredRows.length === 0 ? (
                               <tr>
                                 <td
-                                  colSpan={activeTab === "bondteam" ? 9 : 8}
+                                  colSpan={activeTab === "bond" ? 9 : 8}
                                   className="px-4 py-8 text-center text-sm"
                                   style={{ background: "#ffffff", color: "#555" }}
                                 >
-                                  {activeTab === "bondteam"
-                                    ? "Geen naar bondteam gestuurde matchmakings gevonden."
-                                    : "Geen matchmakings gevonden met deze filters."}
+                                  {activeTab === "bond"
+                                    ? "Geen naar bond gestuurde matchmakings gevonden."
+                                    : activeTab === "app"
+                                    ? "Geen in app gemaakte matchmakings gevonden met deze filters."
+                                    : "Geen ontvangen uploads gevonden met deze filters."}
                                 </td>
                               </tr>
                             ) : (
@@ -792,16 +933,18 @@ export default function ControleOverzichtPage() {
                                 const run = r.laatste_run;
                                 const hasMatchmaking = !!r.matchmaking_id;
                                 const canView = hasMatchmaking;
-                                const isEditing = editId === r.id;
+                                const isEditing = editId === r.row_id;
                                 const mmId = r.matchmaking_id ?? "";
                                 const rowBusy = busyId === mmId;
-                                const rowEditBusy = savingEditId === r.id;
-                                const rowSnapshotBusy = snapshotSavingId === r.id;
-                                const rowMsg = rowMsgById[r.id] ?? "";
+                                const rowEditBusy = savingEditId === r.row_id;
+                                const rowSnapshotBusy = snapshotSavingId === r.row_id;
+                                const rowMsg = rowMsgById[r.row_id] ?? "";
+                                const displayStatus =
+                                  run?.status ?? r.bron_status ?? "Niet gecontroleerd";
 
                                 return (
                                   <tr
-                                    key={r.id}
+                                    key={r.row_id}
                                     style={{
                                       backgroundColor: zebra ? "#ffffff" : "#0d0d0d",
                                       color: zebra ? "#000" : "#fff",
@@ -861,10 +1004,10 @@ export default function ControleOverzichtPage() {
                                     </td>
 
                                     <td className="px-4 py-3 italic">
-                                      {formatStatusLabel(run?.status)}
+                                      {formatStatusLabel(displayStatus)}
                                     </td>
 
-                                    {activeTab === "bondteam" ? (
+                                    {activeTab === "bond" ? (
                                       <td className="px-4 py-3 text-sm">
                                         {formatDateTime(r.official_released_at)}
                                       </td>
@@ -890,7 +1033,7 @@ export default function ControleOverzichtPage() {
                                           Matchmaking
                                         </Link>
 
-                                        {activeTab === "controle" && hasMatchmaking && (
+                                        {activeTab !== "bond" && hasMatchmaking && (
                                           <button
                                             onClick={() =>
                                               startControle(r.matchmaking_id!)
@@ -923,7 +1066,7 @@ export default function ControleOverzichtPage() {
                                         ) : (
                                           <>
                                             <button
-                                              onClick={() => saveEdit(r.id)}
+                                              onClick={() => saveEdit(r)}
                                               disabled={
                                                 rowBusy ||
                                                 rowEditBusy ||
@@ -944,7 +1087,7 @@ export default function ControleOverzichtPage() {
                                           </>
                                         )}
 
-                                        {activeTab === "bondteam" && hasMatchmaking && (
+                                        {activeTab === "bond" && hasMatchmaking && (
                                           <button
                                             onClick={() => saveSnapshot(r)}
                                             disabled={

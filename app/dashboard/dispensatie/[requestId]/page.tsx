@@ -1,28 +1,10 @@
 "use client";
 
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
-import {
-  ArrowLeft,
-  RefreshCcw,
-  ShieldCheck,
-  FileText,
-  MessageSquare,
-  CheckCircle2,
-  XCircle,
-  Gavel,
-  Upload,
-  ClipboardList,
-} from "lucide-react";
 
 const NVB_ORANGE = "#ff4d00";
 const logoSrc = "/branding/fightsupport/excel-logo.png";
@@ -34,14 +16,11 @@ type RequestRow = {
   partij_nr: number | null;
   bout_id: string | null;
   rule_code: string | null;
-
   controle_run_id: string | null;
-
   decision: string | null;
   decision_reason: string | null;
   decided_by: string | null;
   decided_at: string | null;
-
   created_at: string | null;
   updated_at: string | null;
 };
@@ -52,7 +31,6 @@ type UploadRow = {
   evenement_datum: string | null;
   uploaded_by: string | null;
   uploaded_at: string | null;
-
   promotor?: string | null;
   matchmaker?: string | null;
   hoofdofficial?: string | null;
@@ -96,143 +74,104 @@ function normStatus(s: any) {
 function statusLabel(s: any) {
   const x = normStatus(s);
   if (x === "open") return "NIEUW";
+  if (x === "pending") return "PENDING";
+  if (x === "approved") return "GOEDGEKEURD";
+  if (x === "rejected") return "AFGEKEURD";
+  if (x === "closed") return "GESLOTEN";
   return x.toUpperCase();
 }
 
-function fmtDateNL(d: string | null | undefined) {
+function fmtDateNL(d: string | null | undefined, withTime = false) {
   if (!d) return "-";
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return String(d);
-  return dt.toLocaleDateString("nl-NL", {
+  return dt.toLocaleString("nl-NL", {
     day: "numeric",
     month: "short",
     year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
   });
 }
 
-const pageBackground: CSSProperties = {
+const pageBg: CSSProperties = {
   minHeight: "100vh",
+  background:
+    "radial-gradient(circle at 50% 0%, rgba(255,77,0,0.10) 0%, rgba(255,77,0,0.02) 12%, transparent 26%), linear-gradient(180deg, #06080d 0%, #0a0d12 100%)",
   color: "#fff",
-  background: `
-    radial-gradient(circle at 50% 0%, rgba(255,104,20,0.11) 0%, rgba(255,104,20,0.03) 10%, rgba(0,0,0,0) 22%),
-    radial-gradient(circle at 50% 100%, rgba(255,104,20,0.09) 0%, rgba(255,104,20,0.02) 12%, rgba(0,0,0,0) 24%),
-    radial-gradient(circle at 16% 20%, rgba(255,120,20,0.06) 0%, rgba(255,120,20,0) 16%),
-    radial-gradient(circle at 84% 22%, rgba(255,120,20,0.06) 0%, rgba(255,120,20,0) 16%),
-    linear-gradient(180deg, #030405 0%, #06080b 18%, #010203 100%)
-  `,
 };
 
-const sectionRule = (top = false): CSSProperties => ({
-  position: "relative",
-  borderTop: top ? "1px solid rgba(255,255,255,0.05)" : undefined,
-  borderBottom: "1px solid rgba(255,255,255,0.04)",
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.04),
-    inset 0 -1px 0 rgba(0,0,0,0.82)
-  `,
-});
-
-const steelFrameOuter: CSSProperties = {
-  position: "relative",
-  padding: 8,
-  background: `
-    linear-gradient(145deg,
-      #ffffff 0%,
-      #cfcfcf 6%,
-      #6a6a6a 12%,
-      #fafafa 19%,
-      #8d8d8d 27%,
-      #3f3f3f 36%,
-      #ededed 47%,
-      #9f9f9f 58%,
-      #4b4b4b 69%,
-      #ffffff 80%,
-      #b8b8b8 90%,
-      #f7f7f7 100%)
-  `,
-  border: "1px solid rgba(255,255,255,0.60)",
-  boxShadow: `
-    0 12px 22px rgba(0,0,0,0.60),
-    inset 0 2px 1px rgba(255,255,255,0.96),
-    inset 0 -2px 2px rgba(0,0,0,0.82),
-    inset 2px 0 2px rgba(255,255,255,0.44),
-    inset -2px 0 2px rgba(0,0,0,0.54)
-  `,
-};
-
-const steelFrameMid: CSSProperties = {
-  position: "relative",
-  padding: 3,
-  background: `
-    linear-gradient(135deg,
-      rgba(255,255,255,0.95) 0%,
-      rgba(216,216,216,0.95) 14%,
-      rgba(64,64,64,0.96) 28%,
-      rgba(248,248,248,0.94) 48%,
-      rgba(98,98,98,0.96) 68%,
-      rgba(236,236,236,0.96) 100%)
-  `,
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.78),
-    inset 0 -1px 0 rgba(0,0,0,0.58)
-  `,
-};
-
-const steelFrameChannel: CSSProperties = {
-  position: "relative",
-  padding: 4,
-  background: `
-    linear-gradient(180deg,
-      #2a2a2a 0%,
-      #080808 18%,
-      #505050 34%,
-      #0c0c0c 52%,
-      #424242 72%,
-      #090909 100%)
-  `,
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.16),
-    inset 0 -1px 0 rgba(0,0,0,0.84)
-  `,
-};
-
-const steelFrameInner: CSSProperties = {
-  position: "relative",
-  padding: 2,
-  background: `
-    linear-gradient(135deg,
-      #fbfbfb 0%,
-      #d2d2d2 10%,
-      #6f6f6f 22%,
-      #f3f3f3 34%,
-      #b4b4b4 46%,
-      #545454 60%,
-      #fafafa 78%,
-      #b2b2b2 100%)
-  `,
-  border: "1px solid rgba(255,255,255,0.18)",
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.66),
-    inset 0 -1px 0 rgba(0,0,0,0.50)
-  `,
-};
-
-const darkPlate: CSSProperties = {
-  position: "relative",
+const topShell: CSSProperties = {
+  border: "1px solid rgba(205,205,215,0.35)",
+  borderRadius: 22,
   overflow: "hidden",
-  border: "1px solid #080808",
-  background: `
-    radial-gradient(circle at 14% 84%, rgba(255,110,0,0.09), transparent 16%),
-    radial-gradient(circle at 86% 14%, rgba(255,255,255,0.05), transparent 14%),
-    linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 15%, rgba(0,0,0,0.16) 100%),
-    linear-gradient(135deg, #1a1d22 0%, #070a0f 46%, #15181d 100%)
-  `,
-  boxShadow: `
-    inset 0 2px 4px rgba(0,0,0,0.92),
-    inset 0 -2px 6px rgba(255,255,255,0.05),
-    inset 0 0 30px rgba(255,120,0,0.05)
-  `,
+  background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
+  boxShadow: "0 18px 40px rgba(0,0,0,0.34)",
 };
+
+const darkHeader: CSSProperties = {
+  background:
+    "linear-gradient(90deg, rgba(44,46,53,0.98) 0%, rgba(61,63,72,0.96) 26%, rgba(36,38,45,0.98) 50%, rgba(61,63,72,0.96) 74%, rgba(44,46,53,0.98) 100%)",
+  borderBottom: `2px solid ${NVB_ORANGE}`,
+};
+
+const silverButton: CSSProperties = {
+  background:
+    "linear-gradient(180deg, #f7f7f8 0%, #cacbd0 18%, #f2f2f3 48%, #9c9ea6 78%, #d8d9dd 100%)",
+  border: "1px solid rgba(88,91,100,0.9)",
+  color: "#16181d",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 3px 8px rgba(0,0,0,0.18)",
+};
+
+const orangeButton: CSSProperties = {
+  background: "linear-gradient(180deg, #ff6a00 0%, #ff4d00 58%, #bc3800 100%)",
+  border: "1px solid rgba(255,200,160,0.35)",
+  color: "#fff",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 14px rgba(255,77,0,0.22)",
+};
+
+const contentShell: CSSProperties = {
+  marginTop: 14,
+  borderRadius: 24,
+  overflow: "hidden",
+  background: "linear-gradient(180deg, #f1f1f3 0%, #d9dadf 100%)",
+  border: "1px solid rgba(115,118,128,0.6)",
+  boxShadow: "0 16px 34px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.75)",
+};
+
+const lightHeaderCard: CSSProperties = {
+  borderRadius: 20,
+  border: "1px solid rgba(122,124,132,0.45)",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.78), rgba(238,238,241,0.95))",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.78)",
+};
+
+const darkCard: CSSProperties = {
+  borderRadius: 18,
+  background: "linear-gradient(180deg, #10161d 0%, #060a10 100%)",
+  border: "1px solid rgba(176,180,190,0.14)",
+  boxShadow: "0 10px 22px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+  color: "#fff",
+};
+
+const slimSilverFrame: CSSProperties = {
+  border: "1px solid rgba(125,128,138,0.82)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 4px 10px rgba(0,0,0,0.10)",
+};
+
+const inputStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.97)",
+  border: "1px solid rgba(178,180,188,0.95)",
+  color: "#111",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92)",
+};
+
+function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <section style={darkCard} className={`p-4 md:p-5 ${className}`}>
+      {children}
+    </section>
+  );
+}
 
 export default function DispensatieDetailPage() {
   const params = useParams();
@@ -241,16 +180,12 @@ export default function DispensatieDetailPage() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
   const [reqRow, setReqRow] = useState<RequestRow | null>(null);
   const [uploadRow, setUploadRow] = useState<UploadRow | null>(null);
-
   const [votes, setVotes] = useState<VoteRow[]>([]);
   const [messages, setMessages] = useState<MsgRow[]>([]);
   const [attachments, setAttachments] = useState<AttachmentRow[]>([]);
-
   const [myRole, setMyRole] = useState<string | null>(null);
-
   const [msgText, setMsgText] = useState("");
   const [voteNote, setVoteNote] = useState("");
   const [decideReason, setDecideReason] = useState("");
@@ -264,26 +199,16 @@ export default function DispensatieDetailPage() {
       const uid = auth?.user?.id ?? null;
       if (!uid) return setMyRole(null);
 
-      const { data: ur, error: urErr } = await supabase
-        .from("user_roles")
-        .select("role_id")
-        .eq("user_id", uid);
+      const { data: ur, error: urErr } = await supabase.from("user_roles").select("role_id").eq("user_id", uid);
       if (urErr) throw urErr;
 
-      const roleIds = (ur ?? [])
-        .map((r: any) => Number(r.role_id))
-        .filter((n) => Number.isFinite(n));
+      const roleIds = (ur ?? []).map((r: any) => Number(r.role_id)).filter((n) => Number.isFinite(n));
       if (!roleIds.length) return setMyRole(null);
 
-      const { data: roles, error: rErr } = await supabase
-        .from("roles")
-        .select("id,name")
-        .in("id", roleIds);
+      const { data: roles, error: rErr } = await supabase.from("roles").select("id,name").in("id", roleIds);
       if (rErr) throw rErr;
 
-      const names = (roles ?? []).map((r: any) =>
-        String(r.name ?? "").toLowerCase()
-      );
+      const names = (roles ?? []).map((r: any) => String(r.name ?? "").toLowerCase());
       if (names.includes("superadmin")) return setMyRole("superadmin");
       if (names.includes("dispensatie_admin")) return setMyRole("dispensatie_admin");
       if (names.includes("admin")) return setMyRole("admin");
@@ -295,7 +220,6 @@ export default function DispensatieDetailPage() {
 
   async function loadAll() {
     if (!requestId) return;
-
     try {
       setLoading(true);
       setErr(null);
@@ -307,24 +231,17 @@ export default function DispensatieDetailPage() {
         )
         .eq("id", requestId)
         .single();
-
       if (rErr) throw rErr;
       setReqRow(r as any);
 
-      const mmId = (r as any)?.matchmaking_id
-        ? String((r as any).matchmaking_id)
-        : null;
-
+      const mmId = (r as any)?.matchmaking_id ? String((r as any).matchmaking_id) : null;
       if (mmId) {
         const { data: ups, error: uErr } = await supabase
           .from("matchmaking_uploads")
-          .select(
-            "matchmaking_id,evenement_naam,evenement_datum,uploaded_by,uploaded_at,promotor,matchmaker,hoofdofficial"
-          )
+          .select("matchmaking_id,evenement_naam,evenement_datum,uploaded_by,uploaded_at,promotor,matchmaker,hoofdofficial")
           .eq("matchmaking_id", mmId)
           .order("uploaded_at", { ascending: false })
           .limit(1);
-
         if (uErr) throw uErr;
         setUploadRow((ups?.[0] ?? null) as any);
       } else {
@@ -336,7 +253,6 @@ export default function DispensatieDetailPage() {
         .select("id,request_id,user_id,vote,note,created_at,updated_at")
         .eq("request_id", requestId)
         .order("updated_at", { ascending: false });
-
       if (vErr) throw vErr;
       setVotes((v ?? []) as any);
 
@@ -345,18 +261,14 @@ export default function DispensatieDetailPage() {
         .select("id,request_id,user_id,message,created_at")
         .eq("request_id", requestId)
         .order("created_at", { ascending: true });
-
       if (mErr) throw mErr;
       setMessages((m ?? []) as any);
 
       const { data: a, error: aErr } = await supabase
         .from("dispensatie_attachments")
-        .select(
-          "id,request_id,storage_path,original_filename,content_type,uploaded_by,uploaded_at"
-        )
+        .select("id,request_id,storage_path,original_filename,content_type,uploaded_by,uploaded_at")
         .eq("request_id", requestId)
         .order("uploaded_at", { ascending: false });
-
       if (aErr) throw aErr;
       setAttachments((a ?? []) as any);
     } catch (e: any) {
@@ -395,12 +307,7 @@ export default function DispensatieDetailPage() {
       setErr(null);
       const text = msgText.trim();
       if (!text) return;
-
-      await callApi("/api/dispensatie/message", {
-        request_id: requestId,
-        message: text,
-      });
-
+      await callApi("/api/dispensatie/message", { request_id: requestId, message: text });
       setMsgText("");
       await loadAll();
     } catch (e: any) {
@@ -411,11 +318,7 @@ export default function DispensatieDetailPage() {
   async function vote(v: "approve" | "reject") {
     try {
       setErr(null);
-      await callApi("/api/dispensatie/vote", {
-        request_id: requestId,
-        vote: v,
-        note: voteNote || null,
-      });
+      await callApi("/api/dispensatie/vote", { request_id: requestId, vote: v, note: voteNote || null });
       await loadAll();
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -426,16 +329,9 @@ export default function DispensatieDetailPage() {
     try {
       setErr(null);
       if (!isSuperadmin) throw new Error("Alleen superadmin kan definitief beslissen.");
-
       const reason = decideReason.trim();
       if (!reason) throw new Error("Reden is verplicht.");
-
-      await callApi("/api/dispensatie/decide", {
-        request_id: requestId,
-        decision,
-        reason,
-      });
-
+      await callApi("/api/dispensatie/decide", { request_id: requestId, decision, reason });
       setDecideReason("");
       await loadAll();
     } catch (e: any) {
@@ -447,21 +343,15 @@ export default function DispensatieDetailPage() {
     try {
       setErr(null);
       setUploading(true);
-
-      if (file.type !== "application/pdf") {
-        throw new Error("Alleen PDF toegestaan.");
-      }
+      if (file.type !== "application/pdf") throw new Error("Alleen PDF toegestaan.");
 
       const safeName = file.name.replace(/[^\w.\-() ]+/g, "_");
       const path = `${requestId}/${Date.now()}_${safeName}`;
 
-      const { error: upErr } = await supabase.storage
-        .from("dispensatie")
-        .upload(path, file, {
-          contentType: "application/pdf",
-          upsert: false,
-        });
-
+      const { error: upErr } = await supabase.storage.from("dispensatie").upload(path, file, {
+        contentType: "application/pdf",
+        upsert: false,
+      });
       if (upErr) throw upErr;
 
       await callApi("/api/dispensatie/attachment-register", {
@@ -482,13 +372,9 @@ export default function DispensatieDetailPage() {
   async function openAttachment(a: AttachmentRow) {
     try {
       setErr(null);
-      const { data, error } = await supabase.storage
-        .from("dispensatie")
-        .createSignedUrl(a.storage_path, 60 * 10);
-
+      const { data, error } = await supabase.storage.from("dispensatie").createSignedUrl(a.storage_path, 60 * 10);
       if (error) throw error;
       if (!data?.signedUrl) throw new Error("Geen signed url.");
-
       window.open(data.signedUrl, "_blank");
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -498,12 +384,10 @@ export default function DispensatieDetailPage() {
   const voteCounts = useMemo(() => {
     let approve = 0;
     let reject = 0;
-
     for (const v of votes) {
       if (v.vote === "approve") approve++;
       if (v.vote === "reject") reject++;
     }
-
     return { total: votes.length, approve, reject };
   }, [votes]);
 
@@ -517,1645 +401,311 @@ export default function DispensatieDetailPage() {
 
   const mmId = reqRow?.matchmaking_id ?? null;
   const partijNr = reqRow?.partij_nr ?? null;
-  const controlDetailHref =
-    mmId && partijNr != null
-      ? `/dashboard/admin/controle/${mmId}/${partijNr}`
-      : "#";
+  const controlDetailHref = mmId && partijNr != null ? `/dashboard/admin/controle/${mmId}/${partijNr}` : "#";
 
   return (
-    <main style={pageBackground}>
-      <SharedStyles />
-
-      <TopLogoBand />
-      <TitleBand
-        title="Dispensatie Detail"
-        subtitle="Beoordeling, discussie en definitieve beslissing"
-        actionLabel="Overzicht"
-        actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
-        onAction={() => router.push("/dashboard/dispensatie")}
-      />
-
-      <div
-        style={{
-          maxWidth: 1320,
-          margin: "0 auto",
-          padding: "22px 24px 14px",
-        }}
-      >
-        <div
-          className="stats-grid"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-            gap: 20,
-          }}
-        >
-          <StatCard
-            icon={<ClipboardList size={28} strokeWidth={2.4} />}
-            label="Status"
-            value={statusLabel(reqRow?.status)}
-          />
-          <StatCard
-            icon={<CheckCircle2 size={28} strokeWidth={2.4} />}
-            label="Akkoord"
-            value={voteCounts.approve}
-          />
-          <StatCard
-            icon={<XCircle size={28} strokeWidth={2.4} />}
-            label="Afkeur"
-            value={voteCounts.reject}
-          />
-          <StatCard
-            icon={<ShieldCheck size={28} strokeWidth={2.4} />}
-            label="Rol"
-            value={myRole ?? "-"}
-          />
-        </div>
-
-        {err ? (
-          <div style={{ marginTop: 20 }}>
-            <SteelFrame>
-              <div
-                style={{
-                  ...darkPlate,
-                  padding: "16px 18px",
-                  color: "#ffb3b3",
-                  fontWeight: 700,
-                  fontSize: 14,
-                }}
-              >
-                {err}
-              </div>
-            </SteelFrame>
-          </div>
-        ) : null}
-
-        <div
-          className="detail-top-grid"
-          style={{
-            marginTop: 20,
-            display: "grid",
-            gridTemplateColumns: "1.15fr 1.3fr 0.95fr",
-            gap: 20,
-          }}
-        >
-          <SteelFrame>
-            <PanelCard
-              icon={<ShieldCheck size={34} strokeWidth={2.4} />}
-              title="Request info"
-              subtitle="Status en partijdetails"
-            >
-              <InfoRow label="Status">
-                <StatusPill status={normStatus(reqRow?.status)}>
-                  {statusLabel(reqRow?.status)}
-                </StatusPill>
-              </InfoRow>
-
-              <InfoRow label="matchmaking_id">
-                <CodeText>{reqRow?.matchmaking_id ?? "-"}</CodeText>
-              </InfoRow>
-
-              <InfoRow label="partij_nr">
-                <CodeText>{reqRow?.partij_nr ?? "-"}</CodeText>
-              </InfoRow>
-
-              <InfoRow label="rule">
-                <CodeText>{reqRow?.rule_code ?? "-"}</CodeText>
-              </InfoRow>
-
-              <InfoRow label="bout_id">
-                <CodeText>{reqRow?.bout_id ?? "-"}</CodeText>
-              </InfoRow>
-
-              <InfoRow label="request_id">
-                <CodeText>{requestId || "-"}</CodeText>
-              </InfoRow>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, minmax(0,1fr))",
-                  gap: 8,
-                  marginTop: 14,
-                }}
-              >
-                <TinyStat label="Votes" value={voteCounts.total} />
-                <TinyStat label="Akkoord" value={voteCounts.approve} />
-                <TinyStat label="Afkeur" value={voteCounts.reject} />
-              </div>
-            </PanelCard>
-          </SteelFrame>
-
-          <SteelFrame>
-            <PanelCard
-              icon={<FileText size={34} strokeWidth={2.4} />}
-              title="Evenement"
-              subtitle="Upload en betrokken rollen"
-            >
-              <InfoRow label="Naam">{uploadRow?.evenement_naam ?? "-"}</InfoRow>
-              <InfoRow label="Datum">{fmtDateNL(uploadRow?.evenement_datum)}</InfoRow>
-              <InfoRow label="Matchmaker">{uploadRow?.matchmaker ?? "-"}</InfoRow>
-              <InfoRow label="Promotor">{uploadRow?.promotor ?? "-"}</InfoRow>
-              <InfoRow label="Hoofdofficial">{uploadRow?.hoofdofficial ?? "-"}</InfoRow>
-              <InfoRow label="Upload datum">{fmtDateNL(uploadRow?.uploaded_at)}</InfoRow>
-              <InfoRow label="uploaded_by">
-                <CodeText>{uploadRow?.uploaded_by ?? "-"}</CodeText>
-              </InfoRow>
-
-              <div
-                style={{
-                  marginTop: 14,
-                  display: "flex",
-                  gap: 8,
-                  flexWrap: "wrap",
-                }}
-              >
+    <main style={pageBg}>
+      <div className="mx-auto max-w-[1600px] px-4 py-3 md:px-5 md:py-4">
+        <div style={topShell}>
+          <div style={darkHeader} className="px-4 py-4 md:px-6 md:py-5">
+            <div className="grid items-center gap-3 md:grid-cols-[1fr_auto_1fr]">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => router.push("/dashboard/dispensatie")}
+                  className="inline-flex h-[42px] items-center rounded-[8px] px-4 text-sm font-semibold"
+                  style={silverButton}
+                >
+                  ← Overzicht
+                </button>
                 {mmId && partijNr != null ? (
-                  <MiniLinkButton
-                    href={controlDetailHref}
-                    label="Controle detail"
-                  />
-                ) : (
-                  <MiniDisabledButton label="Controle detail" />
-                )}
-
-                <MiniActionButton
-                  label="Refresh"
-                  icon={<RefreshCcw size={14} strokeWidth={2.5} />}
-                  onClick={() => loadAll()}
-                />
-              </div>
-            </PanelCard>
-          </SteelFrame>
-
-          <SteelFrame>
-            <PanelCard
-              icon={<Upload size={34} strokeWidth={2.4} />}
-              title="PDF bijlagen"
-              subtitle="Documenten voor beoordeling"
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  marginBottom: 12,
-                }}
-              >
-                <label
-                  className="fs-metal-button"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    height: 36,
-                    padding: "0 14px",
-                    border: "1px solid rgba(196,77,0,0.85)",
-                    background:
-                      "linear-gradient(180deg, #ff7a1a 0%, #e45d00 55%, #9b3500 100%)",
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 900,
-                    boxShadow:
-                      "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
-                    cursor: uploading ? "default" : "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  <Upload size={14} strokeWidth={2.5} />
-                  {uploading ? "Uploaden..." : "Upload PDF"}
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      e.currentTarget.value = "";
-                      if (f) uploadPdf(f);
-                    }}
-                    disabled={uploading}
-                  />
-                </label>
-              </div>
-
-              {attachments.length === 0 ? (
-                <div
-                  style={{
-                    padding: "12px 0",
-                    color: "rgba(255,255,255,0.64)",
-                    fontSize: 13,
-                  }}
-                >
-                  Geen bijlagen.
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 8,
-                  }}
-                >
-                  {attachments.map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => openAttachment(a)}
-                      className="fs-metal-button"
-                      style={{
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "10px 12px",
-                        border: "1px solid rgba(255,255,255,0.10)",
-                        background:
-                          "linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03))",
-                        color: "#f1f1f1",
-                        boxShadow:
-                          "inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 10px rgba(0,0,0,0.24)",
-                      }}
-                      title={a.original_filename ?? a.storage_path}
-                    >
-                      <div
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 800,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {a.original_filename ?? a.storage_path.split("/").pop() ?? "PDF"}
-                      </div>
-                      <div
-                        style={{
-                          marginTop: 4,
-                          fontSize: 11,
-                          color: "rgba(255,255,255,0.54)",
-                        }}
-                      >
-                        {fmtDateNL(a.uploaded_at)}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </PanelCard>
-          </SteelFrame>
-        </div>
-
-        <div
-          className="detail-bottom-grid"
-          style={{
-            marginTop: 20,
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 20,
-          }}
-        >
-          <SteelFrame>
-            <PanelCard
-              icon={<MessageSquare size={34} strokeWidth={2.4} />}
-              title="Discussie"
-              subtitle="Berichten rondom deze aanvraag"
-            >
-              <div
-                style={{
-                  maxHeight: 340,
-                  overflow: "auto",
-                  paddingRight: 4,
-                  display: "grid",
-                  gap: 10,
-                }}
-              >
-                {messages.length === 0 ? (
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.64)",
-                      fontSize: 13,
-                    }}
-                  >
-                    Nog geen berichten.
-                  </div>
-                ) : (
-                  messages.map((m) => (
-                    <div
-                      key={m.id}
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.10)",
-                        background:
-                          "linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03))",
-                        padding: "10px 12px",
-                        boxShadow:
-                          "inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 10px rgba(0,0,0,0.22)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "rgba(255,255,255,0.55)",
-                          fontFamily: "monospace",
-                          marginBottom: 6,
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {m.user_id}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          color: "#f1f1f1",
-                          lineHeight: 1.45,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {m.message}
-                      </div>
-                      <div
-                        style={{
-                          marginTop: 8,
-                          fontSize: 11,
-                          color: "rgba(255,255,255,0.40)",
-                        }}
-                      >
-                        {fmtDateNL(m.created_at)}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  marginTop: 14,
-                  alignItems: "stretch",
-                }}
-              >
-                <input
-                  value={msgText}
-                  onChange={(e) => setMsgText(e.target.value)}
-                  placeholder="Typ bericht..."
-                  style={{
-                    flex: 1,
-                    height: 40,
-                    padding: "0 14px",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background:
-                      "linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04))",
-                    color: "#fff",
-                    outline: "none",
-                    boxShadow:
-                      "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 2px 4px rgba(0,0,0,0.45)",
-                  }}
-                />
-                <OrangeActionButton label="Plaats" onClick={postMessage} />
-              </div>
-            </PanelCard>
-          </SteelFrame>
-
-          <SteelFrame>
-            <PanelCard
-              icon={<Gavel size={34} strokeWidth={2.4} />}
-              title="Stemmen en besluit"
-              subtitle="Vote en superadmin-afhandeling"
-            >
-              <LabelText>Notitie bij stem (optioneel)</LabelText>
-              <textarea
-                value={voteNote}
-                onChange={(e) => setVoteNote(e.target.value)}
-                rows={3}
-                placeholder="Bijv. reden / toelichting..."
-                style={textareaStyle}
-              />
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  flexWrap: "wrap",
-                  marginTop: 12,
-                  alignItems: "center",
-                }}
-              >
-                <GreenActionButton
-                  label="Stem akkoord"
-                  icon={<CheckCircle2 size={15} strokeWidth={2.5} />}
-                  onClick={() => vote("approve")}
-                />
-                <RedActionButton
-                  label="Stem afkeur"
-                  icon={<XCircle size={15} strokeWidth={2.5} />}
-                  onClick={() => vote("reject")}
-                />
-
-                <div
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: 12,
-                    color: "rgba(255,255,255,0.58)",
-                  }}
-                >
-                  status wordt <b>pending</b> na stem
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 18,
-                  borderTop: "1px solid rgba(255,255,255,0.08)",
-                  paddingTop: 16,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 16,
-                      fontWeight: 900,
-                      color: "#f1f1f1",
-                    }}
-                  >
-                    Superadmin besluit
-                  </div>
-
-                  {reqRow?.decision ? (
-                    <StatusPill
-                      status={String(reqRow.decision).toLowerCase()}
-                    >
-                      {String(reqRow.decision).toUpperCase()}
-                    </StatusPill>
-                  ) : null}
-                </div>
-
-                <LabelText style={{ marginTop: 12 }}>Reden (verplicht)</LabelText>
-                <textarea
-                  value={decideReason}
-                  onChange={(e) => setDecideReason(e.target.value)}
-                  rows={3}
-                  placeholder="Reden..."
-                  style={textareaStyle}
-                />
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    flexWrap: "wrap",
-                    marginTop: 12,
-                    alignItems: "center",
-                  }}
-                >
-                  <OrangeActionButton
-                    label="Definitief goed"
-                    icon={<CheckCircle2 size={15} strokeWidth={2.5} />}
-                    onClick={() => decide("approved")}
-                    disabled={!isSuperadmin}
-                  />
-
-                  <SilverActionButton
-                    label="Definitief afkeur"
-                    icon={<XCircle size={15} strokeWidth={2.5} />}
-                    onClick={() => decide("rejected")}
-                    disabled={!isSuperadmin}
-                  />
-
-                  <MiniActionButton
-                    label="Refresh"
-                    icon={<RefreshCcw size={14} strokeWidth={2.5} />}
-                    onClick={() => loadAll()}
-                  />
-                </div>
-
-                {reqRow?.decision ? (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      padding: "10px 12px",
-                      border: "1px solid rgba(255,255,255,0.10)",
-                      background:
-                        "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
-                      color: "#f1f1f1",
-                      fontSize: 13,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    <div>
-                      <span style={{ color: "rgba(255,255,255,0.56)" }}>Reden:</span>{" "}
-                      {reqRow.decision_reason ?? "-"}
-                    </div>
-                    <div style={{ marginTop: 4, color: "rgba(255,255,255,0.46)" }}>
-                      {fmtDateNL(reqRow.decided_at)} • {reqRow.decided_by ?? "-"}
-                    </div>
-                  </div>
+                  <Link href={controlDetailHref} className="inline-flex h-[42px] items-center rounded-[8px] px-4 text-sm font-semibold" style={silverButton}>
+                    Controle detail
+                  </Link>
                 ) : null}
               </div>
-            </PanelCard>
-          </SteelFrame>
-        </div>
 
-        <div
-          style={{
-            marginTop: 16,
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-            fontSize: 11,
-            color: "rgba(255,255,255,0.42)",
-          }}
-        >
-          <div>{loading ? "Laden..." : ""}</div>
-          <div>
-            {reqRow?.updated_at ? `Laatste update: ${fmtDateNL(reqRow.updated_at)}` : ""}
+              <div className="flex justify-center">
+                <Image src={logoSrc} alt="FightSupport" width={350} height={90} priority className="h-auto w-auto max-w-full" />
+              </div>
+
+              <div className="flex items-center justify-start gap-3 md:justify-end">
+                <span className="inline-flex h-[42px] items-center rounded-[8px] px-4 text-sm font-semibold" style={silverButton}>
+                  Rol: {myRole ?? "-"}
+                </span>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div
-          style={{
-            marginTop: 18,
-            textAlign: "center",
-            fontSize: 9,
-            letterSpacing: 2,
-            color: "rgba(255,255,255,0.30)",
-          }}
-        >
-          © FIGHTSUPPORT
+          <div style={contentShell}>
+            <div className="p-4 md:p-5">
+              <div style={lightHeaderCard} className="px-4 py-4 md:px-5 md:py-5">
+                <div className="grid items-center gap-3 md:grid-cols-[1fr_auto]">
+                  <div>
+                    <h1 className="text-2xl font-extrabold md:text-4xl" style={{ color: NVB_ORANGE }}>
+                      Dispensatie Detail
+                    </h1>
+                    <div className="mt-1 text-sm text-[#334155]">Aanvraag, stemmen en besluit</div>
+                    <div className="mt-1 text-xs text-[#64748b] break-all">{requestId || "-"}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <SmallStat label="Status" value={statusLabel(reqRow?.status)} status={normStatus(reqRow?.status)} />
+                    <SmallStat label="Votes" value={voteCounts.total} />
+                    <SmallStat label="Akkoord" value={voteCounts.approve} />
+                    <SmallStat label="Afkeur" value={voteCounts.reject} />
+                  </div>
+                </div>
+              </div>
+
+              {err ? (
+                <div className="mt-4 rounded-[14px] border border-red-200/60 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
+                  {err}
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-12">
+                <Panel className="xl:col-span-4">
+                  <CardTitle title="Aanvraag" />
+                  <div className="mt-3 space-y-2 text-sm text-white/88">
+                    <InfoRow label="partijnr" value={reqRow?.partij_nr ?? "-"} />
+                    <InfoRow label="rule" value={reqRow?.rule_code ?? "-"} />
+                    <InfoRow label="bout_id" value={reqRow?.bout_id ?? "-"} mono />
+                    <InfoRow label="matchmaking_id" value={reqRow?.matchmaking_id ?? "-"} mono />
+                  </div>
+                </Panel>
+
+                <Panel className="xl:col-span-5">
+                  <CardTitle title="Evenement" />
+                  <div className="mt-3 grid gap-2 text-sm text-white/88 md:grid-cols-2">
+                    <InfoRow label="evenement" value={uploadRow?.evenement_naam ?? "-"} />
+                    <InfoRow label="datum" value={fmtDateNL(uploadRow?.evenement_datum)} />
+                    <InfoRow label="matchmaker" value={uploadRow?.matchmaker ?? "-"} />
+                    <InfoRow label="promotor" value={uploadRow?.promotor ?? "-"} />
+                    <InfoRow label="hoofdofficial" value={uploadRow?.hoofdofficial ?? "-"} />
+                    <InfoRow label="upload" value={fmtDateNL(uploadRow?.uploaded_at, true)} />
+                  </div>
+                </Panel>
+
+                <Panel className="xl:col-span-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle title="PDF" />
+                    <label className="inline-flex cursor-pointer items-center rounded-[8px] px-3 py-2 text-sm font-bold" style={orangeButton}>
+                      {uploading ? "..." : "Upload"}
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null;
+                          e.currentTarget.value = "";
+                          if (f) uploadPdf(f);
+                        }}
+                        disabled={uploading}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {attachments.length === 0 ? (
+                      <div className="text-sm text-white/55">Geen bijlagen.</div>
+                    ) : (
+                      attachments.slice(0, 4).map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => openAttachment(a)}
+                          className="block w-full rounded-[10px] px-3 py-2 text-left text-sm font-semibold text-black hover:brightness-105"
+                          style={{ ...silverButton, ...slimSilverFrame }}
+                          title={a.original_filename ?? a.storage_path}
+                        >
+                          <div className="truncate">{a.original_filename ?? a.storage_path.split("/").pop() ?? "PDF"}</div>
+                          <div className="mt-1 text-xs text-black/55">{fmtDateNL(a.uploaded_at, true)}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </Panel>
+              </div>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-2 items-stretch">
+                <Panel className="h-full flex flex-col min-h-[320px]">
+                  <CardTitle title="Discussie" />
+                  <div className="mt-3 flex-1 overflow-auto space-y-2 pr-1">
+                    {messages.length === 0 ? (
+                      <div className="rounded-[12px] border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/55">
+                        Nog geen berichten.
+                      </div>
+                    ) : (
+                      messages.map((m) => (
+                        <div key={m.id} className="rounded-[12px] border border-white/10 bg-white/5 px-3 py-2">
+                          <div className="text-[11px] text-white/40">{m.user_id}</div>
+                          <div className="mt-1 text-sm font-medium text-white">{m.message}</div>
+                          <div className="mt-1 text-[11px] text-white/40">{fmtDateNL(m.created_at, true)}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={msgText}
+                      onChange={(e) => setMsgText(e.target.value)}
+                      placeholder="Typ bericht..."
+                      className="min-w-0 flex-1 rounded-[10px] px-3 py-2 text-sm outline-none"
+                      style={inputStyle}
+                    />
+                    <button type="button" onClick={postMessage} className="rounded-[10px] px-4 py-2 text-sm font-bold" style={orangeButton}>
+                      Plaats
+                    </button>
+                  </div>
+                </Panel>
+
+                <Panel className="h-full flex flex-col min-h-[320px]">
+                  <CardTitle title="Stemmen" />
+                  <div className="mt-3 text-sm text-white/72">Notitie (optioneel)</div>
+                  <textarea
+                    value={voteNote}
+                    onChange={(e) => setVoteNote(e.target.value)}
+                    className="mt-2 w-full rounded-[10px] px-3 py-2 text-sm outline-none"
+                    rows={4}
+                    placeholder="Bijv. reden / toelichting..."
+                    style={inputStyle}
+                  />
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => vote("approve")}
+                      className="rounded-[10px] px-4 py-2 text-sm font-bold text-white"
+                      style={{
+                        background: "linear-gradient(180deg, #22c55e 0%, #16a34a 58%, #0c7a34 100%)",
+                        border: "1px solid rgba(170,255,200,0.28)",
+                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 6px 14px rgba(22,163,74,0.20)",
+                      }}
+                    >
+                      Stem akkoord
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => vote("reject")}
+                      className="rounded-[10px] px-4 py-2 text-sm font-bold text-white"
+                      style={{
+                        background: "linear-gradient(180deg, #ef4444 0%, #dc2626 58%, #a31313 100%)",
+                        border: "1px solid rgba(255,190,190,0.24)",
+                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 6px 14px rgba(220,38,38,0.20)",
+                      }}
+                    >
+                      Stem afkeur
+                    </button>
+                    <div className="ml-auto text-xs text-white/56">status wordt <b className="text-white/80">pending</b></div>
+                  </div>
+
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle title="Superadmin besluit" />
+                      {reqRow?.decision ? <StatusBadge status={String(reqRow.decision).toLowerCase()}>{String(reqRow.decision).toUpperCase()}</StatusBadge> : null}
+                    </div>
+                    <textarea
+                      value={decideReason}
+                      onChange={(e) => setDecideReason(e.target.value)}
+                      className="mt-3 w-full rounded-[10px] px-3 py-2 text-sm outline-none"
+                      rows={3}
+                      placeholder="Reden (verplicht)..."
+                      style={inputStyle}
+                    />
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => decide("approved")}
+                        disabled={!isSuperadmin}
+                        className="rounded-[10px] px-4 py-2 text-sm font-bold"
+                        style={isSuperadmin ? orangeButton : { ...silverButton, opacity: 0.5 }}
+                      >
+                        Definitief goed
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => decide("rejected")}
+                        disabled={!isSuperadmin}
+                        className="rounded-[10px] px-4 py-2 text-sm font-bold"
+                        style={isSuperadmin ? { ...silverButton, ...slimSilverFrame } : { ...silverButton, opacity: 0.5 }}
+                      >
+                        Definitief afkeur
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => loadAll()}
+                        className="ml-auto rounded-[10px] px-4 py-2 text-sm font-bold"
+                        style={{ ...silverButton, ...slimSilverFrame }}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+
+                    {reqRow?.decision ? (
+                      <div className="mt-3 text-xs text-white/60">
+                        {reqRow.decision_reason ?? "-"} • {fmtDateNL(reqRow.decided_at, true)} • {reqRow.decided_by ?? "-"}
+                      </div>
+                    ) : null}
+                  </div>
+                </Panel>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between text-xs text-[#475569]">
+                <div>{loading ? "Laden..." : ""}</div>
+                <div>{reqRow?.updated_at ? `Laatste update: ${fmtDateNL(reqRow.updated_at, true)}` : ""}</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </main>
   );
 }
 
-const textareaStyle: CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  border: "1px solid rgba(255,255,255,0.12)",
-  background:
-    "linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04))",
-  color: "#fff",
-  outline: "none",
-  resize: "vertical",
-  boxShadow:
-    "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 2px 4px rgba(0,0,0,0.45)",
-};
-
-function SharedStyles() {
-  return (
-    <style jsx>{`
-      @keyframes fsPulseGlow {
-        0%,
-        100% {
-          opacity: 0.78;
-          transform: scaleX(1) scaleY(1);
-        }
-        50% {
-          opacity: 1;
-          transform: scaleX(1.08) scaleY(1.12);
-        }
-      }
-
-      .fs-card-hover {
-        transition: transform 180ms ease, filter 180ms ease, box-shadow 180ms ease;
-      }
-
-      .fs-card-hover:hover {
-        transform: translateY(-2px);
-        filter: drop-shadow(0 0 12px rgba(255, 77, 0, 0.08));
-      }
-
-      .fs-card-hover:hover .fs-card-glow {
-        opacity: 1;
-      }
-
-      .fs-card-hover:hover .fs-card-outer {
-        box-shadow:
-          0 16px 28px rgba(0, 0, 0, 0.68),
-          0 0 18px rgba(255, 77, 0, 0.08),
-          inset 0 2px 1px rgba(255, 255, 255, 0.96),
-          inset 0 -2px 2px rgba(0, 0, 0, 0.82),
-          inset 2px 0 2px rgba(255, 255, 255, 0.44),
-          inset -2px 0 2px rgba(0, 0, 0, 0.54);
-      }
-
-      .fs-hotspot {
-        animation: fsPulseGlow 2.8s ease-in-out infinite;
-        transform-origin: center center;
-      }
-
-      .fs-hotspot-2 {
-        animation-delay: 0.7s;
-      }
-
-      .fs-hotspot-3 {
-        animation-delay: 1.3s;
-      }
-
-      .fs-metal-button {
-        transition: transform 90ms ease, box-shadow 120ms ease, filter 120ms ease;
-      }
-
-      .fs-metal-button:hover {
-        filter: brightness(1.02);
-        box-shadow:
-          inset 0 2px 1px rgba(255, 255, 255, 1),
-          inset 0 -3px 2px rgba(0, 0, 0, 0.6),
-          0 8px 18px rgba(0, 0, 0, 0.46),
-          0 0 10px rgba(255, 77, 0, 0.08);
-      }
-
-      .fs-metal-button:active {
-        transform: translateY(2px);
-        box-shadow:
-          inset 0 2px 2px rgba(0, 0, 0, 0.18),
-          inset 0 -1px 1px rgba(255, 255, 255, 0.28),
-          0 2px 6px rgba(0, 0, 0, 0.35);
-      }
-
-      @media (max-width: 1180px) {
-        .stats-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-        }
-
-        .detail-top-grid {
-          grid-template-columns: 1fr !important;
-        }
-
-        .detail-bottom-grid {
-          grid-template-columns: 1fr !important;
-        }
-      }
-
-      @media (max-width: 860px) {
-        .stats-grid {
-          grid-template-columns: 1fr !important;
-        }
-
-        .title-row {
-          padding-top: 12px !important;
-          padding-bottom: 12px !important;
-          padding-left: 14px !important;
-          padding-right: 14px !important;
-        }
-
-        .title-actions-wrap {
-          position: static !important;
-          transform: none !important;
-          justify-content: center !important;
-          margin-bottom: 10px !important;
-        }
-
-        .title-center {
-          padding-top: 0 !important;
-        }
-      }
-    `}</style>
-  );
+function CardTitle({ title }: { title: string }) {
+  return <h2 className="text-xl font-extrabold leading-none md:text-2xl">{title}</h2>;
 }
 
-function TopLogoBand() {
+function InfoRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div
-      style={{
-        ...sectionRule(true),
-        position: "relative",
-        display: "flex",
-        justifyContent: "center",
-        paddingTop: 0,
-        paddingBottom: 0,
-        background: `
-          radial-gradient(circle at 50% 50%, rgba(255,115,20,0.10) 0%, rgba(255,115,20,0.03) 16%, rgba(0,0,0,0) 34%),
-          linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%)
-        `,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          pointerEvents: "none",
-          background: `
-            radial-gradient(circle at 50% 96%, rgba(255,95,0,0.30), transparent 8%),
-            radial-gradient(circle at 18% 26%, rgba(255,110,20,0.05), transparent 15%),
-            radial-gradient(circle at 82% 24%, rgba(255,110,20,0.05), transparent 15%)
-          `,
-        }}
-      />
-
-      <div
-        style={{
-          position: "relative",
-          width: 1160,
-          height: 96,
-          maxWidth: "96vw",
-          filter:
-            "drop-shadow(0 10px 18px rgba(0,0,0,0.70)) drop-shadow(0 0 16px rgba(255,95,0,0.12))",
-          boxShadow: `
-            inset 0 -10px 24px rgba(0,0,0,0.42),
-            inset 0 5px 14px rgba(255,255,255,0.04)
-          `,
-        }}
-      >
-        <Image
-          src={logoSrc}
-          alt="FightSupport"
-          fill
-          priority
-          className="object-contain"
-          style={{
-            objectFit: "contain",
-            transform: "scaleX(1.34)",
-          }}
-        />
-      </div>
+    <div className="flex gap-2">
+      <span className="w-[110px] shrink-0 text-white/50">{label}:</span>
+      <span className={`${mono ? "font-mono text-[13px]" : ""} break-all text-white`}>{value}</span>
     </div>
   );
 }
 
-function TitleBand({
-  title,
-  subtitle,
-  actionLabel,
-  actionIcon,
-  onAction,
-}: {
-  title: string;
-  subtitle: string;
-  actionLabel: string;
-  actionIcon?: ReactNode;
-  onAction: () => void | Promise<void>;
-}) {
+function SmallStat({ label, value, status }: { label: string; value: React.ReactNode; status?: string }) {
   return (
-    <div
-      style={{
-        ...sectionRule(),
-        position: "relative",
-        background: `
-          linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.015) 10%, rgba(0,0,0,0.04) 100%),
-          linear-gradient(180deg, #171b21 0%, #0a0d12 50%, #161a20 100%)
-        `,
-        boxShadow: `
-          inset 0 1px 0 rgba(255,255,255,0.06),
-          inset 0 -1px 0 rgba(255,255,255,0.03),
-          0 8px 14px rgba(0,0,0,0.34)
-        `,
-      }}
-    >
-      <div
-        className="fs-hotspot"
-        style={{
-          position: "absolute",
-          left: "50%",
-          transform: "translateX(-50%)",
-          bottom: -4,
-          width: 160,
-          height: 8,
-          background:
-            "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
-          filter: "blur(2px)",
-          pointerEvents: "none",
-        }}
-      />
-
-      <div
-        className="title-row"
-        style={{
-          position: "relative",
-          maxWidth: 1400,
-          margin: "0 auto",
-          padding: "11px 18px 10px",
-          minHeight: 92,
-        }}
-      >
-        <div
-          className="title-actions-wrap"
-          style={{
-            position: "absolute",
-            right: 18,
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 2,
-          }}
-        >
-          <HeaderSilverButton
-            label={actionLabel}
-            icon={actionIcon}
-            onClick={onAction}
-          />
-        </div>
-
-        <div
-          className="title-center"
-          style={{
-            textAlign: "center",
-            paddingTop: 0,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 900,
-              letterSpacing: 1,
-              lineHeight: 1,
-              color: "#ececec",
-              textTransform: "uppercase",
-              textShadow:
-                "0 1px 0 rgba(255,255,255,0.18), 0 4px 10px rgba(0,0,0,0.82)",
-            }}
-          >
-            {title}
-          </div>
-
-          <div
-            style={{
-              marginTop: 7,
-              fontSize: 9,
-              letterSpacing: 2.5,
-              color: NVB_ORANGE,
-              textTransform: "uppercase",
-              textShadow: "0 0 8px rgba(255,106,0,0.28)",
-            }}
-          >
-            {subtitle}
-          </div>
-        </div>
-      </div>
+    <div className="rounded-[12px] border border-[#aeb2bb] bg-white px-3 py-2 text-right shadow-sm">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{label}</div>
+      <div className="mt-1 flex justify-end">{status ? <StatusBadge status={status}>{value}</StatusBadge> : <span className="text-base font-extrabold text-[#111827]">{value}</span>}</div>
     </div>
   );
 }
 
-function SteelFrame({
-  children,
-  hover = false,
-}: {
-  children: ReactNode;
-  hover?: boolean;
-}) {
-  return (
-    <div className={hover ? "fs-card-hover" : undefined}>
-      <div style={steelFrameOuter} className={hover ? "fs-card-outer" : undefined}>
-        <div
-          className={hover ? "fs-card-glow" : undefined}
-          style={{
-            position: "absolute",
-            inset: -2,
-            opacity: 0,
-            pointerEvents: "none",
-            background:
-              "radial-gradient(circle at 50% 50%, rgba(255,77,0,0.10) 0%, rgba(255,77,0,0.04) 34%, rgba(255,77,0,0) 70%)",
-            transition: "opacity 180ms ease",
-            filter: "blur(8px)",
-          }}
-        />
+function StatusBadge({ status, children }: { status: string; children: React.ReactNode }) {
+  let style: CSSProperties = {
+    background: "#eceff3",
+    border: "1px solid #c4c9d1",
+    color: "#334155",
+  };
 
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            background: `
-              linear-gradient(120deg, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0.10) 12%, transparent 23%),
-              linear-gradient(300deg, rgba(255,255,255,0.20) 0%, transparent 22%),
-              linear-gradient(180deg, rgba(0,0,0,0.26), transparent 40%)
-            `,
-            mixBlendMode: "screen",
-          }}
-        />
-
-        <div style={steelFrameMid}>
-          <div style={steelFrameChannel}>
-            <div style={steelFrameInner}>{children}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PanelCard({
-  icon,
-  title,
-  subtitle,
-  children,
-}: {
-  icon: ReactNode;
-  title: string;
-  subtitle: string;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        ...darkPlate,
-        padding: "14px 14px 16px",
-        minHeight: 220,
-      }}
-    >
-      <OrangeHotspot left={18} bottom={10} width={56} />
-      <OrangeHotspot right={34} top={10} width={40} small variant={2} />
-      <CardChromeOverlay />
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 12,
-          marginBottom: 14,
-        }}
-      >
-        <IconPlate>{icon}</IconPlate>
-
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 900,
-              lineHeight: 1,
-              color: "#f1f1f1",
-              textShadow: "0 3px 5px rgba(0,0,0,0.8)",
-            }}
-          >
-            {title}
-          </div>
-
-          <div
-            style={{
-              marginTop: 7,
-              fontSize: 13,
-              color: "#d7d7d7",
-              lineHeight: 1.2,
-            }}
-          >
-            {subtitle}
-          </div>
-        </div>
-      </div>
-
-      {children}
-    </div>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <SteelFrame hover>
-      <div
-        style={{
-          ...darkPlate,
-          minHeight: 116,
-          padding: "14px 14px 12px",
-        }}
-      >
-        <OrangeHotspot left={14} bottom={8} width={46} />
-        <OrangeHotspot right={24} top={9} width={30} small variant={2} />
-        <CardChromeOverlay />
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <IconPlate compact>{icon}</IconPlate>
-
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div
-              style={{
-                fontSize: 12,
-                letterSpacing: 1.8,
-                textTransform: "uppercase",
-                color: "rgba(255,255,255,0.72)",
-                fontWeight: 800,
-              }}
-            >
-              {label}
-            </div>
-
-            <div
-              style={{
-                marginTop: 8,
-                fontSize: 28,
-                lineHeight: 1,
-                fontWeight: 900,
-                color: "#ffffff",
-                textShadow: "0 4px 10px rgba(0,0,0,0.8)",
-                wordBreak: "break-word",
-              }}
-            >
-              {value}
-            </div>
-          </div>
-        </div>
-      </div>
-    </SteelFrame>
-  );
-}
-
-function IconPlate({
-  children,
-  compact = false,
-}: {
-  children: ReactNode;
-  compact?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        width: compact ? 68 : 92,
-        height: compact ? 56 : 72,
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "#fff",
-        border: "1px solid #7b2500",
-        background:
-          "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function HeaderSilverButton({
-  label,
-  onClick,
-  icon,
-}: {
-  label: string;
-  onClick: () => void | Promise<void>;
-  icon?: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="fs-metal-button"
-      style={{
-        minWidth: 162,
-        height: 42,
-        border: "1px solid rgba(185,185,185,0.95)",
-        background: `
-          linear-gradient(180deg,
-            #ffffff 0%,
-            #f3f3f3 10%,
-            #d7d7d7 24%,
-            #fcfcfc 42%,
-            #bcbcbc 72%,
-            #efefef 100%)
-        `,
-        color: "#121212",
-        fontSize: 15,
-        fontWeight: 900,
-        boxShadow: `
-          inset 0 1px 0 rgba(255,255,255,1),
-          inset 0 -2px 2px rgba(0,0,0,0.40),
-          0 4px 10px rgba(0,0,0,0.28)
-        `,
-        cursor: "pointer",
-        textShadow: "0 1px 0 rgba(255,255,255,0.55)",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        padding: "0 18px",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function MiniLinkButton({
-  href,
-  label,
-}: {
-  href: string;
-  label: string;
-}) {
-  return (
-    <Link
-      href={href}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: 34,
-        padding: "0 14px",
-        border: "1px solid rgba(185,185,185,0.95)",
-        background: `
-          linear-gradient(180deg,
-            #ffffff 0%,
-            #f3f3f3 10%,
-            #d7d7d7 24%,
-            #fcfcfc 42%,
-            #bcbcbc 72%,
-            #efefef 100%)
-        `,
-        color: "#121212",
-        fontSize: 13,
-        fontWeight: 900,
-        boxShadow: `
-          inset 0 1px 0 rgba(255,255,255,1),
-          inset 0 -2px 2px rgba(0,0,0,0.40),
-          0 4px 10px rgba(0,0,0,0.24)
-        `,
-        textShadow: "0 1px 0 rgba(255,255,255,0.55)",
-        whiteSpace: "nowrap",
-        textDecoration: "none",
-      }}
-    >
-      {label}
-    </Link>
-  );
-}
-
-function MiniDisabledButton({ label }: { label: string }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: 34,
-        padding: "0 14px",
-        border: "1px solid rgba(255,255,255,0.10)",
-        background:
-          "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
-        color: "rgba(255,255,255,0.40)",
-        fontSize: 13,
-        fontWeight: 800,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function MiniActionButton({
-  label,
-  onClick,
-  icon,
-  danger = false,
-  disabled = false,
-}: {
-  label: string;
-  onClick: () => void;
-  icon?: ReactNode;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="fs-metal-button"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 7,
-        height: 34,
-        padding: "0 14px",
-        border: danger
-          ? "1px solid rgba(180,70,70,0.75)"
-          : "1px solid rgba(185,185,185,0.95)",
-        background: disabled
-          ? "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))"
-          : danger
-          ? `
-            linear-gradient(180deg,
-              #ffe7e7 0%,
-              #ffcfcf 18%,
-              #ffb8b8 40%,
-              #f19a9a 72%,
-              #ffd9d9 100%)
-          `
-          : `
-            linear-gradient(180deg,
-              #ffffff 0%,
-              #f3f3f3 10%,
-              #d7d7d7 24%,
-              #fcfcfc 42%,
-              #bcbcbc 72%,
-              #efefef 100%)
-          `,
-        color: disabled ? "rgba(255,255,255,0.38)" : danger ? "#661414" : "#121212",
-        fontSize: 13,
-        fontWeight: 900,
-        boxShadow: disabled
-          ? "inset 0 1px 0 rgba(255,255,255,0.05)"
-          : `
-          inset 0 1px 0 rgba(255,255,255,1),
-          inset 0 -2px 2px rgba(0,0,0,0.40),
-          0 4px 10px rgba(0,0,0,0.24)
-        `,
-        cursor: disabled ? "default" : "pointer",
-        textShadow: disabled ? "none" : "0 1px 0 rgba(255,255,255,0.55)",
-        whiteSpace: "nowrap",
-        opacity: disabled ? 0.7 : 1,
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function OrangeActionButton({
-  label,
-  onClick,
-  icon,
-  disabled = false,
-}: {
-  label: string;
-  onClick: () => void;
-  icon?: ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="fs-metal-button"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        height: 38,
-        padding: "0 16px",
-        border: "1px solid rgba(196,77,0,0.85)",
-        background: disabled
-          ? "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))"
-          : "linear-gradient(180deg, #ff7a1a 0%, #e45d00 55%, #9b3500 100%)",
-        color: disabled ? "rgba(255,255,255,0.38)" : "#fff",
-        fontSize: 13,
-        fontWeight: 900,
-        boxShadow: disabled
-          ? "inset 0 1px 0 rgba(255,255,255,0.05)"
-          : "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
-        cursor: disabled ? "default" : "pointer",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function SilverActionButton({
-  label,
-  onClick,
-  icon,
-  disabled = false,
-}: {
-  label: string;
-  onClick: () => void;
-  icon?: ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <MiniActionButton
-      label={label}
-      icon={icon}
-      onClick={onClick}
-      disabled={disabled}
-    />
-  );
-}
-
-function GreenActionButton({
-  label,
-  onClick,
-  icon,
-}: {
-  label: string;
-  onClick: () => void;
-  icon?: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="fs-metal-button"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        height: 38,
-        padding: "0 16px",
-        border: "1px solid rgba(90,180,120,0.50)",
-        background:
-          "linear-gradient(180deg, #2ebd66 0%, #17944b 55%, #0e5d30 100%)",
-        color: "#fff",
-        fontSize: 13,
-        fontWeight: 900,
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 10px rgba(46,189,102,0.12)",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function RedActionButton({
-  label,
-  onClick,
-  icon,
-}: {
-  label: string;
-  onClick: () => void;
-  icon?: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="fs-metal-button"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        height: 38,
-        padding: "0 16px",
-        border: "1px solid rgba(190,80,80,0.50)",
-        background:
-          "linear-gradient(180deg, #cf4b4b 0%, #a92d2d 55%, #6d1818 100%)",
-        color: "#fff",
-        fontSize: 13,
-        fontWeight: 900,
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 10px rgba(207,75,75,0.12)",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function StatusPill({
-  status,
-  children,
-}: {
-  status: string;
-  children: ReactNode;
-}) {
-  const x = String(status ?? "").toLowerCase();
-
-  let bg =
-    "linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.10))";
-  let color = "#ffffff";
-  let border = "1px solid rgba(255,255,255,0.20)";
-
-  if (x === "nieuw" || x === "open") {
-    bg =
-      "linear-gradient(180deg, rgba(255,120,20,0.35), rgba(255,77,0,0.18))";
-    border = "1px solid rgba(255,120,20,0.45)";
-    color = "#fff3eb";
-  } else if (x === "pending") {
-    bg =
-      "linear-gradient(180deg, rgba(255,220,120,0.28), rgba(180,130,20,0.16))";
-    border = "1px solid rgba(255,220,120,0.36)";
-    color = "#fff7da";
-  } else if (x === "approved") {
-    bg =
-      "linear-gradient(180deg, rgba(110,220,150,0.28), rgba(40,120,70,0.16))";
-    border = "1px solid rgba(110,220,150,0.36)";
-    color = "#eafff0";
-  } else if (x === "rejected") {
-    bg =
-      "linear-gradient(180deg, rgba(220,110,110,0.28), rgba(120,40,40,0.16))";
-    border = "1px solid rgba(220,110,110,0.36)";
-    color = "#fff0f0";
+  if (status === "open" || status === "nieuw") {
+    style = { background: "#ffedd5", border: "1px solid #fdba74", color: "#c2410c" };
+  } else if (status === "pending") {
+    style = { background: "#fef3c7", border: "1px solid #fcd34d", color: "#92400e" };
+  } else if (status === "approved") {
+    style = { background: "#dcfce7", border: "1px solid #86efac", color: "#166534" };
+  } else if (status === "rejected") {
+    style = { background: "#fee2e2", border: "1px solid #fca5a5", color: "#991b1b" };
   }
 
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        minHeight: 28,
-        padding: "0 10px",
-        border,
-        background: bg,
-        color,
-        fontSize: 12,
-        fontWeight: 900,
-        letterSpacing: 0.6,
-        textTransform: "uppercase",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.18), 0 2px 8px rgba(0,0,0,0.20)",
-      }}
-    >
+    <span className="inline-flex min-h-[28px] items-center rounded-full px-3 text-xs font-extrabold uppercase tracking-[0.08em]" style={style}>
       {children}
     </span>
-  );
-}
-
-function InfoRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "120px 1fr",
-        gap: 10,
-        alignItems: "start",
-        padding: "7px 0",
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 12,
-          color: "rgba(255,255,255,0.52)",
-          fontWeight: 700,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 14,
-          color: "#f1f1f1",
-          minWidth: 0,
-          wordBreak: "break-word",
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function TinyStat({
-  label,
-  value,
-}: {
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid rgba(255,255,255,0.10)",
-        background:
-          "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
-        padding: "10px 8px",
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          color: "rgba(255,255,255,0.56)",
-          textTransform: "uppercase",
-          letterSpacing: 1,
-          fontWeight: 800,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          marginTop: 4,
-          fontSize: 20,
-          fontWeight: 900,
-          color: "#fff",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function CodeText({ children }: { children: ReactNode }) {
-  return (
-    <span
-      style={{
-        fontFamily: "monospace",
-        color: "rgba(255,255,255,0.88)",
-        fontSize: 13,
-        wordBreak: "break-all",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function LabelText({
-  children,
-  style,
-}: {
-  children: ReactNode;
-  style?: CSSProperties;
-}) {
-  return (
-    <div
-      style={{
-        fontSize: 12,
-        color: "rgba(255,255,255,0.56)",
-        fontWeight: 800,
-        marginBottom: 6,
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function OrangeHotspot({
-  left,
-  right,
-  top,
-  bottom,
-  width,
-  small = false,
-  variant = 1,
-}: {
-  left?: number;
-  right?: number;
-  top?: number;
-  bottom?: number;
-  width: number;
-  small?: boolean;
-  variant?: 1 | 2 | 3;
-}) {
-  const extraClass =
-    variant === 2
-      ? "fs-hotspot fs-hotspot-2"
-      : variant === 3
-      ? "fs-hotspot fs-hotspot-3"
-      : "fs-hotspot";
-
-  return (
-    <div
-      className={extraClass}
-      style={{
-        position: "absolute",
-        left,
-        right,
-        top,
-        bottom,
-        width,
-        height: small ? 8 : 10,
-        background:
-          "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
-        filter: "blur(1.5px)",
-        pointerEvents: "none",
-      }}
-    />
-  );
-}
-
-function CardChromeOverlay() {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        pointerEvents: "none",
-        background: `
-          linear-gradient(125deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 15%, transparent 26%),
-          linear-gradient(315deg, rgba(255,255,255,0.03) 0%, transparent 22%)
-        `,
-      }}
-    />
   );
 }

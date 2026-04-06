@@ -25,14 +25,20 @@ function isJson(req: Request) {
 }
 function isForm(req: Request) {
   const c = ct(req);
-  return c.includes("multipart/form-data") || c.includes("application/x-www-form-urlencoded");
+  return (
+    c.includes("multipart/form-data") ||
+    c.includes("application/x-www-form-urlencoded")
+  );
 }
 
 /* =========================================================
    Storage download (JSON flow)
 ========================================================= */
 async function downloadStorageFile(file_path: string): Promise<Buffer> {
-  const { data, error } = await supabaseAdmin.storage.from("uploads").download(file_path);
+  const { data, error } = await supabaseAdmin.storage
+    .from("uploads")
+    .download(file_path);
+
   if (error) throw new Error(`Storage download mislukt: ${error.message}`);
 
   const ab = await data.arrayBuffer();
@@ -158,7 +164,16 @@ async function fetchExistingBoutUidIndex(matchmaking_id: string) {
   return index;
 }
 
-const ALLOWED_BONDTEAMS = new Set(["IRO", "NKF", "WPKL", "WMTA", "VON", "UMC", "MMAAN", "MON"]);
+const ALLOWED_BONDTEAMS = new Set([
+  "IRO",
+  "NKF",
+  "WPKL",
+  "WMTA",
+  "VON",
+  "UMC",
+  "MMAAN",
+  "MON",
+]);
 
 function bad(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
@@ -184,7 +199,12 @@ function roleLower(r: any): RoleName {
 ========================================================= */
 export async function POST(req: Request) {
   try {
-    const auth = await requireAnyRole(req, ["admin", "matchmaker", "official", "hoofdofficial"]);
+    const auth = await requireAnyRole(req, [
+      "admin",
+      "matchmaker",
+      "official",
+      "hoofdofficial",
+    ]);
     const userId = auth.userId;
     const role = roleLower(auth.role);
 
@@ -222,18 +242,26 @@ export async function POST(req: Request) {
       matchmaker = body.matchmaker ? String(body.matchmaker).trim() : null;
 
       const bondteamRaw = body.bondteam ? String(body.bondteam).trim() : null;
-      bondteam = bondteamRaw && ALLOWED_BONDTEAMS.has(bondteamRaw) ? bondteamRaw : bondteamRaw;
+      bondteam =
+        bondteamRaw && ALLOWED_BONDTEAMS.has(bondteamRaw)
+          ? bondteamRaw
+          : bondteamRaw;
 
       hoofdofficial = body.hoofdofficial ? String(body.hoofdofficial).trim() : null;
       promotor = body.promotor ? String(body.promotor).trim() : null;
 
-      matchmaking_id = body.matchmaking_id ? String(body.matchmaking_id) : null;
+      matchmaking_id = body.matchmaking_id
+        ? String(body.matchmaking_id).trim()
+        : null;
       force_new = Boolean(body.force_new ?? false);
 
-      event_id = body.event_id ? String(body.event_id) : null;
+      event_id = body.event_id ? String(body.event_id).trim() : null;
 
       if (!file_path) {
-        return NextResponse.json({ error: "JSON mist file_path." }, { status: 400 });
+        return NextResponse.json(
+          { error: "JSON mist file_path." },
+          { status: 400 }
+        );
       }
 
       const buffer = await downloadStorageFile(file_path);
@@ -247,8 +275,12 @@ export async function POST(req: Request) {
       locatie = String(form.get("locatie") ?? "").trim() || null;
 
       matchmaker = String(form.get("matchmaker") ?? "").trim() || null;
+
       const bondteamRaw = String(form.get("bondteam") ?? "").trim() || null;
-      bondteam = bondteamRaw && ALLOWED_BONDTEAMS.has(bondteamRaw) ? bondteamRaw : bondteamRaw;
+      bondteam =
+        bondteamRaw && ALLOWED_BONDTEAMS.has(bondteamRaw)
+          ? bondteamRaw
+          : bondteamRaw;
 
       hoofdofficial = String(form.get("hoofdofficial") ?? "").trim() || null;
       promotor = String(form.get("promotor") ?? "").trim() || null;
@@ -259,7 +291,10 @@ export async function POST(req: Request) {
       event_id = String(form.get("event_id") ?? "").trim() || null;
 
       if (!file) {
-        return NextResponse.json({ error: "Geen file ontvangen." }, { status: 400 });
+        return NextResponse.json(
+          { error: "Geen file ontvangen." },
+          { status: 400 }
+        );
       }
 
       raw_filename = (file as any)?.name ? String((file as any).name) : null;
@@ -269,7 +304,10 @@ export async function POST(req: Request) {
       bouts = await parseExcelToBouts(buffer);
     } else {
       return NextResponse.json(
-        { error: "Onjuiste Content-Type. Gebruik application/json of multipart/form-data." },
+        {
+          error:
+            "Onjuiste Content-Type. Gebruik application/json of multipart/form-data.",
+        },
         { status: 415 }
       );
     }
@@ -288,7 +326,10 @@ export async function POST(req: Request) {
       const userBond = await getUserBondteam(userId);
       if (!userBond) return bad("Je profiel mist bondteam.", 403);
       if (String(userBond) !== String(bondteam)) {
-        return bad("Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.", 403);
+        return bad(
+          "Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.",
+          403
+        );
       }
 
       const mm = String(matchmaker ?? "").trim();
@@ -337,19 +378,45 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: exErr.message }, { status: 500 });
       }
       if (!ex) {
-        return NextResponse.json({ error: "event_id bestaat niet (events)." }, { status: 400 });
+        return NextResponse.json(
+          { error: "event_id bestaat niet (events)." },
+          { status: 400 }
+        );
       }
     }
 
     let mmId = "";
+
     if (!force_new && matchmaking_id) {
       const s = String(matchmaking_id).trim();
-      if (!/^\d+$/.test(s)) {
+      if (!s) {
         return NextResponse.json(
-          { error: "matchmaking_id moet een numerieke id zijn (bigint) in deze database." },
+          { error: "matchmaking_id is leeg." },
           { status: 400 }
         );
       }
+
+      const { data: existingMatchmaking, error: existingMatchmakingErr } =
+        await supabaseAdmin
+          .from("matchmakings")
+          .select("id")
+          .eq("id", s)
+          .maybeSingle();
+
+      if (existingMatchmakingErr) {
+        return NextResponse.json(
+          { error: existingMatchmakingErr.message },
+          { status: 500 }
+        );
+      }
+
+      if (!existingMatchmaking) {
+        return NextResponse.json(
+          { error: "De opgegeven matchmaking_id bestaat niet." },
+          { status: 400 }
+        );
+      }
+
       mmId = s;
     } else {
       const { data: mm, error: mmError } = await supabaseAdmin
@@ -369,7 +436,10 @@ export async function POST(req: Request) {
 
       mmId = String((mm as any)?.id ?? "").trim();
       if (!mmId) {
-        return NextResponse.json({ error: "Kon matchmaking id niet bepalen." }, { status: 500 });
+        return NextResponse.json(
+          { error: "Kon matchmaking id niet bepalen." },
+          { status: 500 }
+        );
       }
     }
 
@@ -409,16 +479,33 @@ export async function POST(req: Request) {
     const rows: any[] = [];
 
     for (const b of bouts ?? []) {
-      const vaR = toVaStrict((b as any)?.va_rood ?? (b as any)?.rood_va ?? (b as any)?.rood_va_mm);
-      const vaB = toVaStrict((b as any)?.va_blauw ?? (b as any)?.blauw_va ?? (b as any)?.blauw_va_mm);
+      const vaR = toVaStrict(
+        (b as any)?.va_rood ??
+          (b as any)?.rood_va ??
+          (b as any)?.rood_va_mm
+      );
+      const vaB = toVaStrict(
+        (b as any)?.va_blauw ??
+          (b as any)?.blauw_va ??
+          (b as any)?.blauw_va_mm
+      );
 
       const discipline = normUpper((b as any)?.discipline ?? "");
       const klasse = normUpper((b as any)?.klasse ?? "");
-      const is_toernooi = (b as any)?.is_toernooi ?? (b as any)?.toernooi ?? null;
+      const is_toernooi =
+        (b as any)?.is_toernooi ?? (b as any)?.toernooi ?? null;
 
-      const fp = boutFingerprint({ vaR, vaB, discipline, klasse, is_toernooi });
+      const fp = boutFingerprint({
+        vaR,
+        vaB,
+        discipline,
+        klasse,
+        is_toernooi,
+      });
 
-      let bout_uid = (b as any)?.bout_uid ? String((b as any).bout_uid).trim() : randomUUID();
+      let bout_uid = (b as any)?.bout_uid
+        ? String((b as any).bout_uid).trim()
+        : randomUUID();
 
       if (fp) {
         const list = existingIndex.get(fp) ?? [];
@@ -459,8 +546,12 @@ export async function POST(req: Request) {
         is_toernooi: toBoolLoose(is_toernooi),
 
         max_gewicht: normalizeMaxGewicht((b as any)?.max_gewicht),
-        max_gewicht_notatie: normalizeWeightNotation((b as any)?.max_gewicht_notatie),
-        max_gewicht_type: normalizeWeightType((b as any)?.extra?.max_gewicht_type),
+        max_gewicht_notatie: normalizeWeightNotation(
+          (b as any)?.max_gewicht_notatie
+        ),
+        max_gewicht_type: normalizeWeightType(
+          (b as any)?.extra?.max_gewicht_type
+        ),
 
         raw_json: (b as any)?.extra ?? null,
 
@@ -488,6 +579,9 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     console.error(e);
-    return NextResponse.json({ error: e?.message || "Onbekende fout" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Onbekende fout" },
+      { status: 500 }
+    );
   }
 }

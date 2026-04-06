@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, type CSSProperties, type ReactNode } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -10,6 +9,8 @@ import {
   FileText,
   Scale,
   ArrowLeft,
+  Building2,
+  Megaphone,
 } from "lucide-react";
 
 type PortalAction = {
@@ -162,14 +163,20 @@ export default function DashboardPage() {
 
   const canAdmin =
     (roles ?? []).includes("admin") || (roles ?? []).includes("superadmin");
+
   const canOfficial =
     (roles ?? []).includes("official") ||
     (roles ?? []).includes("hoofdofficial") ||
     canAdmin;
-  const canDispensatie =
-    (roles ?? []).includes("dispensatie_admin") || canAdmin;
+
   const canMatchmaker =
     (roles ?? []).includes("matchmaker") || canAdmin;
+
+  const canSportscholen =
+    (roles ?? []).includes("sportscholen_admin") || canAdmin;
+
+  const canPromotor =
+    (roles ?? []).includes("promotor") || canAdmin;
 
   if (loading) {
     return (
@@ -214,26 +221,40 @@ export default function DashboardPage() {
           },
         ]
       : []),
+
     ...(canOfficial
       ? [
           {
             label: "Official Portaal",
             subtitle: "Controles, uploads en weegstation",
             href: "/dashboard/officials",
-            icon: ClipboardList,
-          },
-        ]
-      : []),
-    ...(canDispensatie
-      ? [
-          {
-            label: "Dispensatie",
-            subtitle: "Aanvragen, beoordeling en opvolging",
-            href: "/dashboard/dispensatie",
             icon: Scale,
           },
         ]
       : []),
+
+    ...(canSportscholen
+      ? [
+          {
+            label: "Dispensatie",
+            subtitle: "Dispensatie platform",
+            href: "/dashboard/dispensatie",
+            icon: Building2,
+          },
+        ]
+      : []),
+
+    ...(canPromotor
+      ? [
+          {
+            label: "Promotor Portaal",
+            subtitle: "Beheer en geef evenementen door",
+            href: "/dashboard/promotor",
+            icon: Megaphone,
+          },
+        ]
+      : []),
+
     ...(canMatchmaker
       ? [
           {
@@ -244,6 +265,7 @@ export default function DashboardPage() {
           },
         ]
       : []),
+
     {
       label: "Informatie",
       subtitle: "Reglementen, documenten en naslag",
@@ -476,14 +498,15 @@ function TopLogoBand() {
           `,
         }}
       >
-        <Image
+        <img
           src={logoSrc}
           alt="FightSupport"
-          fill
-          priority
-          className="object-contain"
+          loading="eager"
           style={{
+            width: "100%",
+            height: "100%",
             objectFit: "contain",
+            display: "block",
             transform: "scaleX(1.34)",
           }}
         />

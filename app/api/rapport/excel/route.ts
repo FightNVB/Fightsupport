@@ -43,10 +43,6 @@ function safe(v: any, fallback = "") {
   return s ? s : fallback;
 }
 
-function safeRaw(v: any) {
-  return String(v ?? "").trim();
-}
-
 function normalizeVa(v: any) {
   return String(v ?? "")
     .trim()
@@ -320,6 +316,271 @@ function fmtDateTime(v: any) {
   return d.toLocaleString("nl-NL", { timeZone: "Europe/Amsterdam" });
 }
 
+function parseDateOnly(v: any): Date | null {
+  if (!v) return null;
+  const s = String(v).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const d = Number(m[3]);
+    return new Date(Date.UTC(y, mo, d, 12, 0, 0));
+  }
+  const parsed = new Date(s);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 12, 0, 0));
+}
+
+function calcAgeAtDateNumber(dob: any, refDate: any): number | null {
+  const birth = parseDateOnly(dob);
+  const ref = parseDateOnly(refDate);
+  if (!birth || !ref) return null;
+
+  let age = ref.getUTCFullYear() - birth.getUTCFullYear();
+  const m = ref.getUTCMonth() - birth.getUTCMonth();
+  if (m < 0 || (m === 0 && ref.getUTCDate() < birth.getUTCDate())) {
+    age -= 1;
+  }
+
+  return age >= 0 ? age : null;
+}
+
+function calcAgeAtDate(dob: any, refDate: any): string {
+  const n = calcAgeAtDateNumber(dob, refDate);
+  return n == null ? "" : String(n);
+}
+
+function getDobForSide(ctx: any, side: "rood" | "blauw") {
+  return side === "rood"
+    ? ctx?.rood_geboortedatum_fp ??
+        ctx?.rood_geboortedatum_mm ??
+        ctx?.rood_geboortedatum ??
+        ctx?.geboortedatum_rood ??
+        ctx?.rood_dob
+    : ctx?.blauw_geboortedatum_fp ??
+        ctx?.blauw_geboortedatum_mm ??
+        ctx?.blauw_geboortedatum ??
+        ctx?.geboortedatum_blauw ??
+        ctx?.blauw_dob;
+}
+
+function getLeeftijdOpEvenement(ctx: any, side: "rood" | "blauw", eventDate: any) {
+  return calcAgeAtDate(getDobForSide(ctx, side), eventDate);
+}
+
+function getLeeftijdOpEvenementNumber(ctx: any, side: "rood" | "blauw", eventDate: any) {
+  return calcAgeAtDateNumber(getDobForSide(ctx, side), eventDate);
+}
+
+function normalizeKlasse(v: any) {
+  return String(v ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
+
+function getComputedRondetijden(ctx: any, eventDate: any) {
+  const klasse = normalizeKlasse(ctx?.klasse_mm ?? ctx?.klasse);
+
+  if (!klasse) return "";
+
+  if (klasse.startsWith("A")) return "3 x 3 min";
+  if (klasse.startsWith("B")) return "3 x 3 min";
+  if (klasse.startsWith("C")) return "3 x 2 min";
+  if (klasse.startsWith("N")) return "3 x 1,5 min";
+  if (klasse.startsWith("R") || klasse.includes("RECREANT")) return "3 x 1,5 min";
+
+  if (klasse.startsWith("J")) {
+    const leeftijdRood = getLeeftijdOpEvenementNumber(ctx, "rood", eventDate);
+    const leeftijdBlauw = getLeeftijdOpEvenementNumber(ctx, "blauw", eventDate);
+
+    if (
+      leeftijdRood !== null &&
+      leeftijdBlauw !== null &&
+      leeftijdRood >= 16 &&
+      leeftijdBlauw >= 16
+    ) {
+      return "3 x 1,5 min";
+    }
+
+    return "3 x 1 min";
+  }
+
+  return "";
+}
+
+function inferHoek(r: ResultRow): "rood" | "blauw" | null {
+  if (r.hoek === "rood" || r.hoek === "blauw") return r.hoek;
+
+  const c = String(r.rule_code ?? "").toLowerCase();
+  const rr = String(r.rule ?? "").toLowerCase();
+  const bb = String(r.boodschap ?? "").toLowerCase();
+  const hay = `${c} ${rr} ${bb}`;
+
+  if (hay.includes("_rood") || hay.includes(" rood") || hay.includes("rode hoek") || hay.includes("hoek rood")) {
+    return "rood";
+  }
+
+  if (hay.includes("_blauw") || hay.includes(" blauw") || hay.includes("blauwe hoek") || hay.includes("hoek blauw")) {
+    return "blauw";
+  }
+
+  return null;
+}
+
+function isVerbodMelding(r: ResultRow) {
+  const c = normCode(r.rule_code ?? r.rule);
+  if (c.startsWith("VERBOD_")) return true;
+  if (c.startsWith("VERBODZONDER") || c.startsWith("VERBOD_ZONDER")) return true;
+  const rr = String(r.rule ?? "").toUpperCase();
+  const bb = String(r.boodschap ?? "").toUpperCase();
+  return rr.includes("VERBOD") || bb.includes("VERBOD");
+}
+
+function isLicentieMelding(r: ResultRow) {
+  const c = normCode(r.rule_code ?? r.rule);
+  const isL = c.startsWith("LICENTIE_") || c.includes("LICENTIE");
+  if (!isL) return false;
+  return statusFromResultaat(r.resultaat) === "AFKEUR";
+}
+
+function isKeurmerkMelding(r: ResultRow) {
+  const rule = (r.rule_code ?? "").toUpperCase();
+  const status = (r.resultaat ?? "").toUpperCase();
+  if (!rule.includes("KEURMERK")) return false;
+  return status === "AFKEUR" || status === "ACTIE";
+}
+
+function isStartverbodMelding(r: ResultRow) {
+  const c = normCode(r.rule_code ?? r.rule);
+  return c.includes("STARTVERBOD");
+}
+
+function getVaInfo(ctx: any, side: "rood" | "blauw") {
+  if (!ctx) return { prev: "", current: "", changed: false };
+
+  const prevCandidates =
+    side === "rood"
+      ? [ctx?.rood_va_mm_prev, ctx?.rood_va_prev, ctx?.va_rood_prev]
+      : [ctx?.blauw_va_mm_prev, ctx?.blauw_va_prev, ctx?.va_blauw_prev];
+
+  const currentCandidates =
+    side === "rood"
+      ? [
+          ctx?.rood_va_mm,
+          ctx?.rood_va_gecorrigeerd,
+          ctx?.rood_va_corrected,
+          ctx?.va_rood,
+          ctx?.rood_va,
+        ]
+      : [
+          ctx?.blauw_va_mm,
+          ctx?.blauw_va_gecorrigeerd,
+          ctx?.blauw_va_corrected,
+          ctx?.va_blauw,
+          ctx?.blauw_va,
+        ];
+
+  const hasPrevColumn =
+    side === "rood"
+      ? (ctx?.rood_va_mm_prev !== undefined && ctx?.rood_va_mm_prev !== null) ||
+        (ctx?.rood_va_prev !== undefined && ctx?.rood_va_prev !== null) ||
+        (ctx?.va_rood_prev !== undefined && ctx?.va_rood_prev !== null)
+      : (ctx?.blauw_va_mm_prev !== undefined && ctx?.blauw_va_mm_prev !== null) ||
+        (ctx?.blauw_va_prev !== undefined && ctx?.blauw_va_prev !== null) ||
+        (ctx?.va_blauw_prev !== undefined && ctx?.va_blauw_prev !== null);
+
+  const prevRaw = prevCandidates.find((v) => v !== undefined && v !== null) ?? null;
+  const currentRaw = currentCandidates.find((v) => String(v ?? "").trim() !== "") ?? "";
+
+  const prevNorm = normalizeVa(prevRaw);
+  const currentNorm = normalizeVa(currentRaw);
+
+  const prevDisplay = prevRaw === null || prevRaw === undefined || String(prevRaw).trim() === "-" ? "" : safe(prevRaw, "");
+  const currentDisplay = safe(currentRaw, "");
+  const changed = hasPrevColumn && prevNorm !== currentNorm;
+
+  return { prev: prevDisplay, current: currentDisplay, changed };
+}
+
+function getCurrentNaam(ctx: any, side: "rood" | "blauw") {
+  if (!ctx) return "";
+  return side === "rood"
+    ? safe(
+        ctx?.rood_naam_fp ??
+          ctx?.rood_naam_gecorrigeerd ??
+          ctx?.rood_naam_corrected ??
+          ctx?.rood_naam_mm ??
+          ctx?.rood_naam,
+        ""
+      )
+    : safe(
+        ctx?.blauw_naam_fp ??
+          ctx?.blauw_naam_gecorrigeerd ??
+          ctx?.blauw_naam_corrected ??
+          ctx?.blauw_naam_mm ??
+          ctx?.blauw_naam,
+        ""
+      );
+}
+
+function getCurrentGym(ctx: any, side: "rood" | "blauw") {
+  if (!ctx) return "";
+  return side === "rood"
+    ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "")
+    : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "");
+}
+
+function hasFilledValue(v: any) {
+  return v !== null && v !== undefined && String(v).trim() !== "";
+}
+
+function getResolvedMaxGewicht(
+  ctx: any,
+  rawMaps: { byBoutId: Map<string, any>; byPartijNr: Map<number, any> }
+) {
+  const directCandidates = [
+    ctx?.max_gewicht,
+    ctx?.max_gewicht_mm,
+    ctx?.gewicht_max_mm,
+    ctx?.matchmaking_bouts_raw_max_gewicht,
+    ctx?.gewicht_max,
+    ctx?.max_kg,
+    ctx?.maximum_gewicht,
+    ctx?.gewichtslimiet,
+    ctx?.extra?.max_gewicht,
+    ctx?.extra?.max_kg,
+    ctx?.extra?.gewicht_max,
+    ctx?.extra?.maximum_gewicht,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (hasFilledValue(candidate)) return numOrBlank(candidate);
+  }
+
+  const boutIdCandidates = [ctx?.bout_id, ctx?.bout_uid, ctx?.match_bout_id, ctx?.wedstrijd_id]
+    .map((v: any) => safe(v, ""))
+    .filter(Boolean);
+
+  for (const boutId of boutIdCandidates) {
+    if (!rawMaps.byBoutId.has(boutId)) continue;
+    const v = rawMaps.byBoutId.get(boutId);
+    if (hasFilledValue(v)) return numOrBlank(v);
+  }
+
+  const partijNrCandidates = [Number(ctx?.partij_nr), Number(ctx?.partij_nummer), Number(ctx?.partij_label)].filter(
+    (n) => Number.isFinite(n)
+  ) as number[];
+
+  for (const partijNr of partijNrCandidates) {
+    if (!rawMaps.byPartijNr.has(partijNr)) continue;
+    const v = rawMaps.byPartijNr.get(partijNr);
+    if (hasFilledValue(v)) return numOrBlank(v);
+  }
+
+  return "";
+}
+
 async function getLatestRun(matchmaking_id: string) {
   const { data, error } = await supabase
     .from("controle_runs")
@@ -584,6 +845,7 @@ function styleUploadSheetLayout(ws: ExcelJS.Worksheet) {
   ws.getColumn(11).width = 18;
   ws.getColumn(12).width = 10;
   ws.getColumn(13).width = 14;
+  ws.getColumn(14).width = 18;
 
   ws.getRow(1).height = 24;
   ws.getRow(2).height = 22;
@@ -673,16 +935,17 @@ function writeUploadLikeOverviewHeader(opts: {
     "Partij nr",
     "Discipline",
     "Klasse",
-    "Naam atleet 1",
+    "Naam atleet (1)",
     "Sportschool (1)",
     "Fightpaspoort nr (1)",
-    "KG (1)",
+    "Leeftijd",
     "VS",
-    "Naam atleet 2",
+    "Naam atleet (2)",
     "Sportschool (2)",
     "Fightpaspoort nr (2)",
-    "KG (2)",
+    "Leeftijd",
     "Max KG",
+    "Rondetijden",
   ];
 
   for (let c = 1; c <= headers.length; c++) {
@@ -742,180 +1005,6 @@ function writeHeaderBlock(opts: {
   ws.getRow(1).height = 22;
   ws.getRow(2).height = 18;
   ws.getRow(3).height = 18;
-}
-
-function inferHoek(r: ResultRow): "rood" | "blauw" | null {
-  if (r.hoek === "rood" || r.hoek === "blauw") return r.hoek;
-
-  const c = String(r.rule_code ?? "").toLowerCase();
-  const rr = String(r.rule ?? "").toLowerCase();
-  const bb = String(r.boodschap ?? "").toLowerCase();
-  const hay = `${c} ${rr} ${bb}`;
-
-  if (hay.includes("_rood") || hay.includes(" rood") || hay.includes("rode hoek") || hay.includes("hoek rood")) {
-    return "rood";
-  }
-
-  if (hay.includes("_blauw") || hay.includes(" blauw") || hay.includes("blauwe hoek") || hay.includes("hoek blauw")) {
-    return "blauw";
-  }
-
-  return null;
-}
-
-function isVerbodMelding(r: ResultRow) {
-  const c = normCode(r.rule_code ?? r.rule);
-  if (c.startsWith("VERBOD_")) return true;
-  if (c.startsWith("VERBODZONDER") || c.startsWith("VERBOD_ZONDER")) return true;
-  const rr = String(r.rule ?? "").toUpperCase();
-  const bb = String(r.boodschap ?? "").toUpperCase();
-  return rr.includes("VERBOD") || bb.includes("VERBOD");
-}
-
-function isLicentieMelding(r: ResultRow) {
-  const c = normCode(r.rule_code ?? r.rule);
-  const isL = c.startsWith("LICENTIE_") || c.includes("LICENTIE");
-  if (!isL) return false;
-  return statusFromResultaat(r.resultaat) === "AFKEUR";
-}
-
-function isKeurmerkMelding(r: ResultRow) {
-  const rule = (r.rule_code ?? "").toUpperCase();
-  const status = (r.resultaat ?? "").toUpperCase();
-  if (!rule.includes("KEURMERK")) return false;
-  return status === "AFKEUR" || status === "ACTIE";
-}
-
-function isStartverbodMelding(r: ResultRow) {
-  const c = normCode(r.rule_code ?? r.rule);
-  return c.includes("STARTVERBOD");
-}
-
-function getVaInfo(ctx: any, side: "rood" | "blauw") {
-  if (!ctx) return { prev: "", current: "", changed: false };
-
-  const prevCandidates =
-    side === "rood"
-      ? [ctx?.rood_va_mm_prev, ctx?.rood_va_prev, ctx?.va_rood_prev]
-      : [ctx?.blauw_va_mm_prev, ctx?.blauw_va_prev, ctx?.va_blauw_prev];
-
-  const currentCandidates =
-    side === "rood"
-      ? [
-          ctx?.rood_va_mm,
-          ctx?.rood_va_gecorrigeerd,
-          ctx?.rood_va_corrected,
-          ctx?.va_rood,
-          ctx?.rood_va,
-        ]
-      : [
-          ctx?.blauw_va_mm,
-          ctx?.blauw_va_gecorrigeerd,
-          ctx?.blauw_va_corrected,
-          ctx?.va_blauw,
-          ctx?.blauw_va,
-        ];
-
-  const hasPrevColumn =
-    side === "rood"
-      ? (ctx?.rood_va_mm_prev !== undefined && ctx?.rood_va_mm_prev !== null) ||
-        (ctx?.rood_va_prev !== undefined && ctx?.rood_va_prev !== null) ||
-        (ctx?.va_rood_prev !== undefined && ctx?.va_rood_prev !== null)
-      : (ctx?.blauw_va_mm_prev !== undefined && ctx?.blauw_va_mm_prev !== null) ||
-        (ctx?.blauw_va_prev !== undefined && ctx?.blauw_va_prev !== null) ||
-        (ctx?.va_blauw_prev !== undefined && ctx?.va_blauw_prev !== null);
-
-  const prevRaw = prevCandidates.find((v) => v !== undefined && v !== null) ?? null;
-  const currentRaw = currentCandidates.find((v) => String(v ?? "").trim() !== "") ?? "";
-
-  const prevNorm = normalizeVa(prevRaw);
-  const currentNorm = normalizeVa(currentRaw);
-
-  const prevDisplay = prevRaw === null || prevRaw === undefined || String(prevRaw).trim() === "-" ? "" : safe(prevRaw, "");
-  const currentDisplay = safe(currentRaw, "");
-  const changed = hasPrevColumn && prevNorm !== currentNorm;
-
-  return { prev: prevDisplay, current: currentDisplay, changed };
-}
-
-function getCurrentNaam(ctx: any, side: "rood" | "blauw") {
-  if (!ctx) return "";
-  return side === "rood"
-    ? safe(
-        ctx?.rood_naam_fp ??
-          ctx?.rood_naam_gecorrigeerd ??
-          ctx?.rood_naam_corrected ??
-          ctx?.rood_naam_mm ??
-          ctx?.rood_naam,
-        ""
-      )
-    : safe(
-        ctx?.blauw_naam_fp ??
-          ctx?.blauw_naam_gecorrigeerd ??
-          ctx?.blauw_naam_corrected ??
-          ctx?.blauw_naam_mm ??
-          ctx?.blauw_naam,
-        ""
-      );
-}
-
-function getCurrentGym(ctx: any, side: "rood" | "blauw") {
-  if (!ctx) return "";
-  return side === "rood"
-    ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "")
-    : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "");
-}
-
-function getCurrentGewicht(ctx: any, side: "rood" | "blauw") {
-  if (!ctx) return "";
-  const raw =
-    side === "rood"
-      ? ctx?.rood_gewicht_mm ?? ctx?.rood_gewicht ?? ctx?.gewicht_rood ?? ctx?.rood_weight
-      : ctx?.blauw_gewicht_mm ?? ctx?.blauw_gewicht ?? ctx?.gewicht_blauw ?? ctx?.blauw_weight;
-  return numOrBlank(raw);
-}
-
-function hasFilledValue(v: any) {
-  return v !== null && v !== undefined && String(v).trim() !== "";
-}
-
-function getResolvedMaxGewicht(
-  ctx: any,
-  rawMaps: { byBoutId: Map<string, any>; byPartijNr: Map<number, any> }
-) {
-  const directCandidates = [
-    ctx?.max_gewicht,
-    ctx?.max_gewicht_mm,
-    ctx?.gewicht_max_mm,
-    ctx?.matchmaking_bouts_raw_max_gewicht,
-    ctx?.gewicht_max,
-    ctx?.max_kg,
-    ctx?.extra?.max_gewicht,
-    ctx?.extra?.max_kg,
-    ctx?.extra?.gewicht_max,
-  ];
-
-  for (const candidate of directCandidates) {
-    if (hasFilledValue(candidate)) return numOrBlank(candidate);
-  }
-
-  const boutIdCandidates = [ctx?.bout_id, ctx?.bout_uid]
-    .map((v: any) => safe(v, ""))
-    .filter(Boolean);
-
-  for (const boutId of boutIdCandidates) {
-    if (!rawMaps.byBoutId.has(boutId)) continue;
-    const v = rawMaps.byBoutId.get(boutId);
-    if (hasFilledValue(v)) return numOrBlank(v);
-  }
-
-  const partijNr = Number(ctx?.partij_nr);
-  if (Number.isFinite(partijNr) && rawMaps.byPartijNr.has(partijNr)) {
-    const v = rawMaps.byPartijNr.get(partijNr);
-    if (hasFilledValue(v)) return numOrBlank(v);
-  }
-
-  return "";
 }
 
 export async function GET(req: Request) {
@@ -1006,6 +1095,7 @@ export async function GET(req: Request) {
 
     const eventName = safe(eventMeta?.naam, "-");
     const eventDate = fmtNlDateOnly(eventMeta?.datum);
+    const eventDateRaw = eventMeta?.datum ?? null;
     const eventBond = safe((eventMeta as any)?.bond, "");
     const runStart = fmtDateTime(run.gestart_op);
     const runEnd = fmtDateTime(run.afgerond_op);
@@ -1055,17 +1145,18 @@ export async function GET(req: Request) {
         row.getCell(4).value = getCurrentNaam(p, "rood");
         row.getCell(5).value = getCurrentGym(p, "rood");
         row.getCell(6).value = safe(roodVa.current, "");
-        row.getCell(7).value = getCurrentGewicht(p, "rood");
+        row.getCell(7).value = getLeeftijdOpEvenement(p, "rood", eventDateRaw);
         row.getCell(8).value = "vs";
         row.getCell(9).value = getCurrentNaam(p, "blauw");
         row.getCell(10).value = getCurrentGym(p, "blauw");
         row.getCell(11).value = safe(blauwVa.current, "");
-        row.getCell(12).value = getCurrentGewicht(p, "blauw");
+        row.getCell(12).value = getLeeftijdOpEvenement(p, "blauw", eventDateRaw);
         row.getCell(13).value = getResolvedMaxGewicht(p, rawMaps);
+        row.getCell(14).value = getComputedRondetijden(p, eventDateRaw);
 
-        for (let c = 1; c <= 13; c++) {
+        for (let c = 1; c <= 14; c++) {
           styleUploadDataCell(row.getCell(c), {
-            center: c === 1 || c === 7 || c === 8 || c === 12 || c === 13,
+            center: c === 1 || c === 7 || c === 8 || c === 12 || c === 13 || c === 14,
           });
         }
 
@@ -1080,7 +1171,19 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const verbodRows = openMeldingen
+      .filter((r) => isVerbodMelding(r) || (statusFromResultaat(r.resultaat) === "AFKEUR" && normCode(r.rule_code ?? "").startsWith("VERBOD_")))
+      .sort((a, b) => {
+        const ap = Number(a.partij_nr ?? 999999);
+        const bp = Number(b.partij_nr ?? 999999);
+        if (ap !== bp) return ap - bp;
+        const ah = String(inferHoek(a) ?? "");
+        const bh = String(inferHoek(b) ?? "");
+        if (ah !== bh) return ah.localeCompare(bh);
+        return String(a.rule_code ?? "").localeCompare(String(b.rule_code ?? ""));
+      });
+
+    if (verbodRows.length > 0) {
       const ws = wb.addWorksheet("Verbod");
 
       ws.columns = [
@@ -1110,20 +1213,8 @@ export async function GET(req: Request) {
       styleHeaderRow(ws, HEADER_ROW, 7);
 
       const START_ROW = HEADER_ROW + 1;
-
-      const verbodRows = openMeldingen
-        .filter((r) => isVerbodMelding(r) || (statusFromResultaat(r.resultaat) === "AFKEUR" && normCode(r.rule_code ?? "").startsWith("VERBOD_")))
-        .sort((a, b) => {
-          const ap = Number(a.partij_nr ?? 999999);
-          const bp = Number(b.partij_nr ?? 999999);
-          if (ap !== bp) return ap - bp;
-          const ah = String(inferHoek(a) ?? "");
-          const bh = String(inferHoek(b) ?? "");
-          if (ah !== bh) return ah.localeCompare(bh);
-          return String(a.rule_code ?? "").localeCompare(String(b.rule_code ?? ""));
-        });
-
       let rno = START_ROW;
+
       for (const r of verbodRows) {
         const pn = Number(r.partij_nr);
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
@@ -1144,7 +1235,11 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const startverbodRows = openMeldingen
+      .filter((r) => isStartverbodMelding(r))
+      .sort((a, b) => Number(a.partij_nr ?? 999999) - Number(b.partij_nr ?? 999999));
+
+    if (startverbodRows.length > 0) {
       const ws = wb.addWorksheet("Startverbod");
 
       ws.columns = [
@@ -1172,13 +1267,9 @@ export async function GET(req: Request) {
       styleHeaderRow(ws, HEADER_ROW, 5);
 
       const START_ROW = HEADER_ROW + 1;
-
-      const rows = openMeldingen
-        .filter((r) => isStartverbodMelding(r))
-        .sort((a, b) => Number(a.partij_nr ?? 999999) - Number(b.partij_nr ?? 999999));
-
       let rno = START_ROW;
-      for (const r of rows) {
+
+      for (const r of startverbodRows) {
         const pn = Number(r.partij_nr);
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
         const hoek = inferHoek(r);
@@ -1195,7 +1286,16 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const licentieRows = openMeldingen
+      .filter((r) => isLicentieMelding(r))
+      .sort((a, b) => {
+        const ap = Number(a.partij_nr ?? 999999);
+        const bp = Number(b.partij_nr ?? 999999);
+        if (ap !== bp) return ap - bp;
+        return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
+      });
+
+    if (licentieRows.length > 0) {
       const ws = wb.addWorksheet("Licentie");
 
       ws.columns = [
@@ -1226,18 +1326,9 @@ export async function GET(req: Request) {
       styleHeaderRow(ws, HEADER_ROW, 8);
 
       const START_ROW = HEADER_ROW + 1;
-
-      const rows = openMeldingen
-        .filter((r) => isLicentieMelding(r))
-        .sort((a, b) => {
-          const ap = Number(a.partij_nr ?? 999999);
-          const bp = Number(b.partij_nr ?? 999999);
-          if (ap !== bp) return ap - bp;
-          return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
-        });
-
       let rno = START_ROW;
-      for (const r of rows) {
+
+      for (const r of licentieRows) {
         const pn = Number(r.partij_nr);
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
         const hoek = inferHoek(r);
@@ -1256,7 +1347,8 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const keurmerkRows = openMeldingen.filter((r) => isKeurmerkMelding(r));
+    if (keurmerkRows.length > 0) {
       const ws = wb.addWorksheet("Keurmerk");
 
       ws.columns = [
@@ -1285,8 +1377,7 @@ export async function GET(req: Request) {
 
       const set = new Map<string, { reden: string; count: number }>();
 
-      const rows = openMeldingen.filter((r) => isKeurmerkMelding(r));
-      for (const r of rows) {
+      for (const r of keurmerkRows) {
         const pn = Number(r.partij_nr);
         if (!Number.isFinite(pn)) continue;
         const ctx = ctxByPn.get(pn);
@@ -1317,7 +1408,8 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const dispRows = alleDispensaties.sort((a, b) => Number(a.partij_nr ?? 999999) - Number(b.partij_nr ?? 999999));
+    if (dispRows.length > 0) {
       const ws = wb.addWorksheet("Dispensatie");
 
       ws.columns = [
@@ -1349,10 +1441,8 @@ export async function GET(req: Request) {
       styleHeaderRow(ws, HEADER_ROW, 9);
 
       const START_ROW = HEADER_ROW + 1;
-
-      const dispRows = alleDispensaties.sort((a, b) => Number(a.partij_nr ?? 999999) - Number(b.partij_nr ?? 999999));
-
       let rno = START_ROW;
+
       for (const r of dispRows) {
         const row = ws.getRow(rno++);
         row.values = [
@@ -1383,7 +1473,16 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const geenVaRows = openMeldingen
+      .filter((r) => isMissingVARow(r))
+      .sort((a, b) => {
+        const ap = Number(a.partij_nr ?? 999999);
+        const bp = Number(b.partij_nr ?? 999999);
+        if (ap !== bp) return ap - bp;
+        return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
+      });
+
+    if (geenVaRows.length > 0) {
       const ws = wb.addWorksheet("Geen VA");
 
       ws.columns = [
@@ -1413,18 +1512,9 @@ export async function GET(req: Request) {
       styleHeaderRow(ws, HEADER_ROW, 7);
 
       const START_ROW = HEADER_ROW + 1;
-
-      const rows = openMeldingen
-        .filter((r) => isMissingVARow(r))
-        .sort((a, b) => {
-          const ap = Number(a.partij_nr ?? 999999);
-          const bp = Number(b.partij_nr ?? 999999);
-          if (ap !== bp) return ap - bp;
-          return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
-        });
-
       let rno = START_ROW;
-      for (const r of rows) {
+
+      for (const r of geenVaRows) {
         const pn = Number(r.partij_nr);
         const hoek = inferHoek(r);
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
@@ -1446,7 +1536,16 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const vaGewijzigdRows = resultaten
+      .filter((r) => isFightpaspoortGewijzigd(r))
+      .sort((a, b) => {
+        const ap = Number(a.partij_nr ?? 999999);
+        const bp = Number(b.partij_nr ?? 999999);
+        if (ap !== bp) return ap - bp;
+        return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
+      });
+
+    if (vaGewijzigdRows.length > 0 || auditEvents.some((a) => isVaAuditEventType(a.event_type))) {
       const ws = wb.addWorksheet("VA gewijzigd");
 
       ws.columns = [
@@ -1477,18 +1576,9 @@ export async function GET(req: Request) {
       styleHeaderRow(ws, HEADER_ROW, 8);
 
       const START_ROW = HEADER_ROW + 1;
-
-      const rows = resultaten
-        .filter((r) => isFightpaspoortGewijzigd(r))
-        .sort((a, b) => {
-          const ap = Number(a.partij_nr ?? 999999);
-          const bp = Number(b.partij_nr ?? 999999);
-          if (ap !== bp) return ap - bp;
-          return String(inferHoek(a) ?? "").localeCompare(String(inferHoek(b) ?? ""));
-        });
-
       let rno = START_ROW;
-      for (const r of rows) {
+
+      for (const r of vaGewijzigdRows) {
         const pn = Number(r.partij_nr);
         const hoek = inferHoek(r);
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;
@@ -1510,7 +1600,17 @@ export async function GET(req: Request) {
       }
     }
 
-    {
+    const sortedMeldingen = [...meldingenVoorTab].sort((a, b) => {
+      const ap = Number(a.partij_nr ?? 999999);
+      const bp = Number(b.partij_nr ?? 999999);
+      if (ap !== bp) return ap - bp;
+      const ah = String(inferHoek(a) ?? "");
+      const bh = String(inferHoek(b) ?? "");
+      if (ah !== bh) return ah.localeCompare(bh);
+      return statusPrio(statusFromResultaat(a.resultaat)) - statusPrio(statusFromResultaat(b.resultaat));
+    });
+
+    if (sortedMeldingen.length > 0) {
       const ws = wb.addWorksheet("Meldingen");
 
       ws.columns = [
@@ -1544,19 +1644,9 @@ export async function GET(req: Request) {
       styleHeaderRow(ws, HEADER_ROW, 11);
 
       const START_ROW = HEADER_ROW + 1;
-
-      const sorted = [...meldingenVoorTab].sort((a, b) => {
-        const ap = Number(a.partij_nr ?? 999999);
-        const bp = Number(b.partij_nr ?? 999999);
-        if (ap !== bp) return ap - bp;
-        const ah = String(inferHoek(a) ?? "");
-        const bh = String(inferHoek(b) ?? "");
-        if (ah !== bh) return ah.localeCompare(bh);
-        return statusPrio(statusFromResultaat(a.resultaat)) - statusPrio(statusFromResultaat(b.resultaat));
-      });
-
       let rno = START_ROW;
-      for (const r of sorted) {
+
+      for (const r of sortedMeldingen) {
         const pn = Number(r.partij_nr);
         const hoek = (inferHoek(r) as any) ?? null;
         const ctx = Number.isFinite(pn) ? ctxByPn.get(pn) : null;

@@ -1,7 +1,7 @@
 // app/api/dispensatie/upsert/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserFromAuthHeader, hasAnyRole, hasAnyRoleFromReq } from "@/lib/api/requireRole";
+import { requireUserFromAuthHeader, hasAnyRoleFromReq } from "@/lib/api/requireRole";
 
 export const runtime = "nodejs";
 
@@ -41,30 +41,121 @@ function asInt(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function asText(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s || null;
+}
+
+function normUpper(v: unknown): string {
+  return String(v ?? "").trim().toUpperCase();
+}
+
+async function findLatestDispensatieResult(params: {
+  bout_id: string;
+  controle_run_id: string | null;
+}) {
+  const { bout_id, controle_run_id } = params;
+
+  let result: {
+    id: string | null;
+    rule_code: string | null;
+    boodschap: string | null;
+    resultaat: string | null;
+  } | null = null;
+
+  // eerst binnen laatste run
+  {
+    let q = supabaseAdmin
+      .from("controle_resultaten")
+      .select("id, rule_code, boodschap, resultaat, created_at, controle_run_id")
+      .eq("bout_id", bout_id)
+      .order("created_at", { ascending: false });
+
+    if (controle_run_id) {
+      q = q.eq("controle_run_id", controle_run_id);
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const match = (data ?? []).find(
+      (row: any) => normUpper(row?.resultaat) === "DISPENSATIE"
+    );
+
+    if (match) {
+      result = {
+        id: asText(match.id),
+        rule_code: asText(match.rule_code),
+        boodschap: asText(match.boodschap),
+        resultaat: asText(match.resultaat),
+      };
+    }
+  }
+
+  // fallback zonder run filter
+  if (!result) {
+    const { data, error } = await supabaseAdmin
+      .from("controle_resultaten")
+      .select("id, rule_code, boodschap, resultaat, created_at, controle_run_id")
+      .eq("bout_id", bout_id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const match = (data ?? []).find(
+      (row: any) => normUpper(row?.resultaat) === "DISPENSATIE"
+    );
+
+    if (match) {
+      result = {
+        id: asText(match.id),
+        rule_code: asText(match.rule_code),
+        boodschap: asText(match.boodschap),
+        resultaat: asText(match.resultaat),
+      };
+    }
+  }
+
+  return result;
+}
+
 export async function POST(req: Request) {
   try {
     const { user } = await requireUserFromAuthHeader(req);
-    const ok = await hasAnyRoleFromReq(req, ["admin", "superadmin"]);
-    if (!ok) return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
+
+    const ok = await hasAnyRoleFromReq(req, [
+      "matchmaker",
+      "dispensatie_admin",
+      "superadmin",
+    ]);
+
+    if (!ok) {
+      return NextResponse.json(
+        {
+          error:
+            "Geen rechten. Alleen matchmaker, dispensatie_admin of superadmin.",
+        },
+        { status: 403 }
+      );
+    }
 
     const body = await req.json().catch(() => ({}));
 
-    // 🔎 Forensic logging
     console.log("[dispensatie/upsert] RAW body:", JSON.stringify(body, null, 2));
     console.log("[dispensatie/upsert] RAW user.id:", (user as any)?.id);
 
     const matchmaking_id = asUuidStrict((body as any).matchmaking_id);
     const bout_id = asUuidStrict((body as any).bout_id);
     const partij_nr = asInt((body as any).partij_nr);
+    const created_by = asUuidStrict((user as any)?.id);
 
-    const rule_code =
+    const bodyRuleCode =
       typeof (body as any).rule_code === "string"
         ? (body as any).rule_code.trim() || null
         : (body as any).rule_code
-        ? String((body as any).rule_code).trim() || null
-        : null;
-
-    const created_by = asUuidStrict((user as any)?.id);
+          ? String((body as any).rule_code).trim() || null
+          : null;
 
     if (!matchmaking_id || !bout_id) {
       return NextResponse.json(
@@ -83,7 +174,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // laatste controle_run_id (mag null)
     const { data: runs, error: runErr } = await supabaseAdmin
       .from("controle_runs")
       .select("id")
@@ -95,7 +185,39 @@ export async function POST(req: Request) {
 
     const controle_run_id = asUuidStrict(runs?.[0]?.id);
 
-    // bestaat al? (matchmaking_id + bout_id)
+    /**
+     * Alleen resultaat DISPENSATIE telt.
+     * Dus NIET op rule_code, NIET op boodschap, NIET op andere meldingen.
+     */
+    const dispensatieResult = await findLatestDispensatieResult({
+      bout_id,
+      controle_run_id,
+    });
+
+    if (!dispensatieResult) {
+      return NextResponse.json(
+        {
+          error:
+            "Geen controle_resultaten row met resultaat DISPENSATIE gevonden voor deze partij.",
+          debug: {
+            matchmaking_id,
+            bout_id,
+            partij_nr,
+            controle_run_id,
+            body_rule_code: bodyRuleCode,
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const resolved_rule_code =
+      dispensatieResult.rule_code ??
+      bodyRuleCode ??
+      null;
+
+    const dispensatie_melding = dispensatieResult.boodschap ?? null;
+
     const { data: existing, error: exErr } = await supabaseAdmin
       .from("dispensatie_requests")
       .select("id")
@@ -110,12 +232,20 @@ export async function POST(req: Request) {
 
       const patch: any = {
         partij_nr,
-        rule_code,
+        rule_code: resolved_rule_code,
         updated_at: new Date().toISOString(),
       };
+
       if (controle_run_id) patch.controle_run_id = controle_run_id;
 
       console.log("[dispensatie/upsert] UPDATE id:", id, "patch:", patch);
+      console.log("[dispensatie/upsert] DISPENSATIE melding:", dispensatie_melding);
+      console.log(
+        "[dispensatie/upsert] SOURCE resultaat:",
+        dispensatieResult.resultaat,
+        "SOURCE rule_code:",
+        dispensatieResult.rule_code
+      );
 
       const { error: updErr } = await supabaseAdmin
         .from("dispensatie_requests")
@@ -124,10 +254,19 @@ export async function POST(req: Request) {
 
       if (updErr) {
         console.log("[dispensatie/upsert] UPDATE ERROR:", updErr);
-        return NextResponse.json({ error: updErr.message, supabase_error: updErr, patch }, { status: 500 });
+        return NextResponse.json(
+          { error: updErr.message, supabase_error: updErr, patch },
+          { status: 500 }
+        );
       }
 
-      return NextResponse.json({ id });
+      return NextResponse.json({
+        id,
+        rule_code: resolved_rule_code,
+        melding: dispensatie_melding,
+        resultaat: "DISPENSATIE",
+        source_resultaat_id: dispensatieResult.id ?? null,
+      });
     }
 
     const insertRow: any = {
@@ -135,13 +274,19 @@ export async function POST(req: Request) {
       matchmaking_id,
       bout_id,
       partij_nr,
-      rule_code,
+      rule_code: resolved_rule_code,
       controle_run_id: controle_run_id ?? null,
-      // ⚠️ als created_by kolom NOT NULL is, moet dit een uuid zijn.
       created_by: created_by ?? null,
     };
 
     console.log("[dispensatie/upsert] INSERT row:", insertRow);
+    console.log("[dispensatie/upsert] DISPENSATIE melding:", dispensatie_melding);
+    console.log(
+      "[dispensatie/upsert] SOURCE resultaat:",
+      dispensatieResult.resultaat,
+      "SOURCE rule_code:",
+      dispensatieResult.rule_code
+    );
 
     const { data: ins, error: insErr } = await supabaseAdmin
       .from("dispensatie_requests")
@@ -157,7 +302,13 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ id: ins.id });
+    return NextResponse.json({
+      id: ins.id,
+      rule_code: resolved_rule_code,
+      melding: dispensatie_melding,
+      resultaat: "DISPENSATIE",
+      source_resultaat_id: dispensatieResult.id ?? null,
+    });
   } catch (e: any) {
     console.log("[dispensatie/upsert] CATCH ERROR:", e);
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });

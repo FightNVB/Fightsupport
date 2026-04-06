@@ -190,7 +190,7 @@ export default function OfficialsDashboardPage() {
 
   const actions: MenuAction[] = [
     {
-      label: "Matchmaking controle",
+      label: "Matchmaking overzicht",
       subtitle: "Controleoverzicht en partijvalidatie",
       href: "/dashboard/officials/controle",
       icon: ClipboardList,
@@ -202,9 +202,9 @@ export default function OfficialsDashboardPage() {
       icon: Scale,
     },
     {
-      label: "Line-up",
-      subtitle: "Startvolgorde en eventoverzicht beheren",
-      href: "/dashboard/officials/lineup",
+      label: "Events",
+      subtitle: "Aangevraagde events beheren",
+      href: "/dashboard/officials/verzoeken",
       icon: Users,
     },
     {

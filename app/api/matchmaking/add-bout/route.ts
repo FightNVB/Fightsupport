@@ -1,4 +1,3 @@
-// app/api/.../add-bout/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -42,10 +41,8 @@ function toVaStrict(v: any): string | null {
 }
 
 function resolveOrigin(req: Request) {
-  // In sommige deployments ontbreekt Origin; daarom fallbacks.
   const fromHeader = req.headers.get("origin") || "";
 
-  // Host/proto fallback (werkt achter proxies zoals Vercel/NGINX)
   const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
   const proto = req.headers.get("x-forwarded-proto") || (host ? "https" : "");
   const fromHost = host ? `${proto}://${host}` : "";
@@ -57,6 +54,26 @@ function resolveOrigin(req: Request) {
     "";
 
   return (fromHeader || fromHost || fromEnv).replace(/\/$/, "");
+}
+
+function asUuid(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s)
+    ? s
+    : null;
+}
+
+function safeStatusFromKlasse(klasse: string): string {
+  const k = klasse.toLowerCase();
+  if (k.includes("jeugd")) return "concept";
+  return "concept";
+}
+
+function safeLeeftijdTypeFromKlasse(klasse: string): string | null {
+  const k = klasse.toLowerCase();
+  if (k.includes("jeugd")) return "jeugd";
+  return "senior";
 }
 
 export async function POST(req: Request) {
@@ -72,7 +89,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Auth check (token verplicht)
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return bad("Missing Authorization Bearer token", 401);
@@ -84,13 +100,12 @@ export async function POST(req: Request) {
     const { data: userRes, error: userErr } = await authClient.auth.getUser();
     if (userErr || !userRes?.user) return bad("Unauthorized", 401);
 
-    // ✅ Service client (insert mag ook als RLS strak staat)
     const admin = createClient(supabaseUrl, serviceKey);
 
     const body = (await req.json()) as Partial<Payload>;
 
-    const matchmaking_id = String(body.matchmaking_id ?? "").trim();
-    if (!matchmaking_id) return bad("matchmaking_id ontbreekt");
+    const matchmaking_id = asUuid(body.matchmaking_id);
+    if (!matchmaking_id) return bad("matchmaking_id ontbreekt of is ongeldig");
 
     const discipline = String(body.discipline ?? "").trim();
     const klasse = String(body.klasse ?? "").trim();
@@ -107,7 +122,6 @@ export async function POST(req: Request) {
 
     const max_gewicht = toNum(body.max_gewicht);
 
-    // minimale validatie
     if (!discipline) return bad("discipline ontbreekt");
     if (!klasse) return bad("klasse ontbreekt");
     if (!rood_naam) return bad("rood_naam ontbreekt");
@@ -119,7 +133,22 @@ export async function POST(req: Request) {
     if (!va_blauw) return bad("va_blauw ontbreekt");
     if (blauw_gewicht == null) return bad("blauw_gewicht ongeldig");
 
-    // ✅ Pak laatste upload voor deze matchmaking (voor upload_id + event_id)
+    const { data: mmRow, error: mmErr } = await admin
+      .from("matchmaker_matchmakings")
+      .select("*")
+      .eq("id", matchmaking_id)
+      .maybeSingle();
+
+    if (mmErr) return bad(mmErr.message, 500);
+    if (!mmRow) return bad("Matchmaking niet gevonden", 404);
+
+    const matchmaker_matchmaking_id =
+      Number(mmRow?.matchmaker_matchmaking_id ?? mmRow?.legacy_matchmaking_id ?? mmRow?.numeric_id);
+
+    if (!Number.isFinite(matchmaker_matchmaking_id)) {
+      return bad("matchmaker_matchmaking_id (int8) ontbreekt in matchmaker_matchmakings", 500);
+    }
+
     const { data: latestUpload, error: upErr } = await admin
       .from("matchmaking_uploads")
       .select("id, event_id, evenement_datum, uploaded_at")
@@ -129,14 +158,12 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (upErr) return bad(upErr.message, 500);
-    if (!latestUpload?.id) return bad("Geen matchmaking_upload gevonden voor dit matchmaking_id", 400);
 
-    const upload_id = String(latestUpload.id);
-    const event_id = latestUpload.event_id ?? null;
+    const upload_id = latestUpload?.id ? String(latestUpload.id) : null;
+    const event_id = latestUpload?.event_id ?? null;
 
-    // ✅ Next partij_nr (max + 1)
     const { data: lastBout, error: lastErr } = await admin
-      .from("matchmaking_bouts_raw")
+      .from("matchmaker_bouts_raw")
       .select("partij_nr")
       .eq("matchmaking_id", matchmaking_id)
       .order("partij_nr", { ascending: false })
@@ -147,59 +174,77 @@ export async function POST(req: Request) {
 
     const nextPartijNr = Number(lastBout?.partij_nr ?? 0) + 1;
 
-    const bout_uid =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`;
+    const raw = {
+      parse_mode: "manual_add",
+      created_by: userRes.user.id,
+      source: "add-bout",
+      event_id,
+      upload_id,
+      rood: {
+        naam: rood_naam,
+        gym: rood_gym,
+        va: va_rood,
+        gewicht: rood_gewicht,
+      },
+      blauw: {
+        naam: blauw_naam,
+        gym: blauw_gym,
+        va: va_blauw,
+        gewicht: blauw_gewicht,
+      },
+    };
 
     const insertRow = {
-      upload_id,
+      matchmaker_matchmaking_id,
       matchmaking_id,
       partij_nr: nextPartijNr,
+
       discipline,
       klasse,
+      status: safeStatusFromKlasse(klasse),
+      leeftijd_type: safeLeeftijdTypeFromKlasse(klasse),
+
+      rood_inschrijving_id: null,
+      blauw_inschrijving_id: null,
 
       rood_naam,
-      rood_gym,
-      va_rood,
-      rood_gewicht,
-
       blauw_naam,
-      blauw_gym,
-      va_blauw,
-      blauw_gewicht,
 
+      rood_gym,
+      blauw_gym,
+
+      rood_va: va_rood,
+      blauw_va: va_blauw,
+
+      rood_gewicht,
+      blauw_gewicht,
       max_gewicht,
 
-      event_id,
-
-      // handig om te kunnen herkennen
-      raw_json: JSON.stringify({ parse_mode: "manual_add", created_by: userRes.user.id }),
-
-      bout_uid,
+      geslacht: null,
+      created_by: userRes.user.id,
+      source_match_id: null,
+      raw,
     };
 
     const { data: inserted, error: insErr } = await admin
-      .from("matchmaking_bouts_raw")
+      .from("matchmaker_bouts_raw")
       .insert(insertRow)
       .select("*")
       .single();
 
     if (insErr) return bad(insErr.message, 500);
 
-    // ✅ NA INSERT: scoped rescrape (op VA’s) zodat controle_bout_context meteen bijgewerkt wordt
     const vaR = toVaStrict(va_rood);
     const vaB = toVaStrict(va_blauw);
 
     if (!vaR || !vaB) {
-      // Insert is ok, maar rescrape kan niet zonder VA’s
       return NextResponse.json({
         ok: true,
         row: inserted,
         rescrape: {
           ok: false,
           skipped: true,
-          error: "Rescrape overgeslagen: VA nummers ontbreken/ongeldig (va_rood en va_blauw zijn verplicht).",
+          error: "Rescrape overgeslagen: VA nummers ontbreken/ongeldig.",
           partij_nr: nextPartijNr,
           va_rood: vaR,
           va_blauw: vaB,
@@ -212,17 +257,18 @@ export async function POST(req: Request) {
 
     try {
       const origin = resolveOrigin(req);
-      const url = origin ? `${origin}/api/control-engine/bout-rescrape` : "/api/control-engine/bout-rescrape";
+      const url = origin
+        ? `${origin}/api/control-engine/bout-rescrape`
+        : "/api/control-engine/bout-rescrape";
 
-      // Sommige endpoints gebruiken cookie-sessie i.p.v. bearer; daarom beiden doorgeven.
       const cookie = req.headers.get("cookie") || "";
 
       const r = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: authHeader, // bearer doorgeven
-          cookie, // sessie doorgeven (voor requireUserWithRole / assertCanAccessMatchmaking)
+          Authorization: authHeader,
+          cookie,
         },
         body: JSON.stringify({
           matchmaking_id,

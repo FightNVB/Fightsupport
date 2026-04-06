@@ -53,6 +53,11 @@ function asInt(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function normStr(v: any): string | null {
+  const s = String(v ?? "").trim();
+  return s || null;
+}
+
 function reviewKey(row: { partij_nr: any; bout_id: any; rule_code: any; hoek: any }) {
   const partij = asInt(row.partij_nr) ?? -1;
   const bout = asUuid(row.bout_id) ?? "";
@@ -69,6 +74,15 @@ function normalizeReviewStatus(v: any): "approved" | "rejected" | null {
   return null;
 }
 
+function makePlaceholderKey(opts: { partij_nr?: number | null; bout_id?: string | null }) {
+  return reviewKey({
+    partij_nr: opts.partij_nr ?? null,
+    bout_id: opts.bout_id ?? null,
+    rule_code: "__NO_RULES__",
+    hoek: null,
+  });
+}
+
 /**
  * saveControleResultaten
  *
@@ -77,6 +91,10 @@ function normalizeReviewStatus(v: any): "approved" | "rejected" | null {
  * - met bout_id: alleen die bout vervangen
  * - met partij_nr: alleen die partij vervangen
  * - met beide: bout_id heeft voorrang, partij_nr als extra safety
+ *
+ * Belangrijk:
+ * - ook als er GEEN hits zijn, schrijven we bij een scoped save altijd een placeholder row
+ * - zo verlies je geen partij/bout zonder VA of zonder rule hits
  */
 export async function saveControleResultaten(opts: {
   controle_run_id: string;
@@ -121,7 +139,10 @@ export async function saveControleResultaten(opts: {
   for (const r of existing ?? []) {
     const key = reviewKey(r as any);
     const rs = normalizeReviewStatus((r as any).review_status);
-    const hasReview = !!rs || !!(r as any).reviewed_at || !!String((r as any).review_note ?? "").trim();
+    const hasReview =
+      !!rs ||
+      !!(r as any).reviewed_at ||
+      !!String((r as any).review_note ?? "").trim();
     const hasNotes = !!String((r as any).aantekeningen ?? "").trim();
 
     if (hasReview || hasNotes) {
@@ -155,11 +176,23 @@ export async function saveControleResultaten(opts: {
     const mmId = asUuid(hit?.matchmaking_id) ?? matchmaking_id;
 
     // safety:
-    // - als we op bout scoped werken en row heeft andere bout -> skip
-    if (scopedBoutId && bout_id !== scopedBoutId) continue;
+    // - scoped op bout: alleen skippen als hit expliciet een andere bout_id heeft
+    if (scopedBoutId && hitBoutId && hitBoutId !== scopedBoutId) continue;
 
-    // - als we op partij scoped werken en row heeft andere partij -> skip
-    if (scopedBoutId == null && scopedPartijNr != null && partij_nr !== scopedPartijNr) continue;
+    // - scoped op partij: alleen skippen als hit expliciet een andere partij_nr heeft
+    if (
+      scopedBoutId == null &&
+      scopedPartijNr != null &&
+      hit?.partij_nr != null &&
+      asInt(hit?.partij_nr) !== scopedPartijNr
+    ) {
+      continue;
+    }
+
+    // helemaal onbruikbare hit overslaan
+    if (partij_nr == null && bout_id == null) {
+      continue;
+    }
 
     const baseRow: any = {
       controle_run_id,
@@ -169,13 +202,13 @@ export async function saveControleResultaten(opts: {
       partij_nr,
       bout_id,
 
-      rule_code: hit.rule_code ?? null,
-      rule: hit.rule ?? hit.rule_code ?? "RULE",
-      severity: hit.severity ?? null,
-      resultaat: hit.resultaat ?? null,
-      boodschap: hit.boodschap ?? hit.message ?? null,
+      rule_code: normStr(hit.rule_code),
+      rule: normStr(hit.rule) ?? normStr(hit.rule_code) ?? "RULE",
+      severity: normStr(hit.severity),
+      resultaat: normStr(hit.resultaat),
+      boodschap: normStr(hit.boodschap) ?? normStr(hit.message),
       hoek: hit.hoek ?? null,
-      original_resultaat: hit.resultaat ?? null,
+      original_resultaat: normStr(hit.resultaat),
     };
 
     const key = reviewKey({
@@ -208,7 +241,61 @@ export async function saveControleResultaten(opts: {
     rowsToInsert.push(baseRow);
   }
 
-  if (rowsToInsert.length === 0) return;
+  // 3) Geen hits? Dan toch placeholder row schrijven voor scoped save
+  // Zo blijft een partij/bout zonder VA of zonder rule hits bestaan.
+  if (rowsToInsert.length === 0) {
+    // scoped op bout of partij -> placeholder opslaan
+    if (scopedBoutId || scopedPartijNr != null) {
+      const key = makePlaceholderKey({
+        partij_nr: scopedPartijNr ?? null,
+        bout_id: scopedBoutId ?? null,
+      });
+
+      const prev = reviewMap.get(key);
+
+      const placeholderRow: any = {
+        controle_run_id,
+        run_id: controle_run_id,
+        matchmaking_id,
+
+        partij_nr: scopedPartijNr ?? null,
+        bout_id: scopedBoutId ?? null,
+
+        rule_code: "__NO_RULES__",
+        rule: "NO_RULES",
+        severity: null,
+        resultaat: "OK",
+        boodschap: null,
+        hoek: null,
+        original_resultaat: "OK",
+        actie_status: null,
+      };
+
+      if (prev) {
+        const norm = prev._norm as "approved" | "rejected" | null;
+
+        placeholderRow.review_status = norm ?? prev.review_status ?? null;
+        placeholderRow.review_note = prev.review_note ?? null;
+        placeholderRow.reviewed_by = prev.reviewed_by ?? null;
+        placeholderRow.reviewed_at = prev.reviewed_at ?? null;
+        placeholderRow.aantekeningen = prev.aantekeningen ?? null;
+
+        if (norm === "approved") {
+          placeholderRow.resultaat = "OK";
+          placeholderRow.actie_status = "goedgekeurd";
+        } else if (norm === "rejected") {
+          placeholderRow.resultaat = "AFKEUR";
+          placeholderRow.actie_status = "afgekeurd";
+        }
+      }
+
+      rowsToInsert.push(placeholderRow);
+    } else {
+      // hele run zonder hits: dan is er niets te schrijven
+      // maar dit is bewust, want zonder scope weten we niet welke partijen placeholders moeten krijgen
+      return;
+    }
+  }
 
   const { error: insErr } = await supabaseAdmin
     .from("controle_resultaten")

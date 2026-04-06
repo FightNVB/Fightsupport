@@ -17,10 +17,6 @@ function asUuid(v: any): string | null {
   return ok ? s : null;
 }
 
-/**
- * Voer een supabase query uit, maar negeer fouten (best effort).
- * Handig voor "kolom bestaat niet" of "tabel bestaat niet" scenario's.
- */
 async function bestEffort<T>(promise: Promise<T>): Promise<null> {
   try {
     await promise;
@@ -33,7 +29,7 @@ async function bestEffort<T>(promise: Promise<T>): Promise<null> {
 export async function POST(req: Request) {
   try {
     const user = await requireUserFromAuthHeader(req);
-    const allowed = await hasAnyRoleFromReq(req, ["superadmin", "admin"]);
+    const allowed = await hasAnyRoleFromReq(req, ["superadmin", "admin", "matchmaker"]);
     if (!allowed) {
       return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
     }
@@ -52,7 +48,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "partij_nr ontbreekt." }, { status: 400 });
     }
 
-    // 1) dispensatie_requests
     await bestEffort(
       supabaseAdmin
         .from("dispensatie_requests")
@@ -62,11 +57,10 @@ export async function POST(req: Request) {
         .throwOnError()
     );
 
-    // 2) controle_resultaten
     if (controle_run_id) {
       await bestEffort(
         supabaseAdmin
-          .from("controle_resultaten")
+          .from("matchmaker_controle_resultaten")
           .delete()
           .eq("controle_run_id", controle_run_id)
           .eq("partij_nr", partij_nr)
@@ -75,35 +69,17 @@ export async function POST(req: Request) {
     } else {
       await bestEffort(
         supabaseAdmin
-          .from("controle_resultaten")
+          .from("matchmaker_controle_resultaten")
           .delete()
           .eq("matchmaking_id", matchmaking_id)
           .eq("partij_nr", partij_nr)
           .throwOnError()
       );
-
-      // fallback voor oudere data waar matchmaking_id niet op controle_resultaten staat:
-      const { data: runs } = await supabaseAdmin
-        .from("controle_runs")
-        .select("id")
-        .eq("matchmaking_id", matchmaking_id);
-
-      for (const run of runs ?? []) {
-        await bestEffort(
-          supabaseAdmin
-            .from("controle_resultaten")
-            .delete()
-            .eq("controle_run_id", run.id)
-            .eq("partij_nr", partij_nr)
-            .throwOnError()
-        );
-      }
     }
 
-    // 3) controle_bout_context
     {
       let q = supabaseAdmin
-        .from("controle_bout_context")
+        .from("matchmaker_bout_context")
         .delete()
         .eq("matchmaking_id", matchmaking_id)
         .eq("partij_nr", partij_nr);
@@ -113,7 +89,6 @@ export async function POST(req: Request) {
       await bestEffort(q.throwOnError());
     }
 
-    // 4) controle_audit_events  <-- BELANGRIJK voor VA gewijzigd / oude rapportregels
     if (controle_run_id) {
       await bestEffort(
         supabaseAdmin
@@ -135,21 +110,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5) matchmaking_bouts_raw
     if (bout_id) {
       await bestEffort(
         supabaseAdmin
-          .from("matchmaking_bouts_raw")
+          .from("matchmaker_bouts_raw")
           .delete()
-          // @ts-ignore
-          .or(`bout_uid.eq.${bout_id},id.eq.${bout_id}`)
+          .eq("id", bout_id)
           .throwOnError()
       );
     }
 
     await bestEffort(
       supabaseAdmin
-        .from("matchmaking_bouts_raw")
+        .from("matchmaker_bouts_raw")
         .delete()
         .eq("matchmaking_id", matchmaking_id)
         .eq("partij_nr", partij_nr)

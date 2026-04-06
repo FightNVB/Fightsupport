@@ -2,686 +2,381 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Download, RefreshCcw, Save } from "lucide-react";
-
-import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/context/AuthContext";
+import NvbDarkButton from "@/components/NvbDarkButton";
+import NvbLightButton from "@/components/NvbLightButton";
+import {
+  RESULT_OPTIONS,
+  DECISION_OPTIONS,
+  mapBoutResultToExcel,
+  type BoutResultType,
+  type DecisionCode,
+} from "@/lib/uitslagen/excelMapping";
 
-const NVB_ORANGE = "#ff4d00";
-const FS_LINE_LIGHT = "rgba(0,0,0,0.12)";
+const ORANGE = "#ff4d00";
 
-// Vaste uitslag opties – altijd vanuit rood perspectief
-const UITSLAG_OPTIONS = [
-  "Wint op punten",
-  "Verliest op punten",
-  "Onbeslist",
-  "Wint op KO",
-  "Verliest op KO",
-  "Wint op Technisch KO",
-  "Verliest op Technisch KO",
-  "Wint d.m.v. medische interventie",
-  "Verliest d.m.v. medische interventie",
-  "Wint d.m.v. opgave",
-  "Verliest d.m.v. opgave",
-  "No contest",
-  "Wint d.m.v. submission",
-  "Verliest d.m.v. submission",
-  "Wint d.m.v. diskwalificatie",
-  "Verliest d.m.v. diskwalificatie",
-  "Wint d.m.v. RSC",
-  "Verliest d.m.v. RSC",
-  "Demo",
-];
-
-type RoleName =
-  | "superadmin"
-  | "admin"
-  | "promotor"
-  | "matchmaker"
-  | "official"
-  | "hoofdofficial"
-  | "dispensatie_admin";
-
-type Bout = {
+type Row = {
   id: string;
+  matchup_id?: string;
   matchmaking_id: string;
   partij_nr: number;
   discipline: string | null;
   klasse_mm: string | null;
+  max_gewicht: number | null;
   rood_naam: string | null;
-  rood_va: string | null;
   rood_gym: string | null;
   blauw_naam: string | null;
-  blauw_va: string | null;
   blauw_gym: string | null;
-  rood_gewogen_gewicht: number | null;
-  blauw_gewogen_gewicht: number | null;
-  eindstatus: string;
-  sort_order: number | null;
+  uitslagen_lineup?: {
+    id: string;
+    result_type: BoutResultType;
+    decision_code: DecisionCode;
+    result_label_red: string;
+    finalized: boolean;
+  }[];
 };
 
-function safeText(v: any, fallback = "-") {
-  const s = String(v ?? "").trim();
-  return s.length ? s : fallback;
+type LocalState = {
+  result_type: BoutResultType | "";
+  decision_code: DecisionCode;
+  changed_reason: string;
+};
+
+function metalFrameStyle(): CSSProperties {
+  return {
+    background:
+      "linear-gradient(180deg, rgba(248,248,248,0.98) 0%, rgba(214,214,214,0.98) 16%, rgba(125,125,125,0.98) 48%, rgba(235,235,235,0.98) 100%)",
+    boxShadow:
+      "0 0 0 1px rgba(255,255,255,0.65), 0 18px 40px rgba(0,0,0,0.22)",
+  };
 }
 
-function fmtKg(v: number | null | undefined): string {
-  if (v == null) return "-";
-  return `${Number(v).toFixed(1)} kg`;
+function contentPanelStyle(): CSSProperties {
+  return {
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(241,244,247,0.98) 100%)",
+    border: "2px solid rgba(84,84,90,0.34)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.88)",
+  };
 }
 
-function normalizeRoleName(name: any): RoleName | null {
-  const s = String(name ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-  const valid: RoleName[] = [
-    "superadmin", "admin", "promotor", "matchmaker",
-    "official", "hoofdofficial", "dispensatie_admin",
-  ];
-  return valid.includes(s as RoleName) ? (s as RoleName) : null;
-}
-
-// ─── Styles ────────────────────────────────────────────────────────────────────
-const pageWrap: CSSProperties = {
-  minHeight: "100vh",
-  background: "linear-gradient(180deg, #f0f0f0 0%, #e2e2e2 100%)",
-  fontFamily: "'Inter', 'Segoe UI', sans-serif",
-};
-
-const innerWrap: CSSProperties = {
-  maxWidth: 1100,
-  margin: "0 auto",
-  padding: "0 16px 48px",
-};
-
-const topBar: CSSProperties = {
-  background: "linear-gradient(180deg, #1a1a1e 0%, #0d0d10 100%)",
-  borderBottom: `3px solid ${NVB_ORANGE}`,
-  padding: "12px 24px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
-};
-
-const headerBtn: CSSProperties = {
-  padding: "6px 14px",
-  fontSize: 12,
-  fontWeight: 800,
-  color: "#fff",
-  background: "linear-gradient(180deg, #3d434d 0%, #22262d 100%)",
-  border: "1px solid rgba(0,0,0,0.45)",
-  borderRadius: 4,
-  cursor: "pointer",
-};
-
-const orangeBtn: CSSProperties = {
-  ...headerBtn,
-  background: `linear-gradient(180deg, #ff6a14 0%, ${NVB_ORANGE} 55%, #df3f00 100%)`,
-  border: "1px solid rgba(150,40,0,0.55)",
-};
-
-const cardStyle: CSSProperties = {
-  background: "#fff",
-  borderRadius: 10,
-  border: "2px solid #2b2b2b",
-  boxShadow: "0 12px 26px rgba(0,0,0,0.10)",
-  marginBottom: 16,
-  overflow: "hidden",
-};
-
-const cardHeader: CSSProperties = {
-  background: "linear-gradient(180deg, #2a2a2e 0%, #1f1f23 100%)",
-  borderBottom: "2px solid rgba(255,77,0,0.50)",
-  padding: "10px 16px",
-  color: "#fff",
-  fontWeight: 800,
-  fontSize: 15,
-};
-
-const tableStyle: CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  fontSize: 13,
-};
-
-const thStyle: CSSProperties = {
-  padding: "8px 10px",
-  textAlign: "left",
-  fontWeight: 700,
-  fontSize: 11,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.05em",
-  background: "#f5f5f5",
-  borderBottom: "1px solid #e0e0e0",
-};
-
-const tdStyle: CSSProperties = {
-  padding: "8px 10px",
-  verticalAlign: "middle",
-  borderBottom: "1px solid #f0f0f0",
-};
-
-const selectStyle: CSSProperties = {
-  width: "100%",
-  padding: "6px 8px",
-  fontSize: 12,
-  border: "1px solid #d1d5db",
-  borderRadius: 4,
-  background: "#fff",
-  color: "#111",
-};
-
-const saveBtnSmall: CSSProperties = {
-  padding: "5px 12px",
-  fontSize: 12,
-  fontWeight: 700,
-  color: "#fff",
-  background: NVB_ORANGE,
-  border: "none",
-  borderRadius: 4,
-  cursor: "pointer",
-};
-
-// ─── Component ─────────────────────────────────────────────────────────────────
-export default function UitslagenInvoerPage() {
-  const params = useParams<{ matchmakingId?: string | string[] }>();
+export default function OfficialsUitslagenDetailPage() {
   const router = useRouter();
+  const params = useParams<{ matchmakingId: string }>();
+  const { user, roles, loading: authLoading } = useAuth();
+  const matchmakingId = String(params?.matchmakingId ?? "").trim();
 
-  const matchmakingId = useMemo(() => {
-    const v = Array.isArray(params?.matchmakingId)
-      ? params.matchmakingId[0]
-      : params?.matchmakingId;
-    return String(v ?? "").trim();
-  }, [params]);
-
+  const [rows, setRows] = useState<Row[]>([]);
+  const [states, setStates] = useState<Record<string, LocalState>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [pageMsg, setPageMsg] = useState("");
+  const [pageErr, setPageErr] = useState("");
 
-  const [roleNames, setRoleNames] = useState<RoleName[]>([]);
-  const [bouts, setBouts] = useState<Bout[]>([]);
-  const [uitslagen, setUitslagen] = useState<Record<number, string>>({});
-  const [saving, setSaving] = useState<number | null>(null);
-  const [exporting, setExporting] = useState(false);
-
-  const [header, setHeader] = useState<{
-    evenement_naam: string | null;
-    evenement_datum: string | null;
-    bondteam: string | null;
-  } | null>(null);
-
-  const isHoofdofficialOrSuperadmin = useMemo(
-    () => roleNames.includes("hoofdofficial") || roleNames.includes("superadmin") || roleNames.includes("admin"),
-    [roleNames]
+  const allowed = useMemo(
+    () =>
+      roles?.some((r) =>
+        ["hoofdofficial", "admin", "superadmin"].includes(String(r).toLowerCase())
+      ) ?? false,
+    [roles]
   );
 
-  async function loadData() {
-    if (!matchmakingId) return;
+  async function load() {
+    setLoading(true);
+    setPageErr("");
+    setPageMsg("");
 
     try {
-      setLoading(true);
-      setError(null);
-
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-
-      if (userErr || !user) throw new Error("Niet ingelogd.");
-
-      // Load roles
-      const { data: userRoles } = await supabase
-        .from("user_roles")
-        .select("role_id")
-        .eq("user_id", user.id);
-
-      const roleIds = (userRoles ?? []).map((r: any) => r.role_id).filter(Boolean);
-      let names: RoleName[] = [];
-      if (roleIds.length > 0) {
-        const { data: rolesRows } = await supabase
-          .from("roles")
-          .select("id, name")
-          .in("id", roleIds);
-        names = (rolesRows ?? [])
-          .map((r: any) => normalizeRoleName(r?.name))
-          .filter(Boolean) as RoleName[];
-      }
-      setRoleNames(names);
-
-      if (
-        !names.some((r) =>
-          ["hoofdofficial", "admin", "superadmin"].includes(r)
-        )
-      ) {
-        throw new Error("Alleen hoofdofficial, admin of superadmin kan uitslagen invoeren.");
-      }
-
-      // Load matchmaking header
-      const { data: mm } = await supabase
-        .from("matchmaking_uploads")
-        .select("evenement_naam, evenement_datum, bondteam")
+      const { data, error } = await supabase
+        .from("lineup_bouts")
+        .select(`
+          id,
+          matchmaking_id,
+          partij_nr,
+          discipline,
+          klasse_mm,
+          max_gewicht,
+          rood_naam,
+          rood_gym,
+          blauw_naam,
+          blauw_gym,
+          uitslagen_lineup (
+            id,
+            result_type,
+            decision_code,
+            result_label_red,
+            finalized
+          )
+        `)
         .eq("matchmaking_id", matchmakingId)
-        .single();
-
-      if (mm) {
-        setHeader({
-          evenement_naam: mm.evenement_naam ?? null,
-          evenement_datum: mm.evenement_datum ?? null,
-          bondteam: mm.bondteam ?? null,
-        });
-      }
-
-      // Load bouts (only OK or GOEDGEKEURD_MET_DISPENSATIE)
-      const { data: boutsData, error: boutsErr } = await supabase
-        .from("definitive_matchmaking_bouts")
-        .select("*")
-        .eq("matchmaking_id", matchmakingId)
-        .in("eindstatus", ["OK", "GOEDGEKEURD_MET_DISPENSATIE"])
-        .order("sort_order", { ascending: true })
         .order("partij_nr", { ascending: true });
 
-      if (boutsErr) throw new Error(boutsErr.message);
-      setBouts(boutsData ?? []);
+      if (error) throw error;
 
-      // Load existing uitslagen
-      const { data: uitslData } = await supabase
-        .from("uitslagen_officieel")
-        .select("partij_nr, uitslag")
-        .eq("matchmaking_id", matchmakingId);
+      const nextRows = (data ?? []) as Row[];
+      setRows(nextRows);
 
-      const map: Record<number, string> = {};
-      for (const u of uitslData ?? []) {
-        if (u.partij_nr != null) map[Number(u.partij_nr)] = String(u.uitslag ?? "");
-      }
-      setUitslagen(map);
+      const nextStates: Record<string, LocalState> = {};
+      nextRows.forEach((row) => {
+        const saved = row.uitslagen_lineup?.[0];
+        nextStates[row.id] = {
+          result_type: saved?.result_type ?? "",
+          decision_code: saved?.decision_code ?? null,
+          changed_reason: "",
+        };
+      });
+      setStates(nextStates);
     } catch (e: any) {
-      setError(e?.message ?? "Laden mislukt.");
+      setPageErr(e?.message ?? "Laden mislukt.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (matchmakingId) void loadData();
-  }, [matchmakingId]);
+    if (authLoading) return;
+    if (!user) return void router.replace("/login");
+    if (!allowed) return void router.replace("/dashboard");
+    void load();
+  }, [authLoading, user, allowed, router, matchmakingId]);
 
-  async function saveUitslag(partijNr: number, uitslag: string) {
-    if (!uitslag) return;
-    setSaving(partijNr);
-    setError(null);
-    setNotice(null);
+  function setRowState(id: string, patch: Partial<LocalState>) {
+    setStates((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
+
+  async function saveRow(row: Row) {
+    const state = states[row.id];
+    if (!state?.result_type) return;
+
+    setBusyId(row.id);
+    setPageErr("");
+    setPageMsg("");
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const res = await authedFetch("/api/officials/uitslagen/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lineup_bout_id: row.id,
+          matchmaking_id: row.matchmaking_id,
+          partij_nr: row.partij_nr,
+          result_type: state.result_type,
+          decision_code: ["red_win", "blue_win"].includes(state.result_type) ? state.decision_code : null,
+          changed_reason: state.changed_reason || null,
+        }),
+      });
 
-      if (!user) throw new Error("Niet ingelogd.");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? "Opslaan mislukt.");
 
-      const { error: upsertErr } = await supabase
-        .from("uitslagen_officieel")
-        .upsert(
-          {
-            matchmaking_id: matchmakingId,
-            partij_nr: partijNr,
-            uitslag,
-            ingevoerd_door: user.id,
-            ingevoerd_op: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "matchmaking_id,partij_nr" }
-        );
-
-      if (upsertErr) throw new Error(upsertErr.message);
-
-      setUitslagen((prev) => ({ ...prev, [partijNr]: uitslag }));
-      setNotice(`Partij ${partijNr} opgeslagen.`);
+      setPageMsg(`Partij ${row.partij_nr} opgeslagen.`);
+      await load();
     } catch (e: any) {
-      setError(e?.message ?? "Opslaan mislukt.");
+      setPageErr(e?.message ?? "Opslaan mislukt.");
     } finally {
-      setSaving(null);
+      setBusyId(null);
     }
   }
 
-  async function handleExport() {
-    setExporting(true);
-    setError(null);
-    setNotice(null);
-
+  async function finalizeAll() {
+    setPageErr("");
+    setPageMsg("");
     try {
-      const res = await authedFetch("/api/officials/uitslagen/export", {
+      const res = await authedFetch("/api/officials/uitslagen/finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ matchmaking_id: matchmakingId }),
       });
 
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json?.error ?? "Export mislukt");
-      }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? "Finaliseren mislukt.");
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `uitslagen_${matchmakingId}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setNotice("Export succesvol gedownload.");
+      setPageMsg("Alles is gefinaliseerd en staat vast.");
+      await load();
     } catch (e: any) {
-      setError(e?.message ?? "Export mislukt.");
-    } finally {
-      setExporting(false);
+      setPageErr(e?.message ?? "Finaliseren mislukt.");
     }
   }
 
-  const allFilled = bouts.length > 0 && bouts.every((b) => !!uitslagen[b.partij_nr]);
-  const filledCount = bouts.filter((b) => !!uitslagen[b.partij_nr]).length;
-
   return (
-    <div style={pageWrap}>
-      {/* Top bar */}
-      <div style={topBar}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Image
-            src="/branding/fightsupport/logo-dark.png"
-            width={120}
-            height={50}
-            alt="FightSupport"
-            style={{ height: "auto", width: "auto" }}
-            priority
-          />
-          <div>
-            <div style={{ color: "#fff", fontWeight: 800, fontSize: 14 }}>
-              Uitslagen Invoer
+    <main className="min-h-screen bg-[#eceff3] px-4 py-5">
+      <div className="mx-auto w-full max-w-[1780px]">
+        <div className="rounded-[30px] p-[5px]" style={metalFrameStyle()}>
+          <div className="overflow-hidden rounded-[26px]" style={{ background: "linear-gradient(180deg, rgba(41,41,46,0.98) 0%, rgba(24,24,28,0.98) 100%)", border: "2px solid rgba(70,70,74,0.38)" }}>
+            <div className="grid grid-cols-1 gap-4 px-5 py-4 md:grid-cols-[1fr_auto_1fr] md:items-center" style={{ borderBottom: "3px solid rgba(255,77,0,0.58)" }}>
+              <div className="flex flex-wrap items-center gap-2 md:justify-self-start">
+                <NvbLightButton label="← Overzicht" onClick={() => router.push("/dashboard/officials/uitslagen")} />
+                <NvbDarkButton label="↺ Ververs" onClick={() => void load()} />
+              </div>
+              <div className="flex justify-center">
+                <Image src="/branding/fightsupport/excel-logo.png" alt="FightSupport" width={280} height={80} priority style={{ width: "auto", height: "58px", objectFit: "contain" }} />
+              </div>
+              <div className="text-right md:justify-self-end">
+                <div className="text-[18px] font-black uppercase tracking-[0.12em]" style={{ color: ORANGE }}>
+                  Uitslagen invoer
+                </div>
+                <div className="text-[12px] text-white/60">Rood wint • Blauw wint • Onbeslist • No contest • Demo</div>
+              </div>
             </div>
-            <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 11 }}>
-              {safeText(header?.evenement_naam)} ·{" "}
-              {safeText(header?.bondteam)}
+
+            <div className="p-4 md:p-5">
+              <div className="rounded-[24px] p-[4px]" style={metalFrameStyle()}>
+                <div className="rounded-[20px] p-4 md:p-5" style={contentPanelStyle()}>
+                  <div className="flex items-center justify-between gap-3">
+                    <h1 className="text-[30px] font-black uppercase tracking-[0.08em]" style={{ color: ORANGE }}>
+                      Uitslagen per partij
+                    </h1>
+                    <button
+                      onClick={() => void finalizeAll()}
+                      className="rounded-xl px-4 py-2 text-[12px] font-extrabold uppercase tracking-[0.05em] text-white"
+                      style={{ background: "linear-gradient(180deg, #ff6a1a 0%, #ff4d00 55%, #d63b00 100%)" }}
+                    >
+                      Finaliseren
+                    </button>
+                  </div>
+
+                  {pageMsg ? <div className="mt-4 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{pageMsg}</div> : null}
+                  {pageErr ? <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{pageErr}</div> : null}
+
+                  <div className="mt-4 space-y-3">
+                    {loading ? (
+                      <div className="rounded-2xl bg-white px-4 py-8 text-center text-sm text-zinc-500">Laden…</div>
+                    ) : rows.length === 0 ? (
+                      <div className="rounded-2xl bg-white px-4 py-8 text-center text-sm text-zinc-500">Geen partijen gevonden.</div>
+                    ) : (
+                      rows.map((row, idx) => {
+                        const state = states[row.id];
+                        const saved = row.uitslagen_lineup?.[0];
+                        const finalized = saved?.finalized === true;
+
+                        let preview = "-";
+                        try {
+                          if (state?.result_type) {
+                            preview = mapBoutResultToExcel(
+                              state.result_type as BoutResultType,
+                              ["red_win", "blue_win"].includes(state.result_type) ? state.decision_code : null
+                            );
+                          }
+                        } catch {
+                          preview = "-";
+                        }
+
+                        return (
+                          <div
+                            key={row.id}
+                            className="rounded-[18px] border p-3"
+                            style={{
+                              background: idx % 2 === 0 ? "#ffffff" : "#34343a",
+                              color: idx % 2 === 0 ? "#111111" : "#ffffff",
+                              borderColor: "rgba(84,84,90,0.28)",
+                            }}
+                          >
+                            <div className="grid gap-3 xl:grid-cols-[72px_110px_130px_1.2fr_1.2fr_1.4fr_200px_120px] xl:items-center">
+                              <div className="font-black">{row.partij_nr}</div>
+                              <div className="font-bold">{row.discipline || "-"}</div>
+                              <div className="font-bold">{row.klasse_mm || "-"}</div>
+
+                              <div>
+                                <div className="font-black">{row.rood_naam || "-"}</div>
+                                <div className="text-[11px] opacity-70">{row.rood_gym || "-"}</div>
+                              </div>
+
+                              <div>
+                                <div className="font-black">{row.blauw_naam || "-"}</div>
+                                <div className="text-[11px] opacity-70">{row.blauw_gym || "-"}</div>
+                              </div>
+
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap gap-2">
+                                  {RESULT_OPTIONS.map((opt) => (
+                                    <button
+                                      key={opt.value}
+                                      disabled={finalized}
+                                      onClick={() =>
+                                        setRowState(row.id, {
+                                          result_type: opt.value,
+                                          decision_code: ["red_win", "blue_win"].includes(opt.value) ? state?.decision_code ?? null : null,
+                                        })
+                                      }
+                                      className="rounded-xl px-3 py-2 text-[11px] font-extrabold uppercase disabled:opacity-50"
+                                      style={{
+                                        background:
+                                          state?.result_type === opt.value
+                                            ? "linear-gradient(180deg, #ff6a1a 0%, #ff4d00 55%, #d63b00 100%)"
+                                            : idx % 2 === 0
+                                            ? "#111111"
+                                            : "#ffffff",
+                                        color:
+                                          state?.result_type === opt.value
+                                            ? "#ffffff"
+                                            : idx % 2 === 0
+                                            ? "#ffffff"
+                                            : "#111111",
+                                      }}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+
+                                {["red_win", "blue_win"].includes(String(state?.result_type)) ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {DECISION_OPTIONS.map((opt) => (
+                                      <button
+                                        key={opt.value}
+                                        disabled={finalized}
+                                        onClick={() => setRowState(row.id, { decision_code: opt.value })}
+                                        className="rounded-xl border px-3 py-1.5 text-[11px] font-bold disabled:opacity-50"
+                                        style={{
+                                          background: state?.decision_code === opt.value ? "rgba(255,77,0,0.12)" : "transparent",
+                                          borderColor: state?.decision_code === opt.value ? "rgba(255,77,0,0.45)" : "rgba(113,113,122,0.35)",
+                                          color: "inherit",
+                                        }}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              <div className="rounded-2xl border px-3 py-3 text-sm font-bold" style={{ background: "rgba(255,255,255,0.75)", color: "#111111", borderColor: "rgba(113,113,122,0.25)" }}>
+                                Excel: {saved?.result_label_red || preview}
+                              </div>
+
+                              <div className="space-y-2">
+                                <textarea
+                                  value={state?.changed_reason ?? ""}
+                                  onChange={(e) => setRowState(row.id, { changed_reason: e.target.value })}
+                                  disabled={finalized}
+                                  placeholder="Reden bij wijziging"
+                                  className="min-h-[62px] w-full rounded-xl border px-3 py-2 text-[12px] text-black outline-none disabled:opacity-50"
+                                  style={{ borderColor: "rgba(113,113,122,0.25)" }}
+                                />
+                                <button
+                                  disabled={finalized || busyId === row.id || !state?.result_type}
+                                  onClick={() => void saveRow(row)}
+                                  className="w-full rounded-xl px-3 py-2 text-[12px] font-extrabold uppercase text-white disabled:opacity-50"
+                                  style={{ background: "linear-gradient(180deg, #3f434b 0%, #25282e 100%)" }}
+                                >
+                                  {finalized ? "Gefinaliseerd" : busyId === row.id ? "Opslaan…" : "Opslaan"}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Link
-            href="/dashboard/officials/weegstation"
-            style={headerBtn}
-          >
-            ← Terug
-          </Link>
-          <button style={headerBtn} onClick={() => void loadData()}>
-            <RefreshCcw size={12} style={{ marginRight: 4, display: "inline" }} />
-            Ververs
-          </button>
-          {isHoofdofficialOrSuperadmin && (
-            <button
-              style={{
-                ...orangeBtn,
-                opacity: (!allFilled || exporting) ? 0.55 : 1,
-                cursor: (!allFilled || exporting) ? "not-allowed" : "pointer",
-              }}
-              onClick={() => void handleExport()}
-              disabled={!allFilled || exporting}
-              title={!allFilled ? "Vul alle uitslagen in voor export" : ""}
-            >
-              <Download size={12} style={{ marginRight: 4, display: "inline" }} />
-              {exporting ? "Bezig..." : "Export FightPassport (.xlsx)"}
-            </button>
-          )}
-        </div>
       </div>
-
-      <div style={innerWrap}>
-        <div style={{ paddingTop: 24 }}>
-          {/* Status bar */}
-          <div
-            style={{
-              background: allFilled ? "#f0fdf4" : "#fffbeb",
-              border: `1px solid ${allFilled ? "#86efac" : "#fcd34d"}`,
-              borderRadius: 8,
-              padding: "10px 16px",
-              marginBottom: 16,
-              fontSize: 13,
-              fontWeight: 600,
-              color: allFilled ? "#166534" : "#92400e",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            {allFilled
-              ? `✅ Alle ${bouts.length} uitslagen ingevuld – klaar voor export`
-              : `⚠️ ${filledCount} van ${bouts.length} uitslagen ingevuld`}
-          </div>
-
-          {notice && (
-            <div
-              style={{
-                background: "#f0fdf4",
-                border: "1px solid #86efac",
-                borderRadius: 8,
-                padding: "8px 14px",
-                marginBottom: 12,
-                color: "#166534",
-                fontSize: 13,
-              }}
-            >
-              {notice}
-            </div>
-          )}
-
-          {error && (
-            <div
-              style={{
-                background: "#fef2f2",
-                border: "1px solid #fca5a5",
-                borderRadius: 8,
-                padding: "8px 14px",
-                marginBottom: 12,
-                color: "#991b1b",
-                fontSize: 13,
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          {loading ? (
-            <div style={{ textAlign: "center", padding: 48, color: "#6b7280" }}>
-              Laden…
-            </div>
-          ) : !isHoofdofficialOrSuperadmin ? (
-            <div
-              style={{
-                background: "#fef2f2",
-                borderRadius: 10,
-                padding: 24,
-                textAlign: "center",
-                color: "#991b1b",
-              }}
-            >
-              Alleen hoofdofficial, admin of superadmin kan uitslagen invoeren.
-            </div>
-          ) : bouts.length === 0 ? (
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 10,
-                padding: 32,
-                textAlign: "center",
-                color: "#6b7280",
-              }}
-            >
-              Geen OK-partijen gevonden. Zorg dat de weegstation afgerond is en de lineup is bevestigd.
-            </div>
-          ) : (
-            <div style={cardStyle}>
-              <div style={cardHeader}>
-                Partijen — {safeText(header?.evenement_naam)} ({bouts.length} partijen)
-              </div>
-              <div style={{ overflowX: "auto" }}>
-                <table style={tableStyle}>
-                  <thead>
-                    <tr>
-                      <th style={thStyle}>Nr.</th>
-                      <th style={thStyle}>Discipline</th>
-                      <th style={thStyle}>Klasse</th>
-                      <th style={{ ...thStyle, color: "#dc2626" }}>Rood</th>
-                      <th style={{ ...thStyle, color: "#2563eb" }}>Blauw</th>
-                      <th style={thStyle}>Uitslag (rood perspectief)</th>
-                      <th style={thStyle}>Actie</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bouts.map((bout, i) => {
-                      const currentUitslag = uitslagen[bout.partij_nr] ?? "";
-                      const isFilled = !!currentUitslag;
-
-                      return (
-                        <tr
-                          key={bout.id}
-                          style={{
-                            background: i % 2 === 0 ? "#fff" : "#fafafa",
-                            outline: isFilled
-                              ? "none"
-                              : "1px solid rgba(234,179,8,0.3)",
-                          }}
-                        >
-                          <td style={{ ...tdStyle, fontWeight: 700 }}>
-                            {bout.partij_nr}
-                          </td>
-                          <td style={tdStyle}>
-                            {safeText(bout.discipline)}
-                          </td>
-                          <td style={tdStyle}>
-                            {safeText(bout.klasse_mm)}
-                          </td>
-                          <td style={tdStyle}>
-                            <div style={{ fontWeight: 600 }}>
-                              {safeText(bout.rood_naam)}
-                            </div>
-                            <div style={{ fontSize: 11, color: "#6b7280" }}>
-                              {safeText(bout.rood_gym)} · VA {safeText(bout.rood_va)}
-                            </div>
-                            <div style={{ fontSize: 11, color: "#6b7280" }}>
-                              {fmtKg(bout.rood_gewogen_gewicht)}
-                            </div>
-                          </td>
-                          <td style={tdStyle}>
-                            <div style={{ fontWeight: 600 }}>
-                              {safeText(bout.blauw_naam)}
-                            </div>
-                            <div style={{ fontSize: 11, color: "#6b7280" }}>
-                              {safeText(bout.blauw_gym)} · VA {safeText(bout.blauw_va)}
-                            </div>
-                            <div style={{ fontSize: 11, color: "#6b7280" }}>
-                              {fmtKg(bout.blauw_gewogen_gewicht)}
-                            </div>
-                          </td>
-                          <td style={{ ...tdStyle, minWidth: 280 }}>
-                            <select
-                              style={{
-                                ...selectStyle,
-                                borderColor: isFilled ? "#86efac" : "#fcd34d",
-                                background: isFilled ? "#f0fdf4" : "#fffbeb",
-                              }}
-                              value={currentUitslag}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setUitslagen((prev) => ({
-                                  ...prev,
-                                  [bout.partij_nr]: val,
-                                }));
-                              }}
-                            >
-                              <option value="">— kies uitslag —</option>
-                              {UITSLAG_OPTIONS.map((opt) => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td style={tdStyle}>
-                            <button
-                              style={{
-                                ...saveBtnSmall,
-                                opacity:
-                                  saving === bout.partij_nr || !currentUitslag
-                                    ? 0.5
-                                    : 1,
-                                cursor:
-                                  saving === bout.partij_nr || !currentUitslag
-                                    ? "not-allowed"
-                                    : "pointer",
-                              }}
-                              disabled={saving === bout.partij_nr || !currentUitslag}
-                              onClick={() =>
-                                void saveUitslag(bout.partij_nr, currentUitslag)
-                              }
-                            >
-                              <Save size={11} style={{ marginRight: 4, display: "inline" }} />
-                              {saving === bout.partij_nr ? "…" : "Opslaan"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Export section */}
-          {!loading && bouts.length > 0 && isHoofdofficialOrSuperadmin && (
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 10,
-                border: "2px solid #2b2b2b",
-                padding: "16px 20px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>
-                  Export naar FightPassport
-                </div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                  Download Excel in het vaste FightPassport format (altijd vanuit rood perspectief).{" "}
-                  {!allFilled && (
-                    <span style={{ color: "#b45309", fontWeight: 600 }}>
-                      Vul alle {bouts.length - filledCount} nog ontbrekende uitslag(en) in voor de export beschikbaar is.
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                style={{
-                  ...orangeBtn,
-                  padding: "10px 20px",
-                  fontSize: 13,
-                  opacity: (!allFilled || exporting) ? 0.55 : 1,
-                  cursor: (!allFilled || exporting) ? "not-allowed" : "pointer",
-                }}
-                disabled={!allFilled || exporting}
-                onClick={() => void handleExport()}
-              >
-                <Download size={14} style={{ marginRight: 6, display: "inline" }} />
-                {exporting ? "Bezig met exporteren…" : "Download Excel"}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    </main>
   );
 }

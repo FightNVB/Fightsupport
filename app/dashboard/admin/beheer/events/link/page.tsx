@@ -1,16 +1,22 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  LayoutDashboard,
+  Link2,
+  CalendarDays,
+  Upload,
+  UserRound,
+  Save,
+  FileSpreadsheet,
+} from "lucide-react";
 
 const ORANGE = "#ff4d00";
-const BORDER = "#2b2b2b";
-const PAGE_BG =
-  "radial-gradient(900px 520px at 18% 0%, rgba(255,77,0,0.14), transparent 56%), radial-gradient(780px 520px at 82% 18%, rgba(255,255,255,0.80), transparent 62%), linear-gradient(180deg,#f6f6f6 0%, #e7e7e7 55%, #d4d4d4 100%)";
-const PANEL_BG = "linear-gradient(180deg,#ffffff 0%, #f2f2f2 55%, #e7e7e7 100%)";
-const PANEL_BG_SOFT = "linear-gradient(180deg,#fbfbfb 0%, #efefef 55%, #e2e2e2 100%)";
-const PANEL_SHADOW = "0 12px 28px rgba(0,0,0,0.16), inset 0 0 0 2px rgba(255,255,255,0.70)";
+const DARK = "#2b3138";
+const DARKER = "#1f242b";
+const BORDER = "#2a2f36";
 
 type EventRow = {
   id: string;
@@ -34,24 +40,43 @@ type UploadRow = {
   event_id?: string | null;
 };
 
+const PAGE_BG: CSSProperties = {
+  minHeight: "100vh",
+  background: `
+    radial-gradient(circle at 18% 0%, rgba(255,77,0,0.12) 0%, transparent 26%),
+    radial-gradient(circle at 82% 18%, rgba(255,255,255,0.06) 0%, transparent 24%),
+    linear-gradient(180deg, #0f1216 0%, #1b2027 45%, #0f1216 100%)
+  `,
+  color: "#fff",
+};
+
+const SHELL_OUTER: CSSProperties = {
+  background:
+    "linear-gradient(180deg,#f8f8f8 0%, #d7d7d7 18%, #8a8a8a 55%, #efefef 100%)",
+  boxShadow: "0 24px 70px rgba(0,0,0,0.55)",
+};
+
+const SHELL_INNER: CSSProperties = {
+  background:
+    "linear-gradient(180deg, rgba(32,37,45,0.98) 0%, rgba(20,24,30,0.98) 100%)",
+  border: "3px solid rgba(95,105,118,0.55)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+};
+
+const LIGHT_PANEL: CSSProperties = {
+  background:
+    "linear-gradient(180deg, rgba(245,247,250,0.98) 0%, rgba(229,233,238,0.98) 100%)",
+  border: "2px solid rgba(95,105,118,0.55)",
+  boxShadow:
+    "0 16px 34px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.8)",
+};
+
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-screen px-4 py-6" style={{ background: PAGE_BG }}>
-      <div className="mx-auto w-full max-w-6xl">
-        <div
-          className="rounded-[36px] p-[10px]"
-          style={{
-            background: "linear-gradient(180deg,#f8f8f8 0%, #d6d6d6 55%, #bdbdbd 100%)",
-            boxShadow: "0 20px 70px rgba(0,0,0,0.35)",
-          }}
-        >
-          <div
-            className="rounded-[28px] overflow-hidden"
-            style={{
-              border: `4px solid ${BORDER}`,
-              background: "linear-gradient(180deg,#fbfbfb 0%, #f1f1f1 50%, #e7e7e7 100%)",
-            }}
-          >
+    <main style={PAGE_BG} className="px-4 py-6">
+      <div className="mx-auto w-full max-w-[1500px]">
+        <div className="rounded-[34px] p-[7px]" style={SHELL_OUTER}>
+          <div className="overflow-hidden rounded-[28px]" style={SHELL_INNER}>
             {children}
           </div>
         </div>
@@ -60,68 +85,235 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Header({ onBack, onDashboard }: { onBack: () => void; onDashboard: () => void }) {
+function SilverButton({
+  label,
+  onClick,
+  icon,
+}: {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-sm font-extrabold transition hover:brightness-105 active:translate-y-[1px]"
+      style={{
+        color: "#111",
+        border: "1px solid rgba(120,120,120,0.95)",
+        background:
+          "linear-gradient(180deg,#ffffff 0%, #ececec 18%, #cfcfcf 40%, #f7f7f7 58%, #a9a9a9 100%)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,1), inset 0 -2px 2px rgba(0,0,0,0.32), 0 8px 18px rgba(0,0,0,0.28)",
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function OrangeButton({
+  label,
+  onClick,
+  icon,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="inline-flex items-center gap-2 rounded-[12px] px-5 py-2.5 text-sm font-extrabold transition disabled:cursor-not-allowed disabled:opacity-60 hover:brightness-105 active:translate-y-[1px]"
+      style={{
+        color: "#fff",
+        border: `2px solid ${BORDER}`,
+        background:
+          "linear-gradient(180deg,#ff7a2a 0%, #ff4d00 50%, #b83200 100%)",
+        boxShadow:
+          "0 12px 24px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -10px 18px rgba(0,0,0,0.18)",
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function Header({
+  onBack,
+  onDashboard,
+}: {
+  onBack: () => void;
+  onDashboard: () => void;
+}) {
   return (
     <div
-      className="relative px-6 py-6"
+      className="relative px-6 py-5"
       style={{
-        background: "linear-gradient(180deg,#3a3a3a 0%, #1f1f1f 55%, #141414 100%)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 26px rgba(0,0,0,0.35)",
-        borderBottom: "3px solid rgba(255,77,0,0.35)",
+        background:
+          "linear-gradient(180deg, #3b4149 0%, #242a31 48%, #171b20 100%)",
+        borderBottom: "3px solid rgba(255,77,0,0.5)",
+        boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
       }}
     >
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-10"
         style={{
           background:
-            "linear-gradient(90deg, transparent 0%, rgba(255,77,0,0.18) 35%, rgba(255,77,0,0.05) 65%, transparent 100%)",
+            "linear-gradient(90deg, transparent 0%, rgba(255,77,0,0.18) 35%, rgba(255,77,0,0.06) 65%, transparent 100%)",
         }}
       />
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div style={{ color: ORANGE, letterSpacing: "0.14em", fontWeight: 800 }}>FIGHTSUPPORT</div>
-          <div className="text-sm" style={{ color: "rgba(255,255,255,0.70)" }}>Vechtsport ondersteuning</div>
-        </div>
 
-        <div className="absolute left-1/2 -translate-x-1/2">
+      <div className="grid grid-cols-1 items-center gap-4 xl:grid-cols-[1fr_auto_1fr]">
+        <div className="justify-self-start">
           <div
-            className="rounded-[22px] p-[6px]"
+            className="font-extrabold uppercase"
             style={{
-              background: "linear-gradient(180deg,#fefefe,#cfcfcf)",
-              boxShadow: "0 10px 24px rgba(0,0,0,0.55)",
+              fontSize: 28,
+              letterSpacing: "0.05em",
+              color: ORANGE,
+              textShadow: "0 6px 18px rgba(0,0,0,0.45)",
             }}
           >
-            <div className="rounded-[18px] p-[6px]" style={{ border: `3px solid ${BORDER}`, background: "linear-gradient(180deg,#111,#000)" }}>
-              <Image src="/branding/fightsupport/logo-dark.png" width={84} height={84} alt="FightSupport" priority />
-            </div>
+            Events koppelen
+          </div>
+          <div className="mt-1 text-sm text-white/75">
+            Koppel matchmaking-uploads aan evenementen
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <SilverButton
+              label="Terug"
+              icon={<ArrowLeft size={16} strokeWidth={2.7} />}
+              onClick={onBack}
+            />
+            <SilverButton
+              label="Naar dashboard"
+              icon={<LayoutDashboard size={16} strokeWidth={2.7} />}
+              onClick={onDashboard}
+            />
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="rounded-lg px-4 py-2 font-bold"
-            style={{ background: "linear-gradient(180deg,#4b4b4b,#2f2f2f)", color: "#fff", border: "2px solid rgba(255,255,255,0.22)" }}
-          >
-            Terug
-          </button>
-          <button
-            onClick={onDashboard}
-            className="rounded-lg px-5 py-2 font-extrabold"
+        <div className="justify-self-center">
+          <img
+            src="/branding/fightsupport/excel-logo.png"
+            alt="FightSupport"
+            loading="eager"
             style={{
-              background: "linear-gradient(180deg,#f6f6f6,#cfcfcf)",
-              color: "#000",
-              border: `3px solid ${BORDER}`,
-              boxShadow:
-                "0 10px 22px rgba(0,0,0,0.22), inset 0 0 0 2px rgba(255,255,255,0.75), inset 0 -10px 18px rgba(0,0,0,0.08)",
+              width: 240,
+              maxWidth: "80vw",
+              height: "auto",
+              display: "block",
+              filter:
+                "drop-shadow(0 10px 20px rgba(0,0,0,0.45)) drop-shadow(0 0 10px rgba(255,77,0,0.10))",
+            }}
+          />
+        </div>
+
+        <div className="justify-self-end text-right">
+          <div
+            className="font-extrabold tracking-[0.20em]"
+            style={{
+              fontSize: 14,
+              letterSpacing: "0.20em",
+              textTransform: "uppercase",
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(230,230,230,0.74) 35%, rgba(150,150,150,0.55) 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              textShadow: "0 8px 22px rgba(0,0,0,0.35)",
             }}
           >
-            Naar dashboard
-          </button>
+            FIGHTSUPPORT
+          </div>
+          <div className="text-xs text-white/70">Vechtsport ondersteuning</div>
         </div>
       </div>
     </div>
   );
+}
+
+function SectionCard({
+  title,
+  subtitle,
+  icon,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[24px] p-5" style={LIGHT_PANEL}>
+      <div className="mb-4 flex items-start gap-3">
+        <div
+          className="flex h-11 w-11 items-center justify-center rounded-[12px]"
+          style={{
+            background:
+              "linear-gradient(180deg, #ff6b22 0%, #ff4d00 55%, #b93200 100%)",
+            color: "#fff",
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,0.22), 0 8px 18px rgba(255,77,0,0.16)",
+          }}
+        >
+          {icon}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="text-lg font-extrabold" style={{ color: "#111" }}>
+            {title}
+          </div>
+          {subtitle ? (
+            <div className="text-sm" style={{ color: "#56606d" }}>
+              {subtitle}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        className="mb-4 h-[4px] w-full rounded-full"
+        style={{
+          background:
+            "linear-gradient(90deg, rgba(255,77,0,0.95) 0%, rgba(255,77,0,0.18) 48%, rgba(0,0,0,0.08) 100%)",
+        }}
+      />
+
+      {children}
+    </div>
+  );
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="mb-1 text-[12px] font-extrabold uppercase tracking-[0.10em]"
+      style={{ color: "#36404d" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function inputStyle(): CSSProperties {
+  return {
+    width: "100%",
+    borderRadius: 12,
+    padding: "10px 12px",
+    background: "#fff",
+    border: "2px solid rgba(43,49,56,0.90)",
+    color: "#000",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.95)",
+  };
 }
 
 export default function LinkEventsPage() {
@@ -134,7 +326,10 @@ export default function LinkEventsPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId) ?? null, [events, selectedEventId]);
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === selectedEventId) ?? null,
+    [events, selectedEventId]
+  );
 
   async function load() {
     setErr(null);
@@ -154,14 +349,20 @@ export default function LinkEventsPage() {
       setErr("Kies eerst een evenement");
       return;
     }
+
     setSaving(true);
     setErr(null);
+
     try {
       const res = await fetch("/api/events/link-matchmaking", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ event_id: selectedEventId, matchmaking_upload_id: uploadId }),
+        body: JSON.stringify({
+          event_id: selectedEventId,
+          matchmaking_upload_id: uploadId,
+        }),
       });
+
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || "Koppelen mislukt");
       await load();
@@ -174,14 +375,17 @@ export default function LinkEventsPage() {
 
   async function saveEventPatch(patch: Partial<EventRow>) {
     if (!selectedEventId) return;
+
     setSaving(true);
     setErr(null);
+
     try {
       const res = await fetch("/api/events/update", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id: selectedEventId, ...patch }),
       });
+
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || "Opslaan mislukt");
       await load();
@@ -196,138 +400,229 @@ export default function LinkEventsPage() {
 
   return (
     <Shell>
-      <Header onBack={() => router.back()} onDashboard={() => router.push("/dashboard/admin")} />
+      <Header
+        onBack={() => router.back()}
+        onDashboard={() => router.push("/dashboard/admin")}
+      />
 
-      <div className="px-6 py-8">
-        <div className="text-center">
-          <div className="text-4xl font-extrabold" style={{ color: ORANGE }}>
-            Events koppelen
+      <div className="px-4 py-6 md:px-6">
+        <div
+          className="rounded-[24px] p-5 md:p-6"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(239,242,246,0.98) 100%)",
+            border: "2px solid rgba(95,105,118,0.40)",
+            boxShadow:
+              "0 18px 36px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.88)",
+          }}
+        >
+          <div className="text-center">
+            <h1
+              className="text-4xl font-extrabold md:text-5xl"
+              style={{
+                backgroundImage:
+                  "linear-gradient(180deg, #ff7a1a 0%, #ff4d00 45%, #c92c00 100%)",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+                textShadow:
+                  "0 2px 0 rgba(255,255,255,0.35), 0 8px 22px rgba(0,0,0,0.18)",
+              }}
+            >
+              Events koppelen
+            </h1>
+            <p className="mt-2 text-sm md:text-base" style={{ color: "#55606d" }}>
+              Koppel matchmaking-uploads aan een event_id
+            </p>
           </div>
-          <div className="mt-1" style={{ color: "#555" }}>
-            Koppel matchmaking-uploads aan een event (event_id).
-          </div>
-        </div>
 
-        {err && (
-          <div className="mt-6 rounded-2xl px-4 py-3" style={{ border: `3px solid ${BORDER}`, background: "#ffe8e8", color: "#7a0000" }}>
-            {err}
-          </div>
-        )}
-
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* LEFT */}
-          <div className="rounded-2xl p-5" style={{ background: PANEL_BG, border: `3px solid ${BORDER}`, boxShadow: PANEL_SHADOW }}>
-            <div className="mb-4 h-[4px] w-full rounded-full" style={{ background: "linear-gradient(90deg,#ff4d00, rgba(255,77,0,0.10))" }} />
-            <div className="text-lg font-extrabold" style={{ color: "#111" }}>
-              1) Kies event
+          {err ? (
+            <div
+              className="mt-5 rounded-[18px] border px-4 py-3 text-sm font-semibold"
+              style={{
+                background: "rgba(220,38,38,0.10)",
+                color: "#991b1b",
+                borderColor: "rgba(220,38,38,0.28)",
+              }}
+            >
+              {err}
             </div>
-            <div className="mt-3">
-              <select
-                className="w-full rounded-xl px-3 py-2"
-                style={{ background: "#fff", border: `2px solid ${BORDER}`, color: "#000" }}
-                value={selectedEventId}
-                onChange={(e) => setSelectedEventId(e.target.value)}
-              >
-                <option value="">— kies —</option>
-                {events.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.naam} — {e.datum}
-                  </option>
-                ))}
-              </select>
-            </div>
+          ) : null}
 
-            {selectedEvent && (
-              <div className="mt-5">
-                <div className="text-sm font-bold" style={{ color: "#333" }}>
-                  Missende info aanvullen (optioneel)
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-sm font-bold mb-1" style={{ color: "#222" }}>Promotor</div>
-                    <FieldOnBlur
-                      value={selectedEvent.promotor ?? ""}
-                      onBlurSave={(v) => saveEventPatch({ promotor: v || null })}
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold mb-1" style={{ color: "#222" }}>Matchmaker</div>
-                    <FieldOnBlur
-                      value={selectedEvent.matchmaker ?? ""}
-                      onBlurSave={(v) => saveEventPatch({ matchmaker: v || null })}
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold mb-1" style={{ color: "#222" }}>Hoofdofficial</div>
-                    <FieldOnBlur
-                      value={selectedEvent.hoofdofficial ?? ""}
-                      onBlurSave={(v) => saveEventPatch({ hoofdofficial: v || null })}
-                    />
-                  </div>
-                </div>
-
-                {saving && <div className="mt-3 text-sm" style={{ color: "#666" }}>Bezig…</div>}
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <SectionCard
+              title="1) Kies event"
+              subtitle="Selecteer een evenement en vul ontbrekende info aan"
+              icon={<CalendarDays size={22} strokeWidth={2.4} />}
+            >
+              <div>
+                <FieldLabel>Event</FieldLabel>
+                <select
+                  style={inputStyle()}
+                  value={selectedEventId}
+                  onChange={(e) => setSelectedEventId(e.target.value)}
+                >
+                  <option value="">— kies —</option>
+                  {events.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.naam} — {e.datum}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
-          </div>
 
-          {/* RIGHT */}
-          <div className="rounded-2xl p-5" style={{ background: PANEL_BG_SOFT, border: `3px solid ${BORDER}`, boxShadow: PANEL_SHADOW }}>
-            <div className="mb-4 h-[4px] w-full rounded-full" style={{ background: "linear-gradient(90deg, rgba(255,77,0,0.12), rgba(0,0,0,0.10))" }} />
-            <div className="text-lg font-extrabold" style={{ color: "#111" }}>
-              2) Uploads zonder event
-            </div>
+              {selectedEvent ? (
+                <div className="mt-5">
+                  <div
+                    className="mb-3 text-[12px] font-extrabold uppercase tracking-[0.10em]"
+                    style={{ color: "#36404d" }}
+                  >
+                    Missende info aanvullen
+                  </div>
 
-            <div className="mt-3 overflow-x-auto rounded-2xl" style={{ border: `3px solid ${BORDER}`, background: "#fff" }}>
-              <table className="w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
-                <thead>
-                  <tr style={{ background: ORANGE, color: "#fff" }}>
-                    <th className="text-left px-4 py-3">Upload</th>
-                    <th className="text-left px-4 py-3">Event info (uit upload)</th>
-                    <th className="text-left px-4 py-3">Actie</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {openUploads.length === 0 ? (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <div>
+                      <FieldLabel>Promotor</FieldLabel>
+                      <FieldOnBlur
+                        value={selectedEvent.promotor ?? ""}
+                        onBlurSave={(v) => saveEventPatch({ promotor: v || null })}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel>Matchmaker</FieldLabel>
+                      <FieldOnBlur
+                        value={selectedEvent.matchmaker ?? ""}
+                        onBlurSave={(v) => saveEventPatch({ matchmaker: v || null })}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel>Hoofdofficial</FieldLabel>
+                      <FieldOnBlur
+                        value={selectedEvent.hoofdofficial ?? ""}
+                        onBlurSave={(v) => saveEventPatch({ hoofdofficial: v || null })}
+                      />
+                    </div>
+                  </div>
+
+                  {saving ? (
+                    <div className="mt-3 text-sm" style={{ color: "#667282" }}>
+                      Bezig…
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </SectionCard>
+
+            <SectionCard
+              title="2) Uploads zonder event"
+              subtitle="Koppel openstaande uploads aan het gekozen evenement"
+              icon={<Upload size={22} strokeWidth={2.4} />}
+            >
+              <div
+                className="overflow-x-auto rounded-[18px]"
+                style={{
+                  border: "2px solid rgba(43,49,56,0.90)",
+                  background: "#fff",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.95)",
+                }}
+              >
+                <table className="min-w-full border-collapse text-sm">
+                  <thead
+                    style={{
+                      background:
+                        "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
+                      color: "#fff",
+                      borderBottom: "2px solid rgba(255,77,0,0.55)",
+                    }}
+                  >
                     <tr>
-                      <td className="px-4 py-4" colSpan={3} style={{ color: "#666" }}>
-                        Geen openstaande uploads.
-                      </td>
+                      <th className="px-4 py-3 text-left">Upload</th>
+                      <th className="px-4 py-3 text-left">Event info</th>
+                      <th className="px-4 py-3 text-left">Actie</th>
                     </tr>
-                  ) : (
-                    openUploads.map((u, idx) => (
-                      <tr key={u.id} style={{ background: idx % 2 === 0 ? "#ffffff" : "#efefef" }}>
-                        <td className="px-4 py-3" style={{ borderTop: "1px solid rgba(0,0,0,0.10)" }}>
-                          <div className="font-bold" style={{ color: "#111" }}>{u.raw_filename ?? "—"}</div>
-                          <div className="text-xs" style={{ color: "#666" }}>{u.uploaded_at ?? ""}</div>
-                        </td>
-                        <td className="px-4 py-3" style={{ borderTop: "1px solid rgba(0,0,0,0.10)", color: "#111" }}>
-                          <div>{u.evenement_naam ?? "—"}</div>
-                          <div className="text-sm" style={{ color: "#666" }}>
-                            {u.evenement_datum ?? ""} {u.locatie ? `— ${u.locatie}` : ""}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3" style={{ borderTop: "1px solid rgba(0,0,0,0.10)" }}>
-                          <button
-                            disabled={!selectedEventId || saving}
-                            onClick={() => linkUpload(u.id)}
-                            className="rounded-xl px-4 py-2 font-extrabold disabled:opacity-60"
-                            style={{ background: ORANGE, color: "#fff", border: `2px solid ${BORDER}` }}
-                          >
-                            Koppel
-                          </button>
+                  </thead>
+
+                  <tbody>
+                    {openUploads.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="px-4 py-6 text-center"
+                          style={{ background: "#ffffff", color: "#667282" }}
+                        >
+                          Geen openstaande uploads.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    ) : (
+                      openUploads.map((u, idx) => {
+                        const zebra = idx % 2 === 0;
+                        return (
+                          <tr
+                            key={u.id}
+                            style={{
+                              backgroundColor: zebra ? "#ffffff" : "#0d0d0d",
+                              color: zebra ? "#000" : "#fff",
+                            }}
+                          >
+                            <td className="px-4 py-3">
+                              <div className="font-bold">
+                                {u.raw_filename ?? "—"}
+                              </div>
+                              <div
+                                className="text-xs"
+                                style={{
+                                  color: zebra ? "#667282" : "rgba(255,255,255,0.70)",
+                                }}
+                              >
+                                {u.uploaded_at ?? ""}
+                              </div>
+                            </td>
 
-            <div className="mt-3 text-xs" style={{ color: "#666" }}>
-              Tip: na koppelen kun je de controle-flow overal via <span className="font-mono">event_id</span> terugvinden.
-            </div>
+                            <td className="px-4 py-3">
+                              <div>{u.evenement_naam ?? "—"}</div>
+                              <div
+                                className="text-sm"
+                                style={{
+                                  color: zebra ? "#667282" : "rgba(255,255,255,0.70)",
+                                }}
+                              >
+                                {u.evenement_datum ?? ""}
+                                {u.locatie ? ` — ${u.locatie}` : ""}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <OrangeButton
+                                disabled={!selectedEventId || saving}
+                                onClick={() => linkUpload(u.id)}
+                                icon={<Link2 size={15} strokeWidth={2.7} />}
+                                label="Koppel"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div
+                className="mt-3 inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs"
+                style={{
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(236,239,243,0.95) 100%)",
+                  color: "#56606d",
+                  border: "1px solid rgba(95,105,118,0.28)",
+                }}
+              >
+                <FileSpreadsheet size={14} strokeWidth={2.5} />
+                Tip: na koppelen kun je de controle-flow overal via{" "}
+                <span className="font-mono font-bold">event_id</span> terugvinden.
+              </div>
+            </SectionCard>
           </div>
         </div>
       </div>
@@ -347,14 +642,26 @@ function FieldOnBlur({
   useEffect(() => setV(value), [value]);
 
   return (
-    <input
-      className="w-full rounded-xl px-3 py-2"
-      style={{ background: "#fff", border: `2px solid ${BORDER}`, color: "#000" }}
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onBlur={() => {
-        if (v !== value) onBlurSave(v.trim());
-      }}
-    />
+    <div className="relative">
+      <UserRound
+        size={16}
+        strokeWidth={2.5}
+        style={{
+          position: "absolute",
+          left: 12,
+          top: "50%",
+          transform: "translateY(-50%)",
+          color: "#53606f",
+        }}
+      />
+      <input
+        style={{ ...inputStyle(), paddingLeft: 36 }}
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={() => {
+          if (v !== value) onBlurSave(v.trim());
+        }}
+      />
+    </div>
   );
 }

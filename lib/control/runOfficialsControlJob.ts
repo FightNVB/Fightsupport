@@ -27,9 +27,20 @@ function toVaStrict(v: any): string | null {
 
 function pickVA(b: any, side: "rood" | "blauw"): string | null {
   if (side === "rood") {
-    return toVaStrict(b.rood_va) ?? toVaStrict(b.va_rood) ?? toVaStrict(b.rood_va_mm) ?? null;
+    return (
+      toVaStrict(b.rood_va) ??
+      toVaStrict(b.va_rood) ??
+      toVaStrict(b.rood_va_mm) ??
+      null
+    );
   }
-  return toVaStrict(b.blauw_va) ?? toVaStrict(b.va_blauw) ?? toVaStrict(b.blauw_va_mm) ?? null;
+
+  return (
+    toVaStrict(b.blauw_va) ??
+    toVaStrict(b.va_blauw) ??
+    toVaStrict(b.blauw_va_mm) ??
+    null
+  );
 }
 
 function resolveScriptPath(...parts: string[]) {
@@ -44,6 +55,7 @@ function resolveScriptPath(...parts: string[]) {
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
+
   throw new Error(`Script niet gevonden:\n- ${candidates.join("\n- ")}`);
 }
 
@@ -97,8 +109,10 @@ function runNodeScript(
 
     proc.on("close", (code) => {
       const ms = Date.now() - t0;
-      if (code === 0) resolve({ stdout, stderr, ms });
-      else {
+
+      if (code === 0) {
+        resolve({ stdout, stderr, ms });
+      } else {
         reject(
           new Error(
             `Script failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\n\nSTDERR:\n${stderr}\n\nSTDOUT:\n${stdout}`
@@ -107,6 +121,21 @@ function runNodeScript(
       }
     });
   });
+}
+
+function uniqueBy<T>(arr: T[], getKey: (row: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+
+  for (const row of arr) {
+    const key = getKey(row);
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+
+  return out;
 }
 
 export async function runOfficialsControlJob(params: {
@@ -125,10 +154,25 @@ export async function runOfficialsControlJob(params: {
     const stagger_ms = clampInt(payload?.stagger_ms ?? 250, 250, 0, 5000);
     const tab_attempts = clampInt(payload?.tab_attempts ?? 8, 8, 1, 30);
     const soft_wait_ms = clampInt(payload?.soft_wait_ms ?? 900, 900, 200, 5000);
-    const between_attempts_ms = clampInt(payload?.between_attempts_ms ?? 450, 450, 0, 5000);
+    const between_attempts_ms = clampInt(
+      payload?.between_attempts_ms ?? 450,
+      450,
+      0,
+      5000
+    );
 
-    const fullfighter_timeout_ms = clampInt(payload?.fullfighter_timeout_ms ?? 35000, 35000, 5000, 180000);
-    const uitslagen_timeout_ms = clampInt(payload?.uitslagen_timeout_ms ?? 90000, 90000, 5000, 240000);
+    const fullfighter_timeout_ms = clampInt(
+      payload?.fullfighter_timeout_ms ?? 35000,
+      35000,
+      5000,
+      180000
+    );
+    const uitslagen_timeout_ms = clampInt(
+      payload?.uitslagen_timeout_ms ?? 90000,
+      90000,
+      5000,
+      240000
+    );
     const uitslagen_tries = clampInt(payload?.uitslagen_tries ?? 1, 1, 1, 5);
 
     const { data: runRows, error: runErr } = await supabase
@@ -137,7 +181,7 @@ export async function runOfficialsControlJob(params: {
         matchmaking_id,
         status: "running",
         gestart_op: new Date().toISOString(),
-        run_type: "control-engine",
+        run_type: "officials-control-engine",
       })
       .select("id")
       .limit(1);
@@ -145,27 +189,69 @@ export async function runOfficialsControlJob(params: {
     if (runErr) throw runErr;
 
     controle_run_id = runRows?.[0]?.id ?? null;
-    if (!controle_run_id) throw new Error("controle_run insert gaf geen id terug");
+    if (!controle_run_id) {
+      throw new Error("controle_run insert gaf geen id terug");
+    }
 
-    await supabase
-      .from("official_control_queue")
-      .update({ controle_run_id })
-      .eq("id", queueJobId);
+    {
+      const { error } = await supabase
+        .from("official_control_queue")
+        .update({
+          controle_run_id,
+          status: "running",
+          started_at: new Date().toISOString(),
+          finished_at: null,
+          error_message: null,
+        })
+        .eq("id", queueJobId);
+
+      if (error) throw error;
+    }
+
+    console.log("[officials/queue] ▶ cleanup oude context/resultaten...", {
+      queueJobId,
+      matchmaking_id,
+      controle_run_id,
+    });
+
+    {
+      const { error } = await supabase
+        .from("controle_resultaten")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id);
+
+      if (error) throw error;
+    }
+
+    {
+      const { error } = await supabase
+        .from("controle_bout_context")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id);
+
+      if (error) throw error;
+    }
+
+    console.log("[officials/queue] ✅ cleanup klaar");
 
     const { data: bouts, error: boutsErr } = await supabase
       .from("matchmaking_bouts_raw")
       .select("*")
-      .eq("matchmaking_id", matchmaking_id);
+      .eq("matchmaking_id", matchmaking_id)
+      .order("partij_nr", { ascending: true });
 
     if (boutsErr) throw boutsErr;
 
     const vaSet = new Set<string>();
+
     (bouts ?? []).forEach((b: any) => {
       const r = pickVA(b, "rood");
       const bl = pickVA(b, "blauw");
+
       if (r) vaSet.add(r);
       if (bl) vaSet.add(bl);
     });
+
     const va_nummers = [...vaSet].filter(Boolean);
 
     console.log("[officials/queue] run", {
@@ -173,7 +259,7 @@ export async function runOfficialsControlJob(params: {
       matchmaking_id,
       controle_run_id,
       do_scrape,
-      bouts: (bouts ?? []).length,
+      bouts: bouts?.length ?? 0,
       va_count: va_nummers.length,
       workers,
       stagger_ms,
@@ -193,8 +279,12 @@ export async function runOfficialsControlJob(params: {
       "scraper_fp_officials.js"
     );
 
+    dlog("[officials/queue] fpBundlePath =", fpBundlePath);
+
     if (do_scrape && va_nummers.length > 0) {
-      console.log("[officials/queue] ▶ fp_bundle start", { va_count: va_nummers.length });
+      console.log("[officials/queue] ▶ fp_bundle start", {
+        va_count: va_nummers.length,
+      });
 
       try {
         const res = await runNodeScript(
@@ -213,14 +303,20 @@ export async function runOfficialsControlJob(params: {
           "fp_bundle_officials"
         );
 
-        console.log("[officials/queue] ✅ fp_bundle klaar", { ms: res.ms, va_count: va_nummers.length });
+        console.log("[officials/queue] ✅ fp_bundle klaar", {
+          ms: res.ms,
+          va_count: va_nummers.length,
+        });
       } catch (e: any) {
         console.log("[officials/queue] ❌ fp_bundle failed (continuing)", {
           error: e?.message ?? String(e),
         });
       }
     } else {
-      console.log("[officials/queue] scrape skipped", { do_scrape, va_count: va_nummers.length });
+      console.log("[officials/queue] scrape skipped", {
+        do_scrape,
+        va_count: va_nummers.length,
+      });
     }
 
     console.log("[officials/queue] ▶ buildControleBoutContext...");
@@ -232,14 +328,44 @@ export async function runOfficialsControlJob(params: {
     console.log("[officials/queue] ✅ enrichControleBoutContext klaar");
 
     console.log("[officials/queue] ▶ load ctxRows for rulesEngine...");
-    const { data: ctxRows, error: ctxErr } = await supabase
+
+    const { data: rawCtxRows, error: ctxErr } = await supabase
       .from("controle_bout_context")
       .select("*")
-      .eq("controle_run_id", controle_run_id);
+      .eq("matchmaking_id", matchmaking_id)
+      .order("partij_nr", { ascending: true })
+      .order("created_at", { ascending: false });
 
     if (ctxErr) throw ctxErr;
 
-    console.log("[officials/queue] ✅ ctxRows loaded", { rows: ctxRows?.length ?? 0 });
+    const ctxRowsCurrentRun = (rawCtxRows ?? []).filter(
+      (r: any) => String(r?.controle_run_id ?? "") === String(controle_run_id)
+    );
+
+    const ctxRows =
+      ctxRowsCurrentRun.length > 0
+        ? ctxRowsCurrentRun
+        : uniqueBy(
+            (rawCtxRows ?? []) as any[],
+            (r: any) =>
+              String(
+                r?.bout_id ??
+                  r?.bout_uid ??
+                  `${r?.partij_nr ?? ""}-${r?.rood_va_mm ?? ""}-${r?.blauw_va_mm ?? ""}`
+              )
+          );
+
+    console.log("[officials/queue] ✅ ctxRows loaded", {
+      matchmaking_rows: rawCtxRows?.length ?? 0,
+      current_run_rows: ctxRowsCurrentRun.length,
+      rows_used_for_rules: ctxRows.length,
+    });
+
+    if ((bouts?.length ?? 0) > 0 && (ctxRows?.length ?? 0) === 0) {
+      throw new Error(
+        `Geen controle_bout_context rows gevonden voor matchmaking ${matchmaking_id} na build/enrich. Bouts=${bouts?.length ?? 0}.`
+      );
+    }
 
     console.log("[officials/queue] ▶ rulesEngine...");
     const hits = await rulesEngine({
@@ -256,32 +382,41 @@ export async function runOfficialsControlJob(params: {
       console.log("[officials/queue] hit_sample", hits[0]);
     }
 
-    if (DEBUG) {
-      try {
-        const { count } = await supabase
-          .from("controle_resultaten")
-          .select("id", { count: "exact", head: true })
-          .eq("controle_run_id", controle_run_id);
-        console.log("[officials/queue] controle_resultaten count", { count: count ?? null });
-      } catch {}
+    try {
+      const { count } = await supabase
+        .from("controle_resultaten")
+        .select("id", { count: "exact", head: true })
+        .eq("controle_run_id", controle_run_id);
+
+      console.log("[officials/queue] controle_resultaten count", {
+        count: count ?? null,
+      });
+    } catch {}
+
+    {
+      const { error } = await supabase
+        .from("controle_runs")
+        .update({
+          status: "klaar",
+          afgerond_op: new Date().toISOString(),
+        })
+        .eq("id", controle_run_id);
+
+      if (error) throw error;
     }
 
-    await supabase
-      .from("controle_runs")
-      .update({
-        status: "klaar",
-        afgerond_op: new Date().toISOString(),
-      })
-      .eq("id", controle_run_id);
+    {
+      const { error } = await supabase
+        .from("official_control_queue")
+        .update({
+          status: "done",
+          finished_at: new Date().toISOString(),
+          error_message: null,
+        })
+        .eq("id", queueJobId);
 
-    await supabase
-      .from("official_control_queue")
-      .update({
-        status: "done",
-        finished_at: new Date().toISOString(),
-        error_message: null,
-      })
-      .eq("id", queueJobId);
+      if (error) throw error;
+    }
 
     return {
       ok: true,
@@ -289,7 +424,9 @@ export async function runOfficialsControlJob(params: {
       matchmaking_id,
       controle_run_id,
       do_scrape,
+      bouts: bouts?.length ?? 0,
       va_count: va_nummers.length,
+      ctx_rows_used: ctxRows.length,
       workers,
       stagger_ms,
       tab_attempts,
@@ -303,24 +440,32 @@ export async function runOfficialsControlJob(params: {
     console.error("❌ Officials queue fout:", err);
 
     if (controle_run_id) {
-      await supabase
-        .from("controle_runs")
-        .update({
-          status: "failed",
-          foutmelding: err?.message ?? "Onbekende fout",
-          afgerond_op: new Date().toISOString(),
-        })
-        .eq("id", controle_run_id);
+      try {
+        await supabase
+          .from("controle_runs")
+          .update({
+            status: "failed",
+            foutmelding: err?.message ?? "Onbekende fout",
+            afgerond_op: new Date().toISOString(),
+          })
+          .eq("id", controle_run_id);
+      } catch (e) {
+        console.error("❌ Officials queue: update controle_runs failed:", e);
+      }
     }
 
-    await supabase
-      .from("official_control_queue")
-      .update({
-        status: "failed",
-        finished_at: new Date().toISOString(),
-        error_message: err?.message ?? "Onbekende fout",
-      })
-      .eq("id", queueJobId);
+    try {
+      await supabase
+        .from("official_control_queue")
+        .update({
+          status: "failed",
+          finished_at: new Date().toISOString(),
+          error_message: err?.message ?? "Onbekende fout",
+        })
+        .eq("id", queueJobId);
+    } catch (e) {
+      console.error("❌ Officials queue: update official_control_queue failed:", e);
+    }
 
     throw err;
   }

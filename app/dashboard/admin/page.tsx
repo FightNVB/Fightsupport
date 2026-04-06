@@ -195,15 +195,15 @@ export default function AdminDashboardPage() {
       icon: Scale,
     },
     {
-      label: "Audit / Logboek",
-      subtitle: "Historische acties, wijzigingen en systeemlog",
-      href: "/dashboard/admin/audit",
+      label: "Dispensatie",
+      subtitle: "Dispensatie aanvragen",
+      href: "/dashboard/dispensatie",
       icon: History,
     },
     {
-      label: "Instellingen",
-      subtitle: "Systeemconfiguratie en beheeropties",
-      href: "/dashboard/admin/settings",
+      label: "Uitslagen verwerken",
+      subtitle: "Uitslagen beheren en uploadn naar FP",
+      href: "/dashboard/admin/uitslagen/ready-to-upload",
       icon: Trophy,
     },
   ];

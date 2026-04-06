@@ -18,6 +18,49 @@ function isResponseLike(value: unknown): value is Response {
   return typeof Response !== "undefined" && value instanceof Response;
 }
 
+function toSafeErrorMessage(error: any, fallback: string) {
+  const raw = String(error?.message ?? error ?? "").toLowerCase();
+
+  if (
+    raw.includes("502") ||
+    raw.includes("bad gateway") ||
+    raw.includes("cloudflare")
+  ) {
+    return "Supabase is tijdelijk niet bereikbaar. Probeer het zo opnieuw.";
+  }
+
+  if (
+    raw.includes("fetch failed") ||
+    raw.includes("network") ||
+    raw.includes("timeout") ||
+    raw.includes("socket")
+  ) {
+    return "Tijdelijke verbindingsfout met Supabase. Probeer het zo opnieuw.";
+  }
+
+  return String(error?.message ?? fallback);
+}
+
+async function safeSelect<T>(
+  promise: Promise<{ data: T[] | null; error: any }>,
+  label: string,
+  fallback: T[] = []
+): Promise<T[]> {
+  try {
+    const { data, error } = await promise;
+
+    if (error) {
+      console.error(`[released-matchmakings] ${label} queryfout:`, error);
+      return fallback;
+    }
+
+    return Array.isArray(data) ? data : fallback;
+  } catch (err) {
+    console.error(`[released-matchmakings] ${label} upstream fout:`, err);
+    return fallback;
+  }
+}
+
 type ControleRun = {
   id: string;
   matchmaking_id: string;
@@ -36,6 +79,34 @@ type OfficialQueueJob = {
   finished_at: string | null;
   controle_run_id: string | null;
   error_message: string | null;
+};
+
+type UploadRow = {
+  id: string;
+  uploaded_at: string | null;
+  uploaded_by: string | null;
+  evenement_naam: string | null;
+  evenement_datum: string | null;
+  locatie: string | null;
+  matchmaking_id: string | null;
+  matchmaker: string | null;
+  promotor: string | null;
+  bondteam: string | null;
+  official_release: boolean | null;
+  official_released_at: string | null;
+};
+
+type WeighInRow = {
+  matchmaking_id: string | null;
+  laatste_bewerking_op?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+};
+
+type LineupRow = {
+  matchmaking_id: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -58,7 +129,12 @@ export async function GET(req: NextRequest) {
 
     if (profileErr) {
       return NextResponse.json(
-        { error: profileErr.message || "Laden user_profiles mislukt." },
+        {
+          error: toSafeErrorMessage(
+            profileErr,
+            "Laden user_profiles mislukt."
+          ),
+        },
         { status: 500 }
       );
     }
@@ -108,14 +184,23 @@ export async function GET(req: NextRequest) {
 
     if (uploadError) {
       return NextResponse.json(
-        { error: uploadError.message || "Laden matchmaking_uploads mislukt." },
+        {
+          error: toSafeErrorMessage(
+            uploadError,
+            "Laden matchmaking_uploads mislukt."
+          ),
+        },
         { status: 500 }
       );
     }
 
-    const matchmakingIds = (uploads ?? [])
-      .map((u: any) => u.matchmaking_id)
-      .filter(Boolean) as string[];
+    const matchmakingIds = Array.from(
+      new Set(
+        (uploads ?? [])
+          .map((u: any) => String(u?.matchmaking_id ?? "").trim())
+          .filter(Boolean)
+      )
+    );
 
     const { data: runs, error: runsErr } = matchmakingIds.length
       ? await supabaseAdmin
@@ -126,7 +211,9 @@ export async function GET(req: NextRequest) {
 
     if (runsErr) {
       return NextResponse.json(
-        { error: runsErr.message || "Laden controle_runs mislukt." },
+        {
+          error: toSafeErrorMessage(runsErr, "Laden controle_runs mislukt."),
+        },
         { status: 500 }
       );
     }
@@ -142,16 +229,54 @@ export async function GET(req: NextRequest) {
 
     if (queueErr) {
       return NextResponse.json(
-        { error: queueErr.message || "Laden official_control_queue mislukt." },
+        {
+          error: toSafeErrorMessage(
+            queueErr,
+            "Laden official_control_queue mislukt."
+          ),
+        },
         { status: 500 }
       );
     }
 
+    const weighRows = matchmakingIds.length
+      ? await safeSelect<WeighInRow>(
+          supabaseAdmin
+            .from("weigh_in_bouts")
+            .select("matchmaking_id, laatste_bewerking_op, updated_at, created_at")
+            .in("matchmaking_id", matchmakingIds),
+          "weigh_in_bouts"
+        )
+      : [];
+
+    const lineupRows = matchmakingIds.length
+      ? await safeSelect<LineupRow>(
+          supabaseAdmin
+            .from("definitive_matchmaking_bouts")
+            .select("matchmaking_id, created_at, updated_at")
+            .in("matchmaking_id", matchmakingIds),
+          "definitive_matchmaking_bouts"
+        )
+      : [];
+
     const runMap = new Map<string, ControleRun>();
     (runs ?? []).forEach((r) => {
-      const existing = runMap.get(r.matchmaking_id);
-      if (!existing || new Date(r.gestart_op ?? 0) > new Date(existing.gestart_op ?? 0)) {
-        runMap.set(r.matchmaking_id, r);
+      const mmId = String(r?.matchmaking_id ?? "").trim();
+      if (!mmId) return;
+
+      const existing = runMap.get(mmId);
+      if (!existing) {
+        runMap.set(mmId, r);
+        return;
+      }
+
+      const nextTime = new Date(r.gestart_op ?? r.afgerond_op ?? 0).getTime();
+      const existingTime = new Date(
+        existing.gestart_op ?? existing.afgerond_op ?? 0
+      ).getTime();
+
+      if (nextTime >= existingTime) {
+        runMap.set(mmId, r);
       }
     });
 
@@ -165,36 +290,132 @@ export async function GET(req: NextRequest) {
     };
 
     (queueJobs ?? []).forEach((q) => {
-      const existing = queueMap.get(q.matchmaking_id);
+      const mmId = String(q?.matchmaking_id ?? "").trim();
+      if (!mmId) return;
+
+      const existing = queueMap.get(mmId);
       if (!existing) {
-        queueMap.set(q.matchmaking_id, q);
+        queueMap.set(mmId, q);
         return;
       }
 
-      const nextRank = rank(q.status);
-      const existingRank = rank(existing.status);
+      const nextRank = rank(String(q.status ?? ""));
+      const existingRank = rank(String(existing.status ?? ""));
 
       if (
         nextRank > existingRank ||
         (nextRank === existingRank &&
-          new Date(q.created_at ?? 0) > new Date(existing.created_at ?? 0))
+          new Date(q.created_at ?? 0).getTime() >
+            new Date(existing.created_at ?? 0).getTime())
       ) {
-        queueMap.set(q.matchmaking_id, q);
+        queueMap.set(mmId, q);
       }
     });
 
-    const rows = (uploads ?? []).map((u: any) => ({
-      ...u,
-      laatste_run: u.matchmaking_id ? runMap.get(u.matchmaking_id) ?? null : null,
-      actieve_queue_job: u.matchmaking_id ? queueMap.get(u.matchmaking_id) ?? null : null,
-    }));
+    const weighMap = new Map<
+      string,
+      {
+        count: number;
+        latest_at: string | null;
+      }
+    >();
+
+    (weighRows ?? []).forEach((w) => {
+      const mmId = String(w?.matchmaking_id ?? "").trim();
+      if (!mmId) return;
+
+      const stamp =
+        w.laatste_bewerking_op ?? w.updated_at ?? w.created_at ?? null;
+
+      const existing = weighMap.get(mmId);
+      if (!existing) {
+        weighMap.set(mmId, { count: 1, latest_at: stamp });
+        return;
+      }
+
+      const nextTime = new Date(stamp ?? 0).getTime();
+      const existingTime = new Date(existing.latest_at ?? 0).getTime();
+
+      weighMap.set(mmId, {
+        count: existing.count + 1,
+        latest_at: nextTime >= existingTime ? stamp : existing.latest_at,
+      });
+    });
+
+    const lineupMap = new Map<
+      string,
+      {
+        count: number;
+        latest_at: string | null;
+      }
+    >();
+
+    (lineupRows ?? []).forEach((l) => {
+      const mmId = String(l?.matchmaking_id ?? "").trim();
+      if (!mmId) return;
+
+      const stamp = l.updated_at ?? l.created_at ?? null;
+
+      const existing = lineupMap.get(mmId);
+      if (!existing) {
+        lineupMap.set(mmId, { count: 1, latest_at: stamp });
+        return;
+      }
+
+      const nextTime = new Date(stamp ?? 0).getTime();
+      const existingTime = new Date(existing.latest_at ?? 0).getTime();
+
+      lineupMap.set(mmId, {
+        count: existing.count + 1,
+        latest_at: nextTime >= existingTime ? stamp : existing.latest_at,
+      });
+    });
+
+    const rows = (uploads ?? []).map((u: UploadRow) => {
+      const mmId = String(u?.matchmaking_id ?? "").trim();
+      const laatste_run = mmId ? runMap.get(mmId) ?? null : null;
+      const actieve_queue_job = mmId ? queueMap.get(mmId) ?? null : null;
+
+      const weighInfo = mmId ? weighMap.get(mmId) : null;
+      const lineupInfo = mmId ? lineupMap.get(mmId) : null;
+
+      const in_lineup = !!lineupInfo?.count;
+      const naar_weegstation = !in_lineup && !!weighInfo?.count;
+
+      const flow_status = in_lineup
+        ? "in lineup"
+        : naar_weegstation
+        ? "naar weegstation"
+        : "ontvangen";
+
+      return {
+        ...u,
+        laatste_run,
+        actieve_queue_job,
+
+        flow_status,
+
+        naar_weegstation,
+        naar_weegstation_at: weighInfo?.latest_at ?? null,
+
+        in_lineup,
+        lineup: in_lineup,
+        definitive_id: in_lineup ? mmId : null,
+        definitive_matchmaking_id: in_lineup ? mmId : null,
+      };
+    });
 
     return NextResponse.json({ rows });
   } catch (e: any) {
     if (isResponseLike(e)) return e;
 
     return NextResponse.json(
-      { error: e?.message ?? "Onbekende fout." },
+      {
+        error: toSafeErrorMessage(
+          e,
+          "Onbekende fout bij laden official overzicht."
+        ),
+      },
       { status: 500 }
     );
   }

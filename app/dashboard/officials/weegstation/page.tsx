@@ -1,245 +1,642 @@
 "use client";
 
-// app/dashboard/officials/weegstation/page.tsx
-// ✅ Weegstation overzicht: lijst van alle matchmakings waarvan weging beschikbaar is
-
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  RefreshCcw,
+  Scale,
+  Search,
+  ShieldCheck,
+  CalendarDays,
+  Swords,
+  ChevronDown,
+} from "lucide-react";
+
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
-import NvbDarkButton from "@/components/NvbDarkButton";
-import NvbLightButton from "@/components/NvbLightButton";
 
-const NVB_ORANGE = "#ff4d00";
+const ORANGE = "#ff4d00";
 
-function metalFrameStyle(): CSSProperties {
-  const accentGlow =
-    "radial-gradient(640px 320px at 50% 0%, rgba(255,77,0,0.18), transparent 62%)";
-  const brushed =
-    "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, rgba(255,255,255,0.02) 1px, rgba(255,255,255,0.02) 4px)";
-  const sheen =
-    "linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 24%, rgba(255,255,255,0) 48%, rgba(255,255,255,0.10) 70%, rgba(255,255,255,0) 100%)";
-  return {
-    border: "5px solid rgba(10,10,12,0.92)",
-    borderRadius: 22,
-    background: `${accentGlow}, ${sheen}, ${brushed}, linear-gradient(180deg, #3a3d44 0%, #1f2025 52%, #0a0b0e 100%)`,
-    boxShadow:
-      "0 26px 70px rgba(0,0,0,0.70)," +
-      " inset 0 0 0 2px rgba(255,255,255,0.14)," +
-      " inset 0 0 0 4px rgba(180,180,190,0.18)," +
-      " inset 0 0 0 7px rgba(0,0,0,0.55)," +
-      " inset 0 1px 0 rgba(255,255,255,0.22)," +
-      " inset 0 -18px 24px rgba(0,0,0,0.65)",
-  };
-}
+type RoleName =
+  | "superadmin"
+  | "admin"
+  | "promotor"
+  | "matchmaker"
+  | "official"
+  | "hoofdofficial"
+  | "dispensatie_admin";
 
-function metalInnerStyle(): CSSProperties {
-  return {
-    border: "3px solid rgba(0,0,0,0.45)",
-    borderRadius: 16,
-    background:
-      "repeating-linear-gradient(90deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, rgba(255,255,255,0.025) 1px, rgba(255,255,255,0.025) 6px)," +
-      " linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(233,236,240,0.98) 100%)",
-    boxShadow:
-      "inset 0 0 0 2px rgba(255,255,255,0.70)," +
-      " inset 0 0 0 6px rgba(0,0,0,0.10)," +
-      " inset 0 -12px 22px rgba(0,0,0,0.12)",
-  };
-}
-
-type EventRow = {
+type MatchmakingRow = {
   matchmaking_id: string;
   evenement_naam: string | null;
   evenement_datum: string | null;
   bondteam: string | null;
   discipline: string | null;
-  total: number;
-  gewogen: number;
-  ok: number;
-  dispensatie: number;
-  afkeur: number;
+  locatie: string | null;
+  created_at?: string | null;
+
+  uploaded_by?: string | null;
+  created_by?: string | null;
+  created_by_user_id?: string | null;
+  owner_user_id?: string | null;
+  user_id?: string | null;
+  geupload_door?: string | null;
+  aangemaakt_door?: string | null;
 };
+
+function pageBgStyle(): CSSProperties {
+  return {
+    minHeight: "100vh",
+    background:
+      "radial-gradient(circle at top, rgba(255,77,0,0.12) 0%, rgba(255,77,0,0.03) 18%, transparent 34%), linear-gradient(180deg, #050608 0%, #0a0d12 55%, #050608 100%)",
+  };
+}
+
+function metalFrameStyle(): CSSProperties {
+  return {
+    border: "4px solid rgba(20,22,26,0.92)",
+    borderRadius: 26,
+    background:
+      "radial-gradient(900px 300px at 50% -10%, rgba(255,77,0,0.16), transparent 55%), linear-gradient(135deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.05) 20%, rgba(255,255,255,0.00) 42%, rgba(255,255,255,0.12) 70%, rgba(255,255,255,0.02) 100%), repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, rgba(255,255,255,0.015) 1px, rgba(255,255,255,0.015) 5px), linear-gradient(180deg, #575b64 0%, #2b2f37 45%, #181b20 100%)",
+    boxShadow:
+      "0 20px 55px rgba(0,0,0,0.34), inset 0 0 0 2px rgba(255,255,255,0.14), inset 0 0 0 5px rgba(90,94,104,0.28), inset 0 -14px 22px rgba(0,0,0,0.30)",
+  };
+}
+
+function metalInnerStyle(): CSSProperties {
+  return {
+    border: "3px solid rgba(20,22,26,0.34)",
+    borderRadius: 20,
+    background:
+      "repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, rgba(255,255,255,0.03) 1px, rgba(255,255,255,0.03) 6px), linear-gradient(180deg, #f8fafc 0%, #e7edf3 100%)",
+    boxShadow:
+      "inset 0 0 0 2px rgba(255,255,255,0.80), inset 0 0 0 6px rgba(0,0,0,0.08), inset 0 -12px 22px rgba(0,0,0,0.08)",
+  };
+}
+
+function darkPanelStyle(): CSSProperties {
+  return {
+    background: "linear-gradient(180deg, rgba(47,50,58,0.98) 0%, rgba(30,32,37,0.98) 100%)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.07), 0 14px 28px rgba(0,0,0,0.24)",
+    borderRadius: 16,
+  };
+}
+
+function silverCardStyle(): CSSProperties {
+  return {
+    background:
+      "repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, rgba(255,255,255,0.03) 1px, rgba(255,255,255,0.03) 6px), linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(237,242,247,0.98) 100%)",
+    border: "2px solid rgba(0,0,0,0.15)",
+    borderRadius: 18,
+    boxShadow:
+      "inset 0 0 0 1px rgba(255,255,255,0.75), inset 0 -10px 18px rgba(0,0,0,0.06), 0 14px 32px rgba(0,0,0,0.10)",
+  };
+}
+
+function normalizeRoleName(v: unknown): RoleName | "" {
+  return String(v ?? "").trim().toLowerCase() as RoleName | "";
+}
+
+function safeText(v: unknown, fallback = "-") {
+  const s = String(v ?? "").trim();
+  return s.length ? s : fallback;
+}
 
 function formatDate(v: string | null) {
   if (!v) return "-";
   return new Date(v.length === 10 ? `${v}T00:00:00` : v).toLocaleDateString("nl-NL");
 }
 
+function normalizeSearchText(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function ActionButton({
+  children,
+  onClick,
+  disabled,
+  tone = "dark",
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  tone?: "dark" | "orange";
+}) {
+  const styles =
+    tone === "orange"
+      ? {
+          background: "linear-gradient(180deg, #ff6a2b 0%, #ff4d00 100%)",
+          border: "1px solid #c93e00",
+          color: "#111",
+        }
+      : {
+          background: "linear-gradient(180deg, #3d434d 0%, #22262d 100%)",
+          border: "1px solid rgba(0,0,0,0.45)",
+          color: "#fff",
+        };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50"
+      style={{
+        borderRadius: 4,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10)",
+        ...styles,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function getOwnerUserId(row: MatchmakingRow) {
+  const candidates = [
+    row.uploaded_by,
+    row.created_by,
+    row.created_by_user_id,
+    row.owner_user_id,
+    row.user_id,
+    row.geupload_door,
+    row.aangemaakt_door,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate ?? "").trim();
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function getBondteamBadgeStyle(
+  bondteam: string | null | undefined,
+  darkRow: boolean
+): CSSProperties {
+  const key = String(bondteam ?? "").trim().toUpperCase();
+
+  const map: Record<string, { bg: string; color: string; border: string }> = {
+    IRO: { bg: "#dbeafe", color: "#1d4ed8", border: "#93c5fd" },
+    NKF: { bg: "#dcfce7", color: "#166534", border: "#86efac" },
+    WPKL: { bg: "#f3e8ff", color: "#7c3aed", border: "#d8b4fe" },
+    WMTA: { bg: "#fee2e2", color: "#b91c1c", border: "#fca5a5" },
+    VON: { bg: "#fef3c7", color: "#b45309", border: "#fcd34d" },
+    UMC: { bg: "#cffafe", color: "#0f766e", border: "#67e8f9" },
+    MMAAN: { bg: "#e0e7ff", color: "#4338ca", border: "#a5b4fc" },
+    MON: { bg: "#ffedd5", color: "#c2410c", border: "#fdba74" },
+  };
+
+  const found = map[key];
+
+  if (found) {
+    return {
+      background: found.bg,
+      color: found.color,
+      border: `1px solid ${found.border}`,
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
+    };
+  }
+
+  return darkRow
+    ? {
+        background: "rgba(255,255,255,0.10)",
+        color: "#fff",
+        border: "1px solid rgba(255,255,255,0.14)",
+      }
+    : {
+        background: "rgba(255,77,0,0.12)",
+        color: "#9a3412",
+        border: "1px solid rgba(255,77,0,0.20)",
+      };
+}
+
 export default function WeegstationOverzichtPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const [events, setEvents] = useState<EventRow[]>([]);
+
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [melding, setMelding] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user) return;
-    loadEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  const [rows, setRows] = useState<MatchmakingRow[]>([]);
+  const [search, setSearch] = useState("");
+  const [bondteamFilter, setBondteamFilter] = useState("ALLE");
 
-  async function loadEvents() {
+  const [roleNames, setRoleNames] = useState<RoleName[]>([]);
+  const [myBondteam, setMyBondteam] = useState("");
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void loadRows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  async function loadRows() {
+    if (!user?.id) return;
+
     setLoading(true);
     setMelding(null);
 
-    const { data, error } = await supabase
-      .from("weigh_in_bouts")
-      .select(
-        "matchmaking_id, evenement_naam, evenement_datum, bondteam, discipline, eindstatus, rood_gewogen_gewicht, blauw_gewogen_gewicht"
-      )
-      .order("evenement_datum", { ascending: false });
+    try {
+      const uid = user.id;
 
-    if (error) {
-      setMelding("❌ Fout bij laden evenementen: " + error.message);
+      const { data: profile, error: profileErr } = await supabase
+        .from("user_profiles")
+        .select("id, bondteam")
+        .eq("id", uid)
+        .single();
+
+      if (profileErr) throw profileErr;
+
+      setMyBondteam(String(profile?.bondteam ?? "").trim());
+
+      const { data: userRoles, error: urErr } = await supabase
+        .from("user_roles")
+        .select("role_id")
+        .eq("user_id", uid);
+
+      if (urErr) throw urErr;
+
+      const roleIds = (userRoles ?? []).map((r: any) => r.role_id).filter(Boolean);
+
+      let names: RoleName[] = [];
+      if (roleIds.length > 0) {
+        const { data: rolesRows, error: rolesErr } = await supabase
+          .from("roles")
+          .select("id, name")
+          .in("id", roleIds);
+
+        if (rolesErr) throw rolesErr;
+
+        names = (rolesRows ?? [])
+          .map((r: any) => normalizeRoleName(r?.name))
+          .filter(Boolean) as RoleName[];
+      }
+
+      setRoleNames(names);
+
+      const canAccess = names.some((r) =>
+        ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin", "matchmaker"].includes(r)
+      );
+
+      if (!canAccess) {
+        throw new Error("Je hebt geen toegang tot het weegstation.");
+      }
+
+      const { data, error } = await supabase
+        .from("matchmaking_uploads")
+        .select("*")
+        .order("evenement_datum", { ascending: false });
+
+      if (error) throw error;
+
+      const isSuper =
+        names.includes("superadmin") ||
+        names.includes("admin") ||
+        names.includes("dispensatie_admin");
+
+      const isOfficial =
+        names.includes("official") || names.includes("hoofdofficial");
+
+      const isMatchmaker = names.includes("matchmaker");
+
+      const normalizedBondteam = String(profile?.bondteam ?? "").trim().toLowerCase();
+
+      const filtered = (data ?? []).filter((row: any) => {
+        if (!row?.matchmaking_id) return false;
+        if (isSuper) return true;
+
+        if (isOfficial) {
+          return String(row?.bondteam ?? "").trim().toLowerCase() === normalizedBondteam;
+        }
+
+        if (isMatchmaker) {
+          const ownerId = getOwnerUserId(row as MatchmakingRow);
+          return ownerId === uid;
+        }
+
+        return false;
+      });
+
+      const deduped = new Map<string, MatchmakingRow>();
+      for (const row of filtered) {
+        const id = String((row as any)?.matchmaking_id ?? "").trim();
+        if (!id) continue;
+        if (!deduped.has(id)) {
+          deduped.set(id, row as MatchmakingRow);
+        }
+      }
+
+      setRows(Array.from(deduped.values()));
+    } catch (e: any) {
+      setMelding(e?.message ?? "Fout bij laden van matchmakings.");
+      setRows([]);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // Group by matchmaking_id
-    const byMm: Record<string, EventRow> = {};
-    for (const row of data ?? []) {
-      const mmId = row.matchmaking_id;
-      if (!byMm[mmId]) {
-        byMm[mmId] = {
-          matchmaking_id: mmId,
-          evenement_naam: row.evenement_naam,
-          evenement_datum: row.evenement_datum,
-          bondteam: row.bondteam,
-          discipline: row.discipline,
-          total: 0,
-          gewogen: 0,
-          ok: 0,
-          dispensatie: 0,
-          afkeur: 0,
-        };
-      }
-      byMm[mmId].total += 1;
-      if (row.rood_gewogen_gewicht != null && row.blauw_gewogen_gewicht != null) {
-        byMm[mmId].gewogen += 1;
-      }
-      if (row.eindstatus === "OK" || row.eindstatus === "GOEDGEKEURD_MET_DISPENSATIE") {
-        byMm[mmId].ok += 1;
-      }
-      if (row.eindstatus === "DISPENSATIE_NODIG" || row.eindstatus === "GOEDGEKEURD_MET_DISPENSATIE") {
-        byMm[mmId].dispensatie += 1;
-      }
-      if (row.eindstatus === "AFKEUR") {
-        byMm[mmId].afkeur += 1;
-      }
-    }
-
-    setEvents(Object.values(byMm));
-    setLoading(false);
   }
 
+  async function handleRefresh() {
+    setRefreshing(true);
+    await loadRows();
+    setRefreshing(false);
+  }
+
+  const bondteamOptions = useMemo(() => {
+    const unique = Array.from(
+      new Set(rows.map((row) => String(row.bondteam ?? "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "nl"));
+
+    return ["ALLE", ...unique];
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const q = normalizeSearchText(search);
+
+    return rows.filter((row) => {
+      if (bondteamFilter !== "ALLE" && safeText(row.bondteam, "") !== bondteamFilter) {
+        return false;
+      }
+
+      if (!q) return true;
+
+      const haystack = normalizeSearchText(
+        [
+          row.evenement_naam,
+          row.evenement_datum,
+          row.bondteam,
+          row.locatie,
+          row.matchmaking_id,
+        ].join(" ")
+      );
+
+      return haystack.includes(q);
+    });
+  }, [rows, search, bondteamFilter]);
+
+  const roleLabel = useMemo(() => {
+    if (roleNames.includes("superadmin")) return "SUPERADMIN";
+    if (roleNames.includes("admin")) return "ADMIN";
+    if (roleNames.includes("dispensatie_admin")) return "DISPENSATIE ADMIN";
+    if (roleNames.includes("hoofdofficial")) return "HOOFDOFFICIAL";
+    if (roleNames.includes("official")) return "OFFICIAL";
+    if (roleNames.includes("matchmaker")) return "MATCHMAKER";
+    return "GEBRUIKER";
+  }, [roleNames]);
+
   return (
-    <main
-      className="min-h-screen flex items-center justify-center p-4"
-      style={{ background: "#0a0a0d" }}
-    >
-      <div style={{ width: "100%", maxWidth: 760 }}>
-        {/* Metal frame */}
-        <div style={metalFrameStyle()} className="p-4">
-          {/* Header */}
-          <div className="mb-4 rounded-xl px-4 py-4" style={{ background: "linear-gradient(180deg, rgba(255,77,0,0.22), rgba(0,0,0,0))", border: "1px solid rgba(255,77,0,0.28)" }}>
-            <div className="grid items-center gap-4 md:grid-cols-[1fr_auto_1fr]">
-              <div />
-              <div className="flex justify-center">
-                <div className="rounded-[18px] p-[4px]" style={{ background: "linear-gradient(135deg, #f5f5f5 0%, #bdbdbd 28%, #8e8e8e 55%, #f0f0f0 72%, #6f6f6f 100%)", boxShadow: "0 0 0 2px rgba(255,255,255,0.45), 0 0 0 6px rgba(120,120,120,0.18), 0 12px 26px rgba(0,0,0,0.40)" }}>
-                  <div className="rounded-[14px] px-3 py-2" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.68) 0%, rgba(0,0,0,0.40) 100%)", border: "1px solid rgba(255,255,255,0.10)" }}>
-                    <Image src="/branding/fightsupport/logo-dark.png" width={220} height={120} alt="FightSupport" priority className="mx-auto" />
-                  </div>
+    <main className="min-h-screen px-3 py-4 md:px-5 md:py-5" style={pageBgStyle()}>
+      <div className="mx-auto max-w-[1480px]" style={metalFrameStyle()}>
+        <div className="p-3 md:p-4" style={metalInnerStyle()}>
+          <div
+            className="rounded-[14px] px-4 py-4 text-white shadow-2xl"
+            style={darkPanelStyle()}
+          >
+            <div className="grid items-center gap-4 lg:grid-cols-[1fr_auto_1fr]">
+              <div className="min-w-0 leading-tight">
+                <div
+                  className="text-[11px] font-black uppercase tracking-[0.12em]"
+                  style={{ color: ORANGE }}
+                >
+                  Officials portaal
+                </div>
+
+                <div className="mt-1 flex items-center gap-2 text-[26px] font-black leading-[1.05] text-white">
+                  <Scale className="h-6 w-6" style={{ color: ORANGE }} />
+                  <span>WEEGSTATION</span>
+                </div>
+
+                <div className="mt-2 text-[13px] font-semibold text-white/75">
+                  Kies een matchmaking om direct de weging te openen
                 </div>
               </div>
-              <div className="text-right">
-                <div style={{ color: NVB_ORANGE, fontWeight: 900, fontSize: 20, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                  ⚖️ WEEGSTATION
+
+              <div className="flex items-center justify-center">
+                <div className="w-full max-w-[440px]">
+                  <Image
+                    src="/branding/fightsupport/logo-header.png"
+                    width={440}
+                    height={90}
+                    alt="FightSupport"
+                    priority
+                    sizes="(max-width: 1024px) 280px, 440px"
+                    style={{
+                      width: "100%",
+                      height: "auto",
+                      display: "block",
+                      filter:
+                        "drop-shadow(0 0 10px rgba(255,77,0,0.18)) drop-shadow(0 0 22px rgba(255,77,0,0.10))",
+                    }}
+                  />
                 </div>
-                <div style={{ color: "rgba(255,255,255,0.60)", fontSize: 13, marginTop: 2 }}>
-                  Nederlandse Vechtsport Bond — Gewichtsregistratie
+              </div>
+
+              <div className="flex justify-end">
+                <div className="min-w-[170px] rounded-[10px] border border-white/10 bg-white/5 px-3 py-2">
+                  <div
+                    className="text-[10px] font-black uppercase tracking-[0.1em]"
+                    style={{ color: ORANGE }}
+                  >
+                    Toegang
+                  </div>
+                  <div className="mt-1 text-sm font-black text-white">{roleLabel}</div>
+                  <div className="mt-1 text-xs font-semibold text-white/65">
+                    Bondteam: {safeText(myBondteam)}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Inner silver plate */}
-          <div style={metalInnerStyle()} className="p-4">
-            <div className="flex items-center justify-between mb-4">
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#1a1a1a" }}>
-                Kies een evenement
+          <div className="mt-4 rounded-[18px] p-4" style={silverCardStyle()}>
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="min-w-0">
+                <div className="text-[15px] font-black uppercase tracking-[0.08em] text-zinc-900">
+                  Kies matchmaking voor wegen
+                </div>
+                <div className="text-sm font-semibold text-zinc-600">
+                  Compact overzicht — alleen kiezen en openen
+                </div>
               </div>
-              <button
-                onClick={loadEvents}
-                style={{ color: NVB_ORANGE, fontSize: 13, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}
-              >
-                ↺ Vernieuwen
-              </button>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+                <label className="flex min-w-[280px] items-center gap-2 rounded-[8px] border border-black/15 bg-white/80 px-3 py-2">
+                  <Search className="h-4 w-4 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Zoek op event, datum, bondteam of id..."
+                    className="w-full bg-transparent text-sm font-semibold text-zinc-900 outline-none placeholder:text-zinc-400"
+                  />
+                </label>
+
+                <div className="relative min-w-[180px]">
+                  <select
+                    value={bondteamFilter}
+                    onChange={(e) => setBondteamFilter(e.target.value)}
+                    className="w-full appearance-none rounded-[8px] border border-black/15 bg-white/85 px-3 py-2 pr-10 text-sm font-black text-zinc-900 outline-none"
+                  >
+                    {bondteamOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option === "ALLE" ? "Alle bondteams" : option}
+                      </option>
+                    ))}
+                  </select>
+
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                </div>
+
+                <ActionButton onClick={handleRefresh} tone="orange" disabled={refreshing}>
+                  <RefreshCcw className="mr-2 h-4 w-4" />
+                  {refreshing ? "Verversen..." : "Vernieuwen"}
+                </ActionButton>
+
+                <ActionButton onClick={() => router.push("/dashboard/officials")} tone="dark">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Terug
+                </ActionButton>
+              </div>
             </div>
 
-            {melding && (
-              <div className="mb-3 p-3 rounded-lg text-sm" style={{ background: melding.startsWith("❌") ? "#fee2e2" : "#dcfce7", color: melding.startsWith("❌") ? "#991b1b" : "#166534" }}>
+            {melding ? (
+              <div
+                className="mt-4 rounded-[10px] px-4 py-3 text-sm font-bold"
+                style={{
+                  background: "#fee2e2",
+                  color: "#991b1b",
+                  border: "1px solid #fca5a5",
+                }}
+              >
                 {melding}
               </div>
-            )}
+            ) : null}
 
-            {loading ? (
-              <div className="text-center py-8" style={{ color: "rgba(0,0,0,0.45)" }}>
-                Laden…
+            <div className="mt-4 overflow-hidden rounded-[16px] border border-black/15">
+              <div
+                className="grid items-center gap-3 px-4 py-3 text-[11px] font-black uppercase tracking-[0.08em]"
+                style={{
+                  gridTemplateColumns: "minmax(260px, 2fr) 130px 160px 130px",
+                  background: "linear-gradient(180deg, #2f323a 0%, #1e2025 100%)",
+                  color: "#fff",
+                }}
+              >
+                <div>Evenement</div>
+                <div>Datum</div>
+                <div>Bondteam</div>
+                <div className="text-right">Actie</div>
               </div>
-            ) : events.length === 0 ? (
-              <div className="text-center py-8" style={{ color: "rgba(0,0,0,0.45)" }}>
-                Geen evenementen beschikbaar voor wegen.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {events.map((ev) => (
-                  <button
-                    key={ev.matchmaking_id}
-                    onClick={() => router.push(`/dashboard/officials/weegstation/${ev.matchmaking_id}`)}
-                    className="w-full text-left rounded-xl px-4 py-3 transition-all"
-                    style={{
-                      background: "rgba(0,0,0,0.04)",
-                      border: "1.5px solid rgba(0,0,0,0.12)",
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,77,0,0.07)";
-                      (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,77,0,0.40)";
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
-                      (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.12)";
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 15, color: "#1a1a1a" }}>
-                          {ev.evenement_naam ?? "Onbekend evenement"}
+
+              {loading ? (
+                <div className="px-4 py-8 text-center text-sm font-bold text-zinc-600">
+                  Laden...
+                </div>
+              ) : filteredRows.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm font-bold text-zinc-600">
+                  Geen matchmakings gevonden.
+                </div>
+              ) : (
+                filteredRows.map((row, index) => {
+                  const darkRow = index % 2 === 1;
+
+                  return (
+                    <div
+                      key={row.matchmaking_id}
+                      className="grid items-center gap-3 px-4 py-3"
+                      style={{
+                        gridTemplateColumns: "minmax(260px, 2fr) 130px 160px 130px",
+                        background: darkRow
+                          ? "linear-gradient(180deg, #3a3f48 0%, #2d3138 100%)"
+                          : "linear-gradient(180deg, #ffffff 0%, #eef2f6 100%)",
+                        color: darkRow ? "#ffffff" : "#111827",
+                        borderTop: "1px solid rgba(0,0,0,0.10)",
+                      }}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-[18px] font-black">
+                          {safeText(row.evenement_naam, "Onbekend evenement")}
                         </div>
-                        <div style={{ fontSize: 12, color: "rgba(0,0,0,0.50)", marginTop: 2 }}>
-                          {formatDate(ev.evenement_datum)} &nbsp;·&nbsp; {ev.bondteam ?? "-"} &nbsp;·&nbsp; {ev.discipline ?? "-"}
+
+                        <div
+                          className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-bold"
+                          style={{ color: darkRow ? "rgba(255,255,255,0.72)" : "#6b7280" }}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <Swords className="h-3.5 w-3.5" />
+                            Matchmaking
+                          </span>
+
+                          <span className="truncate">ID: {row.matchmaking_id}</span>
+
+                          {row.locatie ? (
+                            <span className="truncate">Locatie: {row.locatie}</span>
+                          ) : null}
                         </div>
                       </div>
-                      <div className="text-right flex-shrink-0 ml-4">
-                        <div style={{ fontSize: 13, fontWeight: 600, color: ev.gewogen === ev.total ? "#16a34a" : NVB_ORANGE }}>
-                          {ev.gewogen}/{ev.total} gewogen
-                        </div>
-                        <div style={{ fontSize: 11, color: "rgba(0,0,0,0.45)" }}>
-                          {ev.ok} OK · {ev.dispensatie} disp. · {ev.afkeur} afkeur
-                        </div>
+
+                      <div className="text-sm font-black">
+                        <span className="inline-flex items-center gap-1.5">
+                          <CalendarDays className="h-4 w-4" />
+                          {formatDate(row.evenement_datum)}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span
+                          className="inline-flex items-center rounded-[4px] px-2 py-1 text-[11px] font-black uppercase"
+                          style={getBondteamBadgeStyle(row.bondteam, darkRow)}
+                        >
+                          <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                          {safeText(row.bondteam)}
+                        </span>
+                      </div>
+
+                      <div className="text-right">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            router.push(`/dashboard/officials/weegstation/${row.matchmaking_id}`)
+                          }
+                          className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 text-xs font-black"
+                          style={{
+                            borderRadius: 4,
+                            border: "1px solid #c93e00",
+                            background: "linear-gradient(180deg, #ff6a2b 0%, #ff4d00 100%)",
+                            color: "#111",
+                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10)",
+                          }}
+                        >
+                          Open weegstation
+                        </button>
                       </div>
                     </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="mt-4">
-              <NvbLightButton
-                label="← Terug naar officials portaal"
-                onClick={() => router.push("/dashboard/officials")}
-              />
+                  );
+                })
+              )}
             </div>
+          </div>
+
+          <div
+            className="mt-4 text-center"
+            style={{
+              fontSize: 10,
+              letterSpacing: 2,
+              color: "rgba(255,255,255,0.34)",
+              textTransform: "uppercase",
+            }}
+          >
+            © Fightsupport
           </div>
         </div>
       </div>

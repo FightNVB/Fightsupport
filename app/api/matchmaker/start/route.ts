@@ -5,6 +5,7 @@ import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 import { buildMatchmakerFighterContext } from "@/lib/matchmaker/buildMatchmakerFighterContext";
 import { enrichMatchmakerBoutContext } from "@/lib/matchmaker/enrichMatchmakerBoutContext";
+import { runMatchmakerFighterRules } from "@/lib/matchmaker/runMatchmakerFighterRules";
 import {
   assertCanAccessMatchmaking,
   requireUserWithRole,
@@ -43,6 +44,7 @@ function resolveScriptPath(...parts: string[]) {
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
+
   throw new Error(`Script niet gevonden:\n- ${candidates.join("\n- ")}`);
 }
 
@@ -163,7 +165,7 @@ export async function POST(req: Request) {
         matchmaking_id,
         status: "running",
         gestart_op: new Date().toISOString(),
-        run_type: "matchmaker-scrape",
+        run_type: "matchmaker-control",
       })
       .select("id")
       .limit(1);
@@ -288,6 +290,13 @@ export async function POST(req: Request) {
     await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id);
     console.log("[control-engine/start] ✅ enrichMatchmakerBoutContext klaar");
 
+    console.log("[control-engine/start] ▶ runMatchmakerFighterRules...");
+    const fighterRuleSummary = await runMatchmakerFighterRules({
+      matchmaking_id,
+      controle_run_id,
+    });
+    console.log("[control-engine/start] ✅ runMatchmakerFighterRules klaar", fighterRuleSummary);
+
     await supabase
       .from("matchmaker_controle_runs")
       .update({
@@ -311,6 +320,7 @@ export async function POST(req: Request) {
       fullfighter_timeout_ms,
       uitslagen_timeout_ms,
       uitslagen_tries,
+      fighter_rules: fighterRuleSummary ?? null,
     });
   } catch (err: any) {
     console.error("❌ ControlEngine fout:", err);

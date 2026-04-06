@@ -12,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="nl">
+    <html lang="nl" data-scroll-behavior="smooth">
       <body className="bg-black text-white">
         <AuthProvider>
           {children}

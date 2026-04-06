@@ -4,14 +4,26 @@ import { evaluateWeighInBout } from "@/lib/weegstation/weighInRulesEngine";
 
 export const runtime = "nodejs";
 
+function normalizeRoleNames(roleNames?: unknown[]): string[] {
+  return (roleNames ?? [])
+    .map((x) => String(x ?? "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function canFinalize(ctx: {
   isHoofdofficialLike?: boolean;
-  roleNames?: string[];
+  roleNames?: unknown[];
 }) {
+  const names = normalizeRoleNames(ctx.roleNames);
+
   if (ctx.isHoofdofficialLike) return true;
 
-  const names = (ctx.roleNames ?? []).map((x) => String(x).trim().toLowerCase());
-  return names.includes("hoofdofficial") || names.includes("superadmin");
+  return (
+    names.includes("official") ||
+    names.includes("hoofdofficial") ||
+    names.includes("admin") ||
+    names.includes("superadmin")
+  );
 }
 
 function getDispDecision(row: any): "VERLEEND" | "AFGEWEZEN" | "NODIG" | null {
@@ -80,7 +92,12 @@ export async function POST(req: Request) {
 
     if (!canFinalize(auth)) {
       return NextResponse.json(
-        { error: "Alleen hoofdofficial of superadmin mag de definitieve lineup maken." },
+        {
+          error:
+            "Alleen official, hoofdofficial, admin of superadmin mag de definitieve lineup bouwen.",
+          debug_roles: normalizeRoleNames((auth as any)?.roleNames),
+          debug_isHoofdofficialLike: !!(auth as any)?.isHoofdofficialLike,
+        },
         { status: 403 }
       );
     }

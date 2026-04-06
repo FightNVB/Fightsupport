@@ -189,8 +189,8 @@ export default function MatchmakerDashboardPage() {
   const actions: MenuAction[] = [
     {
       label: "Matchmaking controle",
-      subtitle: "Controle op partijen en signaleringen",
-      href: "/dashboard/matchmaker/controle",
+      subtitle: "Upload en retour ontvangen MM",
+      href: "/dashboard/matchmaker/controle/ontvangen",
       icon: ClipboardList,
     },
     {

@@ -12,6 +12,7 @@ const supabase = createClient(
 );
 
 async function claimNextJob() {
+  // Draait er al een job? Dan niets claimen.
   const { data: running, error: runningErr } = await supabase
     .from("official_control_queue")
     .select("id")
@@ -21,6 +22,7 @@ async function claimNextJob() {
   if (runningErr) throw runningErr;
   if (running && running.length > 0) return null;
 
+  // Pak oudste queued job
   const { data: queued, error: queuedErr } = await supabase
     .from("official_control_queue")
     .select("*")
@@ -33,11 +35,13 @@ async function claimNextJob() {
 
   const job = queued[0];
 
+  // Claim alleen als hij nog queued is
   const { data: claimed, error: claimErr } = await supabase
     .from("official_control_queue")
     .update({
       status: "running",
       started_at: new Date().toISOString(),
+      finished_at: null,
       error_message: null,
     })
     .eq("id", job.id)
@@ -70,13 +74,35 @@ export async function POST(req: Request) {
       });
     }
 
+    let result: any = null;
+
     try {
-      const result = await runOfficialsControlJob({
+      result = await runOfficialsControlJob({
         queueJobId: job.id,
         matchmaking_id: job.matchmaking_id,
         payload: job.payload ?? {},
       });
+    } catch (err: any) {
+      console.error("❌ officials queue run-next job failed:", {
+        job_id: job.id,
+        matchmaking_id: job.matchmaking_id,
+        error: err?.message ?? String(err),
+      });
 
+      return NextResponse.json(
+        {
+          ok: false,
+          processed: true,
+          job_id: job.id,
+          matchmaking_id: job.matchmaking_id,
+          error: err?.message ?? "Onbekende fout",
+        },
+        { status: 500 }
+      );
+    }
+
+    // Trigger volgende job pas nadat deze klaar is
+    try {
       const baseUrl =
         process.env.INTERNAL_BASE_URL ||
         process.env.NEXT_PUBLIC_SITE_URL ||
@@ -89,26 +115,23 @@ export async function POST(req: Request) {
           "x-officials-queue-secret": process.env.OFFICIALS_QUEUE_SECRET || "",
         },
         body: JSON.stringify({ trigger: "chain-next" }),
-      }).catch(() => {});
-
-      return NextResponse.json({
-        ok: true,
-        processed: true,
-        job_id: job.id,
-        result,
+      }).catch((e) => {
+        console.error("⚠️ officials queue chain-next trigger mislukt:", e);
       });
-    } catch (err: any) {
-      return NextResponse.json(
-        {
-          ok: false,
-          processed: true,
-          job_id: job.id,
-          error: err?.message ?? "Onbekende fout",
-        },
-        { status: 500 }
-      );
+    } catch (e) {
+      console.error("⚠️ officials queue chain-next setup fout:", e);
     }
+
+    return NextResponse.json({
+      ok: true,
+      processed: true,
+      job_id: job.id,
+      matchmaking_id: job.matchmaking_id,
+      result,
+    });
   } catch (err: any) {
+    console.error("❌ officials queue run-next route error:", err);
+
     return NextResponse.json(
       { error: err?.message ?? "Onbekende fout" },
       { status: 500 }
