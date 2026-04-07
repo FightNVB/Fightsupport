@@ -23,18 +23,23 @@ export async function POST(req: Request) {
     const { userId, role } = await requireUserWithRole(req);
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
-    // 0) event_id eerst ophalen uit matchmaking_uploads
-    const { data: uploadRow, error: uploadLookupError } = await supabaseAdmin
-      .from("matchmaking_uploads")
-      .select("id, matchmaking_id, event_id")
-      .eq("matchmaking_id", matchmaking_id)
-      .order("uploaded_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // 0) hoofdrecord + event_id ophalen uit matchmakings (leidende bron)
+    const { data: matchmakingRow, error: matchmakingLookupError } =
+      await supabaseAdmin
+        .from("matchmakings")
+        .select("id, event_id")
+        .eq("id", matchmaking_id)
+        .maybeSingle();
 
-    if (uploadLookupError) throw uploadLookupError;
+    if (matchmakingLookupError) throw matchmakingLookupError;
+    if (!matchmakingRow) {
+      return NextResponse.json(
+        { error: "Matchmaking niet gevonden." },
+        { status: 404 }
+      );
+    }
 
-    const event_id = uploadRow?.event_id ?? null;
+    const event_id = matchmakingRow.event_id ?? null;
 
     // 1) runs ophalen
     const { data: runs, error: runsErr } = await supabaseAdmin
@@ -170,16 +175,16 @@ export async function POST(req: Request) {
       if (error) throw error;
     }
 
-    // 4) event verwijderen zolang event_id nog bekend is
-    if (event_id) {
+    // lifecycle log eerst weg als die FK naar matchmakings heeft
+    {
       const { error } = await supabaseAdmin
-        .from("events")
+        .from("matchmaking_flow_log")
         .delete()
-        .eq("id", event_id);
-      if (error) throw error;
+        .eq("matchmaking_id", matchmaking_id);
+      if (error && error.code !== "PGRST205") throw error;
     }
 
-    // 5) upload(s) weg
+    // 4) uploads weg
     {
       const { error } = await supabaseAdmin
         .from("matchmaking_uploads")
@@ -188,7 +193,7 @@ export async function POST(req: Request) {
       if (error) throw error;
     }
 
-    // 6) matchmaking hoofdrecord weg
+    // 5) matchmaking hoofdrecord weg
     {
       const { error } = await supabaseAdmin
         .from("matchmakings")
@@ -197,10 +202,32 @@ export async function POST(req: Request) {
       if (error) throw error;
     }
 
+    // 6) event pas verwijderen als er geen andere matchmakings meer aan hangen
+    let eventDeleted = false;
+
+    if (event_id) {
+      const { count, error: remainingErr } = await supabaseAdmin
+        .from("matchmakings")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", event_id);
+
+      if (remainingErr) throw remainingErr;
+
+      if ((count ?? 0) === 0) {
+        const { error } = await supabaseAdmin
+          .from("events")
+          .delete()
+          .eq("id", event_id);
+        if (error) throw error;
+        eventDeleted = true;
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       matchmaking_id,
       event_id,
+      event_deleted: eventDeleted,
       deleted_all_for_matchmaking_id: true,
     });
   } catch (e: any) {

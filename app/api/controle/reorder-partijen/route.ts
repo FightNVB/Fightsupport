@@ -157,7 +157,7 @@ async function ensureOriginalPartijNrRaw(
   if (!partijNrs.length) return;
 
   const { data, error } = await supabaseAdmin
-    .from("matchmaker_bouts_raw")
+    .from("matchmaking_bouts_raw")
     .select("partij_nr, original_partij_nr")
     .eq("matchmaking_id", matchmakingId)
     .in("partij_nr", partijNrs);
@@ -171,7 +171,7 @@ async function ensureOriginalPartijNrRaw(
     if (partijNr == null || originalPartijNr != null) continue;
 
     const { error: updErr } = await supabaseAdmin
-      .from("matchmaker_bouts_raw")
+      .from("matchmaking_bouts_raw")
       .update({ original_partij_nr: partijNr })
       .eq("matchmaking_id", matchmakingId)
       .eq("partij_nr", partijNr);
@@ -442,22 +442,22 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const oldPartijNrs = mapping.map((x) => x.old_partij_nr);
-      await ensureOriginalPartijNrRaw(matchmakingId, oldPartijNrs);
+  const oldPartijNrs = mapping.map((x) => x.old_partij_nr);
+  await ensureOriginalPartijNrRaw(matchmakingId, oldPartijNrs);
 
-      await updatePartijNrByOldToNewMap(
-        "matchmaker_bouts_raw",
-        { matchmaking_id: matchmakingId },
-        mapping
-      );
-    } catch (e) {
-      console.warn("matchmaker_bouts_raw reorder sync overgeslagen:", e);
-    }
+  await updatePartijNrByOldToNewMap(
+    "matchmaking_bouts_raw",
+    { matchmaking_id: matchmakingId },
+    mapping
+  );
+} catch (e) {
+  console.warn("matchmaking_bouts_raw reorder sync overgeslagen:", e);
+}
 
     return NextResponse.json({
       ok: true,
       message:
-        "Lineup-volgorde opgeslagen. original_partij_nr is behouden en partij_nr is bijgewerkt op controle_bout_context, controle_resultaten, dispensatie_requests en matchmaker_bouts_raw.",
+        "Lineup-volgorde opgeslagen. original_partij_nr is behouden en partij_nr is bijgewerkt op controle_bout_context, controle_resultaten, dispensatie_requests en matchmaking_bouts_raw.",
       matchmaking_id: matchmakingId,
       controle_run_id: latestControleRunId,
       updated: resolved.length,

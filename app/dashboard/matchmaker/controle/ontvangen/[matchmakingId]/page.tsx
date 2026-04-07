@@ -842,6 +842,41 @@ export default function ControleMatchmakingPage() {
     }
   }
 
+  async function stuurNaarUitslagen() {
+    if (!matchmakingId || releaseBusy) return;
+
+    setReleaseBusy(true);
+    setReleaseMsg(null);
+    setError(null);
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaking/naar-uitslagen", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Naar uitslagen sturen mislukt.");
+
+      const successMsg = json?.message ?? "✅ Matchmaking is doorgestuurd naar uitslagen.";
+      setReleaseMsg(successMsg);
+      setMsg(successMsg);
+    } catch (e: any) {
+      const message = e?.message ?? String(e) ?? "Onbekende fout.";
+      setReleaseMsg(`❌ ${message}`);
+      setError(message);
+    } finally {
+      setReleaseBusy(false);
+    }
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -1312,7 +1347,7 @@ export default function ControleMatchmakingPage() {
 
                 <div className="flex flex-1 items-center justify-end gap-3 flex-wrap">
                   <DarkActionButton
-                    label={releaseBusy ? "Doorsturen…" : "→ Bondteam"}
+                    label={releaseBusy ? "Sturen…" : "→ Stuur naar bond"}
                     tone="orange"
                     onClick={stuurDoorNaarOfficials}
                     disabled={releaseBusy}

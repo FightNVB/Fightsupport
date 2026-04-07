@@ -1,7 +1,4 @@
 // app/api/_utils/authz.ts
-// Auth + authorization helpers for API routes.
-// Uses service role to verify bearer tokens and to read roles / ownership.
-
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseAdmin = createClient(
@@ -27,65 +24,29 @@ function getBearerToken(req: Request): string | null {
 
 function normalizeRole(v: any): RoleName {
   const r = String(v ?? "").trim().toLowerCase();
-  if (
-    r === "superadmin" ||
-    r === "admin" ||
-    r === "matchmaker" ||
-    r === "official" ||
-    r === "hoofdofficial" ||
-    r === "dispensatie_admin"
-  ) {
-    return r;
-  }
+  if (["superadmin","admin","matchmaker","official","hoofdofficial","dispensatie_admin"].includes(r)) return r as RoleName;
   return "unknown";
 }
 
-/**
- * ✅ Canonical role source:
- * 1) public.user_profiles.role (single role)
- * 2) legacy fallback: user_roles -> roles.name
- */
 export async function getUserRole(userId: string): Promise<RoleName> {
-  // 1) user_profiles.role
-  const { data: prof, error: pErr } = await supabaseAdmin
-    .from("user_profiles")
-    .select("role")
-    .eq("id", userId)
-    .maybeSingle();
+  const { data: prof } = await supabaseAdmin.from("user_profiles").select("role").eq("id", userId).maybeSingle();
+  const direct = normalizeRole((prof as any)?.role);
+  if (direct !== "unknown") return direct;
 
-  if (!pErr) {
-    const r = normalizeRole((prof as any)?.role);
-    if (r !== "unknown") return r;
-  }
-
-  // 2) legacy: user_roles + roles
-  const { data, error } = await supabaseAdmin
+  const { data } = await supabaseAdmin
     .from("user_roles")
-    .select(
-      `
-      role_id,
-      roles:roles ( name )
-    `
-    )
+    .select(`role_id, roles:roles ( name )`)
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) {
-    console.error("[authz:getUserRole]", error);
-    return "unknown";
-  }
-
-  const roleName = (data as any)?.roles?.name;
-  return normalizeRole(roleName);
+  return normalizeRole((data as any)?.roles?.name);
 }
 
 export async function requireUserWithRole(req: Request): Promise<{ userId: string; role: RoleName }> {
   const token = getBearerToken(req);
   if (!token) throw new Response("Unauthorized", { status: 401 });
-
   const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
   if (userErr || !userData?.user?.id) throw new Response("Unauthorized", { status: 401 });
-
   const userId = userData.user.id;
   const role = await getUserRole(userId);
   return { userId, role };
@@ -105,23 +66,19 @@ export async function requireAnyRole(req: Request, allowed: RoleName[]): Promise
 }
 
 export async function getUserBondteam(userId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from("user_profiles")
-    .select("bondteam")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[authz:getUserBondteam]", error);
-    return null;
-  }
-
+  const { data } = await supabaseAdmin.from("user_profiles").select("bondteam").eq("id", userId).maybeSingle();
   const bt = (data as any)?.bondteam;
   return bt ? String(bt) : null;
 }
 
-export async function getMatchmakingMeta(matchmaking_id: string): Promise<{ uploaded_by: string | null; bondteam: string | null } | null> {
-  const { data, error } = await supabaseAdmin
+export async function getMatchmakingMeta(matchmaking_id: string): Promise<any | null> {
+  const { data: mm } = await supabaseAdmin
+    .from("matchmakings")
+    .select("id, matchmaker_id, huidige_eigenaar_type, huidige_eigenaar_user_id, huidige_eigenaar_bondteam, bron_type")
+    .eq("id", matchmaking_id)
+    .maybeSingle();
+
+  const { data: upload } = await supabaseAdmin
     .from("matchmaking_uploads")
     .select("uploaded_by, bondteam")
     .eq("matchmaking_id", matchmaking_id)
@@ -129,49 +86,35 @@ export async function getMatchmakingMeta(matchmaking_id: string): Promise<{ uplo
     .limit(1)
     .maybeSingle();
 
-  if (error) {
-    console.error("[authz:getMatchmakingMeta]", error);
-    return null;
-  }
-
   return {
-    uploaded_by: (data as any)?.uploaded_by ? String((data as any).uploaded_by) : null,
-    bondteam: (data as any)?.bondteam ? String((data as any).bondteam) : null,
+    uploaded_by: (upload as any)?.uploaded_by ? String((upload as any).uploaded_by) : null,
+    bondteam: (mm as any)?.huidige_eigenaar_bondteam || (upload as any)?.bondteam || null,
+    huidige_eigenaar_type: (mm as any)?.huidige_eigenaar_type || null,
+    huidige_eigenaar_user_id: (mm as any)?.huidige_eigenaar_user_id || null,
+    matchmaker_id: (mm as any)?.matchmaker_id || null,
   };
 }
 
 export async function getMatchmakingOwner(matchmaking_id: string): Promise<string | null> {
   const meta = await getMatchmakingMeta(matchmaking_id);
-  return meta?.uploaded_by ?? null;
+  return meta?.huidige_eigenaar_user_id ?? meta?.matchmaker_id ?? meta?.uploaded_by ?? null;
 }
 
-/**
- * Access rules:
- * - superadmin/admin: always
- * - matchmaker: only if uploaded_by == userId
- * - official/hoofdofficial: only if matchmaking_uploads.bondteam == user_profiles.bondteam
- */
-export async function assertCanAccessMatchmaking(opts: {
-  matchmaking_id: string;
-  userId: string;
-  role: RoleName;
-}): Promise<void> {
+export async function assertCanAccessMatchmaking(opts: { matchmaking_id: string; userId: string; role: RoleName; }): Promise<void> {
   const { matchmaking_id, userId, role } = opts;
-
   if (role === "admin" || role === "superadmin") return;
-
   const meta = await getMatchmakingMeta(matchmaking_id);
-  const owner = meta?.uploaded_by ?? null;
-  const mmBond = meta?.bondteam ?? null;
+  if (!meta) throw new Response("Forbidden", { status: 403 });
 
   if (role === "matchmaker") {
-    if (!owner || owner !== userId) throw new Response("Forbidden", { status: 403 });
+    const allowedIds = [meta.huidige_eigenaar_user_id, meta.matchmaker_id, meta.uploaded_by].filter(Boolean).map(String);
+    if (!allowedIds.includes(userId)) throw new Response("Forbidden", { status: 403 });
     return;
   }
 
   if (role === "official" || role === "hoofdofficial") {
     const userBond = await getUserBondteam(userId);
-    if (!userBond || !mmBond || String(userBond) !== String(mmBond)) {
+    if (!userBond || !meta.bondteam || String(userBond) !== String(meta.bondteam)) {
       throw new Response("Forbidden", { status: 403 });
     }
     return;

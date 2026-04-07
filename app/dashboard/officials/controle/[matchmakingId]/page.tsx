@@ -1128,6 +1128,32 @@ export default function ControleMatchmakingPage() {
     }
   }
 
+  async function stuurNaarUitslagen() {
+    setError(null);
+    setMsg("");
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaking/naar-uitslagen", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Naar uitslagen sturen mislukt.");
+
+      setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar uitslagen.");
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -1522,6 +1548,13 @@ export default function ControleMatchmakingPage() {
                     onClick={openLineupExcel}
                     disabled={lineupMode}
                     title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                  />
+                  <DarkActionButton
+                    label="→ Naar uitslagen"
+                    tone="green"
+                    onClick={stuurNaarUitslagen}
+                    disabled={lineupMode}
+                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
                   />
                 </div>
 

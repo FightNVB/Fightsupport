@@ -1338,9 +1338,9 @@ export default function WeegstationDetailPage() {
     }
   }
 
-  async function finalizeMatchmaking() {
+  async function completeWeighIn() {
     if (!isHoofdofficialOrSuperadmin) {
-      setError("Alleen hoofdofficial of superadmin mag de definitieve lineup maken.");
+      setError("Alleen hoofdofficial of superadmin mag de weging afsluiten.");
       setNotice(null);
       return;
     }
@@ -1352,18 +1352,18 @@ export default function WeegstationDetailPage() {
     setNotice(null);
 
     try {
-      const res = await authedFetch("/api/officials/weegstation/finalize", {
+      const res = await authedFetch("/api/officials/weegstation/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ matchmakingId }),
       });
 
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || "Finaliseren mislukt.");
+      if (!res.ok) throw new Error(json?.error || "Weging afsluiten mislukt.");
 
-      setNotice(`Definitieve lineup opgeslagen (${json.saved_bouts} partijen).`);
+      setNotice(`Weging afgesloten. ${json.updated_bouts ?? 0} partijen zijn verwerkt.`);
     } catch (e: any) {
-      setError(e?.message ?? "Finaliseren mislukt.");
+      setError(e?.message ?? "Weging afsluiten mislukt.");
     } finally {
       setFinalizing(false);
     }
@@ -1470,12 +1470,12 @@ export default function WeegstationDetailPage() {
 
                 {isHoofdofficialOrSuperadmin && (
                   <ActionButton
-                    onClick={finalizeMatchmaking}
+                    onClick={completeWeighIn}
                     disabled={finalizing}
                     tone="orange"
                     className="px-3 py-1.5 text-[12px]"
                   >
-                    {finalizing ? "Bezig..." : "Definitieve lineup"}
+                    {finalizing ? "Bezig..." : "Weging afsluiten"}
                   </ActionButton>
                 )}
               </div>

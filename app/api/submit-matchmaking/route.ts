@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { parseExcelToBouts } from "./parse_matchmaking";
 import { getUserBondteam, requireAnyRole, RoleName } from "../_utils/authz";
+import { ensureLifecycleRecord } from "../_utils/matchmakingLifecycle";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -194,12 +195,25 @@ function roleLower(r: any): RoleName {
   return "unknown";
 }
 
+function resolveLifecycleBronType(role: RoleName): string {
+  if (role === "matchmaker") return "matchmaker_upload";
+  if (role === "admin" || role === "superadmin") return "admin_upload";
+  return "official_upload";
+}
+
+function resolveLifecycleOwnerType(role: RoleName): "matchmaker" | "admin" | "bondteam" {
+  if (role === "matchmaker") return "matchmaker";
+  if (role === "admin" || role === "superadmin") return "admin";
+  return "bondteam";
+}
+
 /* =========================================================
    Main route
 ========================================================= */
 export async function POST(req: Request) {
   try {
     const auth = await requireAnyRole(req, [
+      "superadmin",
       "admin",
       "matchmaker",
       "official",
@@ -225,9 +239,12 @@ export async function POST(req: Request) {
     let event_id: string | null = null;
 
     const upload_token = randomUUID();
+    let lifecycleBronType: string | null = null;
     let raw_filename: string | null = null;
 
     let bouts: any[] = [];
+
+    lifecycleBronType = resolveLifecycleBronType(role);
 
     if (isJson(req)) {
       const body = await req.json();
@@ -426,6 +443,17 @@ export async function POST(req: Request) {
           datum: evenement_datum,
           locatie,
           created_at: now,
+          status: "nieuw",
+          bron_type: lifecycleBronType,
+          stadium: "nieuw",
+          huidige_eigenaar_type: resolveLifecycleOwnerType(role),
+          huidige_eigenaar_user_id:
+            role === "matchmaker" ? userId : null,
+          huidige_eigenaar_bondteam:
+            role === "official" || role === "hoofdofficial" ? bondteam : null,
+          last_updated_at: now,
+          last_updated_by: userId,
+          event_id: evId || null,
         })
         .select("id")
         .single();
@@ -442,6 +470,27 @@ export async function POST(req: Request) {
         );
       }
     }
+
+    const lifecycleOwnerType = resolveLifecycleOwnerType(role);
+    const lifecycleBondteam =
+      role === "official" || role === "hoofdofficial" ? bondteam : null;
+
+    await ensureLifecycleRecord({
+      matchmakingId: String(mmId),
+      naam: evenement_naam || null,
+      datum: evenement_datum || null,
+      locatie: locatie || null,
+      matchmakerId: role === "matchmaker" ? userId : null,
+      eventId: evId || null,
+      bronType: lifecycleBronType,
+      stage: "nieuw",
+      ownerType: lifecycleOwnerType,
+      ownerUserId: lifecycleOwnerType === "matchmaker" ? userId : null,
+      ownerBondteam: lifecycleOwnerType === "bondteam" ? (bondteam || null) : null,
+      actorUserId: userId,
+      actorRole: role,
+      metadata: { route: "app/api/submit_matchmaking/start/route.ts" },
+    });
 
     const { data: uploadRow, error: uploadErr } = await supabaseAdmin
       .from("matchmaking_uploads")
@@ -575,6 +624,12 @@ export async function POST(req: Request) {
       upload_token,
       matchmaking_id: mmId,
       event_id: evId,
+      lifecycle: {
+        bron_type: lifecycleBronType,
+        stadium: "nieuw",
+        eigenaar_type: lifecycleOwnerType,
+        eigenaar_bondteam: lifecycleBondteam,
+      },
       stats: { total: rows.length, reused, ambiguous, created },
     });
   } catch (e: any) {

@@ -89,7 +89,21 @@ function normalizeStatus(status: string | null | undefined) {
 function formatStatusLabel(status: string | null | undefined) {
   const s = normalizeStatus(status);
   if (s === "concept") return "Concept";
+  if (s === "nieuw") return "Nieuw";
   if (s === "niet gecontroleerd") return "Niet gecontroleerd";
+  if (s === "ingediend_admin") return "Ingediend admin";
+  if (s === "in_controle_admin") return "In controle";
+  if (s === "retour_naar_eigenaar") return "Retour";
+  if (s === "klaar_voor_weegstation") return "Klaar voor weegstation";
+  if (s === "in_weegstation") return "In weegstation";
+  if (s === "weegstation_verwerkt") return "Weegstation verwerkt";
+  if (s === "definitieve_matchmaking_ingediend") {
+    return "Definitieve MM ingediend";
+  }
+  if (s === "klaar_voor_uitslagen") return "Klaar voor uitslagen";
+  if (s === "uitslagen_in_bewerking") return "Uitslagen in bewerking";
+  if (s === "uitslagen_definitief") return "Uitslagen definitief";
+  if (s === "gearchiveerd") return "Gearchiveerd";
   return status ?? "Concept";
 }
 
@@ -267,29 +281,45 @@ export default function MatchmakingOverzichtPage() {
         return;
       }
 
-      setCreating(true);
-
-      const { error } = await supabase.from("matchmaker_matchmakings").insert({
-        naam: naam.trim(),
-        datum,
-        locatie: locatie.trim() || null,
-        promotor: promotor.trim() || null,
-        bondteam: bondteam.trim() || null,
-        matchmaker_id: user.id,
-        matchmaker_naam: profile?.full_name?.trim() || null,
-        status: "concept",
-        official_release: false,
-      });
-
-      if (error) {
-        console.error("Nieuwe matchmaking error:", error);
-        setCreateMsg("❌ Nieuwe matchmaking aanmaken mislukt.");
+      if (!bondteam.trim()) {
+        setCreateMsg("⚠️ Bondteam is verplicht.");
         return;
       }
+
+      setCreating(true);
+
+      const res = await authedFetch("/api/matchmaker/create-matchmaking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          naam: naam.trim(),
+          datum,
+          locatie: locatie.trim() || null,
+          promotor: promotor.trim() || null,
+          bondteam: bondteam.trim() || null,
+          matchmaker_naam: profile?.full_name?.trim() || null,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        console.error("create-matchmaking failed:", res.status, payload);
+        setCreateMsg(
+          payload?.error || "❌ Nieuwe matchmaking aanmaken mislukt."
+        );
+        return;
+      }
+
+      const matchmakingId = String(payload?.matchmaking_id ?? "").trim();
 
       setShowCreate(false);
       resetCreateForm(profile);
       await load();
+
+      if (matchmakingId) {
+        router.push(`/dashboard/matchmaker/matchmaking/`);
+      }
     } catch (e) {
       console.error(e);
       setCreateMsg("❌ Onverwachte fout bij aanmaken.");
@@ -448,19 +478,17 @@ export default function MatchmakingOverzichtPage() {
                 </div>
 
                 <div className="justify-self-center">
-                  <Image
-                    src="/branding/fightsupport/excel-logo.png"
-                    alt="FightSupport"
-                    width={320}
-                    height={120}
-                    priority
-                    style={{
-                      width: "auto",
-                      height: "auto",
-                      maxWidth: "320px",
-                    }}
-                    className="w-[240px] md:w-[280px] xl:w-[320px] drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
-                  />
+                  <div className="w-[240px] md:w-[280px] xl:w-[320px]">
+                    <Image
+                      src="/branding/fightsupport/excel-logo.png"
+                      alt="FightSupport"
+                      width={320}
+                      height={120}
+                      priority
+                      style={{ width: "100%", height: "auto" }}
+                      className="drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+                    />
+                  </div>
                 </div>
 
                 <div className="justify-self-end" />
@@ -490,7 +518,8 @@ export default function MatchmakingOverzichtPage() {
                         </div>
                         <div className="mt-1 text-xs text-zinc-500">
                           Na opslaan komt de matchmaking direct in het overzicht.
-                          Gebruik daarna Upload om vechters toe te voegen.
+                          De app maakt nu ook meteen een centrale rij in{" "}
+                          <code>matchmakings</code>.
                         </div>
                       </div>
 
@@ -545,7 +574,7 @@ export default function MatchmakingOverzichtPage() {
 
                         <div>
                           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
-                            Bondteam
+                            Bondteam *
                           </label>
                           <input
                             value={bondteam}
@@ -738,8 +767,12 @@ export default function MatchmakingOverzichtPage() {
                               <th className="px-4 py-3 text-left">Promotor</th>
                               <th className="px-4 py-3 text-left">Bondteam</th>
                               <th className="px-4 py-3 text-left">Status</th>
-                              <th className="px-4 py-3 text-left">Laatste run</th>
-                              <th className="px-4 py-3 text-left">Aangemaakt</th>
+                              <th className="px-4 py-3 text-left">
+                                Laatste run
+                              </th>
+                              <th className="px-4 py-3 text-left">
+                                Aangemaakt
+                              </th>
                               <th className="px-4 py-3 text-left">Acties</th>
                             </tr>
                           </thead>
@@ -764,17 +797,27 @@ export default function MatchmakingOverzichtPage() {
                                   <tr
                                     key={r.id}
                                     style={{
-                                      backgroundColor: zebra ? "#ffffff" : "#0d0d0d",
+                                      backgroundColor: zebra
+                                        ? "#ffffff"
+                                        : "#0d0d0d",
                                       color: zebra ? "#000" : "#fff",
                                     }}
                                   >
-                                    <td className="px-4 py-3">{formatDate(r.datum)}</td>
+                                    <td className="px-4 py-3">
+                                      {formatDate(r.datum)}
+                                    </td>
                                     <td className="px-4 py-3 font-semibold">
                                       {r.naam ?? "-"}
                                     </td>
-                                    <td className="px-4 py-3">{r.locatie ?? "-"}</td>
-                                    <td className="px-4 py-3">{r.promotor ?? "-"}</td>
-                                    <td className="px-4 py-3">{r.bondteam ?? "-"}</td>
+                                    <td className="px-4 py-3">
+                                      {r.locatie ?? "-"}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      {r.promotor ?? "-"}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      {r.bondteam ?? "-"}
+                                    </td>
                                     <td className="px-4 py-3 italic">
                                       {formatStatusLabel(r.status)}
                                     </td>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { rulesEngineMM } from "@/lib/rulesEngineMM";
+import { ensureLifecycleRecord } from "@/app/api/_utils/matchmakingLifecycle";
 
 export const runtime = "nodejs";
 

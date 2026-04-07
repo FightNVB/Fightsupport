@@ -994,7 +994,7 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/matchmaking/delete-partij", {
+      const resp = await authedFetch("/api/control-engine/delete-partij", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1024,7 +1024,7 @@ export default function ControleMatchmakingPage() {
     }
   }
 
-  async function stuurDoorNaarOfficials() {
+  async function retourNaarMatchmaker() {
     if (!matchmakingId || releaseBusy) return;
 
     setReleaseBusy(true);
@@ -1035,7 +1035,7 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/officials/release-matchmaking", {
+      const resp = await authedFetch("/api/admin/controle/return-to-matchmaker", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1048,13 +1048,48 @@ export default function ControleMatchmakingPage() {
 
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(json?.error ?? "Doorsturen naar officials mislukt.");
+        throw new Error(json?.error ?? "Retour naar matchmaker mislukt.");
       }
 
       const successMsg =
         json?.message ??
-        "✅ Matchmaking is doorgestuurd naar officials en staat nu in het official overzicht.";
+        "✅ Matchmaking is teruggestuurd naar matchmaker.";
 
+      setReleaseMsg(successMsg);
+      setMsg(successMsg);
+    } catch (e: any) {
+      const message = e?.message ?? String(e) ?? "Onbekende fout.";
+      setReleaseMsg(`❌ ${message}`);
+      setError(message);
+    } finally {
+      setReleaseBusy(false);
+    }
+  }
+
+  async function stuurNaarUitslagen() {
+    if (!matchmakingId || releaseBusy) return;
+
+    setReleaseBusy(true);
+    setReleaseMsg(null);
+    setError(null);
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaking/naar-uitslagen", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Naar uitslagen sturen mislukt.");
+
+      const successMsg = json?.message ?? "✅ Matchmaking is doorgestuurd naar uitslagen.";
       setReleaseMsg(successMsg);
       setMsg(successMsg);
     } catch (e: any) {
@@ -1547,9 +1582,9 @@ export default function ControleMatchmakingPage() {
 
                 <div className="flex flex-1 items-center justify-end gap-3 flex-wrap">
                   <DarkActionButton
-                    label={releaseBusy ? "Doorsturen…" : "→ Bondteam"}
+                    label={releaseBusy ? "Retour…" : "← Retour MM"}
                     tone="orange"
-                    onClick={stuurDoorNaarOfficials}
+                    onClick={retourNaarMatchmaker}
                     disabled={releaseBusy || lineupMode}
                     title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
                   />
@@ -1573,6 +1608,13 @@ export default function ControleMatchmakingPage() {
                     onClick={openLineupExcel}
                     disabled={lineupMode}
                     title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                  />
+                  <DarkActionButton
+                    label="→ Naar uitslagen"
+                    tone="green"
+                    onClick={stuurNaarUitslagen}
+                    disabled={releaseBusy || lineupMode}
+                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
                   />
                   <DarkActionButton
                     label="CSV Sportdata"
