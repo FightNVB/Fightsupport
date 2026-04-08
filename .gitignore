@@ -24,3 +24,6 @@ dist/
 build/
 .next/
 tsconfig.tsbuildinfo
+
+ControlEngine/scrapers/utils/cookies.json
+ControlEngine/scrapers/fp_bundle/downloads/
