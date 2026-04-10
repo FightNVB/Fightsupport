@@ -442,7 +442,7 @@ export function boutRulesEngine(input: BoutRulesInput): BoutRuleHit[] {
       rule: "Licentie ontbreekt/ongeldig",
       rule_code: "LICENTIE_ONGELDIG_ROOD",
       resultaat: "AFKEUR",
-      severity: "error",
+      severity: "warning",
       boodschap: `Rood heeft geen geldige licentie (waarde: "${resolveLicenseDisplay(
         rood.licentie
       )}").`,
@@ -455,7 +455,7 @@ export function boutRulesEngine(input: BoutRulesInput): BoutRuleHit[] {
       rule: "Licentie ontbreekt/ongeldig",
       rule_code: "LICENTIE_ONGELDIG_BLAUW",
       resultaat: "AFKEUR",
-      severity: "error",
+      severity: "warning",
       boodschap: `Blauw heeft geen geldige licentie (waarde: "${resolveLicenseDisplay(
         blauw.licentie
       )}").`,
@@ -468,7 +468,7 @@ export function boutRulesEngine(input: BoutRulesInput): BoutRuleHit[] {
       rule: "Keurmerk sportschool ongeldig",
       rule_code: "KEURMERK_ONGELDIG_ROOD",
       resultaat: "AFKEUR",
-      severity: "error",
+      severity: "warning",
       boodschap: s(rood.keurmerk_reden) || "Rood sportschool heeft geen geldig keurmerk.",
       hoek: "rood",
     });
@@ -479,7 +479,7 @@ export function boutRulesEngine(input: BoutRulesInput): BoutRuleHit[] {
       rule: "Keurmerk sportschool ongeldig",
       rule_code: "KEURMERK_ONGELDIG_BLAUW",
       resultaat: "AFKEUR",
-      severity: "error",
+      severity: "warning",
       boodschap: s(blauw.keurmerk_reden) || "Blauw sportschool heeft geen geldig keurmerk.",
       hoek: "blauw",
     });
@@ -583,7 +583,7 @@ export function boutRulesEngine(input: BoutRulesInput): BoutRuleHit[] {
           rule: "MMA jeugd: verschillende leeftijdscategorie",
           rule_code: "MMA_JEUGD_CAT_AFKEUR",
           resultaat: "AFKEUR",
-          severity: "error",
+          severity: "warning",
           boodschap: `Rood valt in categorie ${bandR.label} (leeftijd ${ageR}) en blauw in ${bandB.label} (leeftijd ${ageB}) — afkeur.`,
         });
       }

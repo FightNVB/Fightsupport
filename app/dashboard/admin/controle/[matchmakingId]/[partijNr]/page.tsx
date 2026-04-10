@@ -1373,10 +1373,10 @@ export default function PartijDetailPage() {
     return { uid, roles: names };
   }
 
+  // Admin mag alles goed- of afkeuren (behalve OK en reeds goedgekeurd).
   function canApproveRule(r: ControleResultaatRow) {
-    const res = normResultaat(r?.resultaat);
-    if (!(isSuperadmin || isAdmin)) return false;
-    return res !== "ok";
+    const disp = displayResultaat(r);
+    return disp.label !== "OK" && !isApprovedOverride(r);
   }
 
   async function saveAantekeningen(resultaatId: string, text: string) {
@@ -1504,9 +1504,9 @@ export default function PartijDetailPage() {
         throw new Error("Dispensatie kan hier niet. Gaat naar dispensatie-module.");
       }
 
-      if (res !== "actie" && res !== "afgekeurd" && res !== "dispensatie") {
+      if (res !== "actie" && res !== "afgekeurd" && res !== "dispensatie" && res !== "info") {
         throw new Error(
-          "Alleen ACTIE, AFKEUR of (superadmin) DISPENSATIE kan hier worden goedgekeurd."
+          "Alleen ACTIE, LET OP, AFKEUR of (superadmin) DISPENSATIE kan hier worden goedgekeurd."
         );
       }
 
@@ -1559,9 +1559,9 @@ export default function PartijDetailPage() {
         throw new Error("Dispensatie kan hier niet. Gaat naar dispensatie-module.");
       }
 
-      if (res !== "actie" && res !== "afgekeurd" && res !== "dispensatie") {
+      if (res !== "actie" && res !== "afgekeurd" && res !== "dispensatie" && res !== "info") {
         throw new Error(
-          "Alleen ACTIE, AFKEUR of (superadmin) DISPENSATIE kan hier worden afgekeurd."
+          "Alleen ACTIE, LET OP, AFKEUR of (superadmin) DISPENSATIE kan hier worden afgekeurd."
         );
       }
 
