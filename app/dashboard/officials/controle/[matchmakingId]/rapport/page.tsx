@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import NvbTable from "@/components/NvbTable";
 
-type PartijStatus = "OK" | "AFKEUR" | "DISPENSATIE" | "ACTIE";
+type PartijStatus = "OK" | "AFKEUR" | "DISPENSATIE" | "ACTIE" | "VERBOD";
 
 type ControleRun = {
   id: string;
@@ -18,10 +17,14 @@ type ControleRun = {
 };
 
 type EventMeta = {
-  id: string | null; // matchmaking_uploads.id (matchmaking_id)
-  event_id?: string | null; // optional FK to events
+  id: string | null;
+  event_id?: string | null;
   naam: string | null;
   datum: string | null;
+  bondteam?: string | null;
+  matchmaker?: string | null;
+  promotor?: string | null;
+  locatie?: string | null;
   source?: "matchmaking_uploads" | "events" | null;
 };
 
@@ -40,7 +43,7 @@ type ResultRow = {
 type AuditEvent = {
   partij_nr: number | null;
   hoek: "rood" | "blauw" | null;
-  event_type: string | null; // "RESCRAPE" | "VA_CHANGED" | "RESCRAPE_NO_VA"
+  event_type: string | null;
   old_va: string | null;
   new_va: string | null;
   actor_email: string | null;
@@ -48,9 +51,41 @@ type AuditEvent = {
   reason: string | null;
 };
 
+type IssueSummaryItem = {
+  partij_nr: number;
+  partij: string;
+  hoek: "rood" | "blauw";
+  naam: string;
+  gym: string;
+  label: string;
+  detail: string;
+};
+
+type VerbodSummaryItem = {
+  partij_nr: number;
+  partij: string;
+  hoek: "rood" | "blauw" | "-";
+  naam: string;
+  gym: string;
+  type: "STARTVERBOD" | "VERBOD";
+  detail: string;
+};
+
 function safe(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
   return s ? s : fallback;
+}
+
+function safeRaw(v: any) {
+  return String(v ?? "").trim();
+}
+
+function normalizeVa(v: any) {
+  return String(v ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[-–—]/g, "")
+    .toUpperCase();
 }
 
 function fmtNlDateOnly(v: any) {
@@ -74,13 +109,21 @@ function normCode(v: any) {
   return String(v ?? "").trim().toUpperCase();
 }
 
+function normResultaatLower(v: any) {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (s === "afkeur" || s === "afgekeurd" || s === "afkeuren") return "afgekeurd";
+  if (s === "dispensatie" || s === "disp") return "dispensatie";
+  if (s === "actie" || s === "waarschuwing") return "actie";
+  if (s === "ok" || s === "goedgekeurd" || s === "info") return "ok";
+  if (s === "verbod") return "verbod";
+  return s;
+}
+
 function isApprovedOrClosed(review_status: any) {
   if (review_status == null) return false;
   const raw = String(review_status).trim().toLowerCase();
   if (!raw) return false;
 
-  // ✅ tolerant: "GOEDGEKEURD ✅", "approved (by ...)", "closed/afgehandeld", etc.
-  // We split into tokens so we don't accidentally match "niet goed" as approved.
   const tokens = raw
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
@@ -90,58 +133,312 @@ function isApprovedOrClosed(review_status: any) {
   const tset = new Set(tokens);
   const hasAny = (...t: string[]) => t.some((x) => tset.has(x));
 
-  if (hasAny("approved", "approve", "accepted", "ok", "akkoord", "done", "closed", "resolved", "complete", "completed")) {
+  if (
+    hasAny(
+      "approved",
+      "approve",
+      "accepted",
+      "ok",
+      "akkoord",
+      "done",
+      "closed",
+      "resolved",
+      "complete",
+      "completed"
+    )
+  ) {
     return true;
   }
 
-  // NL varianten
   if (hasAny("goedgekeurd", "afgehandeld")) return true;
-
-  // "goed" is alleen een approval als het een los token is (en niet in "niet goed")
   if (tset.has("goed") && !tset.has("niet")) return true;
-
-  // last resort (suffix/prefix) – voor rare waarden zoals "status_goedgekeurd"
   if (raw.includes("goedgekeurd") || raw.includes("afgehandeld")) return true;
+
   return false;
 }
 
-/**
- * ✅ Naam mismatch / naam anders NOOIT tonen in rapport
- * (maar "Fightpaspoort nummer gewijzigd" wél, dat is aparte melding)
- */
+function rowHaystack(row: ResultRow) {
+  return `${row.rule_code ?? ""} ${row.rule ?? ""} ${row.boodschap ?? ""} ${row.aantekeningen ?? ""}`.toLowerCase();
+}
+
 function isNameMismatch(row: ResultRow) {
   const c = normCode(row.rule_code);
   return c.startsWith("VECHTER_NAAM_MISMATCH") || c.startsWith("VECHTER_NAAM_ANDERS");
 }
 
-/**
- * ✅ "Fightpaspoort nummer gewijzigd" melding tonen
- * - liefst via rule_code VA_NUMMER_AANGEPAST_*
- * - maar ook tolerant: als rule/boodschap die tekst bevat
- */
-function isFightpaspoortGewijzigd(row: ResultRow) {
+function isVARow(row: ResultRow) {
+  const hay = rowHaystack(row);
   const c = normCode(row.rule_code);
-  if (c.startsWith("VA_NUMMER_AANGEPAST")) return true;
-
-  const r = String(row.rule ?? "").toLowerCase();
-  const b = String(row.boodschap ?? "").toLowerCase();
-
-  if (r.includes("fightpaspoort nummer gewijzigd")) return true;
-  if (b.includes("fightpaspoort nummer gewijzigd")) return true;
-
-  return false;
+  return (
+    c.includes("VA") ||
+    hay.includes("fightpaspoort") ||
+    hay.includes("va nummer") ||
+    hay.includes("va-nummer") ||
+    hay.includes("v.a.") ||
+    hay.includes("passport nummer")
+  );
 }
 
-function statusFromResultaat(resultaat: any): PartijStatus {
+function isMissingVARow(row: ResultRow) {
+  const hay = rowHaystack(row);
+  const c = normCode(row.rule_code);
+  return (
+    c.includes("VA_ONTBREEKT") ||
+    c.includes("VA_MISSING") ||
+    c.includes("FIGHTPASPOORT_ONTBREEKT") ||
+    c.includes("FIGHTPASPOORT_MISSING") ||
+    c.includes("GEEN_VA") ||
+    (isVARow(row) &&
+      (hay.includes("ontbreekt") ||
+        hay.includes("missing") ||
+        hay.includes("geen va") ||
+        hay.includes("geen fightpaspoort") ||
+        hay.includes("leeg va") ||
+        hay.includes("va ontbreekt") ||
+        hay.includes("fightpaspoort ontbreekt") ||
+        hay.includes("geen nummer") ||
+        hay.includes("nummer ontbreekt")))
+  );
+}
+
+function isGenericMissingVARow(row: ResultRow) {
+  const text = `${row.rule ?? ""} ${row.boodschap ?? ""}`.trim().toLowerCase().replace(/\s+/g, " ");
+
+  return (
+    text === "fightpaspoortnummer ontbreekt" ||
+    text === "fightpaspoort nummer ontbreekt" ||
+    text === "va nummer ontbreekt" ||
+    text === "fight passport nummer ontbreekt" ||
+    text === "fightpaspoort ontbreekt"
+  );
+}
+
+function missingVARowSpecificity(row: ResultRow) {
+  const msg = safeRaw(row.boodschap ?? row.rule);
+  let score = 0;
+
+  if (!isGenericMissingVARow(row)) score += 100;
+  if (msg) score += Math.min(msg.length, 80);
+  if (safeRaw(row.aantekeningen)) score += 10;
+  if (safeRaw(row.rule_code)) score += 5;
+
+  return score;
+}
+
+function dedupeRows(rows: ResultRow[]) {
+  const missingVaBest = new Map<string, ResultRow>();
+  const otherRows: ResultRow[] = [];
+
+  for (const row of rows) {
+    if (isMissingVARow(row)) {
+      const pn = Number(row.partij_nr);
+      const hoek = inferHoek(row) ?? "onbekend";
+      const key = `${Number.isFinite(pn) ? pn : "x"}-${hoek}-missing-va`;
+      const prev = missingVaBest.get(key);
+
+      if (!prev) {
+        missingVaBest.set(key, row);
+        continue;
+      }
+
+      const prevScore = missingVARowSpecificity(prev);
+      const nextScore = missingVARowSpecificity(row);
+
+      if (nextScore > prevScore) {
+        missingVaBest.set(key, row);
+        continue;
+      }
+
+      if (nextScore === prevScore) {
+        const prevTime = prev.created_at ? new Date(prev.created_at).getTime() : 0;
+        const nextTime = row.created_at ? new Date(row.created_at).getTime() : 0;
+        if (nextTime > prevTime) {
+          missingVaBest.set(key, row);
+        }
+      }
+
+      continue;
+    }
+
+    otherRows.push(row);
+  }
+
+  return [...otherRows, ...Array.from(missingVaBest.values())];
+}
+
+function isFightpaspoortGewijzigd(row: ResultRow) {
+  const c = normCode(row.rule_code);
+  if (
+    c.startsWith("VA_NUMMER_AANGEPAST") ||
+    c.includes("VA_CHANGED") ||
+    c.includes("VA_WIJZIG") ||
+    c.includes("VA_UPDATED") ||
+    c.includes("FIGHTPASPOORT_GEWIJZIGD") ||
+    c.includes("FIGHTPASPOORT_AANGEPAST")
+  ) {
+    return true;
+  }
+
+  const hay = rowHaystack(row);
+  return (
+    hay.includes("fightpaspoort nummer gewijzigd") ||
+    hay.includes("va nummer gewijzigd") ||
+    hay.includes("va aangepast") ||
+    hay.includes("fightpaspoort aangepast") ||
+    hay.includes("gewijzigd van") ||
+    hay.includes("aangepast van") ||
+    hay.includes("oude va") ||
+    hay.includes("nieuwe va")
+  );
+}
+
+function isBelgischeContextRow(row: ResultRow) {
+  const hay = rowHaystack(row);
+  return (
+    hay.includes("belgië") ||
+    hay.includes("belgie") ||
+    hay.includes("belgische") ||
+    hay.includes("bkbmo") ||
+    hay.includes("boksboekje")
+  );
+}
+
+function isBelgischeManualCheckRow(row: ResultRow) {
+  const hay = rowHaystack(row);
+  return (
+    isBelgischeContextRow(row) &&
+    (hay.includes("bkbmo") ||
+      hay.includes("boksboekje") ||
+      hay.includes("belgië") ||
+      hay.includes("belgie") ||
+      hay.includes("belgische sportschool") ||
+      hay.includes("controleer sportschool op bkbmo") ||
+      hay.includes("land: belgië") ||
+      hay.includes("land: belgie"))
+  );
+}
+
+function isKeurmerkRow(row: ResultRow) {
+  const c = String(row.rule_code ?? "").toLowerCase();
+  const r = String(row.rule ?? "").toLowerCase();
+  const b = String(row.boodschap ?? "").toLowerCase();
+  const hay = `${c} ${r} ${b}`;
+  return hay.includes("keurmerk") || hay.includes("gym keurmerk") || hay.includes("sportschool keurmerk");
+}
+
+function isSportschoolMatchRow(row: ResultRow) {
+  const c = String(row.rule_code ?? "").toLowerCase();
+  const r = String(row.rule ?? "").toLowerCase();
+  const b = String(row.boodschap ?? "").toLowerCase();
+  const hay = `${c} ${r} ${b}`;
+
+  return (
+    hay.includes("sportschool_niet_gevonden") ||
+    hay.includes("geen match in sportscholen") ||
+    hay.includes("sportschool niet gevonden") ||
+    hay.includes("lege/ongeldige sportschoolnaam") ||
+    hay.includes("ongeldige sportschoolnaam") ||
+    hay.includes("leeg sportschool") ||
+    hay.includes("geen sportschool match")
+  );
+}
+
+function isLicentieRow(row: ResultRow) {
+  const c = String(row.rule_code ?? "").toLowerCase();
+  const r = String(row.rule ?? "").toLowerCase();
+  const b = String(row.boodschap ?? "").toLowerCase();
+  const hay = `${c} ${r} ${b}`;
+  return hay.includes("licentie") || hay.includes("license");
+}
+
+function inferHoek(row: ResultRow): "rood" | "blauw" | null {
+  if (row.hoek === "rood" || row.hoek === "blauw") return row.hoek;
+
+  const c = String(row.rule_code ?? "").toLowerCase();
+  const r = String(row.rule ?? "").toLowerCase();
+  const b = String(row.boodschap ?? "").toLowerCase();
+  const hay = `${c} ${r} ${b}`;
+
+  if (hay.includes("_rood") || hay.includes(" rood") || hay.includes("rode hoek") || hay.includes("hoek rood")) {
+    return "rood";
+  }
+
+  if (hay.includes("_blauw") || hay.includes(" blauw") || hay.includes("blauwe hoek") || hay.includes("hoek blauw")) {
+    return "blauw";
+  }
+
+  return null;
+}
+
+function isVerbodRow(row: ResultRow) {
+  const c = normCode(row.rule_code ?? row.rule);
+  if (c.includes("STARTVERBOD")) return false;
+  if (c.startsWith("VERBOD_")) return true;
+  if (c.startsWith("VERBODZONDER") || c.startsWith("VERBOD_ZONDER")) return true;
+  if (c.includes("JEUGD_VOLWASSEN_MIX")) return true;
+  if (c.includes("LEEFTIJD_VERSCHIL") && c.includes("AFKEUR")) return true;
+
+  const r = String(row.rule ?? "").toUpperCase();
+  const b = String(row.boodschap ?? "").toUpperCase();
+  return r.includes("VERBOD") || b.includes("VERBOD");
+}
+
+function isStartverbodRow(row: ResultRow) {
+  const c = normCode(row.rule_code ?? row.rule);
+  return c.includes("STARTVERBOD");
+}
+
+function isVaAuditEventType(v: any) {
+  const c = normCode(v);
+  return (
+    c === "VA_CHANGED" ||
+    c === "VA_UPDATED" ||
+    c === "VA_NUMMER_AANGEPAST" ||
+    c === "FIGHTPASPOORT_GEWIJZIGD" ||
+    c === "FIGHTPASPOORT_AANGEPAST"
+  );
+}
+
+function getCurrentVaFromCtx(ctx: any, hoek: "rood" | "blauw") {
+  if (hoek === "rood") {
+    return safeRaw(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.rood_va);
+  }
+  return safeRaw(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.blauw_va);
+}
+
+function getPrevVaFromCtx(ctx: any, hoek: "rood" | "blauw") {
+  if (hoek === "rood") {
+    return safeRaw(ctx?.rood_va_mm_prev);
+  }
+  return safeRaw(ctx?.blauw_va_mm_prev);
+}
+
+function hasPrevVaField(ctx: any, hoek: "rood" | "blauw") {
+  if (hoek === "rood") {
+    return ctx?.rood_va_mm_prev !== undefined && ctx?.rood_va_mm_prev !== null;
+  }
+  return ctx?.blauw_va_mm_prev !== undefined && ctx?.blauw_va_mm_prev !== null;
+}
+
+function statusFromResultaat(resultaat: any, rule_code?: any): PartijStatus {
+  if (rule_code) {
+    const c = String(rule_code ?? "").toUpperCase();
+    if (c.includes("JEUGD_VOLWASSEN_MIX")) return "VERBOD";
+    if (c.includes("LEEFTIJD_VERSCHIL") && c.includes("AFKEUR")) return "VERBOD";
+    if (c.includes("VERBOD")) return "VERBOD";
+    if (c.includes("AFKEUR")) return "AFKEUR";
+  }
+
   const s = String(resultaat ?? "").trim().toLowerCase();
-  if (s === "afkeur" || s === "afgekeurd" || s === "reject" || s === "rejected") return "AFKEUR";
+  if (s === "verbod") return "VERBOD";
+  if (s === "afkeur" || s === "afgekeurd") return "AFKEUR";
   if (s === "dispensatie") return "DISPENSATIE";
   if (s === "actie") return "ACTIE";
   return "OK";
 }
 
 function statusPrio(s: PartijStatus) {
-  return s === "AFKEUR" ? 1 : s === "DISPENSATIE" ? 2 : s === "ACTIE" ? 3 : 9;
+  return s === "VERBOD" ? 0 : s === "AFKEUR" ? 1 : s === "DISPENSATIE" ? 2 : s === "ACTIE" ? 3 : 9;
 }
 
 function partyStatusVoorMeldingen(meldingen: ResultRow[]): PartijStatus {
@@ -149,7 +446,7 @@ function partyStatusVoorMeldingen(meldingen: ResultRow[]): PartijStatus {
   let best: PartijStatus = "OK";
   let bestP = 999;
   for (const m of meldingen) {
-    const st = statusFromResultaat(m.resultaat);
+    const st = statusFromResultaat(m.resultaat, m.rule_code);
     const p = statusPrio(st);
     if (p < bestP) {
       bestP = p;
@@ -159,126 +456,45 @@ function partyStatusVoorMeldingen(meldingen: ResultRow[]): PartijStatus {
   return best;
 }
 
-function StatusBadge({ status }: { status: PartijStatus }) {
-  const base = "inline-flex items-center rounded px-2 py-0.5 text-xs font-bold";
-  if (status === "AFKEUR") return <span className={`${base} bg-red-600 text-zinc-900`}>AFKEUR</span>;
-  if (status === "DISPENSATIE") return <span className={`${base} bg-yellow-500 text-black`}>DISPENSATIE</span>;
-  if (status === "ACTIE") return <span className={`${base} bg-orange-500 text-black`}>ACTIE</span>;
-  return <span className={`${base} bg-green-600 text-zinc-900`}>OK</span>;
-}
-
 function licentieIsProbleem(v: any) {
   const s = String(v ?? "").trim().toLowerCase();
-  return s !== "ja"; // nee / null / anders -> probleem
+  return s !== "ja";
 }
+
 function licentieLabel(v: any) {
   const s = String(v ?? "").trim().toLowerCase();
-  if (!s) return "onbekend";
-  return s;
-}
-function keurmerkIsProbleem(v: any) {
-  return v === false || v == null; // ongeldig of onbekend
+  return s || "onbekend";
 }
 
-// ✅ VA "mist" check (tolerant): leeg/geen digits => mist
-function vaIsMissing(v: any) {
-  if (v == null) return true;
-  const s = String(v).trim();
-  if (!s) return true;
-  const digits = s.replace(/[^0-9]/g, "");
-  // jouw VA is typisch 3-5 cijfers (zoals in andere code)
-  return !/^\d{3,5}$/.test(digits);
+function maxGewichtLabel(p: any) {
+  const raw = p.max_gewicht ?? p.maxgewicht ?? p.max_kg ?? null;
+  if (raw == null || raw === "") return "-";
+  return String(raw).replace(".", ",");
 }
 
-/**
- * ============================================================
- * ✅ DISPENSATIE-INDICATIE (voor badge + jotform link)
- * - Niet alleen resultaat === "DISPENSATIE"
- * - Ook fallback op rule_code/rule als dat dispensatie aanduidt
- * ============================================================
- */
-function isDispensatieMelding(m: ResultRow) {
-  const res = String(m.resultaat ?? "").trim().toLowerCase();
-  if (res === "dispensatie") return true;
-
-  const c = normCode(m.rule_code ?? m.rule);
-  if (c.includes("DISPENSATIE")) return true;
-  if (c.includes("KLASSE") && c.includes("VERSCHIL")) return true; // bv KLASSE_VERSCHIL_*
-  return false;
+function Badge({ status }: { status: PartijStatus }) {
+  const base = "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide";
+  if (status === "VERBOD") return <span className={`${base} bg-purple-700 text-white`}>VERBOD</span>;
+  if (status === "AFKEUR") return <span className={`${base} bg-red-600 text-white`}>AFKEUR</span>;
+  if (status === "DISPENSATIE") return <span className={`${base} bg-yellow-400 text-black`}>DISPENSATIE</span>;
+  if (status === "ACTIE") return <span className={`${base} bg-orange-500 text-black`}>ACTIE</span>;
+  return <span className={`${base} bg-green-600 text-white`}>OK</span>;
 }
 
-function hasDispensatie(meldingen: ResultRow[]) {
-  return (meldingen ?? []).some(isDispensatieMelding);
-}
-
-/**
- * ✅ Max 2 badges:
- * - Hoofdbadge = zwaarste status (AFKEUR > DISPENSATIE > ACTIE > OK)
- * - Extra badge = DISPENSATIE als die óók voorkomt en hoofdbadge ≠ DISPENSATIE
- */
-function StatusBadges({ status, meldingen }: { status: PartijStatus; meldingen: ResultRow[] }) {
-  const extraDisp = hasDispensatie(meldingen) && status !== "DISPENSATIE";
+function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      <StatusBadge status={status} />
-      {extraDisp ? <StatusBadge status="DISPENSATIE" /> : null}
+    <div className="mb-3 flex items-center justify-between gap-3 rounded-t-xl bg-[#ff4d00] px-4 py-2 text-sm font-black text-black">
+      <div>{children}</div>
+      {right ? <div className="text-xs font-bold text-black/80">{right}</div> : null}
     </div>
   );
 }
 
-/**
- * DISPENSATIE LINKS
- * - volwassen klasse verschil: https://form.jotform.com/252374601478056
- * - jeugd dispensatie:         https://form.jotform.com/252374582262055
- *
- * ✅ Let op: we tonen link zodra hasDispensatie(meldingen) true is,
- * ook als hoofdbadge AFKEUR is.
- */
-const DISP_VOLWASSENEN = "https://form.jotform.com/252374601478056";
-const DISP_JEUGD = "https://form.jotform.com/252374582262055";
-
-function isJeugdDispensatie(meldingen: ResultRow[]) {
-  for (const m of meldingen ?? []) {
-    if (!isDispensatieMelding(m)) continue;
-    const c = normCode(m.rule_code ?? m.rule);
-    if (c.includes("JEUGD") || c.includes("YOUTH") || c.includes("CAT13") || c.includes("CAT15") || c.includes("CAT17")) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function DispensatieLinks({ meldingen }: { meldingen: ResultRow[] }) {
-  if (!hasDispensatie(meldingen)) return null;
-
-  const jeugd = isJeugdDispensatie(meldingen);
-  const url = jeugd ? DISP_JEUGD : DISP_VOLWASSENEN;
-  const label = jeugd ? "Dispensatie jeugd (formulier)" : "Klasse verschil volwassenen (formulier)";
-
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-flex items-center gap-2 rounded-md bg-[#111] px-3 py-1.5 text-xs font-extrabold text-[#f2f2f2] ring-1 ring-white/20 shadow-sm hover:bg-[#151515] hover:text-white"
-      title="Open Jotform in nieuwe tab"
-    >
-      <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#ff4d00] shadow-[0_0_0_2px_rgba(255,77,0,0.22)]" />
-      <span className="underline decoration-white/30 underline-offset-2">{label}</span>
-    </a>
-  );
-}
-
-function FsLogo({ className }: { className?: string }) {
-  // Probe a few common locations so the report doesn't break if your asset path differs.
-  // Put your REAL path first if you know it.
+function FsLogo() {
   const candidates = [
-    "/branding/fightsupport/logo-dark.png",
+    "/branding/fightsupport/excel-logo.png",
+    "/branding/fightsupport/logo-header.png",
     "/branding/fightsupport/logo.png",
-    "/branding/fightsupport/logo-light.png",
-    "/fightsupport-logo-dark.png",
-    "/fightsupport-logo.png",
-    "/logo.png",
   ];
 
   const [src, setSrc] = useState<string>(candidates[0]);
@@ -296,11 +512,9 @@ function FsLogo({ className }: { className?: string }) {
             return;
           }
         } catch {
-          // ignore and continue
+          // ignore
         }
       }
-      // fallback: keep first candidate even if HEAD blocked in prod
-      if (alive) setSrc(candidates[0]);
     })();
 
     return () => {
@@ -311,26 +525,65 @@ function FsLogo({ className }: { className?: string }) {
   return (
     <img
       src={src}
-      alt="Fightsupport"
-      className={className ?? ""}
+      alt="FightSupport"
+      className="mx-auto h-auto max-h-[86px] w-auto object-contain"
       onError={() => setSrc(candidates[candidates.length - 1])}
     />
   );
 }
 
-/**
- * ✅ Eventmeta (FightSupport):
- * 1) matchmaking_uploads.event_id -> events.id (naam, datum)
- * 2) fallback: events.matchmaking_id == matchmaking_id
- * 3) fallback: events.upload_id == matchmaking_id
- * 4) fallback: matchmaking_uploads.(evenement_naam/evenement_datum)
- */
+function rowBg(idx: number) {
+  return idx % 2 === 0 ? "bg-white text-black" : "bg-[#eef1f4] text-black";
+}
+
+function keurmerkTekst(row: ResultRow) {
+  return `${row.rule_code ?? ""} ${row.rule ?? ""} ${row.boodschap ?? ""} ${row.aantekeningen ?? ""}`.toLowerCase();
+}
+
+function isKeurmerkOpenIssue(row: ResultRow) {
+  if (!isKeurmerkRow(row)) return false;
+  if (isBelgischeManualCheckRow(row)) return false;
+
+  const tekst = keurmerkTekst(row);
+
+  if (!isApprovedOrClosed(row.review_status)) {
+    return true;
+  }
+
+  if (normResultaatLower(row.resultaat) !== "ok") {
+    return true;
+  }
+
+  if (
+    tekst.includes("geen match") ||
+    tekst.includes("geen match gevonden") ||
+    tekst.includes("niet gevonden") ||
+    tekst.includes("geen data") ||
+    tekst.includes("onvoldoende data") ||
+    tekst.includes("meerdere matches") ||
+    tekst.includes("ambigue") ||
+    tekst.includes("verlopen") ||
+    tekst.includes("expiry") ||
+    tekst.includes("expired") ||
+    tekst.includes("geen keurmerk") ||
+    tekst.includes("zonder keurmerk") ||
+    tekst.includes("ongeldig keurmerk") ||
+    tekst.includes("keurmerk datum ontbreekt") ||
+    tekst.includes("geen keurmerkdatum") ||
+    tekst.includes("geen datum") ||
+    tekst.includes("datum ontbreekt")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
   try {
     const { data: up, error: upErr } = await supabase
       .from("matchmaking_uploads")
-      // ⚠️ select alleen kolommen die zeker bestaan
-      .select("event_id, evenement_naam, evenement_datum, matchmaking_id")
+      .select("event_id, evenement_naam, evenement_datum, matchmaking_id, bondteam, matchmaker, promotor, locatie")
       .or(`id.eq.${matchmaking_id},matchmaking_id.eq.${matchmaking_id}`)
       .order("uploaded_at", { ascending: false })
       .limit(1)
@@ -340,7 +593,6 @@ async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
 
     const uploadEventId = (up as any)?.event_id ? String((up as any).event_id) : null;
 
-    // 1) Prefer: echte link via event_id
     if (uploadEventId) {
       const { data: ev, error: evErr } = await supabase
         .from("events")
@@ -352,61 +604,39 @@ async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
         return {
           id: String((ev as any)?.id ?? uploadEventId),
           event_id: uploadEventId,
-          naam: (ev as any)?.naam ?? null,
-          datum: (ev as any)?.datum ?? null,
+          naam: (ev as any)?.naam ?? (up as any)?.evenement_naam ?? null,
+          datum: (ev as any)?.datum ?? (up as any)?.evenement_datum ?? null,
+          bondteam: (up as any)?.bondteam ?? null,
+          matchmaker: (up as any)?.matchmaker ?? null,
+          promotor: (up as any)?.promotor ?? null,
+          locatie: (up as any)?.locatie ?? null,
           source: "events",
         };
       }
     }
 
-    // 2) Fallback: events.matchmaking_id == matchmaking_id
-    const { data: evByMm, error: evByMmErr } = await supabase
-      .from("events")
-      .select("id, naam, datum")
-      .eq("matchmaking_id", matchmaking_id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!evByMmErr && evByMm) {
-      return {
-        id: String((evByMm as any)?.id ?? null),
-        event_id: String((evByMm as any)?.id ?? null),
-        naam: (evByMm as any)?.naam ?? null,
-        datum: (evByMm as any)?.datum ?? null,
-        source: "events",
-      };
-    }
-
-    // 3) Fallback: events.upload_id == matchmaking_id
-    const { data: evByUpload, error: evByUploadErr } = await supabase
-      .from("events")
-      .select("id, naam, datum")
-      .eq("upload_id", matchmaking_id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!evByUploadErr && evByUpload) {
-      return {
-        id: String((evByUpload as any)?.id ?? null),
-        event_id: String((evByUpload as any)?.id ?? null),
-        naam: (evByUpload as any)?.naam ?? null,
-        datum: (evByUpload as any)?.datum ?? null,
-        source: "events",
-      };
-    }
-
-    // 4) Laatste fallback: upload zelf
     return {
       id: String((up as any)?.matchmaking_id ?? matchmaking_id),
       event_id: uploadEventId,
       naam: (up as any)?.evenement_naam ?? null,
       datum: (up as any)?.evenement_datum ?? null,
+      bondteam: (up as any)?.bondteam ?? null,
+      matchmaker: (up as any)?.matchmaker ?? null,
+      promotor: (up as any)?.promotor ?? null,
+      locatie: (up as any)?.locatie ?? null,
       source: "matchmaking_uploads",
     };
   } catch {
-    return { id: null, naam: null, datum: null, source: null };
+    return {
+      id: null,
+      naam: null,
+      datum: null,
+      bondteam: null,
+      matchmaker: null,
+      promotor: null,
+      locatie: null,
+      source: null,
+    };
   }
 }
 
@@ -416,10 +646,8 @@ export default function RapportPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const [run, setRun] = useState<ControleRun | null>(null);
   const [eventMeta, setEventMeta] = useState<EventMeta | null>(null);
-
   const [ctxRows, setCtxRows] = useState<any[]>([]);
   const [resultaten, setResultaten] = useState<ResultRow[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
@@ -443,7 +671,6 @@ export default function RapportPage() {
         const lastRun = (runRows ?? [])[0] ?? null;
         setRun(lastRun);
 
-        // ✅ event meta: zelfde aanpak als Excel (naam/datum consistent)
         const em = await getEventMeta(matchmakingId);
         setEventMeta(em);
 
@@ -471,9 +698,8 @@ export default function RapportPage() {
           .eq("controle_run_id", lastRun.id);
 
         if (resErr) throw resErr;
-        setResultaten(res ?? []);
+        setResultaten((res ?? []) as ResultRow[]);
 
-        // ✅ Audit events (blijven bestaan na herscrape)
         const { data: aud, error: audErr } = await supabase
           .from("controle_audit_events")
           .select("partij_nr, hoek, event_type, old_va, new_va, actor_email, created_at, reason")
@@ -482,11 +708,10 @@ export default function RapportPage() {
           .order("created_at", { ascending: false });
 
         if (audErr) {
-          // audit is nice-to-have: niet crashen
           console.warn("audit load failed:", audErr.message);
           setAuditEvents([]);
         } else {
-          setAuditEvents((aud ?? []) as any);
+          setAuditEvents((aud ?? []) as AuditEvent[]);
         }
       } catch (e: any) {
         setError(e?.message ?? String(e));
@@ -496,15 +721,127 @@ export default function RapportPage() {
     })();
   }, [matchmakingId]);
 
-  // OPEN meldingen: alles wat NIET approved/closed is
-  // + naam mismatch/anders weglaten (maar fightpaspoort gewijzigd wél meenemen)
   const openMeldingen = useMemo(() => {
-    return (resultaten ?? []).filter((r) => {
-      if (isApprovedOrClosed((r as any).review_status)) return false;
+    const filtered = (resultaten ?? []).filter((r) => {
       if (isNameMismatch(r) && !isFightpaspoortGewijzigd(r)) return false;
+
+      if (isMissingVARow(r)) {
+        if (isApprovedOrClosed(r.review_status)) return false;
+        return true;
+      }
+
+      if (isFightpaspoortGewijzigd(r)) {
+        return true;
+      }
+
+      if (isBelgischeManualCheckRow(r)) {
+        if (isApprovedOrClosed(r.review_status)) return false;
+        if (normResultaatLower(r.resultaat) === "ok") return false;
+        return true;
+      }
+
+      if (isKeurmerkOpenIssue(r)) return true;
+
+      if (isSportschoolMatchRow(r) && !isApprovedOrClosed(r.review_status)) {
+        return true;
+      }
+
+      if (isApprovedOrClosed(r.review_status)) return false;
+      if (normResultaatLower(r.resultaat) === "ok") return false;
+
       return true;
     });
+
+    return dedupeRows(filtered);
   }, [resultaten]);
+
+  const openKeurmerkRows = useMemo(() => {
+    return (resultaten ?? []).filter((r) => isKeurmerkOpenIssue(r) && !isBelgischeManualCheckRow(r));
+  }, [resultaten]);
+
+  const ctxByPartij = useMemo(() => {
+    const map = new Map<number, any>();
+    for (const p of ctxRows ?? []) {
+      const pn = Number(p.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+      map.set(pn, p);
+    }
+    return map;
+  }, [ctxRows]);
+
+  const verbodStartverbodIssues = useMemo(() => {
+    const items: VerbodSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const r of resultaten ?? []) {
+      const resultaat = normResultaatLower(r.resultaat);
+      const notApproved = !isApprovedOrClosed(r.review_status);
+
+      let type: "STARTVERBOD" | "VERBOD" | null = null;
+
+      if (isStartverbodRow(r)) {
+        if (resultaat === "ok") continue;
+        if (!notApproved && resultaat !== "verbod") continue;
+        type = "STARTVERBOD";
+      } else if (isVerbodRow(r)) {
+        if (!notApproved) continue;
+        if (resultaat === "ok") continue;
+        type = "VERBOD";
+      } else if (resultaat === "verbod" && notApproved) {
+        type = "VERBOD";
+      } else {
+        continue;
+      }
+
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+
+      const ctx = ctxByPartij.get(pn);
+      const inferredHoek = inferHoek(r);
+      const hoek: "rood" | "blauw" | "-" = inferredHoek ?? "-";
+
+      let naam = "-";
+      let gym = "-";
+
+      if (inferredHoek === "rood") {
+        naam = safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm);
+        gym = safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym);
+      } else if (inferredHoek === "blauw") {
+        naam = safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
+        gym = safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
+      } else {
+        const roodNaam = safeRaw(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm);
+        const blauwNaam = safeRaw(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
+        const roodGym = safeRaw(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym);
+        const blauwGym = safeRaw(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
+
+        naam = [roodNaam, blauwNaam].filter(Boolean).join(" / ") || "-";
+        gym = [roodGym, blauwGym].filter(Boolean).join(" / ") || "-";
+      }
+
+      const detail = safe(r.boodschap ?? r.rule ?? r.rule_code ?? type);
+      const key = `${type}-${pn}-${hoek}-${detail}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      items.push({
+        partij_nr: pn,
+        partij: safe(ctx?.partij_label ?? pn),
+        hoek,
+        naam,
+        gym,
+        type,
+        detail,
+      });
+    }
+
+    return items.sort((a, b) => {
+      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
+      if (a.type !== b.type) return a.type === "STARTVERBOD" ? -1 : 1;
+      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
+      return a.naam.localeCompare(b.naam, "nl");
+    });
+  }, [resultaten, ctxByPartij]);
 
   const meldByPartij = useMemo(() => {
     const m = new Map<number, ResultRow[]>();
@@ -516,144 +853,177 @@ export default function RapportPage() {
       m.set(pn, arr);
     }
     for (const [pn, arr] of m.entries()) {
-      arr.sort((a, b) => statusPrio(statusFromResultaat(a.resultaat)) - statusPrio(statusFromResultaat(b.resultaat)));
+      arr.sort(
+        (a, b) =>
+          statusPrio(statusFromResultaat(a.resultaat, a.rule_code)) -
+          statusPrio(statusFromResultaat(b.resultaat, b.rule_code))
+      );
       m.set(pn, arr);
     }
     return m;
   }, [openMeldingen]);
 
-  const partijenOverzicht = useMemo(() => {
+  const licentieMetaByPartijHoek = useMemo(() => {
+    const map = new Map<string, { hasRow: boolean; state: "ok" | "issue" | null }>();
+
+    for (const r of resultaten ?? []) {
+      if (!isLicentieRow(r)) continue;
+      const pn = Number(r.partij_nr);
+      const hoek = inferHoek(r);
+      if (!Number.isFinite(pn) || !hoek) continue;
+      const key = `${pn}-${hoek}`;
+      const prev = map.get(key) ?? { hasRow: false, state: null as "ok" | "issue" | null };
+      prev.hasRow = true;
+
+      if (isApprovedOrClosed(r.review_status) || normResultaatLower(r.resultaat) === "ok") {
+        prev.state = "ok";
+      } else {
+        if (prev.state !== "ok") prev.state = "issue";
+      }
+
+      map.set(key, prev);
+    }
+
+    return map;
+  }, [resultaten]);
+
+  const partijenCompact = useMemo(() => {
     return (ctxRows ?? []).map((p: any) => {
       const pn = Number(p.partij_nr);
       const meldingen = Number.isFinite(pn) ? meldByPartij.get(pn) ?? [] : [];
-      const status = partyStatusVoorMeldingen(meldingen);
-
       return {
-        partij_label: p.partij_label ?? p.partij_nr,
-        partij_nr: p.partij_nr,
-        rood: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-        blauw: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
+        partij_nr: pn,
+        partij_label: safe(p.partij_label ?? p.partij_nr),
         discipline: safe(p.discipline),
         klasse: safe(p.klasse_mm ?? p.klasse),
-        status,
-        hasOpenMeldingen: meldingen.length > 0,
-        meldingen,
+        max_gewicht: maxGewichtLabel(p),
+        rood: safe(p.rood_naam_fp ?? p.rood_naam_mm),
+        rood_gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
+        blauw: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
+        blauw_gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
+        status: partyStatusVoorMeldingen(meldingen),
       };
     });
   }, [ctxRows, meldByPartij]);
 
-  const partijMetMeldingen = useMemo(() => {
-    return (ctxRows ?? [])
-      .map((p: any) => {
-        const pn = Number(p.partij_nr);
-        const meldingen = Number.isFinite(pn) ? meldByPartij.get(pn) ?? [] : [];
-        if (!meldingen.length) return null;
+  const licentieIssues = useMemo(() => {
+    const items: IssueSummaryItem[] = [];
 
-        return {
-          partij_label: p.partij_label ?? p.partij_nr,
-          partij_nr: p.partij_nr,
-          status: partyStatusVoorMeldingen(meldingen),
-          roodNaam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-          blauwNaam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
-          roodGym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
-          blauwGym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
-          roodVa: safe(p.rood_va_mm ?? p.va_rood ?? p.rood_va),
-          blauwVa: safe(p.blauw_va_mm ?? p.va_blauw ?? p.blauw_va),
-          meldingen,
-        };
-      })
-      .filter(Boolean) as any[];
-  }, [ctxRows, meldByPartij]);
-
-  // ✅ map partij_nr -> ctx row (voor lookup)
-  const ctxByPartijNr = useMemo(() => {
-    const m = new Map<number, any>();
     for (const p of ctxRows ?? []) {
       const pn = Number(p.partij_nr);
       if (!Number.isFinite(pn)) continue;
-      m.set(pn, p);
+      const partij = safe(p.partij_label ?? p.partij_nr);
+
+      const add = (hoek: "rood" | "blauw", naam: string, gym: string, detail: string) => {
+        items.push({
+          partij_nr: pn,
+          partij,
+          hoek,
+          naam,
+          gym,
+          label: "Licentie",
+          detail,
+        });
+      };
+
+      const roodKey = `${pn}-rood`;
+      const blauwKey = `${pn}-blauw`;
+
+      const roodMeta = licentieMetaByPartijHoek.get(roodKey);
+      const blauwMeta = licentieMetaByPartijHoek.get(blauwKey);
+
+      const roodIssue =
+        roodMeta?.state === "ok"
+          ? false
+          : roodMeta?.state === "issue"
+            ? true
+            : roodMeta?.hasRow
+              ? false
+              : licentieIsProbleem(p.rood_licentie);
+
+      const blauwIssue =
+        blauwMeta?.state === "ok"
+          ? false
+          : blauwMeta?.state === "issue"
+            ? true
+            : blauwMeta?.hasRow
+              ? false
+              : licentieIsProbleem(p.blauw_licentie);
+
+      if (roodIssue) {
+        add(
+          "rood",
+          safe(p.rood_naam_fp ?? p.rood_naam_mm),
+          safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
+          `licentie: ${licentieLabel(p.rood_licentie)}`
+        );
+      }
+
+      if (blauwIssue) {
+        add(
+          "blauw",
+          safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
+          safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
+          `licentie: ${licentieLabel(p.blauw_licentie)}`
+        );
+      }
     }
-    return m;
-  }, [ctxRows]);
 
-  /**
-   * ✅ Aandacht vereist: fightpaspoort nummer gewijzigd
-   * - Eerst: audit VA_CHANGED (blijft bestaan na herscrape)
-   * - Daarna: fallback op controle_resultaten (als ze er (nog) zijn)
-   */
-  const lijstFightpaspoortGewijzigd = useMemo(() => {
-    const items: {
-      partij: string;
-      partij_nr: number;
-      hoek: "rood" | "blauw";
-      naam: string;
-      gym: string;
-      boodschap: string;
-      created_at: string | null;
-    }[] = [];
+    return items.sort((a, b) => {
+      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
+      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
+      return a.naam.localeCompare(b.naam, "nl");
+    });
+  }, [ctxRows, licentieMetaByPartijHoek]);
 
+  const missingVaIssues = useMemo(() => {
+    const items: IssueSummaryItem[] = [];
 
-// 0) context-first: controle_bout_context.*_va_mm_prev gevuld => VA gewijzigd
-for (const p of ctxRows ?? []) {
-  const pn = Number(p.partij_nr);
-  if (!Number.isFinite(pn)) continue;
+    const missingRows = dedupeRows(
+      (resultaten ?? []).filter((r) => {
+        if (!isMissingVARow(r)) return false;
+        if (isApprovedOrClosed(r.review_status)) return false;
+        return true;
+      })
+    );
 
-  const partij = safe(p.partij_label ?? pn);
+    for (const r of missingRows) {
+      const pn = Number(r.partij_nr);
+      const hoek = inferHoek(r);
+      if (!Number.isFinite(pn) || !hoek) continue;
 
-  // rood
-  const roodPrevRaw = (p as any).rood_va_mm_prev;
-  const roodHasPrevField = roodPrevRaw !== null && roodPrevRaw !== undefined;
-  if (roodHasPrevField) {
-    const prev = safe((p as any).rood_va_mm_prev, "");
-    const current = safe((p as any).rood_va_mm ?? (p as any).va_rood ?? (p as any).rood_va, "");
-    const fp = safe((p as any).rood_va, "");
-    const changed = (prev && prev !== current) || (!prev && !!current);
-    if (changed) {
-      const extraFp = fp && fp !== "-" && fp !== current ? ` (FightPassport: ${fp})` : "";
+      const ctx = ctxByPartij.get(pn);
       items.push({
-        partij,
         partij_nr: pn,
-        hoek: "rood",
-        naam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-        gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
-        boodschap: `VA-nummer gewijzigd: ${prev} → ${current}.${extraFp}`,
-        created_at: null,
+        partij: safe(ctx?.partij_label ?? pn),
+        hoek,
+        naam: hoek === "rood" ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm) : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm),
+        gym:
+          hoek === "rood"
+            ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
+            : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym),
+        label: "VA ontbreekt",
+        detail: safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer ontbreekt"),
       });
     }
-  }
 
-  // blauw
-  const blauwPrevRaw = (p as any).blauw_va_mm_prev;
-  const blauwHasPrevField = blauwPrevRaw !== null && blauwPrevRaw !== undefined;
-  if (blauwHasPrevField) {
-    const prev = safe((p as any).blauw_va_mm_prev, "");
-    const current = safe((p as any).blauw_va_mm ?? (p as any).va_blauw ?? (p as any).blauw_va, "");
-    const fp = safe((p as any).blauw_va, "");
-    const changed = (prev && prev !== current) || (!prev && !!current);
-    if (changed) {
-      const extraFp = fp && fp !== "-" && fp !== current ? ` (FightPassport: ${fp})` : "";
-      items.push({
-        partij,
-        partij_nr: pn,
-        hoek: "blauw",
-        naam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
-        gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
-        boodschap: `VA-nummer gewijzigd: ${prev} → ${current}.${extraFp}`,
-        created_at: null,
-      });
-    }
-  }
-}
-    // 1) audit-first
-    for (const ev of auditEvents ?? []) {
-      if (normCode(ev.event_type) !== "VA_CHANGED") continue;
+    return items.sort((a, b) => {
+      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
+      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
+      return a.naam.localeCompare(b.naam, "nl");
+    });
+  }, [resultaten, ctxByPartij]);
 
-      const pn = Number(ev.partij_nr);
-      if (!Number.isFinite(pn)) continue;
+  const keurmerkIssues = useMemo(() => {
+    const items: IssueSummaryItem[] = [];
+    const seen = new Set<string>();
 
-      const hoek = (ev.hoek ?? "rood") as "rood" | "blauw";
-      const ctx = ctxByPartijNr.get(pn);
+    for (const r of openKeurmerkRows) {
+      const pn = Number(r.partij_nr);
+      const hoek = inferHoek(r);
+      if (!Number.isFinite(pn) || !hoek) continue;
 
+      const ctx = ctxByPartij.get(pn);
       const naam =
         hoek === "rood"
           ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm)
@@ -664,700 +1034,910 @@ for (const p of ctxRows ?? []) {
           ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
           : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
 
-      const oldVa = safe(ev.old_va, "-");
-      const newVa = safe(ev.new_va, "-");
-      const actor = ev.actor_email ? ` (door: ${ev.actor_email})` : "";
+      const detail = safe(r.boodschap ?? r.rule ?? "geen geldig of geen herkend keurmerk");
+      const key = `${pn}-${hoek}-${detail}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
 
       items.push({
-        partij: safe(ctx?.partij_label ?? pn),
         partij_nr: pn,
+        partij: safe(ctx?.partij_label ?? pn),
         hoek,
         naam,
         gym,
-        boodschap: `Fightpaspoort nummer gewijzigd: ${oldVa} → ${newVa}. Pas aan op MM.${actor}`,
-        created_at: ev.created_at ?? null,
+        label: "Keurmerk",
+        detail,
       });
     }
 
-    // 2) fallback: resultaten (zonder duplicates)
-    const seen = new Set(items.map((x) => `${x.partij_nr}-${x.hoek}`));
+    return items.sort((a, b) => {
+      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
+      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
+      return a.naam.localeCompare(b.naam, "nl");
+    });
+  }, [openKeurmerkRows, ctxByPartij]);
 
-    for (const r of openMeldingen ?? []) {
+  const fightpaspoortGewijzigd = useMemo(() => {
+    const items: IssueSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const p of ctxRows ?? []) {
+      const pn = Number(p.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+      const partij = safe(p.partij_label ?? p.partij_nr);
+
+      const roodPrevRaw = getPrevVaFromCtx(p, "rood");
+      const roodCurrentRaw = getCurrentVaFromCtx(p, "rood");
+      const roodPrev = normalizeVa(roodPrevRaw);
+      const roodCurrent = normalizeVa(roodCurrentRaw);
+      const roodHasPrevField = hasPrevVaField(p, "rood");
+
+      if (roodHasPrevField && roodPrev !== roodCurrent) {
+        const naam = safe(p.rood_naam_fp ?? p.rood_naam_mm);
+        items.push({
+          partij_nr: pn,
+          partij,
+          hoek: "rood",
+          naam,
+          gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
+          label: "Fightpaspoort gewijzigd",
+          detail: `${naam}: ${roodPrevRaw || "-"} → ${roodCurrentRaw || "-"}`,
+        });
+        seen.add(`${pn}-rood`);
+      }
+
+      const blauwPrevRaw = getPrevVaFromCtx(p, "blauw");
+      const blauwCurrentRaw = getCurrentVaFromCtx(p, "blauw");
+      const blauwPrev = normalizeVa(blauwPrevRaw);
+      const blauwCurrent = normalizeVa(blauwCurrentRaw);
+      const blauwHasPrevField = hasPrevVaField(p, "blauw");
+
+      if (blauwHasPrevField && blauwPrev !== blauwCurrent) {
+        const naam = safe(p.blauw_naam_fp ?? p.blauw_naam_mm);
+        items.push({
+          partij_nr: pn,
+          partij,
+          hoek: "blauw",
+          naam,
+          gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
+          label: "Fightpaspoort gewijzigd",
+          detail: `${naam}: ${blauwPrevRaw || "-"} → ${blauwCurrentRaw || "-"}`,
+        });
+        seen.add(`${pn}-blauw`);
+      }
+    }
+
+    for (const ev of auditEvents ?? []) {
+      if (!isVaAuditEventType(ev.event_type)) continue;
+
+      const pn = Number(ev.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+      const hoek = (ev.hoek ?? "rood") as "rood" | "blauw";
+      const key = `${pn}-${hoek}`;
+      if (seen.has(key)) continue;
+
+      const oldNorm = normalizeVa(ev.old_va);
+      const newNorm = normalizeVa(ev.new_va);
+      if (oldNorm === newNorm) continue;
+
+      const ctx = ctxByPartij.get(pn);
+      const naam =
+        hoek === "rood"
+          ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm)
+          : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
+
+      items.push({
+        partij_nr: pn,
+        partij: safe(ctx?.partij_label ?? pn),
+        hoek,
+        naam,
+        gym:
+          hoek === "rood"
+            ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
+            : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym),
+        label: "Fightpaspoort gewijzigd",
+        detail: `${naam}: ${safe(ev.old_va, "-")} → ${safe(ev.new_va, "-")}`,
+      });
+      seen.add(key);
+    }
+
+    for (const r of resultaten ?? []) {
       if (!isFightpaspoortGewijzigd(r)) continue;
 
       const pn = Number(r.partij_nr);
-      if (!Number.isFinite(pn)) continue;
-
-      const ctx = ctxByPartijNr.get(pn);
-      const hoek = (r.hoek ?? (normCode(r.rule_code).includes("_BLAUW") ? "blauw" : "rood")) as "rood" | "blauw";
+      const hoek = inferHoek(r);
+      if (!Number.isFinite(pn) || !hoek) continue;
 
       const key = `${pn}-${hoek}`;
       if (seen.has(key)) continue;
 
+      const ctx = ctxByPartij.get(pn);
       const naam =
         hoek === "rood"
           ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm)
           : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
 
-      const gym =
-        hoek === "rood"
-          ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
-          : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
-
       items.push({
-        partij: safe(ctx?.partij_label ?? pn),
         partij_nr: pn,
+        partij: safe(ctx?.partij_label ?? pn),
         hoek,
         naam,
-        gym,
-        boodschap: safe(r.boodschap ?? r.rule ?? "Fightpaspoort nummer gewijzigd", "-"),
-        created_at: r.created_at ?? null,
+        gym:
+          hoek === "rood"
+            ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
+            : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym),
+        label: "Fightpaspoort gewijzigd",
+        detail: `${naam}: ${safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer gewijzigd")}`,
       });
+      seen.add(key);
     }
 
-  // ✅ dedupe per partij+hoek (context > audit > resultaat) doordat we 'first wins' houden
-  const uniqMap = new Map<string, (typeof items)[number]>();
-  for (const it of items) {
-    const key = `${it.partij_nr}-${it.hoek}`;
-    if (!uniqMap.has(key)) uniqMap.set(key, it);
+    return items.sort((a, b) => {
+      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
+      return a.hoek.localeCompare(b.hoek);
+    });
+  }, [auditEvents, ctxByPartij, ctxRows, resultaten]);
+
+  const sportschoolIssues = useMemo(() => {
+    const geenKeurmerk = new Set<string>();
+    const geenData = new Set<string>();
+    const verlopen = new Set<string>();
+    const datumOntbreekt = new Set<string>();
+    const nietGevonden = new Set<string>();
+    const belgischeCheck = new Set<string>();
+
+    for (const r of resultaten ?? []) {
+      const isRelevant =
+        isBelgischeManualCheckRow(r) ||
+        isKeurmerkOpenIssue(r) ||
+        (isSportschoolMatchRow(r) && !isApprovedOrClosed(r.review_status));
+
+      if (!isRelevant) continue;
+
+      const tekst = `${r.rule_code ?? ""} ${r.rule ?? ""} ${r.boodschap ?? ""} ${r.aantekeningen ?? ""}`.toLowerCase();
+      const quoted = String(r.boodschap ?? "").match(/"([^"]+)"/);
+      const pn = Number(r.partij_nr);
+      const hoek = inferHoek(r);
+      const ctx = Number.isFinite(pn) ? ctxByPartij.get(pn) : null;
+
+      const gymFromCtx =
+        hoek === "rood"
+          ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "")
+          : hoek === "blauw"
+            ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "")
+            : "";
+
+      const gym = quoted?.[1]?.trim() || gymFromCtx || "-";
+      if (!gym) continue;
+
+      if (isBelgischeManualCheckRow(r)) {
+        belgischeCheck.add(gym);
+        continue;
+      }
+
+      const isNietGevonden =
+        tekst.includes("sportschool_niet_gevonden") ||
+        tekst.includes("geen match in sportscholen") ||
+        tekst.includes("sportschool niet gevonden") ||
+        tekst.includes("lege/ongeldige sportschoolnaam") ||
+        tekst.includes("ongeldige sportschoolnaam");
+
+      const isGeenData =
+        tekst.includes("geen match gevonden") ||
+        tekst.includes("niet gevonden op bkbmo") ||
+        tekst.includes("geen data") ||
+        tekst.includes("onvoldoende data") ||
+        tekst.includes("meerdere matches") ||
+        tekst.includes("ambigue");
+
+      const isDatumOntbreekt =
+        tekst.includes("keurmerk datum ontbreekt") ||
+        tekst.includes("geen keurmerkdatum") ||
+        (tekst.includes("keurmerk") && tekst.includes("datum ontbreekt")) ||
+        (tekst.includes("expiry") && tekst.includes("missing")) ||
+        (tekst.includes("vervaldatum") && tekst.includes("ontbreekt"));
+
+      const isVerlopen =
+        tekst.includes("verlopen") ||
+        tekst.includes("expired") ||
+        tekst.includes("expiry verlopen") ||
+        (tekst.includes("keurmerk") && tekst.includes("niet meer geldig"));
+
+      const isGeenKeurmerk =
+        tekst.includes("geen keurmerk") ||
+        tekst.includes("zonder keurmerk") ||
+        tekst.includes("ongeldig keurmerk") ||
+        tekst.includes("heeft geen geldig keurmerk") ||
+        tekst.includes("niet geldig keurmerk");
+
+      if (isNietGevonden) {
+        nietGevonden.add(gym);
+        continue;
+      }
+
+      if (isGeenData) {
+        geenData.add(gym);
+        continue;
+      }
+
+      if (isDatumOntbreekt) {
+        datumOntbreekt.add(gym);
+        continue;
+      }
+
+      if (isVerlopen) {
+        verlopen.add(gym);
+        continue;
+      }
+
+      if (isGeenKeurmerk || !isApprovedOrClosed(r.review_status) || normResultaatLower(r.resultaat) !== "ok") {
+        geenKeurmerk.add(gym);
+      }
+    }
+
+    for (const gym of belgischeCheck) {
+      nietGevonden.delete(gym);
+      geenData.delete(gym);
+      geenKeurmerk.delete(gym);
+      verlopen.delete(gym);
+      datumOntbreekt.delete(gym);
+    }
+
+    for (const gym of nietGevonden) {
+      geenData.delete(gym);
+      geenKeurmerk.delete(gym);
+      verlopen.delete(gym);
+      datumOntbreekt.delete(gym);
+    }
+
+    for (const gym of geenData) {
+      geenKeurmerk.delete(gym);
+      verlopen.delete(gym);
+      datumOntbreekt.delete(gym);
+    }
+
+    for (const gym of datumOntbreekt) {
+      geenKeurmerk.delete(gym);
+      verlopen.delete(gym);
+    }
+
+    for (const gym of verlopen) {
+      geenKeurmerk.delete(gym);
+    }
+
+    return {
+      belgischeCheck: Array.from(belgischeCheck).sort((a, b) => a.localeCompare(b, "nl")),
+      nietGevonden: Array.from(nietGevonden).sort((a, b) => a.localeCompare(b, "nl")),
+      geenKeurmerk: Array.from(geenKeurmerk).sort((a, b) => a.localeCompare(b, "nl")),
+      geenData: Array.from(geenData).sort((a, b) => a.localeCompare(b, "nl")),
+      verlopen: Array.from(verlopen).sort((a, b) => a.localeCompare(b, "nl")),
+      datumOntbreekt: Array.from(datumOntbreekt).sort((a, b) => a.localeCompare(b, "nl")),
+    };
+  }, [resultaten, ctxByPartij]);
+
+  const partijMetOpenMeldingen = useMemo(() => {
+    return (ctxRows ?? [])
+      .map((p: any) => {
+        const pn = Number(p.partij_nr);
+        if (!Number.isFinite(pn)) return null;
+        const meldingen = meldByPartij.get(pn) ?? [];
+        if (!meldingen.length) return null;
+        return {
+          partij_nr: pn,
+          partij_label: safe(p.partij_label ?? p.partij_nr),
+          status: partyStatusVoorMeldingen(meldingen),
+          discipline: safe(p.discipline),
+          klasse: safe(p.klasse_mm ?? p.klasse),
+          max_gewicht: maxGewichtLabel(p),
+          roodNaam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
+          roodGym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
+          roodVa: safe(p.rood_va_mm ?? p.va_rood ?? p.rood_va),
+          blauwNaam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
+          blauwGym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
+          blauwVa: safe(p.blauw_va_mm ?? p.va_blauw ?? p.blauw_va),
+          meldingen,
+        };
+      })
+      .filter(Boolean) as Array<{
+      partij_nr: number;
+      partij_label: string;
+      status: PartijStatus;
+      discipline: string;
+      klasse: string;
+      max_gewicht: string;
+      roodNaam: string;
+      roodGym: string;
+      roodVa: string;
+      blauwNaam: string;
+      blauwGym: string;
+      blauwVa: string;
+      meldingen: ResultRow[];
+    }>;
+  }, [ctxRows, meldByPartij]);
+
+  if (loading) {
+    return <div className="p-6 text-sm">Rapport laden…</div>;
   }
-  const uniq = Array.from(uniqMap.values());
 
-  uniq.sort((a, b) => {
-    if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
-    return a.hoek.localeCompare(b.hoek);
-  });
-
-  return uniq;
-}, [auditEvents, openMeldingen, ctxByPartijNr, ctxRows]);
-
-  // ===== aparte lijsten =====
-  const lijstLicentie = useMemo(() => {
-    const items: {
-      partij: string;
-      hoek: "rood" | "blauw";
-      naam: string;
-      gym: string;
-      licentie: string;
-      ookGeenVa: boolean;
-    }[] = [];
-
-    for (const p of ctxRows ?? []) {
-      const partij = safe(p.partij_label ?? p.partij_nr);
-
-      const roodVa = p.rood_va_mm ?? p.va_rood ?? p.rood_va;
-      const blauwVa = p.blauw_va_mm ?? p.va_blauw ?? p.blauw_va;
-
-      if (licentieIsProbleem(p.rood_licentie)) {
-        items.push({
-          partij,
-          hoek: "rood",
-          naam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-          gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
-          licentie: licentieLabel(p.rood_licentie),
-          ookGeenVa: vaIsMissing(roodVa),
-        });
-      }
-      if (licentieIsProbleem(p.blauw_licentie)) {
-        items.push({
-          partij,
-          hoek: "blauw",
-          naam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
-          gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
-          licentie: licentieLabel(p.blauw_licentie),
-          ookGeenVa: vaIsMissing(blauwVa),
-        });
-      }
-    }
-
-    const score = (x: string) => (x === "nee" ? 1 : x === "onbekend" ? 2 : 9);
-    const toNum = (s: string) => {
-      const m = String(s ?? "").match(/^\d+/);
-      return m ? Number(m[0]) : 999999;
-    };
-
-    return items.sort((a, b) => {
-      const sa = score(a.licentie);
-      const sb = score(b.licentie);
-      if (sa !== sb) return sa - sb;
-
-      if (a.ookGeenVa !== b.ookGeenVa) return a.ookGeenVa ? -1 : 1;
-
-      const na = toNum(a.partij);
-      const nb = toNum(b.partij);
-      if (na !== nb) return na - nb;
-
-      return a.hoek.localeCompare(b.hoek);
-    });
-  }, [ctxRows]);
-
-  const lijstKeurmerkSportscholen = useMemo(() => {
-    const set = new Set<string>();
-    for (const p of ctxRows ?? []) {
-      const roodGym = safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym, "");
-      const blauwGym = safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym, "");
-      if (roodGym && keurmerkIsProbleem(p.keurmerk_rood)) set.add(roodGym);
-      if (blauwGym && keurmerkIsProbleem(p.keurmerk_blauw)) set.add(blauwGym);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "nl"));
-  }, [ctxRows]);
-
-  const lijstStartverbod = useMemo(() => {
-    const items: { partij: string; hoek: "rood" | "blauw"; naam: string; gym: string }[] = [];
-    for (const p of ctxRows ?? []) {
-      const partij = safe(p.partij_label ?? p.partij_nr);
-
-      if (p.rood_heeft_startverbod === true) {
-        items.push({
-          partij,
-          hoek: "rood",
-          naam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-          gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
-        });
-      }
-      if (p.blauw_heeft_startverbod === true) {
-        items.push({
-          partij,
-          hoek: "blauw",
-          naam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
-          gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
-        });
-      }
-    }
-
-    const toNum = (s: string) => {
-      const m = String(s ?? "").match(/^\d+/);
-      return m ? Number(m[0]) : 999999;
-    };
-
-    return items.sort((a, b) => {
-      const na = toNum(a.partij);
-      const nb = toNum(b.partij);
-      if (na !== nb) return na - nb;
-      return a.hoek.localeCompare(b.hoek);
-    });
-  }, [ctxRows]);
+  if (error) {
+    return <div className="p-6 text-sm text-red-700">Fout: {error}</div>;
+  }
 
   return (
-    <div className="min-h-screen fs-report" style={{ background: "#eef0f3", color: "#111827" }}>
-      {/* ✅ Print/PDF: behoud kleuren & layout (PDF wordt opgeslagen, niet fysiek geprint) */}
+    <div className="fs-report min-h-screen bg-[#eceff3] text-[#111827]">
       <style jsx global>{`
-  @media print {
-    @page {
-      margin: 12mm;
-    }
+        @page {
+          size: A4;
+          margin: 10mm;
+        }
 
-    /* ✅ Chrome/Safari: print backgrounds altijd mee */
-    * {
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
+        @media print {
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
 
-    html,
-    body {
-      background: #ffffff !important;
-    }
+          html,
+          body {
+            background: #ffffff !important;
+          }
 
-    .no-print {
-      display: none !important;
-    }
+          .no-print {
+            display: none !important;
+          }
 
-    .print-max {
-      max-width: none !important;
-      padding: 0 !important;
-      margin: 0 !important;
-    
-    /* ✅ Print: voorkom 'header op losse pagina' door viewport heights */
-    .fs-report,
-    .min-h-screen {
-      min-height: auto !important;
-      height: auto !important;
-    }
+          .print-max {
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
 
-}
+          .cover-page,
+          .page-break-after {
+            page-break-after: always !important;
+            break-after: page !important;
+          }
 
-    /* ✅ Voorkom dat kaarten/secties half op het einde van een pagina vallen */
-    .avoid-break {
-      break-inside: avoid !important;
-      page-break-inside: avoid !important;
-    }
+          .page-break {
+            page-break-before: always !important;
+            break-before: page !important;
+          }
 
-    /* ✅ Fightsupport PDF: frame iets steviger */
-    .fs-report .fs-silver-frame {
-      box-shadow: 0 0 0 2px rgba(192, 192, 192, 0.55) !important;
-    }
+          .avoid-break {
+            break-inside: auto !important;
+            page-break-inside: auto !important;
+          }
 
-    /* ✅ Partijen ‘cards’ met ruimte ertussen */
-    .fs-report table {
-      border-collapse: separate !important;
-      border-spacing: 0 3px !important;
-    }
+          table {
+            page-break-inside: auto !important;
+          }
 
-    .fs-report table thead th {
-      border-bottom: 1px solid rgba(192, 192, 192, 0.35) !important;
-    }
+          tr {
+            page-break-inside: avoid !important;
+            page-break-after: auto !important;
+          }
+        }
+      `}</style>
 
-    /* ❗️NIET meer background forceren op TD — dat breekt zebra (wit wordt zwart) */
-    .fs-report table tbody tr td {
-      border-top: 1px solid rgba(192, 192, 192, 0.35) !important;
-      border-bottom: 1px solid rgba(192, 192, 192, 0.35) !important;
-    }
+      <div className="print-max mx-auto max-w-6xl px-4 py-5">
+        <div className="no-print mb-4 flex items-center justify-between gap-3">
+          <Link
+            href={`/dashboard/admin/controle/${matchmakingId}`}
+            className="inline-flex items-center rounded-lg bg-black px-4 py-2 text-sm font-bold text-white hover:opacity-90"
+          >
+            ← Terug
+          </Link>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center rounded-lg bg-[#ff4d00] px-4 py-2 text-sm font-black text-black hover:brightness-105"
+          >
+            Print / PDF
+          </button>
+        </div>
 
-    .fs-report table tbody tr td:first-child {
-      border-left: 1px solid rgba(192, 192, 192, 0.35) !important;
-      border-top-left-radius: 10px !important;
-      border-bottom-left-radius: 10px !important;
-    }
+        <section className="cover-page page-break-after rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_12px_30px_rgba(0,0,0,0.08)]">
+          <div className="flex min-h-[78vh] flex-col justify-center rounded-[18px] border border-black/10 bg-[linear-gradient(180deg,#f7f7f7_0%,#ececec_100%)] px-6 py-10 text-center">
+            <div className="mb-8 text-center">
+              <div className="mx-auto max-w-[360px]">
+                <FsLogo />
+              </div>
+            </div>
 
-    .fs-report table tbody tr td:last-child {
-      border-right: 1px solid rgba(192, 192, 192, 0.35) !important;
-      border-top-right-radius: 10px !important;
-      border-bottom-right-radius: 10px !important;
-    }
+            <div className="mb-8">
+              <div className="mb-2 text-[11px] font-black uppercase tracking-[0.22em] text-[#ff4d00]">Controle rapport</div>
+              <div className="text-4xl font-black leading-tight">{safe(eventMeta?.naam)}</div>
+            </div>
 
-    /* ✅ Safety: nested spans/divs erven de juiste kleur (zebra bepaalt) */
-    .fs-report table tbody td * {
-      color: inherit !important;
-    }
-  }
-
-
-
-  /* ✅ Duidelijke randen om secties (zodat zebra niet “door elkaar” loopt) */
-  .fs-section {
-    border: 1px solid rgba(0, 0, 0, 0.10);
-    box-shadow: inset 0 0 0 1px rgba(192, 192, 192, 0.25);
-  }
-
-  /* ✅ Zebra (screen + print) — wit / donkergrijs */
-  .fs-report table {
-    width: 100%;
-  }
-
-  .fs-report table thead th {
-    background: linear-gradient(180deg, rgba(245,245,245,1) 0%, rgba(210,210,210,1) 100%);
-    color: #111827 !important;
-    font-weight: 800;
-  }
-
-  .fs-report table tbody tr:nth-child(odd) td {
-    background: #ffffff !important;
-    color: #111827 !important;
-  }
-
-  .fs-report table tbody tr:nth-child(even) td {
-    background: #3a3a3a !important;
-    color: #ffffff !important;
-  }
-
-  .fs-report table tbody td * {
-    color: inherit !important;
-  }
-
-
-  /* === Strong section borders for Licentie / Keurmerk / Startverbod === */
-  .section-strong {
-    border: 2px solid rgba(0,0,0,.85) !important;
-    border-radius: 14px !important;
-    padding: 16px;
-    margin-bottom: 22px;
-    background: linear-gradient(180deg, #ffffff 0%, #f0f0f0 55%, #e6e6e6 100%) !important;
-    box-shadow:
-      0 0 0 1px rgba(255,255,255,.35) inset,
-      0 10px 18px rgba(0,0,0,.12),
-      0 2px 0 rgba(0,0,0,.18) !important;
-  }
-`}
-
-</style>
-      <div className="print-max mx-auto max-w-6xl px-4 py-6">
-        {/* ✅ FightSupport frame (zilver buitenrand + zwarte/oranje binnenrand) */}
-        <div className="fs-silver-frame rounded-[28px] p-[2px] bg-gradient-to-b from-white/70 via-white/25 to-white/60 shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_18px_70px_rgba(0,0,0,0.25)]">
-          <div className="rounded-[26px] p-[2px] bg-gradient-to-b from-[#111111] via-[#070707] to-[#111111] ring-1 ring-black/70">
-            <div className="rounded-[24px] bg-[#f8fafc] ring-1 ring-black/10">
-              {/* header */}
-              <div className="px-5 py-5 border-b border-black/10">
-                <div className="grid gap-4 lg:grid-cols-3 lg:items-center">
-                  {/* links: info */}
-                  <div>
-                    <div
-                      className="text-xs font-extrabold tracking-wider"
-                      style={{
-                        background:
-                          "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(230,230,230,0.72) 40%, rgba(140,140,140,0.60) 100%)",
-                        WebkitBackgroundClip: "text",
-                        WebkitTextFillColor: "transparent",
-                        textShadow: "0 10px 24px rgba(0,0,0,0.18)",
-                      }}
-                    >
-                      FIGHTSUPPORT RAPPORT
-                    </div>
-                    <div className="mt-2">
-                      <div className="text-[#ff4d00] font-extrabold text-sm">Evenement</div>
-                      <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-900">{eventMeta?.naam ?? "-"}</div>
-                      <div className="mt-1 text-[#ff4d00] font-extrabold text-sm">Datum</div>
-                      <div className="text-xl sm:text-2xl font-extrabold tracking-tight text-zinc-900/90">{fmtNlDateOnly(eventMeta?.datum)}</div>
-                    </div>
-
-                    <div className="mt-3 text-xs text-zinc-700">
-                      Matchmaking ID: <span className="font-mono">{matchmakingId}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-zinc-600">
-                      Run: {safe(run?.status)} • Gestart: {fmtDateTime(run?.gestart_op)} • Afgerond: {fmtDateTime(run?.afgerond_op)}
-                    </div>
-                  </div>
-
-                  {/* midden: logo (strak staal, geen glow) */}
-                  <div className="flex justify-center">
-                    <div className="rounded-xl p-[5px] bg-gradient-to-b from-[#e0e0e0] via-[#8c8c8c] to-[#cfcfcf]">
-                      <div className="rounded-lg border-[3px] border-[#bdbdbd] bg-[#0b0b0b] p-4">
-                        {/* ✅ kleiner logo voor rapport (minder dominant) */}
-                        <FsLogo className="h-20 sm:h-24 w-auto" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* rechts: acties (niet printen) */}
-                  <div className="no-print flex items-center justify-start lg:justify-end gap-2">
-                    <Link
-                      href={`/dashboard/admin/controle/${matchmakingId}`}
-                      className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#c0c0c0] ring-1 ring-white/20 hover:bg-[#151515] hover:text-white"
-                    >
-                      Terug
-                    </Link>
-                    <button
-                      onClick={() => window.print()}
-                      className="rounded-md bg-[#ff4d00] px-3 py-2 text-sm font-extrabold text-black hover:brightness-110"
-                    >
-                      Opslaan als PDF
-                    </button>
-                  </div>
-                </div>
+            <div className="mx-auto grid w-full max-w-4xl gap-3 text-left md:grid-cols-2">
+              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Datum</div>
+                <div className="mt-1 text-lg font-black">{fmtNlDateOnly(eventMeta?.datum)}</div>
               </div>
 
-              <div className="px-5 py-6 space-y-6">
-                {loading && <div className="rounded-xl border border-black/10 bg-white p-4 text-sm text-zinc-800">Rapport laden…</div>}
-                {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700">{error}</div>}
+              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Bond</div>
+                <div className="mt-1 text-lg font-black">{safe(eventMeta?.bondteam)}</div>
+              </div>
 
-                {!loading && !error && (
-                  <>
-                    {/* Overzicht ALLE partijen — zebra via NvbTable */}
-                    <div className="fs-section rounded-2xl bg-white overflow-hidden">
-                      <div className="bg-[#ff4d00] px-4 py-3 font-extrabold text-black">Overzicht partijen (alle)</div>
+              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Matchmaker</div>
+                <div className="mt-1 text-lg font-black">{safe(eventMeta?.matchmaker)}</div>
+              </div>
 
-                      <div className="p-3">
-                <NvbTable columns={["Partij", "Partij", "Status"]}>
-                  {partijenOverzicht.map((r, i) => (
-                    <tr key={`${r.partij_nr}-${i}`}>
-                      <td className="px-4 py-2 font-semibold">{safe(r.partij_label)}</td>
-                      <td className="px-4 py-2">
-                        <div className="font-medium">
-                          {r.rood} <span className="opacity-70">vs</span> {r.blauw}
-                        </div>
-                        <div className="text-xs opacity-80">
-                          {r.discipline} • {r.klasse}
-                          {r.hasOpenMeldingen ? " • open meldingen" : ""}
-                        </div>
+              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Promotor</div>
+                <div className="mt-1 text-lg font-black">{safe(eventMeta?.promotor)}</div>
+              </div>
 
-                        {/* ✅ Jotform link zodra er dispensatie is (ook als hoofdbadge AFKEUR is) */}
-                        {hasDispensatie(r.meldingen) ? (
-                          <div className="mt-2">
-                            <DispensatieLinks meldingen={r.meldingen} />
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-2">
-                        {/* ✅ Max 2 badges incl. dispensatie */}
-                        <StatusBadges status={r.status} meldingen={r.meldingen} />
-                      </td>
+              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4 md:col-span-2">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Locatie</div>
+                <div className="mt-1 text-lg font-black">{safe(eventMeta?.locatie)}</div>
+              </div>
+
+              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4 md:col-span-2">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Controle run</div>
+                <div className="mt-1 text-sm font-bold">
+                  {safe(run?.status)} • gestart: {fmtDateTime(run?.gestart_op)}
+                </div>
+                <div className="text-sm font-bold">afgerond: {fmtDateTime(run?.afgerond_op)}</div>
+                <div className="mt-2 text-xs font-semibold text-black/70">Matchmaking ID: {matchmakingId}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-[0_12px_30px_rgba(0,0,0,0.08)]">
+          <div className="space-y-4">
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={`${verbodStartverbodIssues.length}`}>VERBOD / STARTVERBOD</SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Type</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
                     </tr>
-                  ))}
-                </NvbTable>
+                  </thead>
+                  <tbody>
+                    {verbodStartverbodIssues.length ? (
+                      verbodStartverbodIssues.map((item, idx) => (
+                        <tr key={`${item.type}-${item.partij_nr}-${item.hoek}-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
+                          <td className={`px-2 py-1.5 font-black ${rowBg(idx)}`}>{item.type}</td>
+                          <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
+                          <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen open verboden of startverboden.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            {/* ✅ AANDACHT VEREIST — onder partijen, boven licentie/keurmerk/startverbod */}
-            <div className="fs-section rounded-2xl bg-white overflow-hidden">
-              <div className="bg-[#ff4d00] px-4 py-3 font-extrabold text-black">Aandacht vereist</div>
-
-              <div className="p-3 space-y-4">
-                {/* Fightpaspoort nummer gewijzigd */}
-                <div className="rounded-xl border border-black/10 bg-white p-3 avoid-break">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-semibold text-zinc-900">Fightpaspoort nummer gewijzigd</div>
-                    <span className="text-xs font-extrabold text-zinc-600">{lijstFightpaspoortGewijzigd.length}</span>
-                  </div>
-
-                  {lijstFightpaspoortGewijzigd.length === 0 ? (
-                    <div className="mt-2 text-sm text-zinc-700">Geen.</div>
-                  ) : (
-                    <div className="mt-3">
-                      <NvbTable columns={["Partij", "Hoek", "Naam", "Sportschool", "Melding"]}>
-                        {lijstFightpaspoortGewijzigd.map((x, i) => (
-                          <tr key={`fpchg-${x.partij_nr}-${x.hoek}-${i}`}>
-                            <td className="px-4 py-2 font-semibold">{x.partij}</td>
-                            <td className="px-4 py-2">{x.hoek}</td>
-                            <td className="px-4 py-2">{x.naam}</td>
-                            <td className="px-4 py-2">{x.gym}</td>
-                            <td className="px-4 py-2">
-                              <div>{x.boodschap}</div>
-                              {x.created_at ? <div className="mt-1 text-xs text-zinc-600">({fmtDateTime(x.created_at)})</div> : null}
-                            </td>
-                          </tr>
-                        ))}
-                      </NvbTable>
-                    </div>
-                  )}
-                </div>
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={`${licentieIssues.length}`}>GEEN LICENTIE</SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soort</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {licentieIssues.length ? (
+                      licentieIssues.map((item, idx) => (
+                        <tr key={`${item.partij_nr}-${item.hoek}-${item.label}-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
+                          <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
+                          <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
+                          <td className={`px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.label}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen open licentieproblemen.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            {/* Aparte lijsten (onder elkaar in PDF/print) */}
-            <div className="space-y-4">
-              {/* Licentie */}
-              <div className="rounded-2xl border border-black/10 bg-white overflow-hidden section-strong">
-                <div className="bg-[#101010] text-white px-4 py-3 font-extrabold border-b border-black/10">Licentie (nee/onbekend)</div>
-                                <div className="p-3">
-                  {lijstLicentie.length === 0 ? (
-                    <div className="text-sm text-zinc-700">Geen.</div>
-                  ) : (
-                    (() => {
-                      // groepeer per partij zodat rood/blauw naast elkaar kunnen staan
-                      const map = new Map<
-                        string,
-                        {
-                          partij: string;
-                          rood?: (typeof lijstLicentie)[number];
-                          blauw?: (typeof lijstLicentie)[number];
-                        }
-                      >();
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={missingVaIssues.length}>ONTBREKENDE VA NUMMERS</SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {missingVaIssues.length ? (
+                      missingVaIssues.map((item, idx) => (
+                        <tr key={`${item.partij_nr}-${item.hoek}-missing-va-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
+                          <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
+                          <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                      for (const it of lijstLicentie) {
-                        const k = it.partij;
-                        const cur = map.get(k) ?? { partij: it.partij };
-                        if (it.hoek === "rood") cur.rood = it;
-                        if (it.hoek === "blauw") cur.blauw = it;
-                        map.set(k, cur);
-                      }
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={fightpaspoortGewijzigd.length}>FIGHTPASPOORT NUMMER GEWIJZIGD</SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Wijziging</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fightpaspoortGewijzigd.length ? (
+                      fightpaspoortGewijzigd.map((item, idx) => (
+                        <tr key={`${item.partij_nr}-${item.hoek}-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
+                          <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
+                          <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.detail}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                      const rows = Array.from(map.values());
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={`${sportschoolIssues.belgischeCheck.length}`}>
+                BELGIË / BKBMO / BOKSBOEKJE CONTROLE
+              </SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soort</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Waarde</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sportschoolIssues.belgischeCheck.length ? (
+                      sportschoolIssues.belgischeCheck.map((gym, idx) => (
+                        <tr key={`belgische-check-${gym}-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>België / BKBMO check</td>
+                          <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{gym}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>
+                            Belgische sportschool. Geen NVB-keurmerk vereist; controleer BKBMO-site en boksboekje.
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen open Belgische sportschoolcontroles.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                      const Badge = ({
-                        children,
-                        tone,
-                      }: {
-                        children: any;
-                        tone: "danger" | "warn" | "muted";
-                      }) => (
-                        <span
-                          className={
-                            "inline-flex items-center rounded px-2 py-0.5 text-[11px] font-extrabold ring-1 " +
-                            (tone === "danger"
-                              ? "bg-[#ff4d00]/15 text-[#ff4d00] ring-[#ff4d00]/25"
-                              : tone === "warn"
-                              ? "bg-amber-500/15 text-amber-700 ring-amber-500/25"
-                              : "bg-black/5 text-zinc-700 ring-black/10")
-                          }
-                        >
-                          {children}
-                        </span>
-                      );
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle
+                right={`${
+                  keurmerkIssues.length +
+                  sportschoolIssues.nietGevonden.length +
+                  sportschoolIssues.geenKeurmerk.length +
+                  sportschoolIssues.geenData.length +
+                  sportschoolIssues.verlopen.length +
+                  sportschoolIssues.datumOntbreekt.length
+                }`}
+              >
+                KEURMERK CONTROLE
+              </SectionTitle>
+              <div className="space-y-4 px-3 pb-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                    <thead>
+                      <tr>
+                        <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soort</th>
+                        <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Waarde</th>
+                        <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sportschoolIssues.nietGevonden.length === 0 &&
+                      sportschoolIssues.geenKeurmerk.length === 0 &&
+                      sportschoolIssues.geenData.length === 0 &&
+                      sportschoolIssues.verlopen.length === 0 &&
+                      sportschoolIssues.datumOntbreekt.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                            Geen.
+                          </td>
+                        </tr>
+                      ) : (
+                        <>
+                          {sportschoolIssues.nietGevonden.map((gym, idx) => (
+                            <tr key={`niet-gevonden-${gym}-${idx}`}>
+                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>Niet gevonden</td>
+                              <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{gym}</td>
+                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>
+                                Sportschool niet gevonden. Onbekend of sportschool keurmerk heeft.
+                              </td>
+                            </tr>
+                          ))}
 
-                      return (
-                        <div className="rounded-xl overflow-hidden border border-black/10">
-                          {/* header */}
-                          <div className="grid grid-cols-[86px_1fr_1fr] bg-gradient-to-r from-[#f6f6f6] to-white text-xs font-extrabold text-zinc-900 border-b border-black/10">
-                            <div className="px-3 py-2">Partij</div>
-                            <div className="px-3 py-2 border-l border-black/10">Rood</div>
-                            <div className="px-3 py-2 border-l border-black/10">Blauw</div>
-                          </div>
-
-                          {/* rows */}
-                          {rows.map((r, idx) => {
-                            const zebra = idx % 2 === 0 ? "bg-white text-zinc-900" : "bg-[#2f2f2f] text-white";
-                            const subText = idx % 2 === 0 ? "text-zinc-600" : "text-white/75";
-                            const line = idx % 2 === 0 ? "border-black/10" : "border-white/10";
-
-                            const Cell = ({ it, side }: { it?: (typeof lijstLicentie)[number]; side: "rood" | "blauw" }) => {
-                              if (!it) return <div className={`px-3 py-2 text-sm ${idx % 2 === 0 ? "text-zinc-500" : "text-white/70"}`}>—</div>;
-
-                              const licTone = it.licentie === "nee" ? "danger" : it.licentie === "onbekend" ? "warn" : "muted";
-
-                              return (
-                                <div className="px-3 py-2">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <div className="truncate text-sm font-semibold">{it.naam}</div>
-                                      <div className={`truncate text-xs ${subText}`}>{it.gym}</div>
-                                    </div>
-                                    <div className="flex flex-wrap items-center justify-end gap-2">
-                                      {it.ookGeenVa ? <Badge tone="danger">ook geen VA</Badge> : null}
-                                      <Badge tone={licTone as any}>licentie: {it.licentie}</Badge>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            };
-
+                          {sportschoolIssues.geenKeurmerk.map((gym, idx) => {
+                            const offset = sportschoolIssues.nietGevonden.length + idx;
                             return (
-                              <div key={`licrow-${r.partij}-${idx}`} className={`grid grid-cols-[86px_1fr_1fr] ${zebra} border-b last:border-b-0 ${line}`}>
-                                <div className="px-3 py-2 font-extrabold">{r.partij}</div>
-                                <div className={`border-l ${line}`}>
-                                  <Cell it={r.rood} side="rood" />
-                                </div>
-                                <div className={`border-l ${line}`}>
-                                  <Cell it={r.blauw} side="blauw" />
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()
-                  )}
-                </div>
-              </div>
-
-              {/* <div className="section-strong">Keurmerk sportscholen */}
-              <div className="rounded-2xl border border-black/10 bg-white overflow-hidden section-strong">
-                <div className="bg-[#101010] text-white px-4 py-3 font-extrabold border-b border-black/10">Keurmerk (sportscholen)</div>
-                <div className="p-3">
-                  <div className="text-xs text-zinc-600 mb-2">Ongeldig of onbekend (uniek)</div>
-                  {lijstKeurmerkSportscholen.length === 0 ? (
-                    <div className="text-sm text-zinc-700">Geen.</div>
-                  ) : (
-                    <div className="rounded-xl overflow-hidden border border-black/10">
-                      {lijstKeurmerkSportscholen.map((gym, idx) => (
-                        <div
-                          key={`keur-${idx}`}
-                          className={`${idx % 2 === 0 ? "bg-white text-zinc-900" : "bg-[#2f2f2f] text-white"} px-3 py-2 text-sm border-b border-black/10 last:border-b-0`}
-                        >
-                          {gym}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* <div className="section-strong">Startverbod */}
-              <div className="rounded-2xl border border-black/10 bg-white overflow-hidden section-strong">
-                <div className="bg-[#101010] text-white px-4 py-3 font-extrabold border-b border-black/10">Startverbod (true)</div>
-                <div className="p-3">
-                  {lijstStartverbod.length === 0 ? (
-                    <div className="text-sm text-zinc-700">Geen.</div>
-                  ) : (
-                    <div className="rounded-xl overflow-hidden border border-black/10">
-                      {lijstStartverbod.map((x, idx) => (
-                        <div
-                          key={`sv-${idx}`}
-                          className={`${idx % 2 === 0 ? "bg-white text-zinc-900" : "bg-[#2f2f2f] text-white"} px-3 py-2 text-sm border-b border-black/10 last:border-b-0`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-semibold">
-                              {x.partij} • {x.hoek}
-                            </div>
-                            <span className="rounded bg-red-500/15 px-2 py-0.5 text-xs font-extrabold text-red-700 ring-1 ring-red-500/25">startverbod</span>
-                          </div>
-                          <div className="mt-1">{x.naam}</div>
-                          <div className={`${idx % 2 === 0 ? "text-zinc-600" : "text-white/75"} text-xs`}>{x.gym}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Onderaan: detailblokken met open meldingen */}
-            <div className="space-y-6">
-              {partijMetMeldingen.map((it, idx) => (
-                <div key={`partij-${safe(it.partij_nr)}-${idx}`} className="relative mb-12 rounded-2xl p-[4px] bg-gradient-to-br from-[#d9d9d9] via-[#8f8f8f] to-[#cfcfcf]">
-                  <div className="rounded-[14px] border border-white/12 bg-white overflow-hidden">
-                  <div className="flex items-center justify-between gap-3 bg-[#ff4d00] px-4 py-3 shadow-inner">
-                    <div className="font-extrabold text-black">Partij {safe(it.partij_label)}</div>
-
-                    <div className="flex items-center gap-2">
-                      {/* ✅ Jotform link zodra er dispensatie is (ook als hoofdbadge AFKEUR is) */}
-                      <DispensatieLinks meldingen={it.meldingen} />
-
-                      {/* ✅ Max 2 badges incl. dispensatie */}
-                      <StatusBadges status={it.status} meldingen={it.meldingen} />
-                    </div>
-                  </div>
-
-                  <div className="px-4 py-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-xl border border-black/10 bg-white p-3 avoid-break">
-                        <div className="text-xs font-semibold text-zinc-600">Rood</div>
-                        <div className="mt-1 font-semibold text-zinc-900">{it.roodNaam}</div>
-                        <div className="text-sm text-zinc-700">
-                          {it.roodGym} • VA: {it.roodVa}
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-black/10 bg-white p-3 avoid-break">
-                        <div className="text-xs font-semibold text-zinc-600">Blauw</div>
-                        <div className="mt-1 font-semibold text-zinc-900">{it.blauwNaam}</div>
-                        <div className="text-sm text-zinc-700">
-                          {it.blauwGym} • VA: {it.blauwVa}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4">
-                      <div className="text-sm font-semibold">Open meldingen</div>
-
-                      {/* Meldingen zebra ook via NvbTable */}
-                      <div className="mt-2">
-                        <NvbTable columns={["Resultaat", "Regel", "Melding"]}>
-                          {it.meldingen.map((m: ResultRow, i: number) => {
-                            const st = statusFromResultaat(m.resultaat);
-                            const code = safe(m.rule_code ?? m.rule);
-                            const msg = safe(m.boodschap ?? "", "-");
-                            const aant = safe(m.aantekeningen ?? "", "");
-
-                            return (
-                              <tr key={`${safe(it.partij_nr)}-${i}`}>
-                                <td className="px-4 py-2">
-                                  <StatusBadge status={st} />
-                                </td>
-                                <td className="px-4 py-2 font-mono text-xs">{code}</td>
-                                <td className="px-4 py-2">
-                                  <div>{msg}</div>
-                                  {aant && (
-                                    <div className="mt-1 text-xs opacity-80">
-                                      <span className="font-semibold">Aantekeningen:</span> {aant}
-                                    </div>
-                                  )}
-                                </td>
+                              <tr key={`geen-keurmerk-${gym}-${idx}`}>
+                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Zonder geldig keurmerk</td>
+                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
+                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Sportschool heeft geen geldig keurmerk</td>
                               </tr>
                             );
                           })}
-                        </NvbTable>
-                      </div>
-                    </div>
+
+                          {sportschoolIssues.verlopen.map((gym, idx) => {
+                            const offset =
+                              sportschoolIssues.nietGevonden.length +
+                              sportschoolIssues.geenKeurmerk.length +
+                              idx;
+                            return (
+                              <tr key={`verlopen-${gym}-${idx}`}>
+                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Keurmerk verlopen</td>
+                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
+                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Keurmerk aanwezig maar verlopen</td>
+                              </tr>
+                            );
+                          })}
+
+                          {sportschoolIssues.datumOntbreekt.map((gym, idx) => {
+                            const offset =
+                              sportschoolIssues.nietGevonden.length +
+                              sportschoolIssues.geenKeurmerk.length +
+                              sportschoolIssues.verlopen.length +
+                              idx;
+                            return (
+                              <tr key={`datum-ontbreekt-${gym}-${idx}`}>
+                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Datum ontbreekt</td>
+                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
+                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Keurmerkdatum ontbreekt</td>
+                              </tr>
+                            );
+                          })}
+
+                          {sportschoolIssues.geenData.map((gym, idx) => {
+                            const offset =
+                              sportschoolIssues.nietGevonden.length +
+                              sportschoolIssues.geenKeurmerk.length +
+                              sportschoolIssues.verlopen.length +
+                              sportschoolIssues.datumOntbreekt.length +
+                              idx;
+                            return (
+                              <tr key={`geen-data-${gym}-${idx}`}>
+                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Niet gevonden / geen data</td>
+                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
+                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Sportschool niet gevonden of onvoldoende data</td>
+                              </tr>
+                            );
+                          })}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-sm font-black">Open keurmerkmeldingen per vechter</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                      <thead>
+                        <tr>
+                          <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
+                          <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
+                          <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                          <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                          <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {keurmerkIssues.length ? (
+                          keurmerkIssues.map((item, idx) => (
+                            <tr key={`${item.partij_nr}-${item.hoek}-keurmerk-${idx}`}>
+                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
+                              <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
+                              <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
+                              <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
+                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={5} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                              Geen open keurmerkproblemen.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
-                </div>
-              ))}
-
-              {partijMetMeldingen.length === 0 && (
-                <div className="rounded border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700">
-                  Geen open meldingen.
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-                <div className="mt-10 border-t border-white/15 pt-4 text-center text-xs text-zinc-600">
-                  © 2026 Fightsupport – Alle rechten voorbehouden
                 </div>
               </div>
             </div>
           </div>
-        </div>
+
+          <div className="mt-4 space-y-4">
+            {partijMetOpenMeldingen.map((item) => (
+              <section
+                key={item.partij_nr}
+                className="avoid-break overflow-hidden rounded-[18px] border border-black/10 bg-[linear-gradient(180deg,#f9f9f9_0%,#eeeeee_100%)]"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-[#ff4d00] px-4 py-2">
+                  <div className="text-sm font-black text-black">
+                    Partij {item.partij_label} • {item.discipline} • {item.klasse} • max {item.max_gewicht} kg
+                  </div>
+                  <Badge status={item.status} />
+                </div>
+
+                <div className="grid gap-3 p-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-black/10 bg-white px-3 py-3">
+                    <div className="mb-1 text-[11px] font-black uppercase tracking-[0.16em] text-[#ff4d00]">Rood</div>
+                    <div className="font-black">{item.roodNaam}</div>
+                    <div className="text-sm text-black/75">{item.roodGym}</div>
+                    <div className="mt-1 text-xs font-bold text-black/60">VA: {item.roodVa}</div>
+                  </div>
+                  <div className="rounded-xl border border-black/10 bg-white px-3 py-3">
+                    <div className="mb-1 text-[11px] font-black uppercase tracking-[0.16em] text-[#ff4d00]">Blauw</div>
+                    <div className="font-black">{item.blauwNaam}</div>
+                    <div className="text-sm text-black/75">{item.blauwGym}</div>
+                    <div className="mt-1 text-xs font-bold text-black/60">VA: {item.blauwVa}</div>
+                  </div>
+                </div>
+
+                <div className="px-4 pb-4">
+                  <div className="mb-2 text-sm font-black">Open meldingen</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-separate border-spacing-y-[2px] text-sm">
+                      <thead>
+                        <tr>
+                          <th className="w-[110px] rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">
+                            Resultaat
+                          </th>
+                          <th className="w-[280px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">
+                            Regel
+                          </th>
+                          <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">
+                            Melding
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {item.meldingen.map((m, idx) => {
+                          const st = statusFromResultaat(m.resultaat, m.rule_code);
+                          return (
+                            <tr key={`${item.partij_nr}-${idx}-${m.rule_code || m.rule || "melding"}`}>
+                              <td className={`rounded-l-md px-2 py-2 ${rowBg(idx)}`}>
+                                <Badge status={st} />
+                              </td>
+                              <td className={`px-2 py-2 font-mono text-[12px] ${rowBg(idx)}`}>
+                                {safe(m.rule_code ?? m.rule)}
+                              </td>
+                              <td className={`rounded-r-md px-2 py-2 ${rowBg(idx)}`}>
+                                <div>{safe(m.boodschap ?? m.rule)}</div>
+                                {m.aantekeningen ? (
+                                  <div className="mt-1 text-xs opacity-80">Notitie: {m.aantekeningen}</div>
+                                ) : null}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+            ))}
+          </div>
+
+          <div className="page-break mt-4 overflow-hidden rounded-[18px] border border-black/10">
+            <SectionTitle right={`${partijenCompact.length} partijen`}>TOTAAL OVERZICHT PARTIJEN</SectionTitle>
+            <div className="overflow-x-auto px-3 pb-3">
+              <table className="w-full table-fixed border-separate border-spacing-y-[2px] text-[10px] leading-[1.15] md:text-[11px]">
+                <thead>
+                  <tr>
+                    <th className="w-[42px] rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Nr</th>
+                    <th className="w-[95px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Disc.</th>
+                    <th className="w-[90px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Klasse</th>
+                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Rood</th>
+                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Blauw</th>
+                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                    <th className="w-[70px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Max KG</th>
+                    <th className="w-[92px] rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {partijenCompact.map((p, idx) => (
+                    <tr key={p.partij_nr || idx}>
+                      <td className={`rounded-l-md px-2 py-[5px] font-black ${rowBg(idx)}`}>{p.partij_label}</td>
+                      <td className={`px-2 py-[5px] ${rowBg(idx)}`}>{p.discipline}</td>
+                      <td className={`px-2 py-[5px] ${rowBg(idx)}`}>{p.klasse}</td>
+                      <td className={`truncate px-2 py-[5px] font-semibold ${rowBg(idx)}`} title={p.rood}>
+                        {p.rood}
+                      </td>
+                      <td className={`truncate px-2 py-[5px] ${rowBg(idx)}`} title={p.rood_gym}>
+                        {p.rood_gym}
+                      </td>
+                      <td className={`truncate px-2 py-[5px] font-semibold ${rowBg(idx)}`} title={p.blauw}>
+                        {p.blauw}
+                      </td>
+                      <td className={`truncate px-2 py-[5px] ${rowBg(idx)}`} title={p.blauw_gym}>
+                        {p.blauw_gym}
+                      </td>
+                      <td className={`${rowBg(idx)} px-2 py-[5px]`}>{p.max_gewicht}</td>
+                      <td className={`rounded-r-md px-2 py-[5px] ${rowBg(idx)}`}>
+                        <Badge status={p.status} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );

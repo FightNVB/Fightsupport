@@ -17,6 +17,17 @@ import NvbDarkButton from "@/components/NvbDarkButton";
 
 const NVB_ORANGE = "#ff4d00";
 
+const BONDTEAM_OPTIONS = [
+  "IRO",
+  "MMAAN",
+  "MON",
+  "NKF",
+  "UMC",
+  "VON",
+  "WMTA",
+  "WPKL",
+] as const;
+
 const silverBackplate: CSSProperties = {
   background:
     "radial-gradient(circle at 50% 0%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.16) 38%, rgba(0,0,0,0.08) 72%, rgba(0,0,0,0.22) 100%), linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(236,238,242,0.98) 100%)",
@@ -111,6 +122,10 @@ function effectiveStatus(row: MatchmakingRow) {
   return row.laatste_run?.status ?? row.status ?? "concept";
 }
 
+function normalizeBondteam(value: unknown) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
 function Small({
   children,
   origin = "left center",
@@ -157,7 +172,7 @@ export default function MatchmakingOverzichtPage() {
     setDatum("");
     setLocatie("");
     setPromotor("");
-    setBondteam(profileData?.bondteam ?? "");
+    setBondteam(normalizeBondteam(profileData?.bondteam ?? ""));
     setCreateMsg("");
   }
 
@@ -190,7 +205,7 @@ export default function MatchmakingOverzichtPage() {
     const normalizedProfile: Profile = {
       id: user.id,
       full_name: profileData?.full_name ?? "",
-      bondteam: profileData?.bondteam ?? "",
+      bondteam: normalizeBondteam(profileData?.bondteam ?? ""),
     };
 
     setProfile(normalizedProfile);
@@ -296,7 +311,7 @@ export default function MatchmakingOverzichtPage() {
           datum,
           locatie: locatie.trim() || null,
           promotor: promotor.trim() || null,
-          bondteam: bondteam.trim() || null,
+          bondteam: normalizeBondteam(bondteam),
           matchmaker_naam: profile?.full_name?.trim() || null,
         }),
       });
@@ -311,15 +326,11 @@ export default function MatchmakingOverzichtPage() {
         return;
       }
 
-      const matchmakingId = String(payload?.matchmaking_id ?? "").trim();
-
       setShowCreate(false);
       resetCreateForm(profile);
       await load();
 
-      if (matchmakingId) {
-        router.push(`/dashboard/matchmaker/matchmaking/`);
-      }
+      router.push("/dashboard/matchmaker/matchmaking");
     } catch (e) {
       console.error(e);
       setCreateMsg("❌ Onverwachte fout bij aanmaken.");
@@ -478,16 +489,23 @@ export default function MatchmakingOverzichtPage() {
                 </div>
 
                 <div className="justify-self-center">
-                  <div className="w-[240px] md:w-[280px] xl:w-[320px]">
+                  <div
+                    style={{
+                      width: 320,
+                      maxWidth: "100%",
+                      display: "flex",
+                      justifyContent: "center",
+                    }}
+                  >
                     <Image
-                      src="/branding/fightsupport/excel-logo.png"
-                      alt="FightSupport"
-                      width={320}
-                      height={120}
-                      priority
-                      style={{ width: "100%", height: "auto" }}
-                      className="drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
-                    />
+  src="/branding/fightsupport/excel-logo.png"
+  alt="FightSupport"
+  width={320}
+  height={120}
+  priority
+  unoptimized
+  style={{ width: "320px", height: "120px", display: "block" }}
+/>
                   </div>
                 </div>
 
@@ -576,12 +594,18 @@ export default function MatchmakingOverzichtPage() {
                           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
                             Bondteam *
                           </label>
-                          <input
+                          <select
                             value={bondteam}
                             onChange={(e) => setBondteam(e.target.value)}
-                            placeholder="Bondteam"
                             className="orange-input h-10 w-full"
-                          />
+                          >
+                            <option value="">Kies bondteam</option>
+                            {BONDTEAM_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 

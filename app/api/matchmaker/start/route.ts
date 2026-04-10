@@ -115,6 +115,62 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter(Boolean) as string[])];
 }
 
+async function cleanupOldRunData(matchmaking_id: string) {
+  console.log("[Matchmaker/start] ▶ cleanup oude matchmaker data...", {
+    matchmaking_id,
+  });
+
+  const { error: delCtxErr } = await supabase
+    .from("matchmaker_fighter_context")
+    .delete()
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (delCtxErr) throw delCtxErr;
+
+  const { error: delRawErr } = await supabase
+    .from("matchmaker_fighters_raw")
+    .delete()
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (delRawErr) throw delRawErr;
+
+  const { error: delUitslagenErr } = await supabase
+    .from("matchmaker_uitslagen_raw")
+    .delete()
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (delUitslagenErr) throw delUitslagenErr;
+
+  console.log("[Matchmaker/start] ✅ cleanup data klaar");
+}
+
+async function cleanupOldRuns(matchmaking_id: string) {
+  console.log("[Matchmaker/start] ▶ cleanup oude runs...", {
+    matchmaking_id,
+  });
+
+  const { error: delRulesErr } = await supabase
+    .from("matchmaker_controle_resultaten")
+    .delete()
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (delRulesErr) {
+    console.warn(
+      "[Matchmaker/start] waarschuwing: matchmaker_controle_resultaten cleanup mislukt",
+      delRulesErr
+    );
+  }
+
+  const { error: delRunsErr } = await supabase
+    .from("matchmaker_controle_runs")
+    .delete()
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (delRunsErr) throw delRunsErr;
+
+  console.log("[Matchmaker/start] ✅ cleanup runs klaar");
+}
+
 export async function POST(req: Request) {
   let controle_run_id: string | null = null;
 
@@ -159,6 +215,9 @@ export async function POST(req: Request) {
     const { userId, role } = await requireUserWithRole(req);
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
+    await cleanupOldRunData(matchmaking_id);
+    await cleanupOldRuns(matchmaking_id);
+
     const { data: runRows, error: runErr } = await supabase
       .from("matchmaker_controle_runs")
       .insert({
@@ -177,34 +236,6 @@ export async function POST(req: Request) {
       throw new Error("matchmaker_controle_runs insert gaf geen id terug");
     }
 
-    console.log("[control-engine/start] ▶ cleanup oude matchmaker data...", {
-      matchmaking_id,
-      controle_run_id,
-    });
-
-    const { error: delCtxErr } = await supabase
-      .from("matchmaker_fighter_context")
-      .delete()
-      .eq("matchmaking_id", matchmaking_id);
-
-    if (delCtxErr) throw delCtxErr;
-
-    const { error: delRawErr } = await supabase
-      .from("matchmaker_fighters_raw")
-      .delete()
-      .eq("matchmaking_id", matchmaking_id);
-
-    if (delRawErr) throw delRawErr;
-
-    const { error: delUitslagenErr } = await supabase
-      .from("matchmaker_uitslagen_raw")
-      .delete()
-      .eq("matchmaking_id", matchmaking_id);
-
-    if (delUitslagenErr) throw delUitslagenErr;
-
-    console.log("[control-engine/start] ✅ cleanup klaar");
-
     const { data: inschrijvingen, error: insErr } = await supabase
       .from("matchmaker_inschrijvingen")
       .select("id, row_nr, va_nummer")
@@ -218,7 +249,7 @@ export async function POST(req: Request) {
       (inschrijvingen ?? []).map((row: any) => toVaStrict(row?.va_nummer))
     );
 
-    console.log("[control-engine/start] run", {
+    console.log("[Matchmaker/start] run", {
       matchmaking_id,
       controle_run_id,
       do_scrape,
@@ -234,17 +265,17 @@ export async function POST(req: Request) {
       uitslagen_tries,
     });
 
-    dlog("[control-engine/start] va_sample", va_nummers.slice(0, 12));
+    dlog("[Matchmaker/start] va_sample", va_nummers.slice(0, 12));
 
     const fpBundlePath = resolveScriptPath(
       "scrapers",
       "fp_bundle_mm",
       "scraper_fp_bundle_mm.js"
     );
-    dlog("[control-engine/start] fpBundlePath =", fpBundlePath);
+    dlog("[Matchmaker/start] fpBundlePath =", fpBundlePath);
 
     if (do_scrape && va_nummers.length > 0) {
-      console.log("[control-engine/start] ▶ fp_bundle start", {
+      console.log("[Matchmaker/start] ▶ fp_bundle start", {
         va_count: va_nummers.length,
       });
 
@@ -265,45 +296,50 @@ export async function POST(req: Request) {
           "fp_bundleMM"
         );
 
-        console.log("[control-engine/start] ✅ fp_bundleMM klaar", {
+        console.log("[Matchmaker/start] ✅ fp_bundleMM klaar", {
           ms: res.ms,
           va_count: va_nummers.length,
         });
       } catch (e: any) {
-        console.log("[control-engine/start] ❌ fp_bundleMM failed", {
+        console.log("[Matchmaker/start] ❌ fp_bundleMM failed", {
           error: e?.message ?? String(e),
         });
         throw e;
       }
     } else {
-      console.log("[control-engine/start] scrape skipped", {
+      console.log("[Matchmaker/start] scrape skipped", {
         do_scrape,
         va_count: va_nummers.length,
       });
     }
 
-    console.log("[control-engine/start] ▶ buildMatchmakerFighterContext...");
+    console.log("[Matchmaker/start] ▶ buildMatchmakerFighterContext...");
     await buildMatchmakerFighterContext(matchmaking_id, controle_run_id);
-    console.log("[control-engine/start] ✅ buildMatchmakerFighterContext klaar");
+    console.log("[Matchmaker/start] ✅ buildMatchmakerFighterContext klaar");
 
-    console.log("[control-engine/start] ▶ enrichMatchmakerBoutContext...");
+    console.log("[Matchmaker/start] ▶ enrichMatchmakerBoutContext...");
     await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id);
-    console.log("[control-engine/start] ✅ enrichMatchmakerBoutContext klaar");
+    console.log("[Matchmaker/start] ✅ enrichMatchmakerBoutContext klaar");
 
-    console.log("[control-engine/start] ▶ runMatchmakerFighterRules...");
+    console.log("[Matchmaker/start] ▶ runMatchmakerFighterRules...");
     const fighterRuleSummary = await runMatchmakerFighterRules({
       matchmaking_id,
       controle_run_id,
     });
-    console.log("[control-engine/start] ✅ runMatchmakerFighterRules klaar", fighterRuleSummary);
+    console.log(
+      "[Matchmaker/start] ✅ runMatchmakerFighterRules klaar",
+      fighterRuleSummary
+    );
 
-    await supabase
+    const { error: doneErr } = await supabase
       .from("matchmaker_controle_runs")
       .update({
         status: "klaar",
         afgerond_op: new Date().toISOString(),
       })
       .eq("id", controle_run_id);
+
+    if (doneErr) throw doneErr;
 
     return NextResponse.json({
       ok: true,
@@ -323,7 +359,7 @@ export async function POST(req: Request) {
       fighter_rules: fighterRuleSummary ?? null,
     });
   } catch (err: any) {
-    console.error("❌ ControlEngine fout:", err);
+    console.error("❌ Matchmaker/start fout:", err);
 
     if (controle_run_id) {
       await supabase

@@ -1181,7 +1181,7 @@ export default function FighterPage() {
           fighterName={naam}
           matchmakingId={matchmakingId}
           onBack={() =>
-            router.push(`/dashboard/matchmaker/matchmakings/[matchmaking]/${matchmakingId}`)
+            router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`, { replace: true })
           }
           onAutocheck={runAutocheckFightpaspoort}
           checking={checking}

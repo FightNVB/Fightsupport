@@ -9,6 +9,13 @@ function asId(v: unknown) {
   return s || null;
 }
 
+function asVa(v: unknown) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  return s.replace(/[^0-9]/g, "") || null;
+}
+
 function asDateString(v: unknown) {
   const s = String(v ?? "").trim();
   return s || null;
@@ -66,14 +73,11 @@ function uniqueSortedDates(values: string[]) {
 
 function stripRawForContext(raw: Record<string, any> | null | undefined) {
   if (!raw) return {};
-
   const copy = { ...raw };
-
   delete copy.id;
   delete copy.created_at;
   delete copy.updated_at;
   delete copy.matchmaking_id;
-
   return copy;
 }
 
@@ -91,111 +95,39 @@ export async function buildMatchmakerFighterContext(
   const { data: inschrijvingen, error: insErr } = await supabaseAdmin
     .from("matchmaker_inschrijvingen")
     .select("*")
-    .eq("matchmaking_id", mmId)
-    .order("row_nr", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: true });
+    .eq("matchmaking_id", mmId);
 
   if (insErr) throw insErr;
 
   const { data: scrapedRows, error: rawErr } = await supabaseAdmin
     .from("matchmaker_fighters_raw")
     .select("*")
-    .eq("matchmaking_id", mmId)
-    .order("scraped_at", { ascending: false, nullsFirst: false })
-    .order("updated_at", { ascending: false, nullsFirst: false });
+    .eq("matchmaking_id", mmId);
 
   if (rawErr) throw rawErr;
 
-  const { data: uitslagenRows, error: uitsErr } = await supabaseAdmin
-    .from("matchmaker_uitslagen_raw")
-    .select("*")
-    .eq("matchmaking_id", mmId);
-
-  if (uitsErr) throw uitsErr;
-
-  const uitslagenByVa = new Map<string, any[]>();
-  for (const row of uitslagenRows ?? []) {
-    const va =
-      asId(row?.va_nummer) ??
-      asId(row?.va) ??
-      asId(row?.fighter_va) ??
-      asId(row?.vechter_va);
-
-    if (!va) continue;
-
-    const arr = uitslagenByVa.get(va) ?? [];
-    arr.push(row);
-    uitslagenByVa.set(va, arr);
-  }
-
-  const latestScrapedByInschrijving = new Map<string, any>();
   const latestScrapedByVa = new Map<string, any>();
-  const latestScrapedByRowNr = new Map<number, any>();
 
   for (const row of scrapedRows ?? []) {
-    const inschrijvingId = asId(row?.inschrijving_id);
-    const va = asId(row?.va_nummer);
-    const rowNr = asNumber(row?.row_nr);
-
-    if (inschrijvingId && !latestScrapedByInschrijving.has(inschrijvingId)) {
-      latestScrapedByInschrijving.set(inschrijvingId, row);
-    }
-
+    const va = asVa(row?.va_nummer);
     if (va && !latestScrapedByVa.has(va)) {
       latestScrapedByVa.set(va, row);
-    }
-
-    if (rowNr != null && !latestScrapedByRowNr.has(rowNr)) {
-      latestScrapedByRowNr.set(rowNr, row);
     }
   }
 
   const now = new Date().toISOString();
 
   const upserts = (inschrijvingen ?? []).map((ins: any) => {
-    const inschrijvingId = asId(ins?.id);
-    const insVa = asId(ins?.va_nummer);
-    const insRowNr = asNumber(ins?.row_nr);
+    const insVa = asVa(ins?.va_nummer);
 
-    const raw =
-      (inschrijvingId
-        ? latestScrapedByInschrijving.get(inschrijvingId)
-        : null) ??
-      (insRowNr != null ? latestScrapedByRowNr.get(insRowNr) : null) ??
-      (insVa ? latestScrapedByVa.get(insVa) : null) ??
-      null;
-
-    const rawPayload = stripRawForContext(raw);
-
-    const va = asId(ins?.va_nummer ?? raw?.va_nummer);
-    const uitslagen = va ? uitslagenByVa.get(va) ?? [] : [];
-
-    const uitslagenDatums = uniqueSortedDates(
-      uitslagen
-        .map((row: any) =>
-          asDateString(
-            row?.datum ??
-              row?.partij_datum ??
-              row?.event_datum ??
-              row?.created_at
-          )
-        )
-        .filter(Boolean) as string[]
-    );
-
-    const latestBoutDate =
-      uitslagenDatums.length > 0
-        ? uitslagenDatums[uitslagenDatums.length - 1]
-        : null;
+    const raw = insVa ? latestScrapedByVa.get(insVa) : null;
 
     const naamInput =
       fullName(ins?.voornaam, ins?.achternaam) ??
       asId(ins?.naam_input) ??
-      asId(ins?.naam) ??
       null;
 
     const fpNaam =
-      raw?.fp_naam ??
       raw?.naam ??
       fullName(raw?.voornaam, raw?.achternaam) ??
       null;
@@ -206,99 +138,35 @@ export async function buildMatchmakerFighterContext(
       null;
 
     const fpGeboortedatum =
-      asDateString(raw?.fp_geboortedatum) ??
       asDateString(raw?.geboortedatum) ??
       null;
 
-    const gymInput = asId(ins?.gym_input ?? ins?.gym ?? ins?.sportschool);
-    const fpGym = asId(raw?.fp_gym ?? raw?.gym ?? raw?.sportschool);
-
-    const recordW = asNumber(
-      raw?.record_w ?? raw?.gewonnen ?? raw?.win ?? raw?.wins
-    );
-    const recordL = asNumber(
-      raw?.record_l ?? raw?.verloren ?? raw?.loss ?? raw?.losses
-    );
-    const recordD = asNumber(
-      raw?.record_d ?? raw?.gelijk ?? raw?.draw ?? raw?.draws
-    );
-
-    const existingExtra =
-      raw?.extra && typeof raw.extra === "object" ? raw.extra : null;
-
     return {
       matchmaking_id: mmId,
-      inschrijving_id: inschrijvingId,
-      row_nr: insRowNr,
+      inschrijving_id: asId(ins?.id),
 
-      discipline: ins?.discipline ?? raw?.discipline ?? null,
-      klasse: ins?.klasse ?? raw?.fp_klasse ?? raw?.klasse ?? null,
+      naam: fpNaam ?? naamInput,
+      geboortedatum: fpGeboortedatum ?? geboortedatumInput,
+      gewicht: asNumber(ins?.gewicht ?? raw?.gewicht),
       geslacht: ins?.geslacht ?? raw?.geslacht ?? null,
+      klasse: ins?.klasse ?? raw?.klasse ?? null,
 
-      voornaam: ins?.voornaam ?? null,
-      achternaam: ins?.achternaam ?? null,
-      naam_input: naamInput,
-
-      gym_input: gymInput,
-      geboortedatum_input: geboortedatumInput,
-      gewicht: asNumber(ins?.gewicht),
-      va_nummer: va,
-
-      fp_naam: fpNaam,
-      fp_geboortedatum: fpGeboortedatum,
-      fp_gym: fpGym,
-      fp_klasse: raw?.fp_klasse ?? null,
-
-      record_w: recordW,
-      record_l: recordL,
-      record_d: recordD,
+      licentie: raw?.licentie ?? null,
+      heeft_startverbod: raw?.heeft_startverbod ?? null,
+      totaal_wedstrijden: asNumber(raw?.totaal_wedstrijden),
+      gewonnen: asNumber(raw?.gewonnen),
 
       naam_match: namesRoughlyMatch(naamInput, fpNaam),
       geboortedatum_match: datesMatch(geboortedatumInput, fpGeboortedatum),
-      gym_match: gymsMatch(gymInput, fpGym),
-
-      uitslagen_count: uitslagen.length,
-      laatste_partij_datum: latestBoutDate,
-
-      nulmeting_opmerking:
-        raw?.nulmeting_opmerking ??
-        raw?.opmerking ??
-        null,
-
-      heeft_keurmerk:
-        raw?.heeft_keurmerk != null
-          ? String(raw.heeft_keurmerk)
-          : null,
-
-      ...rawPayload,
+      gym_match: gymsMatch(ins?.gym_input, raw?.gym),
 
       extra: {
-        ...(existingExtra ?? {}),
-        upload_id: asId(ins?.upload_id),
-        row_nr: insRowNr,
-        scraped_at: raw?.scraped_at ?? null,
-        scrape_run_id:
-          asId(raw?.scrape_run_id) ??
-          asId(raw?.controle_run_id) ??
-          runId,
-        controle_run_id:
-          runId ??
-          asId(raw?.controle_run_id) ??
-          null,
-        opmerkingen: ins?.opmerkingen ?? null,
-        raw_inschrijving: ins?.raw ?? null,
         raw_scrape: raw ?? null,
-        uitslagen_datums: uitslagenDatums,
-        uitslagen_raw_count: uitslagen.length,
       },
 
       updated_at: now,
     };
   });
-
-  if (upserts.length === 0) {
-    return { count: 0 };
-  }
 
   const { error: upsertErr } = await supabaseAdmin
     .from("matchmaker_fighter_context")

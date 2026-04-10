@@ -23,21 +23,171 @@ function isForm(req: Request) {
   );
 }
 
-async function assertOwner(matchmaking_id: string, user_id: string) {
-  const { data, error } = await supabaseAdmin
-    .from("matchmaker_matchmakings")
-    .select("id, matchmaker_id")
-    .eq("id", matchmaking_id)
-    .maybeSingle();
+function s(v: unknown) {
+  return String(v ?? "").trim();
+}
 
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Matchmaking niet gevonden.");
+async function getUserFromBearer(req: Request) {
+  const auth =
+    req.headers.get("authorization") ||
+    req.headers.get("Authorization") ||
+    "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
 
-  if (String(data.matchmaker_id ?? "") !== String(user_id)) {
-    throw new Error("Geen rechten voor deze matchmaking.");
+  if (!token) {
+    return { user: null as any, token: "", error: "Geen bearer token ontvangen." };
   }
 
-  return true;
+  const {
+    data: { user },
+    error,
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (error) {
+    return { user: null as any, token: "", error: error.message };
+  }
+
+  return { user, token, error: null as string | null };
+}
+
+async function assertOwner(matchmaking_id: string, user_id: string) {
+  const mmId = s(matchmaking_id);
+  const userId = s(user_id);
+
+  if (!mmId) throw new Error("matchmaking_id ontbreekt.");
+  if (!userId) throw new Error("user_id ontbreekt.");
+
+  const { data: mmRow, error: mmErr } = await supabaseAdmin
+    .from("matchmaker_matchmakings")
+    .select("id, matchmaker_id, uploaded_by, created_by")
+    .eq("id", mmId)
+    .maybeSingle();
+
+  if (mmErr) throw new Error(mmErr.message);
+
+  if (mmRow) {
+    const allowed = [
+      s(mmRow.matchmaker_id),
+      s(mmRow.uploaded_by),
+      s(mmRow.created_by),
+    ].filter(Boolean);
+
+    if (allowed.includes(userId)) return true;
+  }
+
+  const { data: coreRow, error: coreErr } = await supabaseAdmin
+    .from("matchmakings")
+    .select("id, matchmaker_id, uploaded_by, created_by")
+    .eq("id", mmId)
+    .maybeSingle();
+
+  if (coreErr) throw new Error(coreErr.message);
+
+  if (coreRow) {
+    const allowed = [
+      s(coreRow.matchmaker_id),
+      s(coreRow.uploaded_by),
+      s(coreRow.created_by),
+    ].filter(Boolean);
+
+    if (allowed.includes(userId)) return true;
+  }
+
+  throw new Error("Geen rechten voor deze matchmaking.");
+}
+
+async function syncUploadedByOnParents(matchmaking_id: string, uploaded_by: string) {
+  const mmId = s(matchmaking_id);
+  const userId = s(uploaded_by);
+
+  if (!mmId || !userId) return;
+
+  const { error: e1 } = await supabaseAdmin
+    .from("matchmaker_matchmakings")
+    .update({ uploaded_by: userId })
+    .eq("id", mmId)
+    .or(`uploaded_by.is.null,uploaded_by.eq.""`);
+
+  if (e1) {
+    console.warn(
+      "[submit-inschrijvingen] matchmaker_matchmakings uploaded_by sync warning:",
+      e1.message
+    );
+  }
+
+  const { error: e2 } = await supabaseAdmin
+    .from("matchmakings")
+    .update({ uploaded_by: userId })
+    .eq("id", mmId)
+    .or(`uploaded_by.is.null,uploaded_by.eq.""`);
+
+  if (e2) {
+    console.warn(
+      "[submit-inschrijvingen] matchmakings uploaded_by sync warning:",
+      e2.message
+    );
+  }
+}
+
+async function bestEffortDeleteEq(table: string, column: string, value: string) {
+  try {
+    const { error } = await supabaseAdmin.from(table).delete().eq(column, value);
+    if (error) {
+      console.warn(`[submit-inschrijvingen] delete warning ${table}.${column}:`, error.message);
+    }
+  } catch (e: any) {
+    console.warn(`[submit-inschrijvingen] delete exception ${table}.${column}:`, e?.message);
+  }
+}
+
+async function startScraperAfterUpload(matchmaking_id: string, bearerToken: string) {
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000";
+
+  const url = `${baseUrl.replace(/\/$/, "")}/api/matchmaker/start`;
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${bearerToken}`,
+      },
+      body: JSON.stringify({
+        matchmaking_id,
+        do_scrape: true,
+        scrape_mode: "auto",
+        reset_before_run: true,
+      }),
+      cache: "no-store",
+    });
+
+    const json = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      return {
+        ok: false,
+        error: json?.error ?? `Scraper start mislukt (${resp.status})`,
+        response: json,
+      };
+    }
+
+    return {
+      ok: true,
+      response: json,
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      error: e?.message ?? "Scraper start mislukt",
+      response: null,
+    };
+  }
 }
 
 export async function POST(req: Request) {
@@ -51,8 +201,17 @@ export async function POST(req: Request) {
 
     const fd = await req.formData();
 
-    const uploaded_by = String(fd.get("uploaded_by") ?? "").trim();
-    const matchmaking_id = String(fd.get("matchmaking_id") ?? "").trim();
+    const bearerUser = await getUserFromBearer(req);
+    if (bearerUser.error || !bearerUser.user) {
+      return NextResponse.json(
+        { error: bearerUser.error ?? "Niet ingelogd." },
+        { status: 401 }
+      );
+    }
+
+    const uploaded_by_from_body = s(fd.get("uploaded_by"));
+    const uploaded_by = s(bearerUser.user.id || uploaded_by_from_body);
+    const matchmaking_id = s(fd.get("matchmaking_id"));
     const file = fd.get("file");
 
     if (!uploaded_by) {
@@ -77,6 +236,7 @@ export async function POST(req: Request) {
     }
 
     await assertOwner(matchmaking_id, uploaded_by);
+    await syncUploadedByOnParents(matchmaking_id, uploaded_by);
 
     const raw_filename = file.name || "inschrijvingen.xlsx";
     const filePath = `matchmaker_inschrijvingen/${matchmaking_id}/${Date.now()}_${raw_filename}`;
@@ -111,7 +271,7 @@ export async function POST(req: Request) {
 
     if (upDbErr) throw new Error(upDbErr.message);
 
-    const uploadId = String(up.id);
+    const uploadId = s(up.id);
 
     const fighters = await parseExcelToFighters(buf);
 
@@ -162,11 +322,20 @@ export async function POST(req: Request) {
 
     if (insErr) throw new Error(insErr.message);
 
+    const scraper = await startScraperAfterUpload(matchmaking_id, bearerUser.token);
+
     return NextResponse.json({
       ok: true,
       matchmaking_id,
       upload_id: uploadId,
       inserted: rows.length,
+      uploaded_by,
+      scraper_started: scraper.ok,
+      scraper_error: scraper.ok ? null : scraper.error,
+      scraper_response: scraper.response,
+      message: scraper.ok
+        ? "Upload gelukt en scraper is automatisch gestart."
+        : "Upload gelukt, maar scraper starten is mislukt.",
     });
   } catch (err: any) {
     console.error("[matchmaker/submit-inschrijvingen] error", err);
@@ -179,13 +348,23 @@ export async function POST(req: Request) {
 
 /**
  * DELETE body:
- *  - { action: "delete_upload", upload_id: string, matchmaking_id: string, user_id: string }
- *  - { action: "delete_matchmaking", matchmaking_id: string, user_id: string }
+ *  - { action: "delete_upload", upload_id: string, matchmaking_id: string }
+ *  - { action: "delete_matchmaking", matchmaking_id: string }
  */
 export async function DELETE(req: Request) {
   try {
+    const bearerUser = await getUserFromBearer(req);
+    if (bearerUser.error || !bearerUser.user) {
+      return NextResponse.json(
+        { error: bearerUser.error ?? "Niet ingelogd." },
+        { status: 401 }
+      );
+    }
+
+    const user_id = s(bearerUser.user.id);
+
     const body = await req.json().catch(() => null);
-    const action = String(body?.action ?? "").trim();
+    const action = s(body?.action);
 
     if (!action) {
       return NextResponse.json(
@@ -195,13 +374,12 @@ export async function DELETE(req: Request) {
     }
 
     if (action === "delete_upload") {
-      const upload_id = String(body?.upload_id ?? "").trim();
-      const matchmaking_id = String(body?.matchmaking_id ?? "").trim();
-      const user_id = String(body?.user_id ?? "").trim();
+      const upload_id = s(body?.upload_id);
+      const matchmaking_id = s(body?.matchmaking_id);
 
-      if (!upload_id || !matchmaking_id || !user_id) {
+      if (!upload_id || !matchmaking_id) {
         return NextResponse.json(
-          { error: "upload_id, matchmaking_id en user_id zijn verplicht" },
+          { error: "upload_id en matchmaking_id zijn verplicht" },
           { status: 400 }
         );
       }
@@ -248,12 +426,11 @@ export async function DELETE(req: Request) {
     }
 
     if (action === "delete_matchmaking") {
-      const matchmaking_id = String(body?.matchmaking_id ?? "").trim();
-      const user_id = String(body?.user_id ?? "").trim();
+      const matchmaking_id = s(body?.matchmaking_id);
 
-      if (!matchmaking_id || !user_id) {
+      if (!matchmaking_id) {
         return NextResponse.json(
-          { error: "matchmaking_id en user_id zijn verplicht" },
+          { error: "matchmaking_id is verplicht" },
           { status: 400 }
         );
       }
@@ -274,6 +451,12 @@ export async function DELETE(req: Request) {
 
       if (d1) throw new Error(d1.message);
 
+      await bestEffortDeleteEq("matchmaker_fighters_raw", "matchmaking_id", matchmaking_id);
+      await bestEffortDeleteEq("matchmaker_bouts_raw", "matchmaking_id", matchmaking_id);
+      await bestEffortDeleteEq("matchmaker_controle_resultaten", "matchmaking_id", matchmaking_id);
+      await bestEffortDeleteEq("dispensatie_hits", "matchmaking_id", matchmaking_id);
+      await bestEffortDeleteEq("dispensatie_requests", "matchmaking_id", matchmaking_id);
+
       const { error: d2 } = await supabaseAdmin
         .from("matchmaker_uploads")
         .delete()
@@ -287,6 +470,8 @@ export async function DELETE(req: Request) {
         .eq("id", matchmaking_id);
 
       if (d3) throw new Error(d3.message);
+
+      await bestEffortDeleteEq("matchmakings", "id", matchmaking_id);
 
       const paths = (ups ?? [])
         .map((u: any) => u.storage_path)

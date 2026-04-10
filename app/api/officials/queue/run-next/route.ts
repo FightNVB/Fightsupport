@@ -11,18 +11,88 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
+const STALE_RUNNING_MINUTES = 30;
+
+function minutesAgoIso(minutes: number) {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
+async function releaseStaleRunningJobs() {
+  const cutoff = minutesAgoIso(STALE_RUNNING_MINUTES);
+
+  const { data: staleRows, error: staleErr } = await supabase
+    .from("official_control_queue")
+    .select("id, matchmaking_id, status, started_at, controle_run_id")
+    .eq("status", "running")
+    .lt("started_at", cutoff);
+
+  if (staleErr) throw staleErr;
+
+  if (!staleRows || staleRows.length === 0) {
+    return [];
+  }
+
+  const staleIds = staleRows.map((row: any) => row.id);
+
+  const { error: queueUpdateErr } = await supabase
+    .from("official_control_queue")
+    .update({
+      status: "failed",
+      finished_at: new Date().toISOString(),
+      error_message: `Automatisch vrijgegeven: running job ouder dan ${STALE_RUNNING_MINUTES} minuten`,
+    })
+    .in("id", staleIds);
+
+  if (queueUpdateErr) throw queueUpdateErr;
+
+  for (const row of staleRows) {
+    const controleRunId = String((row as any)?.controle_run_id ?? "").trim();
+    if (!controleRunId) continue;
+
+    try {
+      await supabase
+        .from("controle_runs")
+        .update({
+          status: "failed",
+          foutmelding: `Automatisch vrijgegeven: officials queue job bleef langer dan ${STALE_RUNNING_MINUTES} minuten running`,
+          afgerond_op: new Date().toISOString(),
+        })
+        .eq("id", controleRunId)
+        .eq("status", "running");
+    } catch (e) {
+      console.error("⚠️ officials queue stale controle_run vrijgeven mislukt:", {
+        controle_run_id: controleRunId,
+        error: e,
+      });
+    }
+  }
+
+  console.warn("[officials/queue/run-next] stale running jobs vrijgegeven:", staleRows);
+
+  return staleRows;
+}
+
 async function claimNextJob() {
-  // Draait er al een job? Dan niets claimen.
+  await releaseStaleRunningJobs();
+
   const { data: running, error: runningErr } = await supabase
     .from("official_control_queue")
-    .select("id")
+    .select("id, matchmaking_id, status, created_at, started_at, controle_run_id")
     .eq("status", "running")
+    .order("created_at", { ascending: true })
     .limit(1);
 
   if (runningErr) throw runningErr;
-  if (running && running.length > 0) return null;
 
-  // Pak oudste queued job
+  if (running && running.length > 0) {
+    console.log("[officials/queue/run-next] skip claim: running job exists", running[0]);
+    return {
+      job: null,
+      reason: "running_exists" as const,
+      running: running[0],
+    };
+  }
+
   const { data: queued, error: queuedErr } = await supabase
     .from("official_control_queue")
     .select("*")
@@ -31,11 +101,18 @@ async function claimNextJob() {
     .limit(1);
 
   if (queuedErr) throw queuedErr;
-  if (!queued || queued.length === 0) return null;
 
-  const job = queued[0];
+  if (!queued || queued.length === 0) {
+    console.log("[officials/queue/run-next] no queued jobs found");
+    return {
+      job: null,
+      reason: "no_queued" as const,
+      running: null,
+    };
+  }
 
-  // Claim alleen als hij nog queued is
+  const nextJob = queued[0];
+
   const { data: claimed, error: claimErr } = await supabase
     .from("official_control_queue")
     .update({
@@ -44,15 +121,32 @@ async function claimNextJob() {
       finished_at: null,
       error_message: null,
     })
-    .eq("id", job.id)
+    .eq("id", nextJob.id)
     .eq("status", "queued")
     .select("*")
     .limit(1);
 
   if (claimErr) throw claimErr;
-  if (!claimed || claimed.length === 0) return null;
 
-  return claimed[0];
+  if (!claimed || claimed.length === 0) {
+    console.log("[officials/queue/run-next] claim lost race", { job_id: nextJob.id });
+    return {
+      job: null,
+      reason: "claim_lost" as const,
+      running: null,
+    };
+  }
+
+  console.log("[officials/queue/run-next] claimed job", {
+    id: claimed[0].id,
+    matchmaking_id: claimed[0].matchmaking_id,
+  });
+
+  return {
+    job: claimed[0],
+    reason: "claimed" as const,
+    running: null,
+  };
 }
 
 export async function POST(req: Request) {
@@ -64,15 +158,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const job = await claimNextJob();
+    const claimed = await claimNextJob();
 
-    if (!job) {
+    if (!claimed.job) {
       return NextResponse.json({
         ok: true,
         processed: false,
-        message: "Geen queued job of er draait al een officials-job.",
+        reason: claimed.reason,
+        running_job: claimed.running ?? null,
+        message:
+          claimed.reason === "running_exists"
+            ? "Er draait al een officials-job."
+            : claimed.reason === "no_queued"
+            ? "Geen queued officials-job gevonden."
+            : "Queue job niet geclaimd.",
       });
     }
+
+    const job = claimed.job;
 
     let result: any = null;
 
@@ -101,7 +204,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Trigger volgende job pas nadat deze klaar is
     try {
       const baseUrl =
         process.env.INTERNAL_BASE_URL ||

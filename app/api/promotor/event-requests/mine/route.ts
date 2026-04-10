@@ -10,20 +10,38 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  return "Laden mislukt";
+}
+
 export async function GET(req: Request) {
   try {
     const auth = await requireUserWithRole(req, ["promotor", "admin", "superadmin"]);
-    const userId = String((auth as any)?.user?.id ?? "").trim();
+
+    const userId = String(auth?.user?.id ?? "").trim();
+
+    if (!userId) {
+      return NextResponse.json({ rows: [] });
+    }
 
     const { data, error } = await supabase
       .from("event_requests")
-      .select("id, created_at, naam, datum, locatie, bondteam, disciplines, status, voorkeur_hoofdofficial_name, toegewezen_hoofdofficial_name, reactie_official")
+      .select(
+        "id, created_at, naam, datum, locatie, bondteam, disciplines, status, voorkeur_hoofdofficial_name, toegewezen_hoofdofficial_name, reactie_official"
+      )
       .eq("promotor_user_id", userId)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-    return NextResponse.json({ rows: data ?? [] });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Laden mislukt" }, { status: 500 });
+
+    return NextResponse.json({
+      rows: Array.isArray(data) ? data : [],
+    });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: getErrorMessage(error) },
+      { status: 500 }
+    );
   }
 }

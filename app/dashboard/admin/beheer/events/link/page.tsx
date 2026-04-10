@@ -7,15 +7,13 @@ import {
   LayoutDashboard,
   Link2,
   CalendarDays,
-  Upload,
+  Swords,
   UserRound,
-  Save,
   FileSpreadsheet,
 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 
 const ORANGE = "#ff4d00";
-const DARK = "#2b3138";
-const DARKER = "#1f242b";
 const BORDER = "#2a2f36";
 
 type EventRow = {
@@ -23,21 +21,29 @@ type EventRow = {
   naam: string;
   datum: string;
   locatie: string | null;
-  status: string;
+  status: string | null;
   bondteam?: string | null;
   promotor?: string | null;
   matchmaker?: string | null;
   hoofdofficial?: string | null;
 };
 
-type UploadRow = {
+type MatchmakingRow = {
   id: string;
-  evenement_naam?: string | null;
-  evenement_datum?: string | null;
+  naam?: string | null;
+  datum?: string | null;
   locatie?: string | null;
-  raw_filename?: string | null;
-  uploaded_at?: string | null;
+  status?: string | null;
+  bondteam?: string | null;
+  promotor?: string | null;
+  matchmaker?: string | null;
+  hoofdofficial?: string | null;
+  bron_type?: string | null;
+  stadium?: string | null;
+  created_at?: string | null;
+  last_updated_at?: string | null;
   event_id?: string | null;
+  matchmaking_upload_id?: string | null;
 };
 
 const PAGE_BG: CSSProperties = {
@@ -185,7 +191,7 @@ function Header({
             Events koppelen
           </div>
           <div className="mt-1 text-sm text-white/75">
-            Koppel matchmaking-uploads aan evenementen
+            Koppel matchmakings aan evenementen
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -316,14 +322,45 @@ function inputStyle(): CSSProperties {
   };
 }
 
+function asText(v: unknown) {
+  const s = String(v ?? "").trim();
+  return s || "";
+}
+
+function normalizeForCompare(v?: string | null) {
+  return asText(v).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function scoreMatchmakingToEvent(matchmaking: MatchmakingRow, event: EventRow) {
+  let score = 0;
+
+  const mmNaam = normalizeForCompare(matchmaking.naam);
+  const evNaam = normalizeForCompare(event.naam);
+
+  const mmDatum = normalizeForCompare(matchmaking.datum);
+  const evDatum = normalizeForCompare(event.datum);
+
+  const mmLocatie = normalizeForCompare(matchmaking.locatie);
+  const evLocatie = normalizeForCompare(event.locatie);
+
+  if (mmNaam && evNaam && mmNaam === evNaam) score += 100;
+  else if (mmNaam && evNaam && (mmNaam.includes(evNaam) || evNaam.includes(mmNaam))) score += 60;
+
+  if (mmDatum && evDatum && mmDatum === evDatum) score += 40;
+  if (mmLocatie && evLocatie && mmLocatie === evLocatie) score += 20;
+
+  return score;
+}
+
 export default function LinkEventsPage() {
   const router = useRouter();
 
   const [events, setEvents] = useState<EventRow[]>([]);
-  const [uploads, setUploads] = useState<UploadRow[]>([]);
+  const [matchmakings, setMatchmakings] = useState<MatchmakingRow[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>("");
 
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   const selectedEvent = useMemo(
@@ -332,19 +369,38 @@ export default function LinkEventsPage() {
   );
 
   async function load() {
+    setLoading(true);
     setErr(null);
-    const res = await fetch("/api/events/link-data");
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(j?.error || "Laden mislukt");
-    setEvents(j.events ?? []);
-    setUploads(j.uploads ?? []);
+
+    try {
+      const [eventsRes, matchmakingsRes] = await Promise.all([
+        supabase
+          .from("events")
+          .select("id, naam, datum, locatie, status, bondteam, promotor, matchmaker, hoofdofficial")
+          .order("datum", { ascending: false }),
+        supabase
+          .from("matchmakings")
+          .select("id, naam, datum, locatie, status, bondteam, promotor, matchmaker, hoofdofficial, bron_type, stadium, created_at, last_updated_at, event_id, matchmaking_upload_id")
+          .order("datum", { ascending: false }),
+      ]);
+
+      if (eventsRes.error) throw new Error(eventsRes.error.message);
+      if (matchmakingsRes.error) throw new Error(matchmakingsRes.error.message);
+
+      setEvents((eventsRes.data ?? []) as EventRow[]);
+      setMatchmakings((matchmakingsRes.data ?? []) as MatchmakingRow[]);
+    } catch (e: any) {
+      setErr(e?.message || "Laden mislukt");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    load().catch((e) => setErr(e.message));
+    load();
   }, []);
 
-  async function linkUpload(uploadId: string) {
+  async function linkMatchmaking(matchmakingId: string) {
     if (!selectedEventId) {
       setErr("Kies eerst een evenement");
       return;
@@ -354,20 +410,19 @@ export default function LinkEventsPage() {
     setErr(null);
 
     try {
-      const res = await fetch("/api/events/link-matchmaking", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const { error } = await supabase
+        .from("matchmakings")
+        .update({
           event_id: selectedEventId,
-          matchmaking_upload_id: uploadId,
-        }),
-      });
+          last_updated_at: new Date().toISOString(),
+        })
+        .eq("id", matchmakingId);
 
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j?.error || "Koppelen mislukt");
+      if (error) throw new Error(error.message);
+
       await load();
     } catch (e: any) {
-      setErr(e?.message || "Onbekende fout");
+      setErr(e?.message || "Koppelen mislukt");
     } finally {
       setSaving(false);
     }
@@ -380,23 +435,41 @@ export default function LinkEventsPage() {
     setErr(null);
 
     try {
-      const res = await fetch("/api/events/update", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: selectedEventId, ...patch }),
-      });
+      const { error } = await supabase
+        .from("events")
+        .update(patch)
+        .eq("id", selectedEventId);
 
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j?.error || "Opslaan mislukt");
+      if (error) throw new Error(error.message);
+
       await load();
     } catch (e: any) {
-      setErr(e?.message || "Onbekende fout");
+      setErr(e?.message || "Opslaan mislukt");
     } finally {
       setSaving(false);
     }
   }
 
-  const openUploads = uploads.filter((u) => !u.event_id);
+  const openMatchmakings = useMemo(() => {
+    return matchmakings.filter((m) => !asText(m.event_id));
+  }, [matchmakings]);
+
+  const sortedOpenMatchmakings = useMemo(() => {
+    if (!selectedEvent) return openMatchmakings;
+
+    return [...openMatchmakings].sort((a, b) => {
+      const aScore = scoreMatchmakingToEvent(a, selectedEvent);
+      const bScore = scoreMatchmakingToEvent(b, selectedEvent);
+
+      if (bScore !== aScore) return bScore - aScore;
+
+      const aDate = asText(a.datum);
+      const bDate = asText(b.datum);
+      if (aDate !== bDate) return aDate.localeCompare(bDate);
+
+      return asText(a.naam).localeCompare(asText(b.naam));
+    });
+  }, [openMatchmakings, selectedEvent]);
 
   return (
     <Shell>
@@ -432,7 +505,7 @@ export default function LinkEventsPage() {
               Events koppelen
             </h1>
             <p className="mt-2 text-sm md:text-base" style={{ color: "#55606d" }}>
-              Koppel matchmaking-uploads aan een event_id
+              Koppel openstaande matchmakings zonder event_id aan een event
             </p>
           </div>
 
@@ -461,11 +534,13 @@ export default function LinkEventsPage() {
                   style={inputStyle()}
                   value={selectedEventId}
                   onChange={(e) => setSelectedEventId(e.target.value)}
+                  disabled={loading || saving}
                 >
                   <option value="">— kies —</option>
                   {events.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.naam} — {e.datum}
+                      {e.locatie ? ` — ${e.locatie}` : ""}
                     </option>
                   ))}
                 </select>
@@ -501,7 +576,9 @@ export default function LinkEventsPage() {
                       <FieldLabel>Hoofdofficial</FieldLabel>
                       <FieldOnBlur
                         value={selectedEvent.hoofdofficial ?? ""}
-                        onBlurSave={(v) => saveEventPatch({ hoofdofficial: v || null })}
+                        onBlurSave={(v) =>
+                          saveEventPatch({ hoofdofficial: v || null })
+                        }
                       />
                     </div>
                   </div>
@@ -516,9 +593,9 @@ export default function LinkEventsPage() {
             </SectionCard>
 
             <SectionCard
-              title="2) Uploads zonder event"
-              subtitle="Koppel openstaande uploads aan het gekozen evenement"
-              icon={<Upload size={22} strokeWidth={2.4} />}
+              title="2) Matchmakings zonder event"
+              subtitle="Koppel openstaande matchmakings aan het gekozen evenement"
+              icon={<Swords size={22} strokeWidth={2.4} />}
             >
               <div
                 className="overflow-x-auto rounded-[18px]"
@@ -538,65 +615,115 @@ export default function LinkEventsPage() {
                     }}
                   >
                     <tr>
-                      <th className="px-4 py-3 text-left">Upload</th>
-                      <th className="px-4 py-3 text-left">Event info</th>
+                      <th className="px-4 py-3 text-left">Matchmaking</th>
+                      <th className="px-4 py-3 text-left">Info</th>
+                      <th className="px-4 py-3 text-left">Status</th>
                       <th className="px-4 py-3 text-left">Actie</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {openUploads.length === 0 ? (
+                    {sortedOpenMatchmakings.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={3}
+                          colSpan={4}
                           className="px-4 py-6 text-center"
                           style={{ background: "#ffffff", color: "#667282" }}
                         >
-                          Geen openstaande uploads.
+                          Geen openstaande matchmakings zonder event_id.
                         </td>
                       </tr>
                     ) : (
-                      openUploads.map((u, idx) => {
+                      sortedOpenMatchmakings.map((m, idx) => {
                         const zebra = idx % 2 === 0;
+                        const hintScore = selectedEvent
+                          ? scoreMatchmakingToEvent(m, selectedEvent)
+                          : 0;
+
                         return (
                           <tr
-                            key={u.id}
+                            key={m.id}
                             style={{
                               backgroundColor: zebra ? "#ffffff" : "#0d0d0d",
                               color: zebra ? "#000" : "#fff",
                             }}
                           >
-                            <td className="px-4 py-3">
-                              <div className="font-bold">
-                                {u.raw_filename ?? "—"}
-                              </div>
+                            <td className="px-4 py-3 align-top">
+                              <div className="font-bold">{m.naam || "—"}</div>
                               <div
                                 className="text-xs"
                                 style={{
-                                  color: zebra ? "#667282" : "rgba(255,255,255,0.70)",
+                                  color: zebra
+                                    ? "#667282"
+                                    : "rgba(255,255,255,0.70)",
                                 }}
                               >
-                                {u.uploaded_at ?? ""}
+                                {m.id}
                               </div>
                             </td>
 
-                            <td className="px-4 py-3">
-                              <div>{u.evenement_naam ?? "—"}</div>
+                            <td className="px-4 py-3 align-top">
+                              <div>{m.datum || "—"}</div>
                               <div
                                 className="text-sm"
                                 style={{
-                                  color: zebra ? "#667282" : "rgba(255,255,255,0.70)",
+                                  color: zebra
+                                    ? "#667282"
+                                    : "rgba(255,255,255,0.70)",
                                 }}
                               >
-                                {u.evenement_datum ?? ""}
-                                {u.locatie ? ` — ${u.locatie}` : ""}
+                                {m.locatie || "—"}
+                              </div>
+                              <div
+                                className="mt-1 text-xs"
+                                style={{
+                                  color: zebra
+                                    ? "#667282"
+                                    : "rgba(255,255,255,0.70)",
+                                }}
+                              >
+                                Bondteam: {m.bondteam || "—"}
+                                {m.bron_type ? ` • ${m.bron_type}` : ""}
+                              </div>
+
+                              {selectedEvent && hintScore > 0 ? (
+                                <div
+                                  className="mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-extrabold"
+                                  style={{
+                                    background: zebra
+                                      ? "rgba(255,77,0,0.10)"
+                                      : "rgba(255,255,255,0.12)",
+                                    color: zebra ? "#c2410c" : "#fff",
+                                    border: `1px solid ${
+                                      zebra
+                                        ? "rgba(255,77,0,0.20)"
+                                        : "rgba(255,255,255,0.18)"
+                                    }`,
+                                  }}
+                                >
+                                  Waarschijnlijk goede match
+                                </div>
+                              ) : null}
+                            </td>
+
+                            <td className="px-4 py-3 align-top">
+                              <div>{m.status || "—"}</div>
+                              <div
+                                className="text-sm"
+                                style={{
+                                  color: zebra
+                                    ? "#667282"
+                                    : "rgba(255,255,255,0.70)",
+                                }}
+                              >
+                                {m.stadium || "—"}
                               </div>
                             </td>
 
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3 align-top">
                               <OrangeButton
                                 disabled={!selectedEventId || saving}
-                                onClick={() => linkUpload(u.id)}
+                                onClick={() => linkMatchmaking(m.id)}
                                 icon={<Link2 size={15} strokeWidth={2.7} />}
                                 label="Koppel"
                               />
@@ -619,8 +746,7 @@ export default function LinkEventsPage() {
                 }}
               >
                 <FileSpreadsheet size={14} strokeWidth={2.5} />
-                Tip: na koppelen kun je de controle-flow overal via{" "}
-                <span className="font-mono font-bold">event_id</span> terugvinden.
+                Matchmakings zonder <span className="font-mono font-bold">event_id</span> kunnen hier alsnog aan een event gekoppeld worden.
               </div>
             </SectionCard>
           </div>

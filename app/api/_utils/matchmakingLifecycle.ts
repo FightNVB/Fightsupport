@@ -6,11 +6,18 @@ export const supabaseAdminLifecycle = createClient(
   { auth: { persistSession: false } }
 );
 
-export type MatchmakingOwnerType = "matchmaker" | "admin" | "bondteam" | "archief";
+export type MatchmakingOwnerType =
+  | "matchmaker"
+  | "admin"
+  | "bondteam"
+  | "archief";
+
 export type MatchmakingStage =
   | "concept_matchmaking"
   | "ingediend_admin"
   | "in_controle_admin"
+  | "in_officials"
+  | "bij_eigenaar"
   | "retour_naar_eigenaar"
   | "klaar_voor_weegstation"
   | "in_weegstation"
@@ -34,6 +41,9 @@ export type EnsureLifecycleInput = {
   ownerType?: MatchmakingOwnerType | null;
   ownerUserId?: string | null;
   ownerBondteam?: string | null;
+  previousOwnerType?: MatchmakingOwnerType | null;
+  previousOwnerUserId?: string | null;
+  previousOwnerBondteam?: string | null;
   actorUserId?: string | null;
   actorRole?: string | null;
   metadata?: Record<string, any> | null;
@@ -101,6 +111,7 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
   if (existingRes.error) throw existingRes.error;
 
   const nowIso = new Date().toISOString();
+
   const patch = {
     naam: s(input.naam),
     datum: s(input.datum),
@@ -112,8 +123,19 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
     stadium: s(input.stage),
     status: s(input.stage) ?? "concept",
     huidige_eigenaar_type: s(input.ownerType),
-    huidige_eigenaar_user_id: input.ownerType === "matchmaker" ? s(input.ownerUserId) : null,
-    huidige_eigenaar_bondteam: input.ownerType === "bondteam" ? s(input.ownerBondteam) : null,
+    huidige_eigenaar_user_id:
+      input.ownerType === "matchmaker" ? s(input.ownerUserId) : null,
+    huidige_eigenaar_bondteam:
+      input.ownerType === "bondteam" ? s(input.ownerBondteam) : null,
+    vorige_eigenaar_type: s(input.previousOwnerType),
+    vorige_eigenaar_user_id:
+      input.previousOwnerType === "matchmaker"
+        ? s(input.previousOwnerUserId)
+        : null,
+    vorige_eigenaar_bondteam:
+      input.previousOwnerType === "bondteam"
+        ? s(input.previousOwnerBondteam)
+        : null,
     is_actief: true,
     is_archived: false,
     last_updated_at: nowIso,
@@ -182,34 +204,55 @@ export async function transferLifecycle(input: {
   if (currentErr) throw currentErr;
 
   const nowIso = new Date().toISOString();
+
   const patch: Record<string, any> = {
     stadium: input.newStage,
     status: input.newStage,
+    vorige_eigenaar_type: current.huidige_eigenaar_type ?? null,
+    vorige_eigenaar_user_id: current.huidige_eigenaar_user_id ?? null,
+    vorige_eigenaar_bondteam: current.huidige_eigenaar_bondteam ?? null,
     huidige_eigenaar_type: input.newOwnerType,
-    huidige_eigenaar_user_id: input.newOwnerType === "matchmaker" ? s(input.newOwnerUserId) : null,
-    huidige_eigenaar_bondteam: input.newOwnerType === "bondteam" ? s(input.newOwnerBondteam) : null,
+    huidige_eigenaar_user_id:
+      input.newOwnerType === "matchmaker" ? s(input.newOwnerUserId) : null,
+    huidige_eigenaar_bondteam:
+      input.newOwnerType === "bondteam" ? s(input.newOwnerBondteam) : null,
     last_updated_at: nowIso,
     last_updated_by: s(input.actorUserId),
     last_received_at: nowIso,
     last_received_by: s(input.actorUserId),
   };
 
-  if (["ingediend_admin", "klaar_voor_weegstation", "definitieve_matchmaking_ingediend", "klaar_voor_uitslagen"].includes(input.newStage)) {
+  if (
+    [
+      "ingediend_admin",
+      "in_officials",
+      "klaar_voor_weegstation",
+      "definitieve_matchmaking_ingediend",
+      "klaar_voor_uitslagen",
+      "bij_eigenaar",
+    ].includes(input.newStage)
+  ) {
     patch.sent_at = nowIso;
     patch.sent_by = s(input.actorUserId);
   }
-  if (input.newStage === "retour_naar_eigenaar") {
+
+  if (
+    input.newStage === "retour_naar_eigenaar" ||
+    input.newStage === "bij_eigenaar"
+  ) {
     patch.returned_at = nowIso;
     patch.returned_by = s(input.actorUserId);
     patch.return_reason = s(input.opmerking);
   }
+
   if (input.newStage === "in_controle_admin") patch.entered_control_at = nowIso;
-  if (input.newStage === "klaar_voor_weegstation") patch.sent_to_officials_at = nowIso;
+  if (input.newStage === "in_officials") patch.sent_to_officials_at = nowIso;
   if (input.newStage === "in_weegstation") patch.entered_weegstation_at = nowIso;
   if (input.newStage === "weegstation_verwerkt") patch.weegstation_processed_at = nowIso;
   if (input.newStage === "definitieve_matchmaking_ingediend") patch.definitive_version_submitted_at = nowIso;
   if (input.newStage === "klaar_voor_uitslagen") patch.ready_for_results_at = nowIso;
   if (input.newStage === "uitslagen_definitief") patch.results_finalized_at = nowIso;
+
   if (input.newStage === "gearchiveerd") {
     patch.archived_at = nowIso;
     patch.is_archived = true;
@@ -227,15 +270,20 @@ export async function transferLifecycle(input: {
 
   await logMatchmakingFlow({
     matchmakingId: input.matchmakingId,
-    actieType: input.newStage === "retour_naar_eigenaar" ? "returned" : "sent",
+    actieType:
+      input.newStage === "retour_naar_eigenaar" || input.newStage === "bij_eigenaar"
+        ? "returned"
+        : "sent",
     vanStadium: current.stadium ?? null,
     naarStadium: input.newStage,
     vanEigenaarType: current.huidige_eigenaar_type ?? null,
     naarEigenaarType: input.newOwnerType,
     vanEigenaarUserId: current.huidige_eigenaar_user_id ?? null,
-    naarEigenaarUserId: input.newOwnerType === "matchmaker" ? s(input.newOwnerUserId) : null,
+    naarEigenaarUserId:
+      input.newOwnerType === "matchmaker" ? s(input.newOwnerUserId) : null,
     vanEigenaarBondteam: current.huidige_eigenaar_bondteam ?? null,
-    naarEigenaarBondteam: input.newOwnerType === "bondteam" ? s(input.newOwnerBondteam) : null,
+    naarEigenaarBondteam:
+      input.newOwnerType === "bondteam" ? s(input.newOwnerBondteam) : null,
     actorUserId: s(input.actorUserId),
     actorRole: s(input.actorRole),
     opmerking: input.opmerking ?? null,

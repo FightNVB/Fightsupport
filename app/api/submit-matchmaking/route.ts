@@ -403,6 +403,11 @@ export async function POST(req: Request) {
     }
 
     let mmId = "";
+    const lifecycleOwnerType = resolveLifecycleOwnerType(role);
+    const lifecycleOwnerUserId =
+      lifecycleOwnerType === "matchmaker" ? userId : null;
+    const lifecycleOwnerBondteam =
+      lifecycleOwnerType === "bondteam" ? bondteam : null;
 
     if (!force_new && matchmaking_id) {
       const s = String(matchmaking_id).trim();
@@ -434,6 +439,31 @@ export async function POST(req: Request) {
         );
       }
 
+      const { error: updateMmErr } = await supabaseAdmin
+        .from("matchmakings")
+        .update({
+          naam: evenement_naam,
+          datum: evenement_datum,
+          locatie,
+          status: "nieuw",
+          bron_type: lifecycleBronType,
+          stadium: "nieuw",
+          huidige_eigenaar_type: lifecycleOwnerType,
+          huidige_eigenaar_user_id: lifecycleOwnerUserId,
+          huidige_eigenaar_bondteam: lifecycleOwnerBondteam,
+          last_updated_at: now,
+          last_updated_by: userId,
+          event_id: evId || null,
+        })
+        .eq("id", s);
+
+      if (updateMmErr) {
+        return NextResponse.json(
+          { error: updateMmErr.message },
+          { status: 500 }
+        );
+      }
+
       mmId = s;
     } else {
       const { data: mm, error: mmError } = await supabaseAdmin
@@ -446,11 +476,9 @@ export async function POST(req: Request) {
           status: "nieuw",
           bron_type: lifecycleBronType,
           stadium: "nieuw",
-          huidige_eigenaar_type: resolveLifecycleOwnerType(role),
-          huidige_eigenaar_user_id:
-            role === "matchmaker" ? userId : null,
-          huidige_eigenaar_bondteam:
-            role === "official" || role === "hoofdofficial" ? bondteam : null,
+          huidige_eigenaar_type: lifecycleOwnerType,
+          huidige_eigenaar_user_id: lifecycleOwnerUserId,
+          huidige_eigenaar_bondteam: lifecycleOwnerBondteam,
           last_updated_at: now,
           last_updated_by: userId,
           event_id: evId || null,
@@ -471,10 +499,6 @@ export async function POST(req: Request) {
       }
     }
 
-    const lifecycleOwnerType = resolveLifecycleOwnerType(role);
-    const lifecycleBondteam =
-      role === "official" || role === "hoofdofficial" ? bondteam : null;
-
     await ensureLifecycleRecord({
       matchmakingId: String(mmId),
       naam: evenement_naam || null,
@@ -491,6 +515,8 @@ export async function POST(req: Request) {
       actorRole: role,
       metadata: { route: "app/api/submit_matchmaking/start/route.ts" },
     });
+
+    const lifecycleBondteam = lifecycleOwnerBondteam;
 
     const { data: uploadRow, error: uploadErr } = await supabaseAdmin
       .from("matchmaking_uploads")

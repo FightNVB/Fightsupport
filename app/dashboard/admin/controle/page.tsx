@@ -30,32 +30,46 @@ interface ControleRun {
   run_type: string | null;
 }
 
-type RowSource = "upload" | "app";
+type TabKey = "eigen" | "matchmaker" | "official";
+type EigenaarType = "admin" | "matchmaker" | "official" | "unknown";
 
-interface OverzichtRow {
-  row_id: string;
-  source: RowSource;
-
-  matchmaking_id: string | null;
-  evenement_naam: string | null;
-  evenement_datum: string | null;
+interface MatchmakingRow {
+  id: string;
+  naam: string | null;
+  datum: string | null;
   locatie: string | null;
-  matchmaker: string | null;
   promotor: string | null;
   bondteam: string | null;
 
-  official_release?: boolean | null;
-  official_released_at?: string | null;
+  bron_type: string | null;
+  stadium: string | null;
+  status: string | null;
+  final_status: string | null;
 
-  uploaded_at?: string | null;
-  uploaded_by?: string | null;
-  hoofdofficial_user_id?: string | null;
+  huidige_eigenaar_type: string | null;
+  huidige_eigenaar_user_id: string | null;
+  huidige_eigenaar_bondteam: string | null;
 
-  bron_status?: string | null;
+  created_at: string | null;
+  last_updated_at: string | null;
+  last_updated_by: string | null;
+
+  submitted_to_admin_at: string | null;
+  entered_control_at: string | null;
+  sent_to_officials_at: string | null;
+  entered_weegstation_at: string | null;
+  ready_for_results_at: string | null;
+  results_finalized_at: string | null;
+
+  is_actief: boolean | null;
+  locked_for_editing: boolean | null;
+  is_archived: boolean | null;
+
+  matchmaker_id?: string | null;
+  hoofdofficial_id?: string | null;
+
   laatste_run: ControleRun | null;
 }
-
-type TabKey = "upload" | "app" | "bond";
 
 function formatDate(v: string | null) {
   if (!v) return "-";
@@ -114,10 +128,69 @@ function normalizeStatus(status: string | null | undefined) {
 }
 
 function formatStatusLabel(status: string | null | undefined) {
-  const s = normalizeStatus(status);
+  const raw = String(status ?? "").trim();
+  const s = raw.toLowerCase();
+
+  if (!s) return "Niet gecontroleerd";
   if (s === "niet gecontroleerd") return "Niet gecontroleerd";
+  if (s === "nieuw") return "Nieuw";
   if (s === "concept") return "Concept";
-  return status ?? "Niet gecontroleerd";
+  if (s === "in_behandeling") return "In behandeling";
+  if (s === "running") return "Bezig";
+  if (s === "klaar") return "Klaar";
+  if (s === "failed") return "Mislukt";
+
+  return raw;
+}
+
+function formatBronLabel(bronType: string | null | undefined) {
+  const s = String(bronType ?? "").trim().toLowerCase();
+
+  if (!s) return "-";
+  if (s === "matchmaker_upload") return "Matchmaker upload";
+  if (s === "matchmaker_app") return "Matchmaker app";
+  if (s === "official_upload") return "Official upload";
+  if (s === "admin_upload") return "Admin upload";
+  if (s === "admin_app") return "Admin app";
+
+  return String(bronType ?? "-");
+}
+
+function normalizeOwnerType(v: string | null | undefined): EigenaarType {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (s === "admin") return "admin";
+  if (s === "matchmaker") return "matchmaker";
+  if (s === "official") return "official";
+  return "unknown";
+}
+
+function formatOwnerTypeLabel(v: string | null | undefined) {
+  const t = normalizeOwnerType(v);
+  if (t === "admin") return "Admin";
+  if (t === "matchmaker") return "Matchmaker";
+  if (t === "official") return "Official";
+  return "Onbekend";
+}
+
+function shortId(v: string | null | undefined) {
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+  if (s.length <= 10) return s;
+  return `${s.slice(0, 8)}…`;
+}
+
+function inferTabFromRow(row: MatchmakingRow): TabKey {
+  const bron = String(row.bron_type ?? "").trim().toLowerCase();
+
+  if (bron === "matchmaker_app" || bron === "matchmaker_upload") {
+    return "matchmaker";
+  }
+
+  if (bron === "official_upload") {
+    return "official";
+  }
+
+  return "eigen";
 }
 
 function TabButton({
@@ -138,7 +211,7 @@ function TabButton({
       className="px-4 py-2 text-sm font-extrabold tracking-[0.02em] transition"
       style={{
         borderRadius: 0,
-        minWidth: 220,
+        minWidth: 240,
         background: active
           ? "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)"
           : "linear-gradient(180deg, #f2f2f2 0%, #cfcfcf 48%, #a8a8a8 100%)",
@@ -157,7 +230,7 @@ function TabButton({
 }
 
 export default function ControleOverzichtPage() {
-  const [rows, setRows] = useState<OverzichtRow[]>([]);
+  const [rows, setRows] = useState<MatchmakingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -166,7 +239,8 @@ export default function ControleOverzichtPage() {
   const [sportsMsg, setSportsMsg] = useState<string>("");
 
   const [editId, setEditId] = useState<string | null>(null);
-  const [editMatchmaker, setEditMatchmaker] = useState("");
+  const [editNaam, setEditNaam] = useState("");
+  const [editLocatie, setEditLocatie] = useState("");
   const [editPromotor, setEditPromotor] = useState("");
   const [editBondteam, setEditBondteam] = useState("");
 
@@ -178,11 +252,42 @@ export default function ControleOverzichtPage() {
   const [filterBondteam, setFilterBondteam] = useState<string>("");
   const [filterName, setFilterName] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<TabKey>("upload");
+  const [filterOwner, setFilterOwner] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<TabKey>("eigen");
+
+  const [ownerMap, setOwnerMap] = useState<Map<string, string>>(new Map());
+
+  const [scrapeOverlayOpen, setScrapeOverlayOpen] = useState(false);
+  const [scrapeOverlayTitle, setScrapeOverlayTitle] = useState("Even wachten");
+  const [scrapeOverlayMessage, setScrapeOverlayMessage] = useState(
+    "Autocheck loopt. Wacht op resultaten..."
+  );
+  const [scrapeOverlaySub, setScrapeOverlaySub] = useState(
+    "Sluit deze pagina niet af terwijl de autocheck loopt."
+  );
 
   useEffect(() => {
     void load();
   }, []);
+
+  function openScrapeOverlay(options?: {
+    title?: string;
+    message?: string;
+    sub?: string;
+  }) {
+    setScrapeOverlayTitle(options?.title ?? "Even wachten");
+    setScrapeOverlayMessage(
+      options?.message ?? "Autocheck loopt. Wacht op resultaten..."
+    );
+    setScrapeOverlaySub(
+      options?.sub ?? "Sluit deze pagina niet af terwijl de controle loopt."
+    );
+    setScrapeOverlayOpen(true);
+  }
+
+  function closeScrapeOverlay() {
+    setScrapeOverlayOpen(false);
+  }
 
   function setRowMessage(rowId: string, message: string) {
     setRowMsgById((prev) => ({
@@ -195,143 +300,139 @@ export default function ControleOverzichtPage() {
     setLoading(true);
     setSportsMsg("");
 
-    const { data: uploads, error: uploadError } = await supabase
-      .from("matchmaking_uploads")
-      .select(
-        `
-        id,
-        uploaded_at,
-        uploaded_by,
-        hoofdofficial_user_id,
-        evenement_naam,
-        evenement_datum,
-        locatie,
-        matchmaking_id,
-        matchmaker,
-        promotor,
-        bondteam,
-        official_release,
-        official_released_at
-      `
-      )
-      .order("uploaded_at", { ascending: false });
+    try {
+      const res = await authedFetch("/api/admin/beheer/matchmakings-overzicht", {
+        method: "GET",
+        cache: "no-store",
+      });
 
-    if (uploadError) {
-      console.error("Fout bij laden uploads:", uploadError);
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-
-    const { data: appRows, error: appError } = await supabase
-      .from("matchmaker_matchmakings")
-      .select(
-        `
-        id,
-        naam,
-        datum,
-        locatie,
-        promotor,
-        bondteam,
-        matchmaker_naam,
-        status,
-        official_release,
-        official_released_at,
-        created_at,
-        updated_at
-      `
-      )
-      .order("created_at", { ascending: false });
-
-    if (appError) {
-      console.error("Fout bij laden matchmaker_matchmakings:", appError);
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-
-    const uploadMatchmakingIds = (uploads ?? [])
-      .map((u: any) => String(u.matchmaking_id ?? "").trim())
-      .filter(Boolean);
-
-    const appMatchmakingIds = (appRows ?? [])
-      .map((r: any) => String(r.id ?? "").trim())
-      .filter(Boolean);
-
-    const allMatchmakingIds = Array.from(
-      new Set([...uploadMatchmakingIds, ...appMatchmakingIds])
-    );
-
-    const { data: runs } = allMatchmakingIds.length
-      ? await supabase
-          .from("controle_runs")
-          .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type")
-          .in("matchmaking_id", allMatchmakingIds)
-      : { data: [] as any[] };
-
-    const runMap = new Map<string, ControleRun>();
-    (runs ?? []).forEach((r: ControleRun) => {
-      const existing = runMap.get(r.matchmaking_id);
-      if (
-        !existing ||
-        new Date(r.gestart_op ?? 0) > new Date(existing.gestart_op ?? 0)
-      ) {
-        runMap.set(r.matchmaking_id, r);
+      if (!res.ok) {
+        const t = await res.text();
+        console.error("Fout bij laden matchmakings:", res.status, t);
+        setRows([]);
+        setLoading(false);
+        return;
       }
-    });
 
-    const mergedUploads: OverzichtRow[] = (uploads ?? []).map((u: any) => {
-      const mmId = String(u.matchmaking_id ?? "").trim() || null;
-      return {
-        row_id: `upload:${u.id}`,
-        source: "upload",
-        matchmaking_id: mmId,
-        evenement_naam: u.evenement_naam ?? null,
-        evenement_datum: u.evenement_datum ?? null,
-        locatie: u.locatie ?? null,
-        matchmaker: u.matchmaker ?? null,
-        promotor: u.promotor ?? null,
-        bondteam: u.bondteam ?? null,
-        official_release: u.official_release ?? false,
-        official_released_at: u.official_released_at ?? null,
-        uploaded_at: u.uploaded_at ?? null,
-        uploaded_by: u.uploaded_by ?? null,
-        hoofdofficial_user_id: u.hoofdofficial_user_id ?? null,
-        bron_status: null,
-        laatste_run: mmId ? runMap.get(mmId) ?? null : null,
-      };
-    });
+      const json = await res.json();
+      const matchmakings = Array.isArray(json?.rows) ? json.rows : [];
 
-    const mergedApps: OverzichtRow[] = (appRows ?? []).map((r: any) => {
-      const mmId = String(r.id ?? "").trim() || null;
-      return {
-        row_id: `app:${r.id}`,
-        source: "app",
-        matchmaking_id: mmId,
-        evenement_naam: r.naam ?? null,
-        evenement_datum: r.datum ?? null,
+      const matchmakingIds = matchmakings
+        .map((r: any) => String(r.id ?? "").trim())
+        .filter(Boolean);
+
+      const { data: runs, error: runsError } = matchmakingIds.length
+        ? await supabase
+            .from("controle_runs")
+            .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type")
+            .in("matchmaking_id", matchmakingIds)
+        : { data: [] as any[], error: null as any };
+
+      if (runsError) {
+        console.error("Fout bij laden controle_runs:", runsError);
+      }
+
+      const runMap = new Map<string, ControleRun>();
+      (runs ?? []).forEach((r: ControleRun) => {
+        const existing = runMap.get(r.matchmaking_id);
+        if (
+          !existing ||
+          new Date(r.gestart_op ?? 0).getTime() >
+            new Date(existing.gestart_op ?? 0).getTime()
+        ) {
+          runMap.set(r.matchmaking_id, r);
+        }
+      });
+
+      const merged: MatchmakingRow[] = matchmakings.map((r: any) => ({
+        id: String(r.id),
+        naam: r.naam ?? null,
+        datum: r.datum ?? null,
         locatie: r.locatie ?? null,
-        matchmaker: r.matchmaker_naam ?? null,
         promotor: r.promotor ?? null,
         bondteam: r.bondteam ?? null,
-        official_release: r.official_release ?? false,
-        official_released_at: r.official_released_at ?? null,
-        uploaded_at: r.created_at ?? null,
-        uploaded_by: null,
-        hoofdofficial_user_id: null,
-        bron_status: r.status ?? null,
-        laatste_run: mmId ? runMap.get(mmId) ?? null : null,
-      };
-    });
 
-    const combined = [...mergedUploads, ...mergedApps].sort((a, b) => {
-      const aTime = new Date(a.uploaded_at ?? a.evenement_datum ?? 0).getTime();
-      const bTime = new Date(b.uploaded_at ?? b.evenement_datum ?? 0).getTime();
-      return bTime - aTime;
-    });
+        bron_type: r.bron_type ?? null,
+        stadium: r.stadium ?? null,
+        status: r.status ?? null,
+        final_status: r.final_status ?? null,
 
-    setRows(combined);
-    setLoading(false);
+        huidige_eigenaar_type: r.huidige_eigenaar_type ?? null,
+        huidige_eigenaar_user_id: r.huidige_eigenaar_user_id ?? null,
+        huidige_eigenaar_bondteam: r.huidige_eigenaar_bondteam ?? null,
+
+        created_at: r.created_at ?? null,
+        last_updated_at: r.last_updated_at ?? null,
+        last_updated_by: r.last_updated_by ?? null,
+
+        submitted_to_admin_at: r.submitted_to_admin_at ?? null,
+        entered_control_at: r.entered_control_at ?? null,
+        sent_to_officials_at: r.sent_to_officials_at ?? null,
+        entered_weegstation_at: r.entered_weegstation_at ?? null,
+        ready_for_results_at: r.ready_for_results_at ?? null,
+        results_finalized_at: r.results_finalized_at ?? null,
+
+        is_actief: r.is_actief ?? true,
+        locked_for_editing: r.locked_for_editing ?? false,
+        is_archived: r.is_archived ?? false,
+
+        matchmaker_id: r.matchmaker_id ?? null,
+        hoofdofficial_id: r.hoofdofficial_id ?? null,
+
+        laatste_run: runMap.get(String(r.id)) ?? null,
+      }));
+
+      const adminOnly = merged.filter(
+        (r) => String(r.huidige_eigenaar_type ?? "").trim().toLowerCase() === "admin"
+      );
+
+      const profileIds = Array.from(
+        new Set(
+          adminOnly
+            .flatMap((r) => [r.last_updated_by, r.huidige_eigenaar_user_id])
+            .map((v) => String(v ?? "").trim())
+            .filter(Boolean)
+        )
+      );
+
+      const ownerNameMap = new Map<string, string>();
+
+      if (profileIds.length) {
+        const { data: profiles, error: profilesError } = await supabase
+          .from("user_profiles")
+          .select("id, full_name, role, email, bondteam, created_at")
+          .in("id", profileIds);
+
+        if (profilesError) {
+          console.error("Fout bij laden user_profiles:", profilesError);
+        } else {
+          (profiles ?? []).forEach((p: any) => {
+            const label =
+              String(p.full_name ?? p.email ?? p.id ?? "").trim() ||
+              String(p.id ?? "").trim();
+
+            if (p.id) {
+              ownerNameMap.set(String(p.id), label);
+            }
+          });
+        }
+      }
+
+      setOwnerMap(ownerNameMap);
+
+      const sorted = adminOnly.sort((a, b) => {
+        const aTime = new Date(a.datum ?? a.created_at ?? 0).getTime();
+        const bTime = new Date(b.datum ?? b.created_at ?? 0).getTime();
+        return bTime - aTime;
+      });
+
+      setRows(sorted);
+    } catch (e) {
+      console.error("Onverwachte fout bij load:", e);
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function runSportscholen() {
@@ -366,6 +467,12 @@ export default function ControleOverzichtPage() {
       setIsBusy(true);
       setBusyId(matchmakingId);
 
+      openScrapeOverlay({
+        title: "Even wachten",
+        message: "Autocheck loopt. Wacht op resultaten...",
+        sub: "Deze matchmaking wordt nu gecontroleerd. Dit kan even duren.",
+      });
+
       const res = await authedFetch("/api/control-engine/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -380,30 +487,39 @@ export default function ControleOverzichtPage() {
       if (!res.ok) {
         const t = await res.text();
         console.error("Start controle failed:", res.status, t);
+        closeScrapeOverlay();
         alert("Start controle mislukt. Check console/logs.");
         return;
       }
 
+      setScrapeOverlayMessage("Resultaten worden geladen...");
+      setScrapeOverlaySub("Nog heel even geduld.");
+
       await load();
+      closeScrapeOverlay();
+    } catch (e) {
+      console.error(e);
+      closeScrapeOverlay();
+      alert("Onverwachte fout bij starten controle.");
     } finally {
       setBusyId(null);
       setIsBusy(false);
     }
   }
 
-  async function deleteMatchmaking(matchmaking_id: string) {
+  async function deleteMatchmaking(matchmakingId: string) {
     const ok2 = window.confirm(
       "Weet je zeker dat je deze matchmaking + alle controle data wilt verwijderen?\n\nDit kan niet ongedaan gemaakt worden."
     );
     if (!ok2) return;
 
     try {
-      setBusyId(matchmaking_id);
+      setBusyId(matchmakingId);
 
       const res = await authedFetch("/api/control-engine/delete-matchmaking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchmaking_id }),
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
       });
 
       if (!res.ok) {
@@ -419,94 +535,77 @@ export default function ControleOverzichtPage() {
     }
   }
 
-  function openEdit(r: OverzichtRow) {
-    setRowMessage(r.row_id, "");
-    setEditId(r.row_id);
-    setEditMatchmaker(r.matchmaker ?? "");
+  function openEdit(r: MatchmakingRow) {
+    setRowMessage(r.id, "");
+    setEditId(r.id);
+    setEditNaam(r.naam ?? "");
+    setEditLocatie(r.locatie ?? "");
     setEditPromotor(r.promotor ?? "");
     setEditBondteam(r.bondteam ?? "");
   }
 
   function closeEdit() {
     setEditId(null);
-    setEditMatchmaker("");
+    setEditNaam("");
+    setEditLocatie("");
     setEditPromotor("");
     setEditBondteam("");
   }
 
-  async function saveEdit(row: OverzichtRow) {
+  async function saveEdit(row: MatchmakingRow) {
     try {
-      setRowMessage(row.row_id, "");
+      setRowMessage(row.id, "");
 
-      if (!editMatchmaker.trim()) {
-        setRowMessage(row.row_id, "⚠️ Matchmaker is verplicht.");
+      if (!editNaam.trim()) {
+        setRowMessage(row.id, "⚠️ Naam evenement is verplicht.");
         return;
       }
 
-      setSavingEditId(row.row_id);
+      setSavingEditId(row.id);
 
-      if (row.source === "upload") {
-        const uploadId = row.row_id.replace(/^upload:/, "");
-        const { error } = await supabase
-          .from("matchmaking_uploads")
-          .update({
-            matchmaker: editMatchmaker.trim(),
-            promotor: editPromotor.trim() || null,
-            bondteam: editBondteam.trim() || null,
-          })
-          .eq("id", uploadId);
+      const { error } = await supabase
+        .from("matchmakings")
+        .update({
+          naam: editNaam.trim(),
+          locatie: editLocatie.trim() || null,
+          promotor: editPromotor.trim() || null,
+          bondteam: editBondteam.trim() || null,
+          last_updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
 
-        if (error) {
-          console.error("Update upload meta error:", error);
-          setRowMessage(row.row_id, "❌ Bewerken opslaan mislukt.");
-          return;
-        }
-      } else {
-        const appId = row.row_id.replace(/^app:/, "");
-        const { error } = await supabase
-          .from("matchmaker_matchmakings")
-          .update({
-            matchmaker_naam: editMatchmaker.trim(),
-            promotor: editPromotor.trim() || null,
-            bondteam: editBondteam.trim() || null,
-          })
-          .eq("id", appId);
-
-        if (error) {
-          console.error("Update app matchmaking error:", error);
-          setRowMessage(row.row_id, "❌ Bewerken opslaan mislukt.");
-          return;
-        }
+      if (error) {
+        console.error("Update matchmaking error:", error);
+        setRowMessage(row.id, "❌ Bewerken opslaan mislukt.");
+        return;
       }
 
-      setRowMessage(row.row_id, "✅ Bewerking opgeslagen.");
+      setRowMessage(row.id, "✅ Bewerking opgeslagen.");
       await load();
       closeEdit();
     } catch (e) {
       console.error(e);
-      setRowMessage(row.row_id, "❌ Onverwachte fout bij opslaan.");
+      setRowMessage(row.id, "❌ Onverwachte fout bij opslaan.");
     } finally {
       setSavingEditId(null);
     }
   }
 
-  async function saveSnapshot(row: OverzichtRow) {
+  async function saveSnapshot(row: MatchmakingRow) {
     try {
-      const matchmakingId = String(row.matchmaking_id ?? "").trim();
-
-      if (!matchmakingId) {
-        setRowMessage(row.row_id, "❌ Geen matchmaking_id.");
+      if (!row.id) {
+        setRowMessage(row.id, "❌ Geen matchmaking_id.");
         return;
       }
 
-      setRowMessage(row.row_id, "");
-      setSnapshotSavingId(row.row_id);
+      setRowMessage(row.id, "");
+      setSnapshotSavingId(row.id);
 
       const res = await authedFetch("/api/admin/beheer/save-matchmaking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          matchmaking_id: matchmakingId,
+          matchmaking_id: row.id,
         }),
       });
 
@@ -515,27 +614,39 @@ export default function ControleOverzichtPage() {
       if (!res.ok) {
         console.error("save-matchmaking failed:", res.status, json);
         setRowMessage(
-          row.row_id,
+          row.id,
           json?.error ? `❌ ${json.error}` : "❌ Snapshot opslaan mislukt."
         );
         return;
       }
 
       setRowMessage(
-        row.row_id,
+        row.id,
         json?.message ?? "✅ Matchmaking opgeslagen in beheer-database."
       );
     } catch (e) {
       console.error(e);
-      setRowMessage(row.row_id, "❌ Onverwachte fout bij snapshot opslaan.");
+      setRowMessage(row.id, "❌ Onverwachte fout bij snapshot opslaan.");
     } finally {
       setSnapshotSavingId(null);
     }
   }
 
+  function getOwnerLabel(row: MatchmakingRow) {
+    const typeLabel = formatOwnerTypeLabel(row.huidige_eigenaar_type);
+    const ownerId = String(row.huidige_eigenaar_user_id ?? "").trim();
+
+    if (!ownerId) return typeLabel;
+
+    const profileName = ownerMap.get(ownerId);
+    if (profileName) return `${typeLabel} · ${profileName}`;
+
+    return `${typeLabel} · ${shortId(ownerId)}`;
+  }
+
   const monthOptions = useMemo(() => {
     return Array.from(
-      new Set(rows.map((r) => getMonthKey(r.evenement_datum)).filter(Boolean))
+      new Set(rows.map((r) => getMonthKey(r.datum)).filter(Boolean))
     ).sort((a, b) => b.localeCompare(a));
   }, [rows]);
 
@@ -543,20 +654,37 @@ export default function ControleOverzichtPage() {
     return Array.from(
       new Set(
         rows.map((r) =>
-          normalizeStatus(r.laatste_run?.status ?? r.bron_status ?? "Niet gecontroleerd")
+          normalizeStatus(
+            r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
+          )
         )
       )
     ).sort((a, b) => a.localeCompare(b, "nl"));
   }, [rows]);
 
+  const ownerOptions = useMemo(() => {
+    return Array.from(
+      new Set(rows.map((r) => normalizeOwnerType(r.huidige_eigenaar_type)))
+    ).filter((v) => v !== "unknown");
+  }, [rows]);
+
+  const eigenCount = useMemo(
+    () => rows.filter((r) => inferTabFromRow(r) === "eigen").length,
+    [rows]
+  );
+
+  const matchmakerCount = useMemo(
+    () => rows.filter((r) => inferTabFromRow(r) === "matchmaker").length,
+    [rows]
+  );
+
+  const officialCount = useMemo(
+    () => rows.filter((r) => inferTabFromRow(r) === "official").length,
+    [rows]
+  );
+
   const tabRows = useMemo(() => {
-    if (activeTab === "bond") {
-      return rows.filter((r) => !!r.official_release);
-    }
-    if (activeTab === "app") {
-      return rows.filter((r) => r.source === "app" && !r.official_release);
-    }
-    return rows.filter((r) => r.source === "upload" && !r.official_release);
+    return rows.filter((r) => inferTabFromRow(r) === activeTab);
   }, [rows, activeTab]);
 
   const filteredRows = useMemo(() => {
@@ -564,58 +692,38 @@ export default function ControleOverzichtPage() {
     const bondNeedle = filterBondteam.trim().toLowerCase();
 
     return tabRows.filter((r) => {
-      const rowMonth = getMonthKey(r.evenement_datum);
+      const rowMonth = getMonthKey(r.datum);
       const rowBondteam = (r.bondteam ?? "").trim().toLowerCase();
-      const rowMatchmaker = (r.matchmaker ?? "").trim().toLowerCase();
-      const rowEvent = (r.evenement_naam ?? "").trim().toLowerCase();
+      const rowEvent = (r.naam ?? "").trim().toLowerCase();
+      const rowOwner = normalizeOwnerType(r.huidige_eigenaar_type);
       const rowStatus = normalizeStatus(
-        r.laatste_run?.status ?? r.bron_status ?? "Niet gecontroleerd"
+        r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
       );
 
       if (filterMonth && rowMonth !== filterMonth) return false;
       if (filterStatus && rowStatus !== filterStatus) return false;
+      if (filterOwner && rowOwner !== filterOwner) return false;
       if (bondNeedle && !rowBondteam.includes(bondNeedle)) return false;
-
-      if (
-        nameNeedle &&
-        !rowMatchmaker.includes(nameNeedle) &&
-        !rowEvent.includes(nameNeedle)
-      ) {
-        return false;
-      }
+      if (nameNeedle && !rowEvent.includes(nameNeedle)) return false;
 
       return true;
     });
-  }, [tabRows, filterMonth, filterBondteam, filterName, filterStatus]);
+  }, [tabRows, filterMonth, filterBondteam, filterName, filterStatus, filterOwner]);
 
   const hasActiveFilters =
-    !!filterMonth || !!filterBondteam || !!filterName || !!filterStatus;
+    !!filterMonth || !!filterBondteam || !!filterName || !!filterStatus || !!filterOwner;
 
   function resetFilters() {
     setFilterMonth("");
     setFilterBondteam("");
     setFilterName("");
     setFilterStatus("");
+    setFilterOwner("");
   }
-
-  const bondCount = useMemo(
-    () => rows.filter((r) => !!r.official_release).length,
-    [rows]
-  );
-
-  const appCount = useMemo(
-    () => rows.filter((r) => r.source === "app" && !r.official_release).length,
-    [rows]
-  );
-
-  const uploadCount = useMemo(
-    () => rows.filter((r) => r.source === "upload" && !r.official_release).length,
-    [rows]
-  );
 
   return (
     <main className="min-h-screen px-4 py-6" style={{ background: "#eef0f3" }}>
-      <div className="mx-auto w-full max-w-[1500px]">
+      <div className="mx-auto w-full max-w-[1650px]">
         <div
           className="rounded-[32px] p-[6px]"
           style={{
@@ -654,10 +762,10 @@ export default function ControleOverzichtPage() {
                         textShadow: "0 6px 18px rgba(0,0,0,0.45)",
                       }}
                     >
-                      Controle Overzicht
+                      Admin Beheer · Matchmakings
                     </div>
                     <div className="mt-1 text-sm text-white/85">
-                      Matchmakings ter controle
+                      Overzicht op basis van tabel <strong>matchmakings</strong>
                     </div>
                   </div>
 
@@ -705,6 +813,7 @@ export default function ControleOverzichtPage() {
                   >
                     {sportsBusy ? "Sportscholen…" : "Sportscholen sync"}
                   </button>
+
                   {sportsMsg ? (
                     <span className="text-xs" style={{ color: "var(--brand-orange)" }}>
                       {sportsMsg}
@@ -722,22 +831,22 @@ export default function ControleOverzichtPage() {
                 <div className="px-2 py-2 md:px-3">
                   <div className="mb-5 flex flex-wrap items-center justify-center gap-3">
                     <TabButton
-                      active={activeTab === "upload"}
-                      label="Ontvangen via upload"
-                      count={uploadCount}
-                      onClick={() => setActiveTab("upload")}
+                      active={activeTab === "eigen"}
+                      label="Eigen upload"
+                      count={eigenCount}
+                      onClick={() => setActiveTab("eigen")}
                     />
                     <TabButton
-                      active={activeTab === "app"}
-                      label="MM in app gemaakt"
-                      count={appCount}
-                      onClick={() => setActiveTab("app")}
+                      active={activeTab === "matchmaker"}
+                      label="Van matchmaker ontvangen"
+                      count={matchmakerCount}
+                      onClick={() => setActiveTab("matchmaker")}
                     />
                     <TabButton
-                      active={activeTab === "bond"}
-                      label="Naar bond"
-                      count={bondCount}
-                      onClick={() => setActiveTab("bond")}
+                      active={activeTab === "official"}
+                      label="Van official ontvangen"
+                      count={officialCount}
+                      onClick={() => setActiveTab("official")}
                     />
                   </div>
 
@@ -758,11 +867,11 @@ export default function ControleOverzichtPage() {
                             Filters
                           </div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            {activeTab === "bond"
-                              ? "Overzicht van matchmakings die naar bond zijn gestuurd"
-                              : activeTab === "app"
-                              ? "Overzicht van matchmakings die in de app zijn gemaakt"
-                              : "Overzicht van ontvangen matchmakings via upload"}
+                            {activeTab === "eigen"
+                              ? "Admin eigen uploads en admin-aangemaakte matchmakings"
+                              : activeTab === "matchmaker"
+                              ? "Alleen ontvangen van matchmaker en nu in bezit van admin"
+                              : "Alleen ontvangen van official en nu in bezit van admin"}
                           </div>
                         </div>
 
@@ -771,7 +880,7 @@ export default function ControleOverzichtPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[180px_180px_minmax(180px,1fr)_180px_180px]">
+                      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[180px_180px_minmax(200px,1fr)_180px_180px_180px]">
                         <div>
                           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
                             Maand
@@ -814,12 +923,12 @@ export default function ControleOverzichtPage() {
 
                         <div>
                           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
-                            Naam
+                            Naam event
                           </label>
                           <input
                             value={filterName}
                             onChange={(e) => setFilterName(e.target.value)}
-                            placeholder="Zoek evenement of matchmaker"
+                            placeholder="Zoek evenement"
                             className="h-10 w-full rounded-xl border px-3 text-sm outline-none"
                             style={{
                               borderColor: "rgba(63,63,70,0.22)",
@@ -847,6 +956,29 @@ export default function ControleOverzichtPage() {
                             {statusOptions.map((status) => (
                               <option key={status} value={status}>
                                 {formatStatusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                            Eigenaar
+                          </label>
+                          <select
+                            value={filterOwner}
+                            onChange={(e) => setFilterOwner(e.target.value)}
+                            className="h-10 w-full rounded-xl border px-3 text-sm outline-none"
+                            style={{
+                              borderColor: "rgba(63,63,70,0.22)",
+                              background: "#fff",
+                              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.95)",
+                            }}
+                          >
+                            <option value="">Alle eigenaren</option>
+                            {ownerOptions.map((owner) => (
+                              <option key={owner} value={owner}>
+                                {formatOwnerTypeLabel(owner)}
                               </option>
                             ))}
                           </select>
@@ -900,14 +1032,10 @@ export default function ControleOverzichtPage() {
                             <tr>
                               <th className="px-4 py-3 text-left">Datum</th>
                               <th className="px-4 py-3 text-left">Evenement</th>
-                              <th className="px-4 py-3 text-left">Locatie</th>
-                              <th className="px-4 py-3 text-left">Matchmaker</th>
-                              <th className="px-4 py-3 text-left">Promotor</th>
+                              <th className="px-4 py-3 text-left">Bron</th>
+                              <th className="px-4 py-3 text-left">Eigenaar</th>
                               <th className="px-4 py-3 text-left">Bondteam</th>
-                              <th className="px-4 py-3 text-left">Status</th>
-                              {activeTab === "bond" ? (
-                                <th className="px-4 py-3 text-left">Doorgestuurd</th>
-                              ) : null}
+                              <th className="px-4 py-3 text-left">Laatst bijgewerkt</th>
                               <th className="px-4 py-3 text-left">Acties</th>
                             </tr>
                           </thead>
@@ -916,76 +1044,65 @@ export default function ControleOverzichtPage() {
                             {filteredRows.length === 0 ? (
                               <tr>
                                 <td
-                                  colSpan={activeTab === "bond" ? 9 : 8}
+                                  colSpan={7}
                                   className="px-4 py-8 text-center text-sm"
                                   style={{ background: "#ffffff", color: "#555" }}
                                 >
-                                  {activeTab === "bond"
-                                    ? "Geen naar bond gestuurde matchmakings gevonden."
-                                    : activeTab === "app"
-                                    ? "Geen in app gemaakte matchmakings gevonden met deze filters."
-                                    : "Geen ontvangen uploads gevonden met deze filters."}
+                                  {activeTab === "eigen"
+                                    ? "Geen eigen admin matchmakings gevonden."
+                                    : activeTab === "matchmaker"
+                                    ? "Nog geen matchmakings van matchmaker ontvangen."
+                                    : "Nog geen matchmakings van official ontvangen."}
                                 </td>
                               </tr>
                             ) : (
                               filteredRows.map((r, i) => {
                                 const zebra = i % 2 === 0;
-                                const run = r.laatste_run;
-                                const hasMatchmaking = !!r.matchmaking_id;
-                                const canView = hasMatchmaking;
-                                const isEditing = editId === r.row_id;
-                                const mmId = r.matchmaking_id ?? "";
-                                const rowBusy = busyId === mmId;
-                                const rowEditBusy = savingEditId === r.row_id;
-                                const rowSnapshotBusy = snapshotSavingId === r.row_id;
-                                const rowMsg = rowMsgById[r.row_id] ?? "";
-                                const displayStatus =
-                                  run?.status ?? r.bron_status ?? "Niet gecontroleerd";
+                                const isEditing = editId === r.id;
+                                const rowBusy = busyId === r.id;
+                                const rowEditBusy = savingEditId === r.id;
+                                const rowSnapshotBusy = snapshotSavingId === r.id;
+                                const rowMsg = rowMsgById[r.id] ?? "";
 
                                 return (
                                   <tr
-                                    key={r.row_id}
+                                    key={r.id}
                                     style={{
                                       backgroundColor: zebra ? "#ffffff" : "#0d0d0d",
                                       color: zebra ? "#000" : "#fff",
                                     }}
                                   >
-                                    <td className="px-4 py-3">
-                                      {formatDate(r.evenement_datum)}
-                                    </td>
+                                    <td className="px-4 py-3">{formatDate(r.datum)}</td>
+
                                     <td className="px-4 py-3 font-semibold">
-                                      {r.evenement_naam ?? "-"}
-                                    </td>
-                                    <td className="px-4 py-3">{r.locatie ?? "-"}</td>
-
-                                    <td className="px-4 py-3">
                                       {isEditing ? (
                                         <input
                                           className="orange-input h-9 w-full"
-                                          value={editMatchmaker}
-                                          onChange={(e) =>
-                                            setEditMatchmaker(e.target.value)
-                                          }
-                                          placeholder="Matchmaker *"
+                                          value={editNaam}
+                                          onChange={(e) => setEditNaam(e.target.value)}
+                                          placeholder="Naam evenement *"
                                         />
                                       ) : (
-                                        r.matchmaker ?? "-"
+                                        <div>
+                                          <div>{r.naam ?? "-"}</div>
+                                          {r.locatie ? (
+                                            <div className="text-xs opacity-75">
+                                              {r.locatie}
+                                            </div>
+                                          ) : null}
+                                        </div>
                                       )}
                                     </td>
 
+                                    <td className="px-4 py-3">{formatBronLabel(r.bron_type)}</td>
+
                                     <td className="px-4 py-3">
-                                      {isEditing ? (
-                                        <input
-                                          className="orange-input h-9 w-full"
-                                          value={editPromotor}
-                                          onChange={(e) =>
-                                            setEditPromotor(e.target.value)
-                                          }
-                                          placeholder="Promotor (optioneel)"
-                                        />
-                                      ) : (
-                                        r.promotor ?? "-"
-                                      )}
+                                      <div className="font-semibold">{getOwnerLabel(r)}</div>
+                                      {r.huidige_eigenaar_bondteam ? (
+                                        <div className="text-xs opacity-75">
+                                          Bondteam: {r.huidige_eigenaar_bondteam}
+                                        </div>
+                                      ) : null}
                                     </td>
 
                                     <td className="px-4 py-3">
@@ -993,63 +1110,46 @@ export default function ControleOverzichtPage() {
                                         <input
                                           className="orange-input h-9 w-full"
                                           value={editBondteam}
-                                          onChange={(e) =>
-                                            setEditBondteam(e.target.value)
-                                          }
-                                          placeholder="Bondteam (optioneel)"
+                                          onChange={(e) => setEditBondteam(e.target.value)}
+                                          placeholder="Bondteam"
                                         />
                                       ) : (
                                         r.bondteam ?? "-"
                                       )}
                                     </td>
 
-                                    <td className="px-4 py-3 italic">
-                                      {formatStatusLabel(displayStatus)}
+                                    <td className="px-4 py-3 text-sm">
+                                      <div>{formatDateTime(r.last_updated_at)}</div>
+                                      {r.last_updated_by ? (
+                                        <div className="text-xs opacity-75">
+                                          {ownerMap.get(r.last_updated_by) ??
+                                            shortId(r.last_updated_by)}
+                                        </div>
+                                      ) : null}
                                     </td>
-
-                                    {activeTab === "bond" ? (
-                                      <td className="px-4 py-3 text-sm">
-                                        {formatDateTime(r.official_released_at)}
-                                      </td>
-                                    ) : null}
 
                                     <td className="px-4 py-3">
                                       <div className="flex flex-wrap items-center gap-3">
                                         <Link
-                                          href={
-                                            hasMatchmaking
-                                              ? `/dashboard/admin/controle/${r.matchmaking_id}`
-                                              : "#"
-                                          }
-                                          className={[
-                                            "rounded border px-3 py-1 text-sm",
-                                            canView
-                                              ? "bg-[#2f2f33] border-[var(--brand-orange)] text-white hover:bg-[var(--brand-orange)] hover:text-black"
-                                              : "pointer-events-none cursor-not-allowed bg-zinc-200 text-zinc-400 border-zinc-300",
-                                          ].join(" ")}
-                                          aria-disabled={!canView}
-                                          tabIndex={canView ? 0 : -1}
+                                          href={`/dashboard/admin/controle/${r.id}`}
+                                          className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
                                         >
                                           Matchmaking
                                         </Link>
 
-                                        {activeTab !== "bond" && hasMatchmaking && (
-                                          <button
-                                            onClick={() =>
-                                              startControle(r.matchmaking_id!)
-                                            }
-                                            disabled={
-                                              rowBusy ||
-                                              isBusy ||
-                                              rowEditBusy ||
-                                              rowSnapshotBusy
-                                            }
-                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
-                                            title="Start volledige controle: scrape + build + enrich + rules (nieuwe run)"
-                                          >
-                                            {rowBusy ? "Bezig…" : "Start controle"}
-                                          </button>
-                                        )}
+                                        <button
+                                          onClick={() => startControle(r.id)}
+                                          disabled={
+                                            rowBusy ||
+                                            isBusy ||
+                                            rowEditBusy ||
+                                            rowSnapshotBusy
+                                          }
+                                          className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
+                                          title="Start volledige controle: scrape + build + enrich + rules"
+                                        >
+                                          {rowBusy ? "Bezig…" : "Start controle"}
+                                        </button>
 
                                         {!isEditing ? (
                                           <button
@@ -1075,8 +1175,9 @@ export default function ControleOverzichtPage() {
                                               }
                                               className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
                                             >
-                                              {rowEditBusy ? "Opslaan…" : "Bewerking opslaan"}
+                                              {rowEditBusy ? "Opslaan…" : "Opslaan"}
                                             </button>
+
                                             <button
                                               onClick={closeEdit}
                                               disabled={rowEditBusy || rowSnapshotBusy}
@@ -1087,39 +1188,33 @@ export default function ControleOverzichtPage() {
                                           </>
                                         )}
 
-                                        {activeTab === "bond" && hasMatchmaking && (
-                                          <button
-                                            onClick={() => saveSnapshot(r)}
-                                            disabled={
-                                              rowBusy ||
-                                              rowEditBusy ||
-                                              rowSnapshotBusy ||
-                                              isBusy
-                                            }
-                                            className="rounded border border-emerald-600 bg-[#2f2f33] px-3 py-1 text-sm text-emerald-100 hover:bg-emerald-600 hover:text-white disabled:opacity-60"
-                                            title="Sla deze matchmaking op in admin beheer snapshots"
-                                          >
-                                            {rowSnapshotBusy ? "Bezig…" : "Opslaan"}
-                                          </button>
-                                        )}
+                                        <button
+                                          onClick={() => saveSnapshot(r)}
+                                          disabled={
+                                            rowBusy ||
+                                            rowEditBusy ||
+                                            rowSnapshotBusy ||
+                                            isBusy
+                                          }
+                                          className="rounded border border-emerald-600 bg-[#2f2f33] px-3 py-1 text-sm text-emerald-100 hover:bg-emerald-600 hover:text-white disabled:opacity-60"
+                                          title="Sla deze matchmaking op in admin beheer snapshots"
+                                        >
+                                          {rowSnapshotBusy ? "Bezig…" : "Opslaan"}
+                                        </button>
 
-                                        {hasMatchmaking && (
-                                          <button
-                                            onClick={() =>
-                                              deleteMatchmaking(r.matchmaking_id!)
-                                            }
-                                            disabled={
-                                              rowBusy ||
-                                              isBusy ||
-                                              rowEditBusy ||
-                                              rowSnapshotBusy
-                                            }
-                                            className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
-                                            title="Verwijdert uploads, bouts, uitslagen_raw en alle controle-data voor deze matchmaking"
-                                          >
-                                            {rowBusy ? "Bezig…" : "Verwijderen"}
-                                          </button>
-                                        )}
+                                        <button
+                                          onClick={() => deleteMatchmaking(r.id)}
+                                          disabled={
+                                            rowBusy ||
+                                            isBusy ||
+                                            rowEditBusy ||
+                                            rowSnapshotBusy
+                                          }
+                                          className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
+                                          title="Verwijdert deze matchmaking met gekoppelde controledata"
+                                        >
+                                          {rowBusy ? "Bezig…" : "Verwijderen"}
+                                        </button>
 
                                         {rowMsg ? (
                                           <span
@@ -1162,6 +1257,128 @@ export default function ControleOverzichtPage() {
           </div>
         </div>
 
+        {scrapeOverlayOpen ? (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              background:
+                "radial-gradient(circle at center, rgba(255,255,255,0.10) 0%, rgba(0,0,0,0.74) 62%, rgba(0,0,0,0.88) 100%)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 24,
+            }}
+          >
+            <div
+              style={{
+                width: "min(96vw, 760px)",
+                borderRadius: 28,
+                overflow: "hidden",
+                border: "3px solid rgba(255,77,0,0.45)",
+                boxShadow:
+                  "0 30px 90px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12)",
+                background:
+                  "linear-gradient(180deg, rgba(42,42,46,0.98) 0%, rgba(20,20,24,0.98) 100%)",
+              }}
+            >
+              <div
+                style={{
+                  height: 5,
+                  background:
+                    "linear-gradient(90deg, rgba(255,106,0,0.95) 0%, rgba(255,77,0,1) 50%, rgba(255,106,0,0.95) 100%)",
+                }}
+              />
+
+              <div
+                style={{
+                  padding: "34px 28px 30px",
+                  textAlign: "center",
+                  color: "#fff",
+                }}
+              >
+                <div
+                  style={{
+                    margin: "0 auto 18px",
+                    width: 86,
+                    height: 86,
+                    borderRadius: "50%",
+                    border: "4px solid rgba(255,255,255,0.16)",
+                    borderTop: "4px solid #ff4d00",
+                    animation: "scrapeSpin 1s linear infinite",
+                    boxShadow: "0 0 0 10px rgba(255,77,0,0.08)",
+                  }}
+                />
+
+                <div
+                  style={{
+                    fontSize: 28,
+                    fontWeight: 900,
+                    letterSpacing: "0.03em",
+                    textTransform: "uppercase",
+                    color: NVB_ORANGE,
+                    textShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                  }}
+                >
+                  {scrapeOverlayTitle}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 14,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    lineHeight: 1.45,
+                    color: "#ffffff",
+                  }}
+                >
+                  {scrapeOverlayMessage}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                    color: "rgba(255,255,255,0.78)",
+                  }}
+                >
+                  {scrapeOverlaySub}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 24,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 10,
+                    borderRadius: 999,
+                    padding: "10px 16px",
+                    background: "rgba(255,255,255,0.06)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: NVB_ORANGE,
+                      boxShadow: "0 0 18px rgba(255,77,0,0.75)",
+                    }}
+                  />
+                  Controle bezig
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <style jsx global>{`
           :root {
             --brand-orange: ${NVB_ORANGE};
@@ -1179,6 +1396,15 @@ export default function ControleOverzichtPage() {
           .orange-input:focus {
             border-color: rgba(255, 77, 0, 0.75);
             box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.18);
+          }
+
+          @keyframes scrapeSpin {
+            0% {
+              transform: rotate(0deg);
+            }
+            100% {
+              transform: rotate(360deg);
+            }
           }
         `}</style>
       </div>

@@ -12,7 +12,6 @@ import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
-  RefreshCcw,
   Save,
   Upload,
   Search,
@@ -23,9 +22,8 @@ import {
   Swords,
   ChevronDown,
   ChevronUp,
-  Layers3,
-  Clock3,
   AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
@@ -116,6 +114,42 @@ type DifferenceRow = {
   right: string;
   tone?: "default" | "orange" | "red";
 };
+
+type BoutRuleResult = {
+  code: string;
+  message: string;
+  severity: "ok" | "warning" | "error";
+};
+
+type ClassTabKey =
+  | "jeugd-jongen"
+  | "jeugd-meisje"
+  | "n-heer"
+  | "n-dame"
+  | "c-heer"
+  | "c-dame"
+  | "b-heer"
+  | "b-dame"
+  | "a-heer"
+  | "a-dame";
+
+type ClassTabItem = {
+  key: ClassTabKey;
+  label: string;
+};
+
+const CLASS_TAB_ORDER: ClassTabItem[] = [
+  { key: "jeugd-jongen", label: "Jeugd jongen" },
+  { key: "jeugd-meisje", label: "Jeugd meisje" },
+  { key: "n-heer", label: "N klasse heer" },
+  { key: "n-dame", label: "N klasse dame" },
+  { key: "c-heer", label: "C heer" },
+  { key: "c-dame", label: "C dame" },
+  { key: "b-heer", label: "B heer" },
+  { key: "b-dame", label: "B dame" },
+  { key: "a-heer", label: "A heer" },
+  { key: "a-dame", label: "A dame" },
+];
 
 function toName(f: FighterRow | null | undefined) {
   if (!f) return "-";
@@ -398,7 +432,7 @@ function mapMatchRow(row: any): MatchRow {
       row.blauw_inschrijving_id != null ? Number(row.blauw_inschrijving_id) : null,
     rood_naam: row.rood_naam ?? null,
     blauw_naam: row.blauw_naam ?? null,
-    raw: row.raw ?? null,
+    raw: row,
   };
 }
 
@@ -425,51 +459,6 @@ function normalizeGender(value?: string | null) {
     return "Man";
   }
   return value?.trim() || "Onbekend";
-}
-
-function geslachtKlasseTabLabel(
-  klasse?: string | null,
-  geslacht?: string | null
-) {
-  const k = String(klasse ?? "").trim().toLowerCase();
-  const g = normalizeGender(geslacht);
-
-  if (k.includes("jeugd")) {
-    if (g === "Vrouw") return "Meisje / jeugd";
-    if (g === "Man") return "Jongen / jeugd";
-    return "Onbekend / jeugd";
-  }
-
-  const prefix =
-    k === "a" || k.startsWith("a ") || k.includes("a-klasse")
-      ? "A"
-      : k === "b" || k.startsWith("b ") || k.includes("b-klasse")
-      ? "B"
-      : k === "c" || k.startsWith("c ") || k.includes("c-klasse")
-      ? "C"
-      : k === "n" || k.startsWith("n ") || k.includes("n-klasse")
-      ? "N"
-      : klasse || "Overig";
-
-  if (g === "Vrouw") return `${prefix} dame`;
-  if (g === "Man") return `${prefix} heer`;
-  return `${prefix} onbekend`;
-}
-
-function tabRank(label: string) {
-  const v = label.trim().toLowerCase();
-
-  if (v === "jongen / jeugd") return 0;
-  if (v === "meisje / jeugd") return 1;
-  if (v === "n heer") return 10;
-  if (v === "n dame") return 11;
-  if (v === "c heer") return 20;
-  if (v === "c dame") return 21;
-  if (v === "b heer") return 30;
-  if (v === "b dame") return 31;
-  if (v === "a heer") return 40;
-  if (v === "a dame") return 41;
-  return 999;
 }
 
 function getFighterAge(fighter: FighterRow, eventDate?: string | null) {
@@ -534,6 +523,7 @@ function getMatchLinkedId(match: MatchRow, side: "red" | "blue") {
         ""
     ).trim();
   }
+
   return String(
     match.raw?.blauw_fighter_context_id ??
       match.raw?.blauw_fighter_id ??
@@ -563,8 +553,191 @@ function getFighterDetailHref(matchmakingId: string, fighter: FighterRow) {
   if (stableId) {
     return `/dashboard/matchmaker/matchmaking/${matchmakingId}/fighter/${stableId}`;
   }
-
   return `/dashboard/matchmaker/matchmaking/${matchmakingId}/fighter/${fighter.id}`;
+}
+
+function isCheckedFighter(fighter: FighterRow) {
+  const rawExists = fighter.source === "fighter_context";
+  if (rawExists) return true;
+
+  if (String(fighter.scraped_at ?? "").trim()) return true;
+
+  const status = String(fighter.scrape_status ?? "").trim().toLowerCase();
+  if (!status) return false;
+
+  if (
+    [
+      "pending",
+      "queued",
+      "running",
+      "processing",
+      "new",
+      "nieuw",
+      "wacht",
+      "wachtend",
+    ].includes(status)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function getGenderBucket(value?: string | null): "heer" | "dame" | null {
+  const normalized = normalizeGender(value);
+  if (normalized === "Man") return "heer";
+  if (normalized === "Vrouw") return "dame";
+  return null;
+}
+
+function getKlasseLetter(value?: string | null): "n" | "c" | "b" | "a" | null {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw.includes("jeugd")) return null;
+
+  const compact = raw.replace(/\s+/g, " ");
+
+  if (
+    compact === "n" ||
+    compact.startsWith("n ") ||
+    compact.includes(" n ") ||
+    compact.includes("n-") ||
+    compact.includes("klasse n") ||
+    compact.includes("n klasse")
+  ) {
+    return "n";
+  }
+  if (
+    compact === "c" ||
+    compact.startsWith("c ") ||
+    compact.includes(" c ") ||
+    compact.includes("c-") ||
+    compact.includes("klasse c") ||
+    compact.includes("c klasse")
+  ) {
+    return "c";
+  }
+  if (
+    compact === "b" ||
+    compact.startsWith("b ") ||
+    compact.includes(" b ") ||
+    compact.includes("b-") ||
+    compact.includes("klasse b") ||
+    compact.includes("b klasse")
+  ) {
+    return "b";
+  }
+  if (
+    compact === "a" ||
+    compact.startsWith("a ") ||
+    compact.includes(" a ") ||
+    compact.includes("a-") ||
+    compact.includes("klasse a") ||
+    compact.includes("a klasse")
+  ) {
+    return "a";
+  }
+
+  return null;
+}
+
+function getClassTabKey(fighter: FighterRow): ClassTabKey | null {
+  const klasse = String(fighter.klasse ?? "").trim().toLowerCase();
+  const gender = getGenderBucket(fighter.geslacht);
+
+  if (!klasse || !gender) return null;
+
+  if (klasse.includes("jeugd")) {
+    return gender === "heer" ? "jeugd-jongen" : "jeugd-meisje";
+  }
+
+  const letter = getKlasseLetter(klasse);
+  if (!letter) return null;
+
+  if (letter === "n") return gender === "heer" ? "n-heer" : "n-dame";
+  if (letter === "c") return gender === "heer" ? "c-heer" : "c-dame";
+  if (letter === "b") return gender === "heer" ? "b-heer" : "b-dame";
+  return gender === "heer" ? "a-heer" : "a-dame";
+}
+
+function normalizeBoutRuleSeverity(value: any): "ok" | "warning" | "error" {
+  const raw = String(value ?? "").trim().toLowerCase();
+
+  if (
+    [
+      "error",
+      "danger",
+      "verbod",
+      "afkeur",
+      "afgekeurd",
+      "block",
+      "blocked",
+    ].includes(raw)
+  ) {
+    return "error";
+  }
+
+  if (
+    [
+      "warning",
+      "warn",
+      "actie",
+      "dispensatie",
+      "oranje",
+      "orange",
+      "needs_attention",
+    ].includes(raw)
+  ) {
+    return "warning";
+  }
+
+  return "ok";
+}
+
+function normalizeBoutRuleMessages(payload: any): BoutRuleResult[] {
+  const candidates = [
+    payload?.rules,
+    payload?.results,
+    payload?.messages,
+    payload?.hits,
+    payload?.data?.rules,
+    payload?.data?.results,
+    payload?.data?.messages,
+    payload?.boutRules,
+    payload?.bout_rules,
+  ];
+
+  const source = candidates.find((x) => Array.isArray(x));
+  if (!Array.isArray(source)) return [];
+
+  return source
+    .map((item: any, index: number): BoutRuleResult | null => {
+      const message = String(
+        item?.message ??
+          item?.boodschap ??
+          item?.text ??
+          item?.omschrijving ??
+          item?.rule_message ??
+          ""
+      ).trim();
+
+      const code = String(
+        item?.code ?? item?.rule_code ?? item?.id ?? `rule-${index + 1}`
+      ).trim();
+
+      const severity = normalizeBoutRuleSeverity(
+        item?.severity ?? item?.resultaat ?? item?.status ?? item?.tone
+      );
+
+      if (!message) return null;
+
+      return {
+        code: code || `rule-${index + 1}`,
+        message,
+        severity,
+      };
+    })
+    .filter(Boolean) as BoutRuleResult[];
 }
 
 function HeaderButton({
@@ -606,11 +779,15 @@ export default function MatchmakerMatchPage() {
   const [busy, setBusy] = useState(false);
   const [scrapeBusy, setScrapeBusy] = useState(false);
   const [handmatigBusy, setHandmatigBusy] = useState(false);
-  const [toolsCollapsed, setToolsCollapsed] = useState(true);
+  const [toolsCollapsed, setToolsCollapsed] = useState(false);
+
+  const [scrapeOverlayOpen, setScrapeOverlayOpen] = useState(false);
+  const [scrapeOverlayMessage, setScrapeOverlayMessage] = useState("");
 
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadResult, setUploadResult] = useState<{
@@ -619,9 +796,7 @@ export default function MatchmakerMatchPage() {
     message: string;
   } | null>(null);
 
-  const [activeDiscipline, setActiveDiscipline] = useState("");
-  const [activeKlasse, setActiveKlasse] = useState("");
-  const [activeUploadView, setActiveUploadView] = useState<"all" | "latest">("all");
+  const [activeClassTab, setActiveClassTab] = useState<ClassTabKey | "">("");
 
   const [filter, setFilter] = useState({
     query: "",
@@ -644,6 +819,8 @@ export default function MatchmakerMatchPage() {
     demo: "",
     opmerkingen: "",
   });
+
+  const [boutRuleMessages, setBoutRuleMessages] = useState<BoutRuleResult[]>([]);
 
   async function load() {
     if (!matchmakingId) return;
@@ -691,10 +868,7 @@ export default function MatchmakerMatchPage() {
 
     let mappedFighters: FighterRow[] = [];
 
-    if (
-      !fighterContextQuery.error &&
-      (fighterContextQuery.data ?? []).length > 0
-    ) {
+    if (!fighterContextQuery.error && (fighterContextQuery.data ?? []).length > 0) {
       const fighterContextRows = fighterContextQuery.data ?? [];
 
       const inschrijvingIds = fighterContextRows
@@ -821,143 +995,63 @@ export default function MatchmakerMatchPage() {
     return s;
   }, [matches]);
 
-  const uploadGroups = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        uploadId: string;
-        rows: FighterRow[];
-        maxRowNr: number;
-      }
-    >();
+  const checkedCount = useMemo(
+    () => fighters.filter((f) => isCheckedFighter(f)).length,
+    [fighters]
+  );
 
-    for (const fighter of fighters) {
-      const uploadId = String(fighter.upload_id ?? "").trim();
-      if (!uploadId) continue;
-
-      const existing = map.get(uploadId);
-      const rowNr = fighter.row_nr ?? 0;
-
-      if (!existing) {
-        map.set(uploadId, {
-          uploadId,
-          rows: [fighter],
-          maxRowNr: rowNr,
-        });
-      } else {
-        existing.rows.push(fighter);
-        if (rowNr > existing.maxRowNr) existing.maxRowNr = rowNr;
-      }
-    }
-
-    return Array.from(map.values()).sort((a, b) => b.maxRowNr - a.maxRowNr);
-  }, [fighters]);
-
-  const latestUploadId = useMemo(() => {
-    return uploadGroups[0]?.uploadId ?? null;
-  }, [uploadGroups]);
-
-  const latestUploadCount = useMemo(() => {
-    return uploadGroups[0]?.rows.length ?? 0;
-  }, [uploadGroups]);
-
-  const sourceFilteredFighters = useMemo(() => {
-    if (activeUploadView === "latest" && latestUploadId) {
-      return fighters.filter(
-        (f) => String(f.upload_id ?? "").trim() === String(latestUploadId).trim()
-      );
-    }
-    if (activeUploadView === "latest" && !latestUploadId) {
-      return [];
-    }
-    return fighters;
-  }, [fighters, activeUploadView, latestUploadId]);
-
-  const baseFiltered = useMemo(() => {
+  const baseFilteredFighters = useMemo(() => {
     const q = filter.query.trim().toLowerCase();
 
-    return sourceFilteredFighters
-      .filter((f) => !filter.onlyUnmatched || !fighterIsMatched(f, matchedIds))
-      .filter((f) => {
-        if (!q) return true;
+    return fighters.filter((f) => {
+      if (filter.onlyUnmatched && fighterIsMatched(f, matchedIds)) return false;
 
-        return [
-          toName(f),
-          f.gym,
-          f.gym_input,
-          f.fp_gym,
-          f.fp_naam,
-          f.va_nummer,
-          f.discipline,
-          f.klasse,
-          normalizeGender(f.geslacht),
-          f.email,
-          f.telefoon,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(q);
-      });
-  }, [sourceFilteredFighters, filter, matchedIds]);
+      if (!q) return true;
 
-  const disciplineTabs = useMemo(() => {
-    return Array.from(
-      new Set(
-        baseFiltered
-          .map((f) => String(f.discipline ?? "").trim())
-          .filter(Boolean)
-      )
-    ).sort((a, b) => a.localeCompare(b, "nl"));
-  }, [baseFiltered]);
+      return [
+        toName(f),
+        f.gym,
+        f.gym_input,
+        f.fp_gym,
+        f.fp_naam,
+        f.va_nummer,
+        f.discipline,
+        f.klasse,
+        normalizeGender(f.geslacht),
+        f.email,
+        f.telefoon,
+        f.scrape_status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [fighters, filter, matchedIds]);
+
+  const classTabs = useMemo(() => {
+    const present = new Set<ClassTabKey>();
+
+    for (const fighter of baseFilteredFighters) {
+      const key = getClassTabKey(fighter);
+      if (key) present.add(key);
+    }
+
+    return CLASS_TAB_ORDER.filter((item) => present.has(item.key));
+  }, [baseFilteredFighters]);
 
   useEffect(() => {
-    if (!disciplineTabs.length) {
-      setActiveDiscipline("");
+    if (!classTabs.length) {
+      setActiveClassTab("");
       return;
     }
-    if (!activeDiscipline || !disciplineTabs.includes(activeDiscipline)) {
-      setActiveDiscipline(disciplineTabs[0]);
-    }
-  }, [disciplineTabs, activeDiscipline]);
-
-  const klasseTabs = useMemo(() => {
-    if (!activeDiscipline) return [];
-
-    const values = Array.from(
-      new Set(
-        baseFiltered
-          .filter((f) => String(f.discipline ?? "").trim() === activeDiscipline)
-          .map((f) => geslachtKlasseTabLabel(f.klasse, f.geslacht))
-          .filter(Boolean)
-      )
-    );
-
-    return values.sort(
-      (a, b) => tabRank(a) - tabRank(b) || a.localeCompare(b, "nl")
-    );
-  }, [baseFiltered, activeDiscipline]);
-
-  useEffect(() => {
-    if (!klasseTabs.length) {
-      setActiveKlasse("");
-      return;
-    }
-    if (!activeKlasse || !klasseTabs.includes(activeKlasse)) {
-      setActiveKlasse(klasseTabs[0]);
-    }
-  }, [klasseTabs, activeKlasse]);
+    if (activeClassTab && classTabs.some((tab) => tab.key === activeClassTab)) return;
+    setActiveClassTab(classTabs[0].key);
+  }, [classTabs, activeClassTab]);
 
   const visibleFighters = useMemo(() => {
-    const rows = baseFiltered.filter((f) => {
-      const disciplineOk = activeDiscipline
-        ? String(f.discipline ?? "").trim() === activeDiscipline
-        : true;
-
-      const klasseOk = activeKlasse
-        ? geslachtKlasseTabLabel(f.klasse, f.geslacht) === activeKlasse
-        : true;
-
-      return disciplineOk && klasseOk;
+    const rows = baseFilteredFighters.filter((fighter) => {
+      if (!activeClassTab) return true;
+      return getClassTabKey(fighter) === activeClassTab;
     });
 
     return [...rows].sort((a, b) => {
@@ -982,7 +1076,43 @@ export default function MatchmakerMatchPage() {
 
       return toName(a).localeCompare(toName(b), "nl");
     });
-  }, [baseFiltered, activeDiscipline, activeKlasse, matchmaking?.datum]);
+  }, [baseFilteredFighters, activeClassTab, matchmaking?.datum]);
+
+  const visibleDisciplinesText = useMemo(() => {
+    const values = Array.from(
+      new Set(
+        visibleFighters
+          .map((f) => String(f.discipline ?? "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "nl"));
+
+    return values.length ? values.join(" · ") : "-";
+  }, [visibleFighters]);
+
+  const visibleKlassenText = useMemo(() => {
+    const values = Array.from(
+      new Set(
+        visibleFighters
+          .map((f) => String(f.klasse ?? "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "nl"));
+
+    return values.length ? values.join(" · ") : "-";
+  }, [visibleFighters]);
+
+  const visibleGeslachtText = useMemo(() => {
+    const values = Array.from(
+      new Set(
+        visibleFighters
+          .map((f) => normalizeGender(f.geslacht))
+          .filter((v) => v && v !== "Onbekend")
+      )
+    ).sort((a, b) => a.localeCompare(b, "nl"));
+
+    return values.length ? values.join(" · ") : "-";
+  }, [visibleFighters]);
 
   const compareData = useMemo(() => {
     if (!selectedRed || !selectedBlue) return null;
@@ -1014,42 +1144,20 @@ export default function MatchmakerMatchPage() {
     };
 
     addDiff(
-      "discipline",
-      "Discipline",
-      selectedRed.discipline ?? "-",
-      selectedBlue.discipline ?? "-"
-    );
-
-    addDiff(
-      "klasse",
-      "Klasse",
-      selectedRed.klasse ?? "-",
-      selectedBlue.klasse ?? "-"
-    );
-
-    addDiff(
-      "geslacht",
-      "Geslacht",
-      normalizeGender(selectedRed.geslacht),
-      normalizeGender(selectedBlue.geslacht),
-      normalizeGender(selectedRed.geslacht) !== normalizeGender(selectedBlue.geslacht)
-        ? "red"
-        : "default"
-    );
-
-    addDiff(
-      "sportschool",
-      "Sportschool",
-      selectedRed.gym_input || selectedRed.fp_gym || selectedRed.gym || "-",
-      selectedBlue.gym_input || selectedBlue.fp_gym || selectedBlue.gym || "-"
-    );
-
-    addDiff(
       "gewicht",
       "Gewicht",
       formatWeight(redWeight),
       formatWeight(blueWeight),
-      redWeight != null && blueWeight != null && redWeight !== blueWeight ? "orange" : "default"
+      redWeight != null && blueWeight != null && redWeight !== blueWeight
+        ? "orange"
+        : "default"
+    );
+
+    addDiff(
+      "leeftijd",
+      "Leeftijd",
+      String(getFighterAge(selectedRed, matchmaking?.datum ?? null) ?? "-"),
+      String(getFighterAge(selectedBlue, matchmaking?.datum ?? null) ?? "-")
     );
 
     addDiff(
@@ -1087,24 +1195,6 @@ export default function MatchmakerMatchPage() {
           text: `Leeftijdsverschil ${ageDiffExact.text}`,
         };
       }
-
-      differences.push({
-        key: "leeftijdsverschil",
-        label: "Leeftijdsverschil",
-        left: ageDiffExact.text,
-        right:
-          ageRule.status === "verbod"
-            ? "VERBOD"
-            : ageRule.status === "dispensatie"
-            ? "DISPENSATIE AANVRAGEN"
-            : "OK",
-        tone:
-          ageRule.status === "verbod"
-            ? "red"
-            : ageRule.status === "dispensatie"
-            ? "orange"
-            : "default",
-      });
     }
 
     return {
@@ -1112,9 +1202,11 @@ export default function MatchmakerMatchPage() {
       blueName: toName(selectedBlue),
       differences,
       ageRule,
-      saveBlocked: ageRule?.status === "verbod",
+      saveBlocked:
+        ageRule?.status === "verbod" ||
+        boutRuleMessages.some((r) => r.severity === "error"),
     };
-  }, [selectedRed, selectedBlue]);
+  }, [selectedRed, selectedBlue, matchmaking?.datum, boutRuleMessages]);
 
   function toggleSelected(id: string) {
     setSelectedIds((prev) =>
@@ -1130,12 +1222,44 @@ export default function MatchmakerMatchPage() {
     setSelectedRed(null);
     setSelectedBlue(null);
     setShowCompareModal(false);
+    setBoutRuleMessages([]);
+  }
+
+  async function evaluateBoutRules(red: FighterRow, blue: FighterRow) {
+    try {
+      const res = await authedFetch(`/api/matchmaker/bout-rules/evaluate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          red_fighter_id: red.fighter_id ?? red.id,
+          blue_fighter_id: blue.fighter_id ?? blue.id,
+          red_inschrijving_id: red.inschrijving_id ?? null,
+          blue_inschrijving_id: blue.inschrijving_id ?? null,
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(json?.error ?? "BoutRulesEngine fout");
+      }
+
+      const normalized = normalizeBoutRuleMessages(json);
+      setBoutRuleMessages(normalized);
+      setShowCompareModal(true);
+    } catch (err: any) {
+      alert(err?.message ?? "Fout bij controleren van de partijregels");
+    }
   }
 
   function handleMatchClick(fighter: FighterRow) {
     if (!selectedRed) {
       setSelectedRed(fighter);
       setSelectedBlue(null);
+      setBoutRuleMessages([]);
       setShowCompareModal(false);
       return;
     }
@@ -1146,7 +1270,7 @@ export default function MatchmakerMatchPage() {
     }
 
     setSelectedBlue(fighter);
-    setShowCompareModal(true);
+    void evaluateBoutRules(selectedRed, fighter);
   }
 
   async function scrapeAll() {
@@ -1154,76 +1278,81 @@ export default function MatchmakerMatchPage() {
       if (!matchmakingId) return;
 
       setScrapeBusy(true);
+      setScrapeOverlayOpen(true);
+      setScrapeOverlayMessage(
+        "Wacht op resultaten... Fightpaspoort controle."
+      );
 
       const res = await authedFetch(`/api/matchmaker/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
-          mode: "auto",
+          do_scrape: true,
         }),
       });
 
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        alert(json?.error ?? "Scrapen mislukt");
-        return;
+        throw new Error(json?.error ?? "Scrapen mislukt");
       }
 
+      setScrapeOverlayMessage("Resultaten worden geladen...");
       await load();
+    } catch (err: any) {
+      alert(err?.message ?? "Scrapen mislukt");
     } finally {
       setScrapeBusy(false);
+      setScrapeOverlayOpen(false);
+      setScrapeOverlayMessage("");
     }
   }
 
-  async function scrapeLatestUpload() {
+  async function scrapeSelected() {
     try {
-      if (!matchmakingId) return;
+      if (!matchmakingId || selectedIds.length === 0) {
+        alert("Selecteer eerst één of meerdere vechters.");
+        return;
+      }
 
-      const latestRows = fighters.filter(
-        (f) => String(f.upload_id ?? "").trim() === String(latestUploadId ?? "").trim()
+      const selectedFighters = fighters.filter((f) =>
+        selectedIds.includes(String(f.id))
       );
 
-      if (!latestRows.length) {
-        alert("Geen nieuwste upload gevonden.");
+      if (!selectedFighters.length) {
+        alert("Geen geselecteerde vechters gevonden.");
         return;
       }
 
       setScrapeBusy(true);
-
-      const fighterContextIds = latestRows
-        .filter((f) => f.source === "fighter_context")
-        .map((f) => f.id);
-
-      const inschrijvingIds = latestRows
-        .map((f) => String(f.inschrijving_id ?? f.id ?? "").trim())
-        .filter(Boolean);
-
-      const fighterIds = latestRows
-        .map((f) => String(f.id).trim())
-        .filter(Boolean);
+      setScrapeOverlayOpen(true);
+      setScrapeOverlayMessage(
+        "Wacht op resultaten... De geselecteerde vechters worden gecontroleerd."
+      );
 
       const res = await authedFetch(`/api/matchmaker/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
-          mode: "selected",
-          fighter_ids: fighterIds,
-          fighter_context_ids: fighterContextIds,
-          inschrijving_ids: inschrijvingIds,
+          do_scrape: true,
+          fighter_ids: selectedFighters.map((f) => f.fighter_id ?? f.id),
         }),
       });
 
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        alert(json?.error ?? "Autocheck nieuwste upload mislukt");
-        return;
+        throw new Error(json?.error ?? "Autocheck geselecteerd mislukt");
       }
 
+      setScrapeOverlayMessage("Resultaten worden geladen...");
       await load();
+    } catch (err: any) {
+      alert(err?.message ?? "Autocheck geselecteerd mislukt");
     } finally {
       setScrapeBusy(false);
+      setScrapeOverlayOpen(false);
+      setScrapeOverlayMessage("");
     }
   }
 
@@ -1236,7 +1365,7 @@ export default function MatchmakerMatchPage() {
     }
 
     if (compareData?.saveBlocked) {
-      alert("Deze partij mag niet opgeslagen worden: leeftijdsverschil is 24 maanden of meer.");
+      alert("Deze partij mag niet opgeslagen worden door de partijregels.");
       return;
     }
 
@@ -1256,10 +1385,8 @@ export default function MatchmakerMatchPage() {
         blauw_fighter_context_id:
           selectedBlue.source === "fighter_context" ? selectedBlue.id : null,
 
-        rood_inschrijving_id:
-          selectedRed.inschrijving_id ?? null,
-        blauw_inschrijving_id:
-          selectedBlue.inschrijving_id ?? null,
+        rood_inschrijving_id: selectedRed.inschrijving_id ?? null,
+        blauw_inschrijving_id: selectedBlue.inschrijving_id ?? null,
       }),
     });
 
@@ -1326,116 +1453,105 @@ export default function MatchmakerMatchPage() {
   }
 
   async function handleUpload() {
-    if (!uploadFile || !matchmakingId) return;
-
-    setUploadBusy(true);
-    setUploadResult(null);
-
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      if (!uploadFile || !matchmakingId) return;
 
-      if (!user) {
-        alert("Niet ingelogd.");
-        return;
-      }
-
-      const existingVaNummers = new Set(
-        fighters
-          .map((f) => String(f.va_nummer ?? "").trim().toLowerCase())
-          .filter(Boolean)
-      );
+      setUploadBusy(true);
 
       const formData = new FormData();
       formData.append("file", uploadFile);
       formData.append("matchmaking_id", matchmakingId);
-      formData.append("uploaded_by", user.id);
 
-      const token =
-        (await supabase.auth.getSession()).data.session?.access_token ?? "";
-
-      const res = await fetch("/api/matchmaker/submit-inschrijvingen", {
+      const res = await authedFetch(`/api/matchmaker/submit-inschrijvingen`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
-      const json = await res.json().catch(() => ({}));
+      const json = await res.json().catch(() => null);
+
       if (!res.ok) {
-        alert(json?.error ?? "Upload mislukt");
-        return;
+        throw new Error(json?.error ?? "Upload mislukt");
       }
 
-      await load();
-      setActiveUploadView("latest");
-      setToolsCollapsed(true);
-
-      const newFightersQuery = await supabase
-        .from("matchmaker_inschrijvingen")
-        .select("va_nummer")
-        .eq("matchmaking_id", matchmakingId)
-        .eq("upload_id", json.upload_id);
-
-      const newVaNummers = (newFightersQuery.data ?? []).map((r: any) =>
-        String(r.va_nummer ?? "").trim().toLowerCase()
-      );
-
-      const duplicates = newVaNummers.filter(
-        (va) => va && existingVaNummers.has(va)
-      ).length;
-
-      const inserted = Math.max(0, (json.inserted ?? 0) - duplicates);
-
       setUploadResult({
-        inserted,
-        duplicates,
-        message: `${inserted} nieuwe vechter${
-          inserted !== 1 ? "s" : ""
-        } toegevoegd${
-          duplicates > 0
-            ? `, ${duplicates} dubbel${duplicates !== 1 ? "en" : ""} overgeslagen`
-            : ""
-        }.`,
+        inserted: Number(json?.inserted ?? 0),
+        duplicates: Number(json?.duplicates ?? 0),
+        message:
+          json?.message ??
+          `Upload voltooid. Toegevoegd: ${Number(
+            json?.inserted ?? 0
+          )}, dubbelen: ${Number(json?.duplicates ?? 0)}.`,
       });
 
       setUploadFile(null);
+      await load();
+    } catch (err: any) {
+      alert(err?.message ?? "Upload mislukt");
     } finally {
       setUploadBusy(false);
     }
   }
 
+  const selectedCountText = `${selectedIds.length} geselecteerd`;
+  const unmatchedCount = visibleFighters.filter(
+    (f) => !fighterIsMatched(f, matchedIds)
+  ).length;
+
   return (
     <main style={pageBackground}>
+      <style jsx global>{`
+        @keyframes fsSpin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        @keyframes fsSpinReverse {
+          from {
+            transform: rotate(360deg);
+          }
+          to {
+            transform: rotate(0deg);
+          }
+        }
+      `}</style>
+
       <div style={topShell}>
         <div style={topLogoWrap}>
           <Image
             src="/branding/fightsupport/excel-logo.png"
             alt="FightSupport"
-            width={250}
-            height={100}
+            width={180}
+            height={64}
+            style={{ width: "auto", height: 56 }}
             priority
-            style={{ height: "auto", width: "100%", maxWidth: 250 }}
           />
         </div>
 
         <div style={portalBand}>
-          <div style={portalTitle}>MATCH PORTAAL</div>
-          <div style={portalSub}>SNEL MATCHEN</div>
-        </div>
+          <div style={portalBandInner}>
+            <div style={portalBandLeft}>
+              <Link
+                href={`/dashboard/matchmaker/matchmaking`}
+                style={{ textDecoration: "none" }}
+              >
+                <HeaderButton>
+                  <ArrowLeft size={16} style={{ marginRight: 8 }} />
+                  Terug
+                </HeaderButton>
+              </Link>
+            </div>
 
-        <div style={headerActionRow}>
-          <HeaderButton
-            onClick={() => router.push("/dashboard/matchmaker/matchmaking")}
-          >
-            <ArrowLeft size={16} style={{ marginRight: 8 }} />
-            Overzicht
-          </HeaderButton>
+            <div style={portalBandCenter}>
+              <div style={portalTitle}>MATCHMAKER</div>
+              <div style={portalSub}>VECHTERS MATCHEN</div>
+            </div>
 
-          <HeaderButton onClick={() => void load()}>
-            <RefreshCcw size={16} style={{ marginRight: 8 }} />
-            Ververs
-          </HeaderButton>
+            <div style={portalBandRight} />
+          </div>
         </div>
       </div>
 
@@ -1443,327 +1559,319 @@ export default function MatchmakerMatchPage() {
         <div style={titleCardCompact}>
           <div style={titleTopRow}>
             <div>
-              <div style={titleMain}>Matchen</div>
+              <div style={titleMain}>
+                {matchmaking?.naam || "Matchmaking"}
+              </div>
               <div style={titleSubCompact}>
-                Kies een vechter, klik daarna op de tweede vechter en controleer alleen de verschillen.
+                {formatDate(matchmaking?.datum)} · {matchmaking?.locatie || "-"} ·{" "}
+                {matchmaking?.bondteam || "-"}
               </div>
             </div>
 
             <button
-              type="button"
               style={collapseToggle}
-              onClick={() => setToolsCollapsed((v) => !v)}
+              onClick={() => setToolsCollapsed((prev) => !prev)}
             >
               {toolsCollapsed ? (
                 <>
-                  <ChevronDown size={16} style={{ marginRight: 8 }} />
-                  Werkbalk openen
+                  <ChevronDown size={15} style={{ marginRight: 8 }} />
+                  Toon acties
                 </>
               ) : (
                 <>
-                  <ChevronUp size={16} style={{ marginRight: 8 }} />
-                  Werkbalk inklappen
+                  <ChevronUp size={15} style={{ marginRight: 8 }} />
+                  Verberg acties
                 </>
               )}
             </button>
           </div>
 
           <div style={metaRowCompact}>
-            <span>
-              <strong>Event:</strong> {matchmaking?.naam ?? "-"}
-            </span>
-            <span>
-              <strong>Datum:</strong> {formatDate(matchmaking?.datum)}
-            </span>
-            <span>
-              <strong>Bondteam:</strong> {matchmaking?.bondteam ?? "-"}
-            </span>
-            <span>
-              <strong>Locatie:</strong> {matchmaking?.locatie ?? "-"}
-            </span>
-            <span>
-              <strong>Uploads:</strong> {uploadGroups.length}
-            </span>
-            <span>
-              <strong>Nieuwste upload:</strong>{" "}
-              {latestUploadCount ? `${latestUploadCount} vechters` : "-"}
-            </span>
-            <span>
-              <strong>Bestaande partijen:</strong> {matches.length}
-            </span>
+            <span>Status: {matchmaking?.status || "-"}</span>
+            <span>Gecontroleerd: {checkedCount}</span>
+            <span>Zichtbaar: {visibleFighters.length}</span>
+            <span>Ongekoppeld: {unmatchedCount}</span>
           </div>
+
+          {!toolsCollapsed ? (
+            <div style={{ marginTop: 10 }}>
+              <div style={actionGridCompact}>
+                <ActionCard
+                  title="Autocheck alles"
+                  text="Start scraper voor alle vechters"
+                  icon={<Radar size={22} />}
+                  onClick={() => void scrapeAll()}
+                  disabled={scrapeBusy || !matchmakingId}
+                />
+                <ActionCard
+                  title="Autocheck geselecteerd"
+                  text="Controleer alleen geselecteerde vechters"
+                  icon={<CheckCircle2 size={22} />}
+                  onClick={() => void scrapeSelected()}
+                  disabled={scrapeBusy || !selectedIds.length || !matchmakingId}
+                />
+                <ActionCard
+                  title="Handmatig toevoegen"
+                  text="Voeg zelf een vechter toe"
+                  icon={<UserPlus size={22} />}
+                  onClick={() => setShowManualModal(true)}
+                />
+                <ActionCard
+                  title="Upload vechters"
+                  text="Importeer extra vechters uit Excel"
+                  icon={<Upload size={22} />}
+                  onClick={() => setShowUploadModal(true)}
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        {!toolsCollapsed ? (
-          <>
-            <div style={actionGridCompact}>
-              <ActionCard
-                title="Upload"
-                text="Excel"
-                icon={<Upload size={24} />}
-                onClick={() => {
-                  setUploadResult(null);
-                  setUploadFile(null);
-                  setShowUploadModal(true);
-                }}
-              />
+        <div style={filterCardCompact}>
+          <div style={filterTopRowCompact}>
+            <div>
+              <div style={sectionTitle}>Zoeken en selectie</div>
+              <div style={sectionSub}>
+                Klassen staan nu in tabbladen en worden alleen getoond als ze aanwezig zijn.
+              </div>
+            </div>
+            <div style={selectedCount}>{selectedCountText}</div>
+          </div>
 
-              <ActionCard
-                title="Handmatig"
-                text="Losse vechter"
-                icon={<UserPlus size={24} />}
-                onClick={() => setShowManualModal(true)}
-              />
+          <div style={filterGridCompact}>
+            <div style={fieldWrapWide}>
+              <label style={labelStyle}>Zoeken</label>
+              <div style={searchInputWrap}>
+                <Search size={16} />
+                <input
+                  value={filter.query}
+                  onChange={(e) =>
+                    setFilter((s) => ({ ...s, query: e.target.value }))
+                  }
+                  placeholder="Zoek op naam, gym, klasse, VA, status..."
+                  style={textInputBare}
+                />
+              </div>
+            </div>
 
-              <ActionCard
-                title="Autocheck alles"
-                text="Fightpaspoort"
-                icon={<Radar size={24} />}
-                onClick={() => void scrapeAll()}
-                disabled={scrapeBusy || !matchmakingId}
-              />
-
-              <ActionCard
-                title="Autocheck laatste upload"
-                text={
-                  latestUploadCount
-                    ? `${latestUploadCount} vechters`
-                    : "Geen upload"
+            <label style={checkboxWrap}>
+              <input
+                type="checkbox"
+                checked={filter.onlyUnmatched}
+                onChange={(e) =>
+                  setFilter((s) => ({
+                    ...s,
+                    onlyUnmatched: e.target.checked,
+                  }))
                 }
-                icon={<Clock3 size={24} />}
-                onClick={() => void scrapeLatestUpload()}
-                disabled={scrapeBusy || !latestUploadId || !matchmakingId}
               />
+              Alleen ongekoppeld
+            </label>
+
+            <div style={filterActionArea}>
+              <button style={tinyButton} onClick={clearSelection}>
+                Wis selectie
+              </button>
+              <button
+                style={{
+                  ...tinyButton,
+                  ...(selectedRed ? activePickButton : {}),
+                }}
+                onClick={resetMatchChoice}
+              >
+                Reset matchkeuze
+              </button>
             </div>
+          </div>
 
-            <div style={filterCardCompact}>
-              <div style={filterTopRowCompact}>
-                <div>
-                  <div style={sectionTitle}>Filters</div>
-                  <div style={sectionSub}>Zoek en kies snel de juiste groep.</div>
-                </div>
-
-                <div style={selectedCount}>
-                  {selectedIds.length} geselecteerd
-                  {selectedRed ? (
-                    <span style={{ marginLeft: 10, color: "#ffd8c7" }}>
-                      · gekozen: <strong>{toName(selectedRed)}</strong>
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              <div style={uploadTabsWrap}>
-                <button
-                  type="button"
-                  style={{
-                    ...uploadViewTab,
-                    ...(activeUploadView === "all" ? activeUploadViewTab : {}),
-                  }}
-                  onClick={() => setActiveUploadView("all")}
-                >
-                  <Layers3 size={15} style={{ marginRight: 8 }} />
-                  Alle vechters
-                </button>
-
-                <button
-                  type="button"
-                  style={{
-                    ...uploadViewTab,
-                    ...(activeUploadView === "latest" ? activeUploadViewTab : {}),
-                  }}
-                  onClick={() => setActiveUploadView("latest")}
-                >
-                  <Clock3 size={15} style={{ marginRight: 8 }} />
-                  Nieuwste upload
-                  <span style={uploadCountBadge}>{latestUploadCount}</span>
-                </button>
-              </div>
-
-              <div style={filterGridCompact}>
-                <div style={fieldWrapWide}>
-                  <label style={labelStyle}>Zoeken</label>
-                  <div style={searchInputWrap}>
-                    <Search size={16} style={{ color: "#6b7280" }} />
-                    <input
-                      style={textInputBare}
-                      placeholder="Naam, gym, VA, discipline of klasse"
-                      value={filter.query}
-                      onChange={(e) =>
-                        setFilter((s) => ({ ...s, query: e.target.value }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                <label style={checkboxWrap}>
-                  <input
-                    type="checkbox"
-                    checked={filter.onlyUnmatched}
-                    onChange={(e) =>
-                      setFilter((s) => ({
-                        ...s,
-                        onlyUnmatched: e.target.checked,
-                      }))
-                    }
-                  />
-                  Alleen ongekoppeld
-                </label>
-
-                <div style={filterActionArea}>
-                  <button style={tinyButton} onClick={clearSelection}>
-                    Selectie wissen
-                  </button>
-                  <button style={tinyButton} onClick={resetMatchChoice}>
-                    Keuze wissen
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <div style={tabLabel}>Discipline</div>
-                <div style={tabRailCompact}>
-                  {disciplineTabs.length === 0 ? (
-                    <div style={sectionSub}>Geen disciplines gevonden.</div>
-                  ) : (
-                    disciplineTabs.map((tab) => (
-                      <button
-                        key={tab}
-                        style={{
-                          ...tabBtnCompact,
-                          ...(activeDiscipline === tab ? activeTabBtn : {}),
-                        }}
-                        onClick={() => setActiveDiscipline(tab)}
-                      >
-                        {tab}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <div style={tabLabel}>Klasse / geslacht</div>
-                <div style={tabRailCompact}>
-                  {klasseTabs.length === 0 ? (
-                    <div style={sectionSub}>Geen klasses gevonden.</div>
-                  ) : (
-                    klasseTabs.map((tab) => (
-                      <button
-                        key={tab}
-                        style={{
-                          ...subTabBtnCompact,
-                          ...(activeKlasse === tab ? activeSubTabBtn : {}),
-                        }}
-                        onClick={() => setActiveKlasse(tab)}
-                      >
-                        {tab}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
+          <div style={classInfoRow}>
+            <div style={classInfoCard}>
+              <div style={labelStyle}>Discipline</div>
+              <div style={classInfoValue}>{visibleDisciplinesText}</div>
             </div>
-          </>
-        ) : null}
+            <div style={classInfoCard}>
+              <div style={labelStyle}>Klasse</div>
+              <div style={classInfoValue}>{visibleKlassenText}</div>
+            </div>
+            <div style={classInfoCard}>
+              <div style={labelStyle}>Geslacht</div>
+              <div style={classInfoValue}>{visibleGeslachtText}</div>
+            </div>
+          </div>
+
+          {classTabs.length > 0 ? (
+            <div style={tabButtonRail}>
+              {classTabs.map((tab) => {
+                const count = baseFilteredFighters.filter(
+                  (fighter) => getClassTabKey(fighter) === tab.key
+                ).length;
+                const active = activeClassTab === tab.key;
+
+                return (
+                  <button
+                    key={tab.key}
+                    style={{
+                      ...tabButton,
+                      ...(active ? activeTabButton : {}),
+                    }}
+                    onClick={() => setActiveClassTab(tab.key)}
+                  >
+                    <span>{tab.label}</span>
+                    <span style={tabCount}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={emptyStateCard}>
+              Geen klasse-tabbladen gevonden voor de huidige selectie.
+            </div>
+          )}
+        </div>
 
         <div style={fighterTableCard}>
-          {visibleFighters.length === 0 ? (
-            <div style={emptyStateCard}>
-              Geen vechters gevonden in deze selectie.
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 10,
+              marginBottom: 10,
+              alignItems: "flex-start",
+            }}
+          >
+            <div>
+              <div style={sectionTitle}>
+                Beschikbare vechters
+                {activeClassTab
+                  ? ` · ${
+                      classTabs.find((t) => t.key === activeClassTab)?.label ?? ""
+                    }`
+                  : ""}
+              </div>
+              <div style={sectionSub}>
+                Binnen het tabblad gesorteerd op leeftijd en daarna gewicht.
+              </div>
             </div>
+          </div>
+
+          {visibleFighters.length === 0 ? (
+            <div style={emptyStateCard}>Geen vechters gevonden.</div>
           ) : (
             <div style={tableWrap}>
               <table style={tableStyle}>
                 <thead>
                   <tr>
                     <th style={thStyle}>Sel</th>
-                    <th style={thStyle}>#</th>
+                    <th style={thStyle}>Actie</th>
+                    <th style={thStyle}>Detail</th>
+                    <th style={thStyle}>Naam</th>
                     <th style={thStyle}>Discipline</th>
                     <th style={thStyle}>Klasse</th>
                     <th style={thStyle}>Geslacht</th>
-                    <th style={thStyle}>Naam vechter</th>
-                    <th style={thStyle}>Sportschool</th>
-                    <th style={thStyle}>Totaal aantal partijen</th>
                     <th style={thStyle}>Leeftijd</th>
                     <th style={thStyle}>Gewicht</th>
-                    <th style={thStyle}>Detail</th>
-                    <th style={thStyle}>Actie</th>
+                    <th style={thStyle}>Totaal partijen</th>
+                    <th style={thStyle}>Gym</th>
+                    <th style={thStyle}>VA</th>
+                    <th style={thStyle}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleFighters.map((f, i) => {
-                    const selectionId = getStableSelectionId(f);
-                    const selected = selectedIds.includes(selectionId);
-                    const age = getFighterAge(f, matchmaking?.datum ?? null);
-                    const isChosen =
-                      selectedRed?.id === f.id || selectedBlue?.id === f.id;
+                  {visibleFighters.map((fighter, index) => {
+                    const stableId = getStableSelectionId(fighter);
+                    const isSelected = selectedIds.includes(stableId);
+                    const isRed = selectedRed?.id === fighter.id;
+                    const isBlue = selectedBlue?.id === fighter.id;
+                    const alreadyMatched = fighterIsMatched(fighter, matchedIds);
+                    const checked = isCheckedFighter(fighter);
+                    const age = getFighterAge(fighter, matchmaking?.datum ?? null);
 
-                    const detailHref = getFighterDetailHref(matchmakingId, f);
+                    const rowBackground =
+                      index % 2 === 0 ? "#ffffff" : "#2b2b2b";
+                    const rowColor = index % 2 === 0 ? "#111111" : "#ffffff";
 
                     return (
                       <tr
-                        key={String(f.id)}
-                        style={{
-                          background: isChosen
-                            ? "linear-gradient(180deg, rgba(255,77,0,0.22) 0%, rgba(255,77,0,0.08) 100%)"
-                            : i % 2 === 0
-                            ? "#ffffff"
-                            : "#111827",
-                          color: isChosen
-                            ? "#fff"
-                            : i % 2 === 0
-                            ? "#111"
-                            : "#fff",
-                          outline: isChosen
-                            ? "2px solid rgba(255,77,0,0.75)"
-                            : "none",
-                        }}
+                        key={fighter.id}
+                        style={{ background: rowBackground, color: rowColor }}
                       >
-                        <td style={tdStyle}>
+                        <td style={{ ...tdStyle, color: rowColor }}>
                           <input
                             type="checkbox"
-                            checked={selected}
-                            onChange={() => toggleSelected(selectionId)}
+                            checked={isSelected}
+                            onChange={() => toggleSelected(stableId)}
                           />
                         </td>
 
-                        <td style={tdStyleStrong}>#{f.row_nr ?? "-"}</td>
-                        <td style={tdStyle}>{f.discipline ?? "-"}</td>
-                        <td style={tdStyle}>{f.klasse ?? "-"}</td>
-                        <td style={tdStyle}>{normalizeGender(f.geslacht)}</td>
-                        <td style={tdStyleStrong}>{toName(f)}</td>
-                        <td style={tdStyle}>
-                          {f.gym_input ?? f.fp_gym ?? f.gym ?? "-"}
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          <button
+                            style={{
+                              ...matchPickButton,
+                              ...(isRed || isBlue ? activePickButton : {}),
+                              opacity: alreadyMatched ? 0.6 : 1,
+                            }}
+                            onClick={() => handleMatchClick(fighter)}
+                            disabled={alreadyMatched}
+                          >
+                            <Swords size={15} style={{ marginRight: 8 }} />
+                            {isRed ? "Rood" : isBlue ? "Blauw" : "Kies"}
+                          </button>
                         </td>
-                        <td style={tdStyle}>{getDisplayTotalPartijenText(f)}</td>
-                        <td style={tdStyle}>{age ?? "-"}</td>
-                        <td style={tdStyle}>{formatWeight(f.gewicht)}</td>
 
-                        <td style={tdStyle}>
-                          <Link href={detailHref} style={detailLink}>
-                            <Link2 size={14} style={{ marginRight: 6 }} />
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          <Link
+                            href={getFighterDetailHref(matchmakingId, fighter)}
+                            style={detailLink}
+                          >
+                            <Link2 size={14} style={{ marginRight: 7 }} />
                             Detail
                           </Link>
                         </td>
 
-                        <td style={tdStyle}>
-                          <button
-                            style={{
-                              ...matchPickButton,
-                              ...(isChosen ? activePickButton : {}),
-                            }}
-                            onClick={() => handleMatchClick(f)}
-                          >
-                            <Swords size={14} style={{ marginRight: 6 }} />
-                            {selectedRed?.id === f.id
-                              ? "Gekozen"
-                              : selectedBlue?.id === f.id
-                              ? "Gekozen"
-                              : selectedRed
-                              ? "Match"
-                              : "Kies vechter"}
-                          </button>
+                        <td style={{ ...tdStyleStrong, color: rowColor }}>
+                          {toName(fighter)}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {fighter.discipline || "-"}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {fighter.klasse || "-"}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {normalizeGender(fighter.geslacht)}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {age ?? "-"}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {formatWeight(fighter.gewicht)}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {getDisplayTotalPartijenText(fighter)}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {fighter.gym || fighter.gym_input || fighter.fp_gym || "-"}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {fighter.va_nummer || "-"}
+                        </td>
+
+                        <td style={{ ...tdStyle, color: rowColor }}>
+                          {alreadyMatched ? (
+                            "Al gekoppeld"
+                          ) : checked ? (
+                            "Gecontroleerd"
+                          ) : (
+                            fighter.scrape_status || "Nieuw"
+                          )}
                         </td>
                       </tr>
                     );
@@ -1780,9 +1888,9 @@ export default function MatchmakerMatchPage() {
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
             <div style={modalTopBar}>
               <div>
-                <div style={sectionTitle}>Verschillen</div>
+                <div style={sectionTitle}>Verschillen en meldingen</div>
                 <div style={sectionSub}>
-                  Alleen afwijkingen tussen beide vechters worden getoond.
+                  Gewicht, leeftijd, aantal partijen en alle meldingen uit de boutRulesEngine.
                 </div>
               </div>
 
@@ -1797,11 +1905,6 @@ export default function MatchmakerMatchPage() {
                   }}
                   disabled={busy || compareData.saveBlocked}
                   onClick={() => void saveMatch()}
-                  title={
-                    compareData.saveBlocked
-                      ? "Opslaan geblokkeerd door verbod."
-                      : undefined
-                  }
                 >
                   <Save size={16} style={{ marginRight: 8 }} />
                   {busy ? "Opslaan..." : "Match"}
@@ -1828,8 +1931,8 @@ export default function MatchmakerMatchPage() {
 
             <div style={compareHeaderRow}>
               <div />
-              <div style={compareFighterHeader}>Vechter 1</div>
-              <div style={compareFighterHeader}>Vechter 2</div>
+              <div style={compareFighterHeader}>{compareData.redName}</div>
+              <div style={compareFighterHeader}>{compareData.blueName}</div>
             </div>
 
             <div style={compareTable}>
@@ -1845,6 +1948,41 @@ export default function MatchmakerMatchPage() {
                     tone={row.tone}
                   />
                 ))
+              )}
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <div style={sectionTitle}>BoutRulesEngine meldingen</div>
+              {boutRuleMessages.length === 0 ? (
+                <div style={noDiffCard}>
+                  Geen meldingen vanuit de boutRulesEngine ontvangen.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                  {boutRuleMessages.map((rule) => {
+                    const toneStyle =
+                      rule.severity === "error"
+                        ? verbodBanner
+                        : rule.severity === "warning"
+                        ? dispensatieBanner
+                        : okBanner;
+
+                    const Icon =
+                      rule.severity === "ok" ? CheckCircle2 : AlertTriangle;
+
+                    return (
+                      <div key={rule.code} style={toneStyle}>
+                        <Icon size={18} style={{ marginRight: 10 }} />
+                        <div>
+                          <div style={{ fontWeight: 900 }}>{rule.message}</div>
+                          <div style={{ fontSize: 12, opacity: 0.9, marginTop: 2 }}>
+                            Code: {rule.code}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
@@ -1870,9 +2008,7 @@ export default function MatchmakerMatchPage() {
               <ManualInput
                 label="Achternaam"
                 value={manualForm.achternaam}
-                onChange={(v) =>
-                  setManualForm((s) => ({ ...s, achternaam: v }))
-                }
+                onChange={(v) => setManualForm((s) => ({ ...s, achternaam: v }))}
               />
               <ManualInput
                 label="Geslacht"
@@ -1882,9 +2018,7 @@ export default function MatchmakerMatchPage() {
               <ManualInput
                 label="Discipline"
                 value={manualForm.discipline}
-                onChange={(v) =>
-                  setManualForm((s) => ({ ...s, discipline: v }))
-                }
+                onChange={(v) => setManualForm((s) => ({ ...s, discipline: v }))}
               />
               <ManualInput
                 label="Klasse"
@@ -1899,9 +2033,7 @@ export default function MatchmakerMatchPage() {
               <ManualInput
                 label="VA nummer"
                 value={manualForm.va_nummer}
-                onChange={(v) =>
-                  setManualForm((s) => ({ ...s, va_nummer: v }))
-                }
+                onChange={(v) => setManualForm((s) => ({ ...s, va_nummer: v }))}
               />
               <ManualInput
                 label="Geboortedatum"
@@ -1977,9 +2109,7 @@ export default function MatchmakerMatchPage() {
             <div style={modalHeader}>
               <div>
                 <div style={sectionTitle}>Vechters uploaden</div>
-                <div style={sectionSub}>
-                  Upload een Excel bestand met nieuwe vechters.
-                </div>
+                <div style={sectionSub}>Upload een Excel bestand met nieuwe vechters.</div>
               </div>
               <button
                 style={closeBtn}
@@ -1990,89 +2120,57 @@ export default function MatchmakerMatchPage() {
             </div>
 
             <div style={{ padding: "16px 18px" }}>
-              <div style={{ marginBottom: 14 }}>
-                <label
-                  style={{
-                    display: "block",
-                    marginBottom: 6,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "#e2e8f0",
-                  }}
-                >
-                  Excel bestand (.xlsx, .xls)
-                </label>
+              <label style={labelStyle}>Excel bestand (.xlsx, .xls)</label>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                style={fileInputStyle}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  setUploadFile(f);
+                  setUploadResult(null);
+                }}
+              />
 
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    background: "rgba(255,255,255,0.08)",
-                    border: "1px solid rgba(255,255,255,0.18)",
-                    borderRadius: 6,
-                    color: "#e2e8f0",
-                    fontSize: 13,
-                  }}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setUploadFile(f);
-                    setUploadResult(null);
-                  }}
-                />
-
-                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>
-                  1 vechter per rij · naam, discipline, klasse, VA, gewicht, gym
-                </div>
-              </div>
-
-              {uploadResult && (
-                <div
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 6,
-                    background:
-                      uploadResult.duplicates > 0
-                        ? "rgba(234,179,8,0.15)"
-                        : "rgba(34,197,94,0.15)",
-                    border:
-                      uploadResult.duplicates > 0
-                        ? "1px solid rgba(234,179,8,0.4)"
-                        : "1px solid rgba(34,197,94,0.4)",
-                    color:
-                      uploadResult.duplicates > 0 ? "#fef08a" : "#86efac",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    marginBottom: 12,
-                  }}
-                >
-                  {uploadResult.message}
-                </div>
-              )}
+              {uploadResult ? (
+                <div style={uploadResultBox}>{uploadResult.message}</div>
+              ) : null}
             </div>
 
             <div style={modalActionRow}>
               <button
                 style={secondaryButton}
                 onClick={() => !uploadBusy && setShowUploadModal(false)}
-                disabled={uploadBusy}
               >
                 Sluiten
               </button>
               <button
-                style={{
-                  ...primaryButton,
-                  opacity: !uploadFile || uploadBusy ? 0.55 : 1,
-                  cursor:
-                    !uploadFile || uploadBusy ? "not-allowed" : "pointer",
-                }}
+                style={primaryButton}
                 disabled={!uploadFile || uploadBusy || !matchmakingId}
                 onClick={() => void handleUpload()}
               >
                 <Upload size={16} style={{ marginRight: 8 }} />
                 {uploadBusy ? "Uploaden..." : "Upload bestand"}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {scrapeOverlayOpen ? (
+        <div style={scrapeOverlay}>
+          <div style={scrapeOverlayCard}>
+            <div style={scrapeSpinnerWrap}>
+              <div style={scrapeSpinnerOuter} />
+              <div style={scrapeSpinnerInner} />
+            </div>
+
+            <div style={scrapeOverlayTitle}>Even wachten</div>
+            <div style={scrapeOverlayTextStyle}>
+              {scrapeOverlayMessage || "Wacht op resultaten..."}
+            </div>
+            <div style={scrapeOverlaySub}>
+              Sluit deze pagina niet af totdat de resultaten zijn geladen.
             </div>
           </div>
         </div>
@@ -2102,8 +2200,8 @@ function CompareRow({
   return (
     <div style={compareRow}>
       <div style={compareLabel}>{label}</div>
-      <div style={{ ...rowTone }}>{left || "-"}</div>
-      <div style={{ ...rowTone }}>{right || "-"}</div>
+      <div style={rowTone}>{left || "-"}</div>
+      <div style={rowTone}>{right || "-"}</div>
     </div>
   );
 }
@@ -2170,181 +2268,155 @@ const pageBackground: CSSProperties = {
     "radial-gradient(900px 520px at 18% 0%, rgba(255,77,0,0.14), transparent 56%), radial-gradient(780px 520px at 82% 18%, rgba(255,255,255,0.08), transparent 62%), linear-gradient(180deg,#040404 0%, #050505 55%, #000000 100%)",
   color: "#fff",
 };
-
 const topShell: CSSProperties = {
   position: "relative",
-  paddingBottom: 10,
-  borderBottom: "1px solid rgba(255,255,255,0.08)",
-  background:
-    "linear-gradient(180deg, rgba(255,77,0,0.10) 0%, rgba(0,0,0,0) 55%)",
+  paddingBottom: 4,
+  borderBottom: "1px solid rgba(255,255,255,0.06)",
+  background: "linear-gradient(180deg, rgba(255,77,0,0.08) 0%, rgba(0,0,0,0) 58%)",
 };
-
 const topLogoWrap: CSSProperties = {
   display: "flex",
   justifyContent: "center",
-  paddingTop: 6,
+  paddingTop: 2,
+  paddingBottom: 2,
 };
-
 const portalBand: CSSProperties = {
-  marginTop: 4,
-  background:
-    "linear-gradient(180deg, rgba(22,28,40,0.95) 0%, rgba(6,10,16,0.95) 100%)",
-  borderTop: "1px solid rgba(255,255,255,0.15)",
-  borderBottom: "1px solid rgba(255,255,255,0.12)",
-  textAlign: "center",
-  padding: "8px 16px 10px",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+  marginTop: 0,
+  background: "linear-gradient(180deg, rgba(12,20,36,0.98) 0%, rgba(4,8,14,0.98) 100%)",
+  borderTop: "1px solid rgba(255,255,255,0.12)",
+  borderBottom: "1px solid rgba(255,255,255,0.10)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
 };
-
+const portalBandInner: CSSProperties = {
+  maxWidth: 1600,
+  margin: "0 auto",
+  minHeight: 78,
+  display: "grid",
+  gridTemplateColumns: "220px 1fr 220px",
+  alignItems: "center",
+  gap: 12,
+  padding: "0 14px",
+};
+const portalBandLeft: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-start",
+  alignItems: "center",
+};
+const portalBandCenter: CSSProperties = { textAlign: "center" };
+const portalBandRight: CSSProperties = { minHeight: 1 };
 const portalTitle: CSSProperties = {
-  fontSize: 34,
+  fontSize: 28,
   fontWeight: 900,
   lineHeight: 1,
-  letterSpacing: "0.03em",
-  color: "#efefef",
+  letterSpacing: "0.035em",
+  color: "#f3f4f6",
   textShadow: "0 2px 10px rgba(0,0,0,0.55)",
 };
-
 const portalSub: CSSProperties = {
   marginTop: 4,
-  fontSize: 12,
-  letterSpacing: "0.24em",
+  fontSize: 11,
+  letterSpacing: "0.26em",
   color: NVB_ORANGE,
 };
-
-const headerActionRow: CSSProperties = {
-  maxWidth: 1500,
-  margin: "8px auto 0",
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 10,
-  padding: "0 16px",
-};
-
 const silverButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 42,
-  padding: "0 14px",
+  minHeight: 36,
+  padding: "0 13px",
   border: "1px solid rgba(0,0,0,0.35)",
-  background:
-    "linear-gradient(180deg,#ffffff 0%,#dedede 38%,#b8b8b8 50%,#f7f7f7 100%)",
+  background: "linear-gradient(180deg,#ffffff 0%,#e7e7e7 34%,#bcbcbc 50%,#fafafa 100%)",
   color: "#111",
   fontWeight: 800,
   fontSize: 13,
   cursor: "pointer",
-  boxShadow:
-    "inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(0,0,0,0.25)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92), 0 8px 18px rgba(0,0,0,0.22)",
 };
-
 const contentWrap: CSSProperties = {
-  maxWidth: 1700,
+  maxWidth: 1800,
   margin: "0 auto",
-  padding: 14,
+  padding: "8px 14px 14px",
   display: "grid",
-  gap: 12,
+  gap: 10,
 };
-
 const titleCardCompact: CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.18)",
-  background:
-    "linear-gradient(180deg, rgba(10,14,20,0.98) 0%, rgba(2,5,9,0.98) 100%)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "linear-gradient(180deg, rgba(6,11,18,0.985) 0%, rgba(1,3,7,0.985) 100%)",
   padding: 12,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
 };
-
 const titleTopRow: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
   gap: 12,
 };
-
 const collapseToggle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  minHeight: 38,
+  minHeight: 34,
   padding: "0 12px",
-  border: "1px solid rgba(255,255,255,0.16)",
-  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.05)",
   color: "#fff",
   fontWeight: 800,
   fontSize: 12,
   cursor: "pointer",
   whiteSpace: "nowrap",
 };
-
-const titleMain: CSSProperties = {
-  fontSize: 20,
-  fontWeight: 900,
-  color: "#fff",
-};
-
+const titleMain: CSSProperties = { fontSize: 18, fontWeight: 900, color: "#fff" };
 const titleSubCompact: CSSProperties = {
-  marginTop: 3,
+  marginTop: 2,
   fontSize: 13,
   color: "#c9d1db",
 };
-
 const metaRowCompact: CSSProperties = {
   marginTop: 8,
   display: "flex",
   flexWrap: "wrap",
-  gap: 12,
+  gap: 10,
   fontSize: 12,
   color: "#d9d9d9",
 };
-
 const actionGridCompact: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 10,
 };
-
 const portalCardCompact: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 10,
   padding: 10,
-  border: "2px solid rgba(230,230,230,0.82)",
-  background:
-    "linear-gradient(180deg, rgba(16,19,26,0.98) 0%, rgba(5,8,13,0.98) 100%)",
-  boxShadow:
-    "inset 0 0 0 1px rgba(255,255,255,0.20), 0 10px 18px rgba(0,0,0,0.26)",
+  border: "1px solid rgba(230,230,230,0.72)",
+  background: "linear-gradient(180deg, rgba(11,16,24,0.985) 0%, rgba(3,7,12,0.985) 100%)",
+  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.14), 0 10px 18px rgba(0,0,0,0.24)",
 };
-
 const iconBoxCompact: CSSProperties = {
-  width: 52,
-  height: 52,
+  width: 46,
+  height: 46,
   display: "grid",
   placeItems: "center",
   color: "#fff",
-  background:
-    "linear-gradient(180deg, #ff680f 0%, #ff4d00 55%, #cc3f00 100%)",
-  boxShadow: "0 8px 16px rgba(255,77,0,0.18)",
+  background: "linear-gradient(180deg, #ff680f 0%, #ff4d00 55%, #cc3f00 100%)",
+  boxShadow: "0 8px 16px rgba(255,77,0,0.16)",
   flexShrink: 0,
 };
-
 const portalCardTitleCompact: CSSProperties = {
   fontSize: 15,
   fontWeight: 900,
   color: "#efefef",
 };
-
 const portalCardTextCompact: CSSProperties = {
   marginTop: 2,
   fontSize: 12,
   color: "#d0d6df",
 };
-
 const filterCardCompact: CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.18)",
-  background:
-    "linear-gradient(180deg, rgba(10,14,20,0.98) 0%, rgba(2,5,9,0.98) 100%)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "linear-gradient(180deg, rgba(6,11,18,0.985) 0%, rgba(1,3,7,0.985) 100%)",
   padding: 12,
 };
-
 const filterTopRowCompact: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -2352,84 +2424,33 @@ const filterTopRowCompact: CSSProperties = {
   gap: 10,
   marginBottom: 10,
 };
-
 const selectedCount: CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
   color: "#d8d8d8",
 };
-
 const sectionTitle: CSSProperties = {
   fontSize: 17,
   fontWeight: 900,
   color: "#fff",
 };
-
 const sectionSub: CSSProperties = {
   marginTop: 3,
   fontSize: 13,
   color: "#aeb8c5",
 };
-
-const uploadTabsWrap: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-  marginBottom: 12,
-};
-
-const uploadViewTab: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  minHeight: 38,
-  padding: "0 12px",
-  border: "1px solid rgba(255,255,255,0.14)",
-  background:
-    "linear-gradient(180deg, rgba(14,19,26,0.96) 0%, rgba(5,9,14,0.96) 100%)",
-  color: "#fff",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const activeUploadViewTab: CSSProperties = {
-  border: "1px solid rgba(255,77,0,0.65)",
-  background:
-    "linear-gradient(180deg, rgba(255,112,36,0.22) 0%, rgba(255,77,0,0.16) 100%)",
-  boxShadow: "0 8px 18px rgba(255,77,0,0.14)",
-};
-
-const uploadCountBadge: CSSProperties = {
-  marginLeft: 8,
-  minWidth: 24,
-  height: 24,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "0 8px",
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.12)",
-  fontSize: 12,
-  fontWeight: 900,
-};
-
 const filterGridCompact: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "2fr auto auto",
   gap: 10,
   alignItems: "end",
 };
-
 const filterActionArea: CSSProperties = {
   display: "flex",
   gap: 8,
   flexWrap: "wrap",
 };
-
-const fieldWrapWide: CSSProperties = {
-  display: "grid",
-  gap: 6,
-};
-
+const fieldWrapWide: CSSProperties = { display: "grid", gap: 6 };
 const labelStyle: CSSProperties = {
   fontSize: 11,
   fontWeight: 800,
@@ -2437,7 +2458,6 @@ const labelStyle: CSSProperties = {
   textTransform: "uppercase",
   color: "#c4ccd7",
 };
-
 const inputStyle: CSSProperties = {
   height: 42,
   border: "1px solid rgba(255,255,255,0.14)",
@@ -2446,7 +2466,6 @@ const inputStyle: CSSProperties = {
   padding: "0 12px",
   outline: "none",
 };
-
 const searchInputWrap: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -2456,7 +2475,6 @@ const searchInputWrap: CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   padding: "0 12px",
 };
-
 const textInputBare: CSSProperties = {
   flex: 1,
   height: "100%",
@@ -2465,7 +2483,6 @@ const textInputBare: CSSProperties = {
   color: "#fff",
   outline: "none",
 };
-
 const checkboxWrap: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -2474,71 +2491,62 @@ const checkboxWrap: CSSProperties = {
   fontSize: 13,
   color: "#d6dbe2",
 };
-
-const tabLabel: CSSProperties = {
-  marginBottom: 6,
-  fontSize: 11,
-  fontWeight: 900,
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
-  color: "#d6dee8",
+const classInfoRow: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 8,
+  marginTop: 10,
 };
-
-const tabRailCompact: CSSProperties = {
+const classInfoCard: CSSProperties = {
+  padding: "10px 12px",
+  border: "1px solid rgba(255,255,255,0.12)",
+  background: "rgba(255,255,255,0.04)",
+};
+const classInfoValue: CSSProperties = {
+  marginTop: 5,
+  fontSize: 13,
+  color: "#ffffff",
+  fontWeight: 700,
+};
+const tabButtonRail: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
-  padding: 8,
-  border: "1px solid rgba(255,255,255,0.10)",
-  background: "rgba(255,255,255,0.03)",
+  marginTop: 12,
 };
-
-const tabBtnCompact: CSSProperties = {
-  minHeight: 40,
+const tabButton: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 10,
+  minHeight: 38,
   padding: "0 14px",
   border: "1px solid rgba(255,255,255,0.16)",
-  background:
-    "linear-gradient(180deg, rgba(17,24,39,0.9) 0%, rgba(8,12,18,0.9) 100%)",
-  color: "#fff",
-  fontWeight: 900,
-  fontSize: 14,
-  cursor: "pointer",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
-};
-
-const activeTabBtn: CSSProperties = {
-  background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
-  color: "#fff",
-  border: "1px solid rgba(255,77,0,0.8)",
-  boxShadow: "0 10px 22px rgba(255,77,0,0.24)",
-};
-
-const subTabBtnCompact: CSSProperties = {
-  minHeight: 38,
-  padding: "0 12px",
-  border: "1px solid rgba(255,255,255,0.16)",
-  background:
-    "linear-gradient(180deg, rgba(8,14,22,0.95) 0%, rgba(4,8,13,0.95) 100%)",
+  background: "rgba(255,255,255,0.05)",
   color: "#fff",
   fontWeight: 800,
-  fontSize: 13,
   cursor: "pointer",
 };
-
-const activeSubTabBtn: CSSProperties = {
-  background: "linear-gradient(180deg, #5b6678 0%, #374151 100%)",
+const activeTabButton: CSSProperties = {
+  background: "linear-gradient(180deg,#ff8b45 0%,#ff4d00 100%)",
+  border: "1px solid rgba(255,77,0,0.55)",
   color: "#fff",
-  border: "1px solid rgba(255,255,255,0.30)",
-  boxShadow: "0 8px 18px rgba(148,163,184,0.18)",
 };
-
+const tabCount: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 24,
+  height: 24,
+  padding: "0 6px",
+  background: "rgba(0,0,0,0.18)",
+  fontSize: 12,
+  fontWeight: 900,
+};
 const fighterTableCard: CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.18)",
-  background:
-    "linear-gradient(180deg, rgba(10,14,20,0.98) 0%, rgba(2,5,9,0.98) 100%)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "linear-gradient(180deg, rgba(6,11,18,0.985) 0%, rgba(1,3,7,0.985) 100%)",
   padding: 10,
 };
-
 const tinyButton: CSSProperties = {
   border: "1px solid rgba(255,255,255,0.18)",
   background: "rgba(255,255,255,0.06)",
@@ -2548,24 +2556,17 @@ const tinyButton: CSSProperties = {
   fontWeight: 700,
   fontSize: 12,
 };
-
 const emptyStateCard: CSSProperties = {
   padding: 20,
   border: "1px solid rgba(255,255,255,0.10)",
   background: "rgba(255,255,255,0.03)",
   color: "#cbd5e1",
 };
-
 const tableWrap: CSSProperties = {
   overflowX: "auto",
-  border: "1px solid rgba(255,255,255,0.18)",
+  border: "1px solid rgba(255,255,255,0.16)",
 };
-
-const tableStyle: CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-};
-
+const tableStyle: CSSProperties = { width: "100%", borderCollapse: "collapse" };
 const thStyle: CSSProperties = {
   background: "linear-gradient(180deg, #ff6a00 0%, #ff5400 100%)",
   color: "#fff",
@@ -2575,19 +2576,13 @@ const thStyle: CSSProperties = {
   whiteSpace: "nowrap",
   fontSize: 13,
 };
-
 const tdStyle: CSSProperties = {
   padding: "8px",
   borderTop: "1px solid rgba(0,0,0,0.08)",
   whiteSpace: "nowrap",
   fontSize: 13,
 };
-
-const tdStyleStrong: CSSProperties = {
-  ...tdStyle,
-  fontWeight: 800,
-};
-
+const tdStyleStrong: CSSProperties = { ...tdStyle, fontWeight: 800 };
 const detailLink: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -2598,7 +2593,6 @@ const detailLink: CSSProperties = {
   padding: "7px 10px",
   fontSize: 12,
 };
-
 const matchPickButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -2612,12 +2606,10 @@ const matchPickButton: CSSProperties = {
   fontWeight: 800,
   fontSize: 12,
 };
-
 const activePickButton: CSSProperties = {
   background: "linear-gradient(180deg,#ff8b45 0%,#ff4d00 100%)",
   color: "#fff",
 };
-
 const modalBackdrop: CSSProperties = {
   position: "fixed",
   inset: 0,
@@ -2629,23 +2621,16 @@ const modalBackdrop: CSSProperties = {
   padding: "36px 20px 20px",
   overflowY: "auto",
 };
-
 const modalCard: CSSProperties = {
   width: "100%",
   maxWidth: 920,
   border: "3px solid rgba(255,255,255,0.20)",
-  background:
-    "linear-gradient(180deg, rgba(16,19,26,0.99) 0%, rgba(5,8,13,0.99) 100%)",
+  background: "linear-gradient(180deg, rgba(16,19,26,0.99) 0%, rgba(5,8,13,0.99) 100%)",
   padding: 18,
   boxShadow: "0 22px 70px rgba(0,0,0,0.55)",
   marginBottom: 24,
 };
-
-const modalCardLarge: CSSProperties = {
-  ...modalCard,
-  maxWidth: 1100,
-};
-
+const modalCardLarge: CSSProperties = { ...modalCard, maxWidth: 1100 };
 const modalHeader: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -2653,7 +2638,6 @@ const modalHeader: CSSProperties = {
   gap: 12,
   marginBottom: 16,
 };
-
 const modalTopBar: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -2661,14 +2645,12 @@ const modalTopBar: CSSProperties = {
   gap: 12,
   marginBottom: 16,
 };
-
 const modalTopActions: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 10,
   flexWrap: "wrap",
 };
-
 const closeBtn: CSSProperties = {
   width: 40,
   height: 40,
@@ -2677,38 +2659,29 @@ const closeBtn: CSSProperties = {
   color: "#fff",
   cursor: "pointer",
 };
-
 const compareHeaderRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "180px 1fr 1fr",
   gap: 10,
   marginBottom: 8,
 };
-
 const compareFighterHeader: CSSProperties = {
   fontWeight: 900,
   color: "#fff",
   padding: "0 4px",
 };
-
-const compareTable: CSSProperties = {
-  display: "grid",
-  gap: 8,
-};
-
+const compareTable: CSSProperties = { display: "grid", gap: 8 };
 const compareRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "180px 1fr 1fr",
   gap: 10,
   alignItems: "center",
 };
-
 const compareLabel: CSSProperties = {
   fontWeight: 900,
   color: "#fff",
   fontSize: 13,
 };
-
 const compareValue: CSSProperties = {
   minHeight: 42,
   display: "flex",
@@ -2719,21 +2692,18 @@ const compareValue: CSSProperties = {
   color: "#e5e7eb",
   fontSize: 13,
 };
-
 const compareValueWarning: CSSProperties = {
   ...compareValue,
   background: "rgba(255,166,0,0.10)",
   border: "1px solid rgba(255,166,0,0.30)",
   color: "#ffdc9b",
 };
-
 const compareValueDanger: CSSProperties = {
   ...compareValue,
   background: "rgba(239,68,68,0.12)",
   border: "1px solid rgba(239,68,68,0.34)",
   color: "#fecaca",
 };
-
 const primaryButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -2741,13 +2711,11 @@ const primaryButton: CSSProperties = {
   minHeight: 42,
   padding: "0 14px",
   border: "1px solid rgba(255,77,0,0.55)",
-  background:
-    "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
+  background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
   color: "#fff",
   fontWeight: 900,
   cursor: "pointer",
 };
-
 const secondaryButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -2760,27 +2728,23 @@ const secondaryButton: CSSProperties = {
   fontWeight: 900,
   cursor: "pointer",
 };
-
 const disabledDangerButton: CSSProperties = {
   background: "linear-gradient(180deg, #7f1d1d 0%, #991b1b 100%)",
   border: "1px solid rgba(239,68,68,0.55)",
   opacity: 0.7,
   cursor: "not-allowed",
 };
-
 const modalActionRow: CSSProperties = {
   marginTop: 18,
   display: "flex",
   justifyContent: "flex-end",
   gap: 12,
 };
-
 const manualGrid: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 12,
 };
-
 const textareaStyle: CSSProperties = {
   width: "100%",
   minHeight: 100,
@@ -2791,7 +2755,6 @@ const textareaStyle: CSSProperties = {
   outline: "none",
   resize: "vertical",
 };
-
 const dispensatieBanner: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -2802,7 +2765,6 @@ const dispensatieBanner: CSSProperties = {
   color: "#ffdc9b",
   fontWeight: 900,
 };
-
 const verbodBanner: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -2813,11 +2775,98 @@ const verbodBanner: CSSProperties = {
   color: "#fecaca",
   fontWeight: 900,
 };
-
+const okBanner: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  padding: "12px 14px",
+  background: "rgba(34,197,94,0.12)",
+  border: "1px solid rgba(34,197,94,0.34)",
+  color: "#bbf7d0",
+  fontWeight: 900,
+};
 const noDiffCard: CSSProperties = {
   padding: "14px 16px",
   background: "rgba(255,255,255,0.05)",
   border: "1px solid rgba(255,255,255,0.12)",
   color: "#e5e7eb",
   fontWeight: 700,
+};
+const scrapeOverlay: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 3000,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(0,0,0,0.72)",
+  backdropFilter: "blur(3px)",
+  padding: 20,
+};
+const scrapeOverlayCard: CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  border: "2px solid rgba(255,255,255,0.18)",
+  background: "linear-gradient(180deg, rgba(10,14,20,0.98) 0%, rgba(3,7,12,0.98) 100%)",
+  boxShadow: "0 28px 80px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.08)",
+  padding: "28px 26px",
+  textAlign: "center",
+};
+const scrapeSpinnerWrap: CSSProperties = {
+  position: "relative",
+  width: 88,
+  height: 88,
+  margin: "0 auto 18px",
+};
+const scrapeSpinnerOuter: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  borderRadius: "50%",
+  border: "4px solid rgba(255,255,255,0.12)",
+  borderTop: "4px solid #ff4d00",
+  animation: "fsSpin 1s linear infinite",
+};
+const scrapeSpinnerInner: CSSProperties = {
+  position: "absolute",
+  inset: 14,
+  borderRadius: "50%",
+  border: "3px solid rgba(255,255,255,0.08)",
+  borderBottom: "3px solid #ff8a3d",
+  animation: "fsSpinReverse 1.2s linear infinite",
+};
+const scrapeOverlayTitle: CSSProperties = {
+  fontSize: 24,
+  fontWeight: 900,
+  color: "#ffffff",
+  letterSpacing: "0.03em",
+};
+const scrapeOverlayTextStyle: CSSProperties = {
+  marginTop: 10,
+  fontSize: 15,
+  lineHeight: 1.5,
+  color: "#f1f5f9",
+  fontWeight: 700,
+};
+const scrapeOverlaySub: CSSProperties = {
+  marginTop: 12,
+  fontSize: 12,
+  color: "#aeb8c5",
+};
+const fileInputStyle: CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 6,
+  color: "#e2e8f0",
+  fontSize: 13,
+};
+const uploadResultBox: CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 6,
+  background: "rgba(34,197,94,0.15)",
+  border: "1px solid rgba(34,197,94,0.4)",
+  color: "#86efac",
+  fontSize: 13,
+  fontWeight: 700,
+  marginTop: 12,
 };

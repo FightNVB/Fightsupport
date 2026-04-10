@@ -190,7 +190,7 @@ export default function MatchmakerDashboardPage() {
     {
       label: "Matchmaking controle",
       subtitle: "Upload en retour ontvangen MM",
-      href: "/dashboard/matchmaker/controle/ontvangen",
+      href: "/dashboard/matchmaker/controle",
       icon: ClipboardList,
     },
     {

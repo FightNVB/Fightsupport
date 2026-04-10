@@ -5,6 +5,31 @@ import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
+const ALLOWED_BONDTEAMS = [
+  "IRO",
+  "MMAAN",
+  "MON",
+  "NKF",
+  "UMC",
+  "VON",
+  "WMTA",
+  "WPKL",
+] as const;
+
+function normalizeText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function normalizeBondteam(value: unknown): string {
+  return normalizeText(value).toUpperCase();
+}
+
+function isAllowedBondteam(value: string): boolean {
+  return ALLOWED_BONDTEAMS.includes(
+    value as (typeof ALLOWED_BONDTEAMS)[number]
+  );
+}
+
 export async function POST(req: Request) {
   try {
     const auth = await requireAnyRole(req, ["matchmaker", "superadmin", "admin"]);
@@ -13,29 +38,46 @@ export async function POST(req: Request) {
 
     const body = await req.json();
 
-    const naam = String(body?.naam ?? "").trim();
-    const datum = String(body?.datum ?? "").trim();
-    const locatie = String(body?.locatie ?? "").trim() || null;
-    const promotor = String(body?.promotor ?? "").trim() || null;
-    const bondteam = String(body?.bondteam ?? "").trim() || null;
-    const matchmakerNaam = String(body?.matchmaker_naam ?? "").trim() || null;
+    const naam = normalizeText(body?.naam);
+    const datum = normalizeText(body?.datum);
+    const locatie = normalizeText(body?.locatie) || null;
+    const promotor = normalizeText(body?.promotor) || null;
+    const bondteam = normalizeBondteam(body?.bondteam);
+    const matchmakerNaam = normalizeText(body?.matchmaker_naam) || null;
 
     if (!naam) {
-      return NextResponse.json({ error: "Naam is verplicht." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Naam is verplicht." },
+        { status: 400 }
+      );
     }
 
     if (!datum) {
-      return NextResponse.json({ error: "Datum is verplicht." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Datum is verplicht." },
+        { status: 400 }
+      );
     }
 
     if (!bondteam) {
-      return NextResponse.json({ error: "Bondteam is verplicht." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Bondteam is verplicht." },
+        { status: 400 }
+      );
+    }
+
+    if (!isAllowedBondteam(bondteam)) {
+      return NextResponse.json(
+        {
+          error: `Ongeldig bondteam. Kies een van: ${ALLOWED_BONDTEAMS.join(", ")}`,
+        },
+        { status: 400 }
+      );
     }
 
     const now = new Date().toISOString();
     const matchmakingId = randomUUID();
 
-    // 1) eerst event maken
     const { data: eventRow, error: eventError } = await supabaseAdmin
       .from("events")
       .insert({
@@ -51,14 +93,21 @@ export async function POST(req: Request) {
       .single();
 
     if (eventError) {
-      console.error("create-matchmaking event insert error:", eventError);
+      console.error("create-matchmaking event insert error:", {
+        eventError,
+        attemptedBondteam: bondteam,
+      });
+
       return NextResponse.json(
-        { error: eventError.message || "Aanmaken event mislukt." },
+        {
+          error: eventError.message || "Aanmaken event mislukt.",
+        },
         { status: 500 }
       );
     }
 
     const eventId = String(eventRow?.id ?? "").trim();
+
     if (!eventId) {
       return NextResponse.json(
         { error: "Kon event_id niet bepalen." },
@@ -66,7 +115,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2) centrale lifecycle/hoofdrecord
     const { error: lifecycleError } = await supabaseAdmin
       .from("matchmakings")
       .insert({
@@ -74,6 +122,8 @@ export async function POST(req: Request) {
         naam,
         datum,
         locatie,
+        promotor,
+        bondteam,
         matchmaker_id: userId,
         status: "nieuw",
         created_at: now,
@@ -82,7 +132,6 @@ export async function POST(req: Request) {
         stadium: "nieuw",
         huidige_eigenaar_type: "matchmaker",
         huidige_eigenaar_user_id: userId,
-        huidige_eigenaar_bondteam: null,
         is_actief: true,
         locked_for_editing: false,
         is_archived: false,
@@ -96,12 +145,13 @@ export async function POST(req: Request) {
       await supabaseAdmin.from("events").delete().eq("id", eventId);
 
       return NextResponse.json(
-        { error: lifecycleError.message || "Aanmaken matchmakings mislukt." },
+        {
+          error: lifecycleError.message || "Aanmaken matchmakings mislukt.",
+        },
         { status: 500 }
       );
     }
 
-    // 3) matchmaker-specifieke record
     const { error: mmError } = await supabaseAdmin
       .from("matchmaker_matchmakings")
       .insert({
@@ -120,18 +170,23 @@ export async function POST(req: Request) {
       });
 
     if (mmError) {
-      console.error("create-matchmaking matchmaker_matchmakings insert error:", mmError);
+      console.error(
+        "create-matchmaking matchmaker_matchmakings insert error:",
+        mmError
+      );
 
       await supabaseAdmin.from("matchmakings").delete().eq("id", matchmakingId);
       await supabaseAdmin.from("events").delete().eq("id", eventId);
 
       return NextResponse.json(
-        { error: mmError.message || "Aanmaken matchmaker_matchmakings mislukt." },
+        {
+          error:
+            mmError.message || "Aanmaken matchmaker_matchmakings mislukt.",
+        },
         { status: 500 }
       );
     }
 
-    // 4) flowlog
     const { error: flowLogError } = await supabaseAdmin
       .from("matchmaking_flow_log")
       .insert({

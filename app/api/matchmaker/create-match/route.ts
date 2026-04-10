@@ -63,6 +63,33 @@ function jsonError(message: string, status = 400, extra?: Record<string, any>) {
   return NextResponse.json({ error: message, ...(extra ?? {}) }, { status });
 }
 
+function keyIns(v: unknown) {
+  const n = toNumber(v);
+  return n == null ? "" : `ins:${n}`;
+}
+
+function keyCtx(v: unknown) {
+  const x = s(v);
+  return x ? `ctx:${x}` : "";
+}
+
+function keyFighter(v: unknown) {
+  const x = s(v);
+  return x ? `fighter:${x}` : "";
+}
+
+function buildParticipantKeys(args: {
+  fighter_context_id?: unknown;
+  inschrijving_id?: unknown;
+  fighter_id?: unknown;
+}) {
+  return [
+    keyCtx(args.fighter_context_id),
+    keyIns(args.inschrijving_id),
+    keyFighter(args.fighter_id),
+  ].filter(Boolean);
+}
+
 async function getUserFromBearer(req: NextRequest) {
   const auth =
     req.headers.get("authorization") || req.headers.get("Authorization") || "";
@@ -138,6 +165,7 @@ async function canAccessMatchmaking(
     s(mmRow?.user_id),
     s(mmRow?.owner_user_id),
     s(mmRow?.uploaded_by),
+    s(mmRow?.matchmaker_id),
   ].filter(Boolean);
 
   if (owners.includes(userId)) return true;
@@ -279,7 +307,11 @@ async function findFighterRecord({
     s(inschrijving?.gym) ||
     null;
 
-  const discipline = s(base?.discipline) || s(inschrijving?.discipline) || null;
+  const discipline =
+    s(base?.discipline) ||
+    s(base?.fp_discipline) ||
+    s(inschrijving?.discipline) ||
+    null;
 
   const klasse =
     s(base?.klasse) ||
@@ -412,9 +444,17 @@ async function ensureScopedControleRunId(matchmakingId: string): Promise<string>
 }
 
 async function fetchEventInfo(matchmakingId: string) {
+  const { data: lifecycleRow, error: lifecycleErr } = await supabaseAdmin
+    .from("matchmakings")
+    .select("id, naam, datum")
+    .eq("id", matchmakingId)
+    .maybeSingle();
+
+  if (lifecycleErr) throw lifecycleErr;
+
   const { data: mmRow, error: mmErr } = await supabaseAdmin
     .from("matchmaker_matchmakings")
-    .select("id, datum, evenement_datum, event_date, gala_date, discipline, sub_discipline")
+    .select("id, naam, datum")
     .eq("id", matchmakingId)
     .maybeSingle();
 
@@ -422,7 +462,7 @@ async function fetchEventInfo(matchmakingId: string) {
 
   const { data: uploadRow, error: uploadErr } = await supabaseAdmin
     .from("matchmaking_uploads")
-    .select("evenement_datum")
+    .select("evenement_naam, evenement_datum")
     .eq("matchmaking_id", matchmakingId)
     .order("uploaded_at", { ascending: false })
     .limit(1)
@@ -431,15 +471,16 @@ async function fetchEventInfo(matchmakingId: string) {
   if (uploadErr) throw uploadErr;
 
   return {
-    evenement_datum:
-      s(mmRow?.evenement_datum) ||
-      s(mmRow?.datum) ||
-      s(mmRow?.event_date) ||
-      s(mmRow?.gala_date) ||
-      s(uploadRow?.evenement_datum) ||
+    evenement_naam:
+      s(lifecycleRow?.naam) ||
+      s(uploadRow?.evenement_naam) ||
+      s(mmRow?.naam) ||
       null,
-    discipline: s(mmRow?.discipline) || null,
-    sub_discipline: s(mmRow?.sub_discipline) || null,
+    evenement_datum:
+      s(lifecycleRow?.datum) ||
+      s(uploadRow?.evenement_datum) ||
+      s(mmRow?.datum) ||
+      null,
   };
 }
 
@@ -450,9 +491,8 @@ function buildScopedCtxRow(args: {
   red: any;
   blue: any;
   eventInfo: {
+    evenement_naam: string | null;
     evenement_datum: string | null;
-    discipline: string | null;
-    sub_discipline: string | null;
   };
 }) {
   const { matchmakingId, inserted, partijNr, red, blue, eventInfo } = args;
@@ -462,10 +502,14 @@ function buildScopedCtxRow(args: {
   const redIns = red?.raw_inschrijving ?? {};
   const blueIns = blue?.raw_inschrijving ?? {};
 
-  const klasseMm = s(inserted?.klasse) || s(red?.klasse) || s(blue?.klasse) || null;
+  const klasseMm =
+    s(inserted?.klasse) ||
+    s(red?.klasse) ||
+    s(blue?.klasse) ||
+    null;
+
   const discipline =
     s(inserted?.discipline) ||
-    eventInfo.discipline ||
     s(red?.discipline) ||
     s(blue?.discipline) ||
     null;
@@ -478,7 +522,7 @@ function buildScopedCtxRow(args: {
     event_date: eventInfo.evenement_datum,
     evenement_datum: eventInfo.evenement_datum,
     discipline,
-    sub_discipline: eventInfo.sub_discipline,
+    sub_discipline: null,
     klasse_mm: klasseMm,
 
     rood_va_mm: s(red?.va_nummer) || null,
@@ -624,6 +668,14 @@ function buildScopedCtxRow(args: {
   };
 }
 
+type DuplicateHit = {
+  existing_bout_id: number | string | null;
+  partij_nr: number | null;
+  fighter_name: string;
+  corner: "rood" | "blauw";
+  matched_key: string;
+};
+
 export async function POST(req: NextRequest) {
   try {
     const { user, error: userError } = await getUserFromBearer(req);
@@ -642,6 +694,9 @@ export async function POST(req: NextRequest) {
     const rood_inschrijving_id = s(body?.rood_inschrijving_id);
     const blauw_inschrijving_id = s(body?.blauw_inschrijving_id);
 
+    const allowDuplicateOverride = body?.allow_duplicate_override === true;
+    const overrideReason = s(body?.override_reason) || null;
+
     if (!matchmakingId) return jsonError("matchmaking_id ontbreekt.");
     if (!rood_fighter_id && !rood_fighter_context_id && !rood_inschrijving_id) {
       return jsonError("Rode vechter ontbreekt.");
@@ -655,6 +710,18 @@ export async function POST(req: NextRequest) {
     if (!allowed) {
       return jsonError("Je hebt geen toegang tot deze matchmaking.", 403);
     }
+
+    await ensureLifecycleRecord(matchmakingId, {
+      bron_type: "matchmaker_app",
+      stadium: "nieuw",
+      huidige_eigenaar_type: "matchmaker",
+      huidige_eigenaar_user_id: user.id,
+      actor_user_id: user.id,
+      actor_role: roles[0] || "matchmaker",
+      opmerking: "Lifecycle record ensured vanuit create-match",
+    }).catch((err) => {
+      console.warn("ensureLifecycleRecord warning:", err);
+    });
 
     const red = await findFighterRecord({
       matchmakingId,
@@ -673,17 +740,17 @@ export async function POST(req: NextRequest) {
     if (!red) return jsonError("Rode vechter niet gevonden.");
     if (!blue) return jsonError("Blauwe vechter niet gevonden.");
 
-    const redKeys = [
-      s(red.fighter_context_id),
-      String(red.inschrijving_id),
-      s(red.fighter_id),
-    ].filter(Boolean);
+    const redKeys = buildParticipantKeys({
+      fighter_context_id: red.fighter_context_id,
+      inschrijving_id: red.inschrijving_id,
+      fighter_id: red.fighter_id,
+    });
 
-    const blueKeys = [
-      s(blue.fighter_context_id),
-      String(blue.inschrijving_id),
-      s(blue.fighter_id),
-    ].filter(Boolean);
+    const blueKeys = buildParticipantKeys({
+      fighter_context_id: blue.fighter_context_id,
+      inschrijving_id: blue.inschrijving_id,
+      fighter_id: blue.fighter_id,
+    });
 
     if (redKeys.some((k) => blueKeys.includes(k))) {
       return jsonError("Rood en blauw mogen niet dezelfde vechter zijn.");
@@ -703,27 +770,82 @@ export async function POST(req: NextRequest) {
 
     const { data: existingBouts, error: existingErr } = await supabaseAdmin
       .from("matchmaker_bouts_raw")
-      .select("id, rood_inschrijving_id, blauw_inschrijving_id, raw")
+      .select(`
+        id,
+        matchmaking_id,
+        partij_nr,
+        rood_inschrijving_id,
+        blauw_inschrijving_id,
+        rood_fighter_id,
+        blauw_fighter_id,
+        rood_fighter_context_id,
+        blauw_fighter_context_id,
+        raw
+      `)
       .eq("matchmaking_id", matchmakingId);
 
     if (existingErr) throw existingErr;
 
+    const duplicateHits: DuplicateHit[] = [];
+
     for (const row of existingBouts ?? []) {
-      const usedKeys = [
-        String(toNumber(row?.rood_inschrijving_id) ?? ""),
-        String(toNumber(row?.blauw_inschrijving_id) ?? ""),
-        s(row?.raw?.rood_fighter_context_id),
-        s(row?.raw?.blauw_fighter_context_id),
-        s(row?.raw?.rood_fighter_id),
-        s(row?.raw?.blauw_fighter_id),
+      const raw = row?.raw ?? {};
+
+      const rowRedKeys = [
+        keyIns(row?.rood_inschrijving_id),
+        keyCtx(row?.rood_fighter_context_id ?? raw?.rood_fighter_context_id),
+        keyFighter(row?.rood_fighter_id ?? raw?.rood_fighter_id),
       ].filter(Boolean);
 
-      if (redKeys.some((k) => usedKeys.includes(k))) {
-        return jsonError(`Vechter ${red.naam} zit al in een partij.`);
+      const rowBlueKeys = [
+        keyIns(row?.blauw_inschrijving_id),
+        keyCtx(row?.blauw_fighter_context_id ?? raw?.blauw_fighter_context_id),
+        keyFighter(row?.blauw_fighter_id ?? raw?.blauw_fighter_id),
+      ].filter(Boolean);
+
+      const rowPartijNr = toNumber(row?.partij_nr) ?? toNumber(raw?.partij_nr);
+
+      const redMatchedKey = redKeys.find(
+        (k) => rowRedKeys.includes(k) || rowBlueKeys.includes(k)
+      );
+      if (redMatchedKey) {
+        duplicateHits.push({
+          existing_bout_id: row?.id ?? null,
+          partij_nr: rowPartijNr,
+          fighter_name: red.naam,
+          corner: "rood",
+          matched_key: redMatchedKey,
+        });
       }
-      if (blueKeys.some((k) => usedKeys.includes(k))) {
-        return jsonError(`Vechter ${blue.naam} zit al in een partij.`);
+
+      const blueMatchedKey = blueKeys.find(
+        (k) => rowRedKeys.includes(k) || rowBlueKeys.includes(k)
+      );
+      if (blueMatchedKey) {
+        duplicateHits.push({
+          existing_bout_id: row?.id ?? null,
+          partij_nr: rowPartijNr,
+          fighter_name: blue.naam,
+          corner: "blauw",
+          matched_key: blueMatchedKey,
+        });
       }
+    }
+
+    if (duplicateHits.length > 0 && !allowDuplicateOverride) {
+      const first = duplicateHits[0];
+
+      return NextResponse.json(
+        {
+          needs_override: true,
+          error:
+            duplicateHits.length === 1
+              ? `${first.fighter_name} zit al in partij ${first.partij_nr ?? "?"} binnen deze matchmaking.`
+              : "Eén of meer vechters zitten al in een andere partij binnen deze matchmaking.",
+          duplicate_hits: duplicateHits,
+        },
+        { status: 409 }
+      );
     }
 
     const partijNr = await getNextPartijNr(matchmakingId);
@@ -760,13 +882,20 @@ export async function POST(req: NextRequest) {
       leeftijdDiffMonths >= 18 &&
       leeftijdDiffMonths < 24;
 
+    const eventInfo = await fetchEventInfo(matchmakingId);
+    const now = new Date().toISOString();
+
     const rawPayload = {
       source: "match_portal",
       created_via: "create-match",
       matchmaking_id: matchmakingId,
+      evenement_naam: eventInfo.evenement_naam,
+      evenement_datum: eventInfo.evenement_datum,
       partij_nr: partijNr,
       requires_dispensatie: requiresDispensatie,
       leeftijdsverschil_maanden: leeftijdDiffMonths,
+      duplicate_override: duplicateHits.length > 0,
+      duplicate_hits: duplicateHits,
 
       rood_fighter_context_id: red.fighter_context_id,
       blauw_fighter_context_id: blue.fighter_context_id,
@@ -806,6 +935,11 @@ export async function POST(req: NextRequest) {
       rood_inschrijving_id: red.inschrijving_id,
       blauw_inschrijving_id: blue.inschrijving_id,
 
+      rood_fighter_id: red.fighter_id || null,
+      blauw_fighter_id: blue.fighter_id || null,
+      rood_fighter_context_id: toNumber(red.fighter_context_id),
+      blauw_fighter_context_id: toNumber(blue.fighter_context_id),
+
       discipline,
       klasse,
       status: requiresDispensatie ? "dispensatie" : "concept",
@@ -825,9 +959,18 @@ export async function POST(req: NextRequest) {
       blauw_gewicht: blue.gewicht,
 
       max_gewicht: maxGewicht,
+      evenement_naam: eventInfo.evenement_naam,
+      evenement_datum: eventInfo.evenement_datum,
 
       created_by: user.id,
+      matchmaker_id: user.id,
       source_match_id: null,
+
+      override_duplicate: duplicateHits.length > 0,
+      override_reason: duplicateHits.length > 0 ? overrideReason : null,
+      override_by: duplicateHits.length > 0 ? user.id : null,
+      override_at: duplicateHits.length > 0 ? now : null,
+
       raw: rawPayload,
     };
 
@@ -840,7 +983,6 @@ export async function POST(req: NextRequest) {
     if (insertErr) throw insertErr;
 
     const controleRunId = await ensureScopedControleRunId(matchmakingId);
-    const eventInfo = await fetchEventInfo(matchmakingId);
 
     const scopedCtxRow = buildScopedCtxRow({
       matchmakingId,
@@ -883,12 +1025,19 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      message: requiresDispensatie
-        ? "Partij opgeslagen. Dispensatie nodig."
-        : "Partij opgeslagen.",
+      message:
+        duplicateHits.length > 0
+          ? requiresDispensatie
+            ? "Partij opgeslagen met override. Dispensatie nodig."
+            : "Partij opgeslagen met override."
+          : requiresDispensatie
+          ? "Partij opgeslagen. Dispensatie nodig."
+          : "Partij opgeslagen.",
       partij_nr: partijNr,
       requires_dispensatie: requiresDispensatie,
       leeftijdsverschil_maanden: leeftijdDiffMonths,
+      duplicate_override: duplicateHits.length > 0,
+      duplicate_hits: duplicateHits,
       bout: inserted,
       rules_hits: ruleHits,
     });

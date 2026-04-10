@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import { requireRole } from "@/lib/api/requireRole";
+import { runOfficialsControlJob } from "@/lib/control/runOfficialsControlJob";
 
 export const runtime = "nodejs";
 
@@ -10,17 +11,125 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
+type MatchmakingRow = {
+  id: string;
+  bondteam: string | null;
+  huidige_eigenaar_type: string | null;
+  huidige_eigenaar_user_id: string | null;
+  huidige_eigenaar_bondteam: string | null;
+  is_actief: boolean | null;
+  is_archived: boolean | null;
+};
+
+type ProfileRow = {
+  id: string;
+  role: string | null;
+  bondteam: string | null;
+};
+
+function norm(v: unknown) {
+  return String(v ?? "").trim().toLowerCase();
+}
+
+async function assertOfficialCanStartMatchmaking(
+  matchmaking_id: string,
+  userId: string,
+  roles: string[]
+) {
+  const normalizedRoles = (roles ?? []).map((r) => norm(r)).filter(Boolean);
+  const isAdmin =
+    normalizedRoles.includes("admin") || normalizedRoles.includes("superadmin");
+
+  const { data: profile, error: profileErr } = await supabase
+    .from("user_profiles")
+    .select("id, role, bondteam")
+    .eq("id", userId)
+    .single<ProfileRow>();
+
+  if (profileErr || !profile) {
+    throw new Error(`Profiel niet gevonden: ${profileErr?.message ?? "onbekend"}`);
+  }
+
+  const { data: mm, error: mmErr } = await supabase
+    .from("matchmakings")
+    .select(
+      "id, bondteam, huidige_eigenaar_type, huidige_eigenaar_user_id, huidige_eigenaar_bondteam, is_actief, is_archived"
+    )
+    .eq("id", matchmaking_id)
+    .single<MatchmakingRow>();
+
+  if (mmErr || !mm) {
+    throw new Error(`Matchmaking niet gevonden: ${mmErr?.message ?? "onbekend"}`);
+  }
+
+  if (isAdmin) return;
+
+  if (mm.is_archived) {
+    throw new Error("Deze matchmaking is gearchiveerd.");
+  }
+
+  if (mm.is_actief === false) {
+    throw new Error("Deze matchmaking is niet actief.");
+  }
+
+  const profileRole = norm(profile.role);
+  const userBondteam = norm(profile.bondteam);
+
+  const ownerType = norm(mm.huidige_eigenaar_type);
+  const ownerUserId = String(mm.huidige_eigenaar_user_id ?? "").trim();
+  const ownerBondteam = norm(mm.huidige_eigenaar_bondteam);
+  const matchmakingBondteam = norm(mm.bondteam);
+
+  const isOfficialRole =
+    profileRole === "official" || profileRole === "hoofdofficial";
+
+  if (!isOfficialRole) {
+    throw new Error(`Geen toegang. Rol ${profile.role ?? ""} is niet toegestaan.`);
+  }
+
+  if (ownerUserId && ownerUserId === userId) {
+    return;
+  }
+
+  const bondteamMatches =
+    userBondteam !== "" &&
+    (
+      (ownerBondteam !== "" && ownerBondteam === userBondteam) ||
+      (matchmakingBondteam !== "" && matchmakingBondteam === userBondteam)
+    );
+
+  const ownerIsOfficialsSide =
+    ownerType === "bondteam" ||
+    ownerType === "official" ||
+    ownerType === "hoofdofficial";
+
+  if (ownerIsOfficialsSide && bondteamMatches) {
+    return;
+  }
+
+  throw new Error("Geen toegang tot deze matchmaking.");
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const matchmaking_id = body?.matchmaking_id as string | undefined;
+    const matchmaking_id = String(body?.matchmaking_id ?? "").trim();
 
     if (!matchmaking_id) {
-      return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
+      return NextResponse.json(
+        { error: "matchmaking_id ontbreekt" },
+        { status: 400 }
+      );
     }
 
-    const { userId, role } = await requireUserWithRole(req);
-    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+    const { userId, roles } = await requireRole(req, [
+      "official",
+      "hoofdofficial",
+      "admin",
+      "superadmin",
+    ]);
+
+    await assertOfficialCanStartMatchmaking(matchmaking_id, userId, roles);
 
     const payload = {
       do_scrape: body?.do_scrape !== false,
@@ -32,6 +141,8 @@ export async function POST(req: Request) {
       fullfighter_timeout_ms: body?.fullfighter_timeout_ms ?? 35000,
       uitslagen_timeout_ms: body?.uitslagen_timeout_ms ?? 90000,
       uitslagen_tries: body?.uitslagen_tries ?? 1,
+      scrape_mode: body?.scrape_mode ?? "auto",
+      reset_before_run: body?.reset_before_run === true,
     };
 
     const { data: inserted, error: insertErr } = await supabase
@@ -39,60 +150,51 @@ export async function POST(req: Request) {
       .insert({
         matchmaking_id,
         requested_by: userId,
-        status: "queued",
+        status: "running",
         payload,
+        started_at: new Date().toISOString(),
       })
       .select("*")
       .single();
 
     if (insertErr) {
-      if (insertErr.code === "23505") {
-        const { data: existing } = await supabase
-          .from("official_control_queue")
-          .select("id, status, created_at, started_at, controle_run_id")
-          .eq("matchmaking_id", matchmaking_id)
-          .in("status", ["queued", "running"])
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        return NextResponse.json({
-          ok: true,
-          queued: false,
-          already_exists: true,
-          message: "Voor deze matchmaking staat al een officials-controle in de wachtrij of draait er al één.",
-          existing_job: existing?.[0] ?? null,
-        });
-      }
-
-      throw insertErr;
+      throw new Error(
+        `Insert official_control_queue mislukt: ${insertErr.message} (${insertErr.code ?? "geen code"})`
+      );
     }
 
-    const baseUrl =
-      process.env.INTERNAL_BASE_URL ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      "http://localhost:3000";
-
-    fetch(`${baseUrl}/api/officials/queue/run-next`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-officials-queue-secret": process.env.OFFICIALS_QUEUE_SECRET || "",
-      },
-      body: JSON.stringify({ trigger: "officials-start" }),
-    }).catch(() => {});
+    const result = await runOfficialsControlJob({
+      queueJobId: inserted.id,
+      matchmaking_id,
+      payload,
+    });
 
     return NextResponse.json({
       ok: true,
-      queued: true,
-      message: "Officials-controle toegevoegd aan wachtrij.",
+      queued: false,
+      started_directly: true,
       job_id: inserted.id,
-      status: inserted.status,
       matchmaking_id,
+      result,
     });
   } catch (err: any) {
+    if (err instanceof Response) return err;
+
+    const message = String(err?.message ?? "Onbekende fout");
+    const lowered = message.toLowerCase();
+
     return NextResponse.json(
-      { error: err?.message ?? "Onbekende fout" },
-      { status: 500 }
+      { error: message },
+      {
+        status:
+          lowered.includes("geen toegang")
+            ? 403
+            : lowered.includes("niet ingelogd")
+            ? 401
+            : lowered.includes("ontbreekt")
+            ? 400
+            : 500,
+      }
     );
   }
 }

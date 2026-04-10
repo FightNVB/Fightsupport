@@ -20,15 +20,6 @@ const NVB_ORANGE = "#ff4d00";
 
 type AnyRow = Record<string, any>;
 
-type ControleRun = {
-  id: string;
-  matchmaking_id: string;
-  status: string;
-  gestart_op: string | null;
-  afgerond_op: string | null;
-  run_type: string | null;
-};
-
 type PartijStatus = "afgekeurd" | "dispensatie" | "actie" | "ok" | "geen_info";
 
 type ResRow = {
@@ -62,7 +53,7 @@ function formatDateNl(d?: any): string {
   if (!dt) {
     const raw = String(d ?? "").trim();
     if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) return raw;
-    return raw;
+    return raw || "-";
   }
   const dd = String(dt.getDate()).padStart(2, "0");
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
@@ -78,46 +69,19 @@ function calcAgeYearsOnDate(eventDate: Date, birthDate: Date): number | null {
   return years;
 }
 
-function ageAtEvent(ctx: AnyRow, side: "rood" | "blauw"): string {
-  const event = parseISODateOnly(
-    ctx?.evenement_datum ?? ctx?.event_datum ?? ctx?.datum ?? null
-  );
-  const birth = parseISODateOnly(
-    ctx?.[`${side}_geboortedatum_fp`] ??
-      ctx?.[`${side}_geboortedatum_mm`] ??
-      ctx?.[`${side}_geboortedatum`] ??
-      null
-  );
-  if (!event || !birth) return "-";
-  const years = calcAgeYearsOnDate(event, birth);
-  return years == null ? "-" : String(years);
-}
-
-function ageAtEventNumber(ctx: AnyRow, side: "rood" | "blauw"): number | null {
-  const event = parseISODateOnly(
-    ctx?.evenement_datum ?? ctx?.event_datum ?? ctx?.datum ?? null
-  );
-  const birth = parseISODateOnly(
-    ctx?.[`${side}_geboortedatum_fp`] ??
-      ctx?.[`${side}_geboortedatum_mm`] ??
-      ctx?.[`${side}_geboortedatum`] ??
-      null
-  );
-  if (!event || !birth) return null;
-  return calcAgeYearsOnDate(event, birth);
-}
-
-function minAgeAtEvent(ctx: AnyRow): number {
-  const rood = ageAtEventNumber(ctx, "rood");
-  const blauw = ageAtEventNumber(ctx, "blauw");
-  const nums = [rood, blauw].filter((x): x is number => x != null && Number.isFinite(x));
-  if (!nums.length) return 999;
-  return Math.min(...nums);
-}
-
 function safeText(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
   return s.length ? s : fallback;
+}
+
+function parseNumberish(v: any): number | null {
+  if (v == null) return null;
+  const s = String(v).trim().replace(",", ".");
+  if (!s) return null;
+  const m = s.match(/-?\d+(\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
 }
 
 function licenseValueToOk(v: any): boolean | null {
@@ -127,8 +91,11 @@ function licenseValueToOk(v: any): boolean | null {
   const s = String(v).trim().toLowerCase();
   if (!s) return null;
   if (["ja", "yes", "true", "geldig", "ok", "actief", "active"].includes(s)) return true;
-  if (["nee", "no", "false", "ongeldig", "verlopen", "niet", "inactive", "inactief"].includes(s))
+  if (
+    ["nee", "no", "false", "ongeldig", "verlopen", "niet", "inactive", "inactief"].includes(s)
+  ) {
     return false;
+  }
   if (s.includes("valid") || s.includes("geldig") || s.includes("ok")) return true;
   if (s.includes("invalid") || s.includes("ongeldig") || s.includes("verlop")) return false;
   return null;
@@ -248,150 +215,6 @@ function isLicentieRow(r: ResRow) {
   return hay.includes("licentie") || hay.includes("license");
 }
 
-function HeaderBadge({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "blue" | "purple";
-}) {
-  const cls =
-    tone === "red"
-      ? "bg-red-500 text-zinc-900"
-      : tone === "yellow"
-      ? "bg-yellow-300 text-black"
-      : tone === "orange"
-      ? "bg-orange-600 text-zinc-900"
-      : tone === "green"
-      ? "bg-green-500 text-zinc-900"
-      : tone === "blue"
-      ? "bg-blue-700 text-white"
-      : tone === "purple"
-      ? "bg-purple-700 text-white"
-      : tone === "white"
-      ? "bg-white/90 text-black"
-      : "bg-gray-500 text-zinc-900";
-
-  return (
-    <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${cls}`}>
-      <span>{label}</span>
-      <span className="tabular-nums">{value}</span>
-    </span>
-  );
-}
-
-function Chip({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "purple" | "blue";
-}) {
-  const cls =
-    tone === "red"
-      ? "bg-red-500 text-zinc-900"
-      : tone === "yellow"
-      ? "bg-yellow-300 text-black"
-      : tone === "orange"
-      ? "bg-orange-600 text-zinc-900"
-      : tone === "green"
-      ? "bg-green-500 text-zinc-900"
-      : tone === "purple"
-      ? "bg-purple-700 text-white"
-      : tone === "blue"
-      ? "bg-blue-700 text-white"
-      : tone === "white"
-      ? "bg-white/90 text-black"
-      : "bg-gray-500 text-zinc-900";
-
-  return (
-    <span className={`px-2 py-1 rounded text-[11px] font-extrabold ${cls}`}>
-      {label}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: PartijStatus }) {
-  if (status === "afgekeurd") return <Chip label="AFKEUR" tone="red" />;
-  if (status === "dispensatie") return <Chip label="DISPENSATIE" tone="orange" />;
-  if (status === "actie") return <Chip label="ACTIE" tone="yellow" />;
-  if (status === "ok") return <Chip label="OK" tone="green" />;
-  return <Chip label="GEEN INFO" tone="white" />;
-}
-
-function FilterButton({
-  label,
-  active,
-  onClick,
-  count,
-  tone,
-  disabled,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  count: number;
-  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "neutral" | "purple" | "blue";
-  disabled?: boolean;
-}) {
-  const base =
-    "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-extrabold border transition";
-
-  const activeCls =
-    tone === "red"
-      ? "bg-red-500 text-zinc-900 border-red-500"
-      : tone === "yellow"
-      ? "bg-yellow-300 text-black border-yellow-300"
-      : tone === "orange"
-      ? "bg-orange-600 text-zinc-900 border-orange-600"
-      : tone === "green"
-      ? "bg-green-500 text-zinc-900 border-green-500"
-      : tone === "purple"
-      ? "bg-purple-700 text-white border-purple-700"
-      : tone === "blue"
-      ? "bg-blue-700 text-white border-blue-700"
-      : tone === "white"
-      ? "bg-white text-black border-white"
-      : tone === "gray"
-      ? "bg-gray-500 text-zinc-900 border-gray-500"
-      : "bg-zinc-100 text-zinc-900 border-zinc-300";
-
-  const inactiveCls =
-    tone === "red"
-      ? "bg-white text-red-700 border-red-500/60 hover:bg-red-500/15"
-      : tone === "yellow"
-      ? "bg-white text-yellow-800 border-yellow-300/70 hover:bg-yellow-300/15"
-      : tone === "orange"
-      ? "bg-white text-orange-800 border-orange-500/70 hover:bg-orange-500/15"
-      : tone === "green"
-      ? "bg-white text-green-800 border-green-500/60 hover:bg-green-500/15"
-      : tone === "purple"
-      ? "bg-white text-purple-700 border-purple-700/60 hover:bg-purple-700/15"
-      : tone === "blue"
-      ? "bg-white text-blue-700 border-blue-500/60 hover:bg-blue-500/15"
-      : tone === "white"
-      ? "bg-white text-zinc-900 border-zinc-400 hover:bg-zinc-100"
-      : tone === "gray"
-      ? "bg-white text-slate-700 border-gray-500/60 hover:bg-gray-500/15"
-      : "bg-white text-zinc-900 border-zinc-300 hover:bg-white";
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!!disabled}
-      className={`${base} ${active ? activeCls : inactiveCls} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-    >
-      <span>{label}</span>
-      <span className={`tabular-nums px-2 py-0.5 rounded-full ${active ? "bg-white" : "bg-zinc-100"}`}>
-        {count}
-      </span>
-    </button>
-  );
-}
-
 function isVerbodRow(r: ResRow) {
   const code = String(r.rule_code ?? "").toUpperCase();
   const rule = String(r.rule ?? "").toUpperCase();
@@ -480,7 +303,7 @@ function buildGalaDuurSamenvatting(runMeldingen: ResRow[]) {
 
   let extra = "";
   if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
-  else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
+  else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Hoofdofficial of admin-goedkeuring nodig.";
   else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
 
   const q = formatQuarterHoursFromMinutes(mins);
@@ -514,7 +337,7 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[]): ResRow[] {
         overMax
           ? "Overschrijdt max 8.5 uur — AFKEUR."
           : needsApproval
-          ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
+          ? "Boven 6.5 uur — goedkeuring nodig."
           : "Binnen 6.5 uur (geen goedkeuring nodig)."
       }`
     : sum?.text ?? galaRows.find((r) => r?.boodschap)?.boodschap ?? "";
@@ -531,6 +354,150 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[]): ResRow[] {
   return [merged, ...rest];
 }
 
+function HeaderBadge({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "blue" | "purple";
+}) {
+  const cls =
+    tone === "red"
+      ? "bg-red-500 text-zinc-900"
+      : tone === "yellow"
+      ? "bg-yellow-300 text-black"
+      : tone === "orange"
+      ? "bg-orange-600 text-zinc-900"
+      : tone === "green"
+      ? "bg-green-500 text-zinc-900"
+      : tone === "blue"
+      ? "bg-blue-700 text-white"
+      : tone === "purple"
+      ? "bg-purple-700 text-white"
+      : tone === "white"
+      ? "bg-white/90 text-black"
+      : "bg-gray-500 text-zinc-900";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${cls}`}
+    >
+      <span>{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </span>
+  );
+}
+
+function Chip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "purple" | "blue";
+}) {
+  const cls =
+    tone === "red"
+      ? "bg-red-500 text-zinc-900"
+      : tone === "yellow"
+      ? "bg-yellow-300 text-black"
+      : tone === "orange"
+      ? "bg-orange-600 text-zinc-900"
+      : tone === "green"
+      ? "bg-green-500 text-zinc-900"
+      : tone === "purple"
+      ? "bg-purple-700 text-white"
+      : tone === "blue"
+      ? "bg-blue-700 text-white"
+      : tone === "white"
+      ? "bg-white/90 text-black"
+      : "bg-gray-500 text-zinc-900";
+
+  return <span className={`px-2 py-1 rounded text-[11px] font-extrabold ${cls}`}>{label}</span>;
+}
+
+function StatusBadge({ status }: { status: PartijStatus }) {
+  if (status === "afgekeurd") return <Chip label="AFKEUR" tone="red" />;
+  if (status === "dispensatie") return <Chip label="DISPENSATIE" tone="orange" />;
+  if (status === "actie") return <Chip label="ACTIE" tone="yellow" />;
+  if (status === "ok") return <Chip label="OK" tone="green" />;
+  return <Chip label="GEEN INFO" tone="white" />;
+}
+
+function FilterButton({
+  label,
+  active,
+  onClick,
+  count,
+  tone,
+  disabled,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  count: number;
+  tone: "red" | "yellow" | "orange" | "gray" | "green" | "white" | "neutral" | "purple" | "blue";
+  disabled?: boolean;
+}) {
+  const base =
+    "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-extrabold border transition";
+
+  const activeCls =
+    tone === "red"
+      ? "bg-red-500 text-zinc-900 border-red-500"
+      : tone === "yellow"
+      ? "bg-yellow-300 text-black border-yellow-300"
+      : tone === "orange"
+      ? "bg-orange-600 text-zinc-900 border-orange-600"
+      : tone === "green"
+      ? "bg-green-500 text-zinc-900 border-green-500"
+      : tone === "purple"
+      ? "bg-purple-700 text-white border-purple-700"
+      : tone === "blue"
+      ? "bg-blue-700 text-white border-blue-700"
+      : tone === "white"
+      ? "bg-white text-black border-white"
+      : tone === "gray"
+      ? "bg-gray-500 text-zinc-900 border-gray-500"
+      : "bg-zinc-100 text-zinc-900 border-zinc-300";
+
+  const inactiveCls =
+    tone === "red"
+      ? "bg-white text-red-700 border-red-500/60 hover:bg-red-500/15"
+      : tone === "yellow"
+      ? "bg-white text-yellow-800 border-yellow-300/70 hover:bg-yellow-300/15"
+      : tone === "orange"
+      ? "bg-white text-orange-800 border-orange-500/70 hover:bg-orange-500/15"
+      : tone === "green"
+      ? "bg-white text-green-800 border-green-500/60 hover:bg-green-500/15"
+      : tone === "purple"
+      ? "bg-white text-purple-700 border-purple-700/60 hover:bg-purple-700/15"
+      : tone === "blue"
+      ? "bg-white text-blue-700 border-blue-500/60 hover:bg-blue-500/15"
+      : tone === "white"
+      ? "bg-white text-zinc-900 border-zinc-400 hover:bg-zinc-100"
+      : tone === "gray"
+      ? "bg-white text-slate-700 border-gray-500/60 hover:bg-gray-500/15"
+      : "bg-white text-zinc-900 border-zinc-300 hover:bg-white";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!!disabled}
+      className={`${base} ${active ? activeCls : inactiveCls} ${
+        disabled ? "opacity-50 cursor-not-allowed" : ""
+      }`}
+    >
+      <span>{label}</span>
+      <span className={`tabular-nums px-2 py-0.5 rounded-full ${active ? "bg-white" : "bg-zinc-100"}`}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
 function DarkActionButton({
   label,
   onClick,
@@ -540,7 +507,7 @@ function DarkActionButton({
 }: {
   label: string;
   onClick: () => void;
-  tone?: "orange" | "green" | "purple" | "red" | "silver";
+  tone?: "orange" | "green" | "purple" | "red" | "silver" | "blue";
   title?: string;
   disabled?: boolean;
 }) {
@@ -551,6 +518,8 @@ function DarkActionButton({
       ? "rgba(147,51,234,0.85)"
       : tone === "red"
       ? "rgba(239,68,68,0.85)"
+      : tone === "blue"
+      ? "rgba(37,99,235,0.85)"
       : tone === "silver"
       ? "rgba(220,220,220,0.70)"
       : "rgba(255,77,0,0.85)";
@@ -611,36 +580,21 @@ function Field({
 }
 
 function getStableRowKey(r: AnyRow): string {
-  if (typeof r?.id === "string" && r.id.trim()) return `ctx-${r.id.trim()}`;
-  if (typeof r?.bout_id === "string" && r.bout_id.trim()) return `bout-${r.bout_id.trim()}`;
-  if (typeof r?.matchmaker_bout_id === "string" && r.matchmaker_bout_id.trim())
+  if (typeof r?.id === "string" && r.id.trim()) return `bout-${r.id.trim()}`;
+  if (typeof r?.matchmaker_bout_id === "string" && r.matchmaker_bout_id.trim()) {
     return `mmb-${r.matchmaker_bout_id.trim()}`;
-  if (typeof r?.raw_bout_id === "string" && r.raw_bout_id.trim()) return `raw-${r.raw_bout_id.trim()}`;
-  if (typeof r?.source_bout_id === "string" && r.source_bout_id.trim())
-    return `src-${r.source_bout_id.trim()}`;
+  }
+  if (typeof r?.source_matchmaker_bout_id === "string" && r.source_matchmaker_bout_id.trim()) {
+    return `src-${r.source_matchmaker_bout_id.trim()}`;
+  }
   return `partij-${String(r?.partij_nr ?? Math.random())}`;
 }
 
-function getControleContextId(r: AnyRow): string | null {
-  if (typeof r?.id === "string" && r.id.trim()) return r.id.trim();
-  return null;
-}
-
 function getBoutIdForReorder(r: AnyRow): string | null {
-  const candidates = [
-    r?.matchmaker_bout_id,
-    r?.bout_id,
-    r?.raw_bout_id,
-    r?.source_bout_id,
-    r?.id,
-  ];
-
+  const candidates = [r?.id, r?.matchmaker_bout_id, r?.source_matchmaker_bout_id];
   for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
   }
-
   return null;
 }
 
@@ -651,22 +605,12 @@ function arrayMove<T>(list: T[], from: number, to: number): T[] {
   return copy;
 }
 
-function toNumberLoose(v: any): number | null {
-  if (v == null) return null;
-  const s = String(v).trim().replace(",", ".");
-  if (!s) return null;
-  const m = s.match(/-?\d+(\.\d+)?/);
-  if (!m) return null;
-  const n = Number(m[0]);
-  return Number.isFinite(n) ? n : null;
-}
-
 function getBoutWeightForSort(r: AnyRow): number {
-  const maxKg = toNumberLoose(r?.max_gewicht);
+  const maxKg = parseNumberish(r?.max_gewicht);
   if (maxKg != null) return maxKg;
 
-  const rood = toNumberLoose(r?.rood_gewicht);
-  const blauw = toNumberLoose(r?.blauw_gewicht);
+  const rood = parseNumberish(r?.rood_gewicht);
+  const blauw = parseNumberish(r?.blauw_gewicht);
 
   if (rood != null && blauw != null) return Math.max(rood, blauw);
   if (rood != null) return rood;
@@ -676,14 +620,48 @@ function getBoutWeightForSort(r: AnyRow): number {
 
 function klasseRank(raw: any): number {
   const s = String(raw ?? "").trim().toUpperCase();
-
   if (!s) return 999;
   if (s.includes("N")) return 1;
   if (s.includes("C")) return 2;
   if (s.includes("B")) return 3;
   if (s.includes("A")) return 4;
-
   return 999;
+}
+
+function eventDateFromRow(ctx: AnyRow): Date | null {
+  return parseISODateOnly(ctx?.evenement_datum ?? ctx?.event_datum ?? ctx?.datum ?? null);
+}
+
+function getBirthDateFromRow(ctx: AnyRow, side: "rood" | "blauw"): Date | null {
+  return parseISODateOnly(
+    ctx?.[`${side}_geboortedatum_fp`] ??
+      ctx?.[`${side}_geboortedatum_mm`] ??
+      ctx?.[`${side}_geboortedatum`] ??
+      null
+  );
+}
+
+function ageAtEvent(ctx: AnyRow, side: "rood" | "blauw"): string {
+  const event = eventDateFromRow(ctx);
+  const birth = getBirthDateFromRow(ctx, side);
+  if (!event || !birth) return "-";
+  const years = calcAgeYearsOnDate(event, birth);
+  return years == null ? "-" : String(years);
+}
+
+function ageAtEventNumber(ctx: AnyRow, side: "rood" | "blauw"): number | null {
+  const event = eventDateFromRow(ctx);
+  const birth = getBirthDateFromRow(ctx, side);
+  if (!event || !birth) return null;
+  return calcAgeYearsOnDate(event, birth);
+}
+
+function minAgeAtEvent(ctx: AnyRow): number {
+  const rood = ageAtEventNumber(ctx, "rood");
+  const blauw = ageAtEventNumber(ctx, "blauw");
+  const nums = [rood, blauw].filter((x): x is number => x != null && Number.isFinite(x));
+  if (!nums.length) return 999;
+  return Math.min(...nums);
 }
 
 function autoSortLineupRows(input: AnyRow[]): AnyRow[] {
@@ -691,7 +669,8 @@ function autoSortLineupRows(input: AnyRow[]): AnyRow[] {
     const ageDiff = minAgeAtEvent(a) - minAgeAtEvent(b);
     if (ageDiff !== 0) return ageDiff;
 
-    const klasseDiff = klasseRank(a?.klasse_mm ?? a?.klasse) - klasseRank(b?.klasse_mm ?? b?.klasse);
+    const klasseDiff =
+      klasseRank(a?.klasse_mm ?? a?.klasse) - klasseRank(b?.klasse_mm ?? b?.klasse);
     if (klasseDiff !== 0) return klasseDiff;
 
     const weightDiff = getBoutWeightForSort(a) - getBoutWeightForSort(b);
@@ -703,6 +682,165 @@ function autoSortLineupRows(input: AnyRow[]): AnyRow[] {
   });
 }
 
+function normalizeVaKey(v: any): string {
+  return String(v ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function createMergedBoutRow(bout: AnyRow, fighterRows: AnyRow[]): AnyRow {
+  const result: AnyRow = { ...bout };
+
+  const byId = new Map<string, AnyRow>();
+  const byVa = new Map<string, AnyRow>();
+
+  for (const fr of fighterRows) {
+    const fighterId = String(fr?.fighter_id ?? fr?.id ?? "").trim();
+    if (fighterId) {
+      if (!byId.has(fighterId)) byId.set(fighterId, fr);
+    }
+
+    const vaCandidates = [
+      fr?.va_nummer,
+      fr?.va_number,
+      fr?.va,
+      fr?.va_nr,
+      fr?.licentie_nummer,
+      fr?.fighter_va,
+      fr?.fp_nummer,
+    ];
+
+    for (const candidate of vaCandidates) {
+      const key = normalizeVaKey(candidate);
+      if (key && !byVa.has(key)) {
+        byVa.set(key, fr);
+      }
+    }
+  }
+
+  function findFighter(side: "rood" | "blauw") {
+    const idCandidates = [
+      result?.[`${side}_fighter_id`],
+      result?.[`${side}_fighter_uuid`],
+      result?.[`${side}_id`],
+    ]
+      .map((x: any) => String(x ?? "").trim())
+      .filter(Boolean);
+
+    for (const id of idCandidates) {
+      const hit = byId.get(id);
+      if (hit) return hit;
+    }
+
+    const vaCandidates = [
+      result?.[`${side}_va_mm`],
+      result?.[`${side}_va`],
+      side === "rood" ? result?.va_rood : result?.va_blauw,
+      result?.[`${side}_fp_nummer`],
+      result?.[`${side}_licentie_nummer`],
+    ];
+
+    for (const candidate of vaCandidates) {
+      const hit = byVa.get(normalizeVaKey(candidate));
+      if (hit) return hit;
+    }
+
+    return null;
+  }
+
+  const rood = findFighter("rood");
+  const blauw = findFighter("blauw");
+
+  function mergeSide(side: "rood" | "blauw", fr: AnyRow | null) {
+    if (!fr) return;
+
+    const mapEntries: Array<[string, any]> = [
+      [`${side}_naam_fp`, fr?.naam ?? fr?.full_name ?? fr?.fighter_name ?? fr?.name ?? null],
+      [`${side}_naam_mm`, fr?.naam ?? fr?.full_name ?? fr?.fighter_name ?? fr?.name ?? null],
+      [`${side}_gym_fp`, fr?.gym ?? fr?.sportschool ?? fr?.club ?? fr?.team ?? null],
+      [`${side}_gym_mm`, fr?.gym ?? fr?.sportschool ?? fr?.club ?? fr?.team ?? null],
+      [
+        `${side}_geboortedatum_fp`,
+        fr?.geboortedatum ?? fr?.birth_date ?? fr?.dob ?? fr?.date_of_birth ?? null,
+      ],
+      [
+        `${side}_licentie`,
+        fr?.licentie ?? fr?.license ?? fr?.licentie_status ?? fr?.license_status ?? null,
+      ],
+      [
+        `${side}_licentie_ok`,
+        fr?.licentie_ok ?? fr?.license_ok ?? fr?.licentie_geldig ?? fr?.license_valid ?? null,
+      ],
+      [
+        `${side}_startverbod`,
+        fr?.startverbod ?? fr?.verbod ?? fr?.niet_starten ?? fr?.suspension ?? null,
+      ],
+      [
+        `${side}_geslacht`,
+        fr?.geslacht ?? fr?.gender ?? fr?.sex ?? null,
+      ],
+    ];
+
+    for (const [key, value] of mapEntries) {
+      if (
+        (result?.[key] == null || String(result?.[key]).trim() === "") &&
+        value != null &&
+        String(value).trim() !== ""
+      ) {
+        result[key] = value;
+      }
+    }
+  }
+
+  mergeSide("rood", rood);
+  mergeSide("blauw", blauw);
+
+  return result;
+}
+
+function renumberPreviewRows(input: AnyRow[]): AnyRow[] {
+  return input.map((row, index) => ({ ...row, __preview_partij_nr: index + 1 }));
+}
+
+function swapBoutCornersLocal(row: AnyRow): AnyRow {
+  const swapped: AnyRow = { ...row };
+
+  const pairs: Array<[string, string]> = [
+    ["rood_naam", "blauw_naam"],
+    ["rood_naam_mm", "blauw_naam_mm"],
+    ["rood_naam_fp", "blauw_naam_fp"],
+    ["rood_gym", "blauw_gym"],
+    ["rood_gym_mm", "blauw_gym_mm"],
+    ["rood_gym_fp", "blauw_gym_fp"],
+    ["rood_va", "blauw_va"],
+    ["rood_va_mm", "blauw_va_mm"],
+    ["va_rood", "va_blauw"],
+    ["rood_gewicht", "blauw_gewicht"],
+    ["rood_fighter_id", "blauw_fighter_id"],
+    ["rood_fighter_uuid", "blauw_fighter_uuid"],
+    ["rood_id", "blauw_id"],
+    ["rood_geboortedatum", "blauw_geboortedatum"],
+    ["rood_geboortedatum_mm", "blauw_geboortedatum_mm"],
+    ["rood_geboortedatum_fp", "blauw_geboortedatum_fp"],
+    ["rood_licentie", "blauw_licentie"],
+    ["rood_licentie_ok", "blauw_licentie_ok"],
+    ["rood_startverbod", "blauw_startverbod"],
+    ["rood_geslacht", "blauw_geslacht"],
+    ["rood_klasse", "blauw_klasse"],
+    ["rood_record", "blauw_record"],
+  ];
+
+  for (const [a, b] of pairs) {
+    const temp = swapped[a];
+    swapped[a] = swapped[b];
+    swapped[b] = temp;
+  }
+
+  swapped.__swapped = !swapped.__swapped;
+  return swapped;
+}
+
 export default function MatchmakerMatchmakingPage() {
   const params = useParams();
   const router = useRouter();
@@ -711,15 +849,16 @@ export default function MatchmakerMatchmakingPage() {
   const [reloadTick, setReloadTick] = useState(0);
 
   const [loading, setLoading] = useState(true);
-  const [run, setRun] = useState<ControleRun | null>(null);
 
   const [evenementNaam, setEvenementNaam] = useState<string | null>(null);
   const [evenementDatum, setEvenementDatum] = useState<string | null>(null);
+  const [bondteam, setBondteam] = useState<string | null>(null);
+  const [stadium, setStadium] = useState<string | null>(null);
+  const [ownerType, setOwnerType] = useState<string | null>(null);
 
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [lineupMode, setLineupMode] = useState(false);
   const [orderedRows, setOrderedRows] = useState<AnyRow[]>([]);
-  const [dragId, setDragId] = useState<string | null>(null);
   const [saveOrderBusy, setSaveOrderBusy] = useState(false);
 
   const [statusByPartij, setStatusByPartij] = useState<Record<number, PartijStatus>>({});
@@ -733,7 +872,9 @@ export default function MatchmakerMatchmakingPage() {
   const [dispRequestByPartij, setDispRequestByPartij] = useState<Record<number, boolean>>({});
   const [dispResultaatByPartij, setDispResultaatByPartij] = useState<Record<number, boolean>>({});
   const [countByPartij, setCountByPartij] = useState<Record<number, number>>({});
-  const [licentieStatusByPartij, setLicentieStatusByPartij] = useState<Record<number, "ok" | "issue">>({});
+  const [licentieStatusByPartij, setLicentieStatusByPartij] = useState<
+    Record<number, "ok" | "issue">
+  >({});
 
   const [verbodByPartij, setVerbodByPartij] = useState<Record<number, boolean>>({});
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -765,9 +906,9 @@ export default function MatchmakerMatchmakingPage() {
   const subtitle = useMemo(() => {
     const naam = (evenementNaam ?? "").trim();
     const datum = formatDateNl(evenementDatum);
-    if (naam && datum) return `${naam} ${datum}`;
+    if (naam && datum && datum !== "-") return `${naam} ${datum}`;
     if (naam) return naam;
-    if (datum) return datum;
+    if (datum && datum !== "-") return datum;
     return "-";
   }, [evenementNaam, evenementDatum]);
 
@@ -781,36 +922,40 @@ export default function MatchmakerMatchmakingPage() {
     []
   );
 
-  function openReportHtml() {
-    router.push(`/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/rapport`);
-  }
-
-  function openExcel() {
-    window.open(`/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
-  }
-
-  function openLineupExcel() {
-    window.open(`/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
-  }
-
-  function openSportdataCsv() {
-    window.open(`/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
+  function openLineupPdf() {
+    window.open(`/api/rapport/lineup-pdf?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "_blank");
   }
 
   function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
     const sorted = [...nextRows].sort(
       (a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0)
     );
-    setOrderedRows(sorted);
+    setOrderedRows(renumberPreviewRows(sorted));
   }
 
   function movePartij(fromIndex: number, toIndex: number) {
     if (toIndex < 0 || toIndex >= orderedRows.length) return;
-    setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
+    setOrderedRows((prev) => renumberPreviewRows(arrayMove(prev, fromIndex, toIndex)));
+  }
+
+  function movePartijToIndex(fromIndex: number, targetVisualNr: number) {
+    if (!Number.isFinite(targetVisualNr)) return;
+    const toIndex = Math.max(0, Math.min(orderedRows.length - 1, targetVisualNr - 1));
+    if (fromIndex === toIndex) return;
+    setOrderedRows((prev) => renumberPreviewRows(arrayMove(prev, fromIndex, toIndex)));
+  }
+
+  function swapCorners(rowKey: string) {
+    setOrderedRows((prev) =>
+      renumberPreviewRows(
+        prev.map((row) => (getStableRowKey(row) === rowKey ? swapBoutCornersLocal(row) : row))
+      )
+    );
+    setMsg("✅ Hoeken lokaal gewisseld. Sla de lineup op om dit vast te leggen.");
   }
 
   function applyAutoLineup() {
-    setOrderedRows(autoSortLineupRows(orderedRows));
+    setOrderedRows(renumberPreviewRows(autoSortLineupRows(orderedRows)));
     setMsg(
       "✅ Lineup automatisch gesorteerd op jongste eerst, daarna klasse N → C → B → A, daarna gewicht."
     );
@@ -818,16 +963,19 @@ export default function MatchmakerMatchmakingPage() {
 
   function getVisualPartijNr(row: AnyRow, indexInView: number) {
     if (!lineupMode) return Number(row?.partij_nr ?? indexInView + 1);
-    return indexInView + 1;
+    return Number(row?.__preview_partij_nr ?? indexInView + 1);
   }
 
   function hasOrderChanges() {
     if (orderedRows.length !== rows.length) return false;
+
     for (let i = 0; i < orderedRows.length; i += 1) {
       const visualNr = i + 1;
       const currentNr = Number(orderedRows[i]?.partij_nr ?? 0);
       if (currentNr !== visualNr) return true;
+      if (orderedRows[i]?.__swapped) return true;
     }
+
     return false;
   }
 
@@ -841,7 +989,6 @@ export default function MatchmakerMatchmakingPage() {
     }
 
     const items = orderedRows.map((r, index) => ({
-      ctx_row_id: getControleContextId(r),
       bout_id: getBoutIdForReorder(r),
       old_partij_nr:
         typeof r?.partij_nr === "number"
@@ -850,9 +997,28 @@ export default function MatchmakerMatchmakingPage() {
           ? Number(r.partij_nr.trim())
           : null,
       partij_nr: index + 1,
+      swapped: !!r?.__swapped,
+      rood_naam: r?.rood_naam ?? null,
+      rood_naam_mm: r?.rood_naam_mm ?? null,
+      rood_gym: r?.rood_gym ?? null,
+      rood_gym_mm: r?.rood_gym_mm ?? null,
+      rood_va: r?.rood_va ?? null,
+      rood_va_mm: r?.rood_va_mm ?? null,
+      va_rood: r?.va_rood ?? null,
+      rood_gewicht: r?.rood_gewicht ?? null,
+      rood_fighter_id: r?.rood_fighter_id ?? null,
+      blauw_naam: r?.blauw_naam ?? null,
+      blauw_naam_mm: r?.blauw_naam_mm ?? null,
+      blauw_gym: r?.blauw_gym ?? null,
+      blauw_gym_mm: r?.blauw_gym_mm ?? null,
+      blauw_va: r?.blauw_va ?? null,
+      blauw_va_mm: r?.blauw_va_mm ?? null,
+      va_blauw: r?.va_blauw ?? null,
+      blauw_gewicht: r?.blauw_gewicht ?? null,
+      blauw_fighter_id: r?.blauw_fighter_id ?? null,
     }));
 
-    const invalid = items.find((x) => !x.ctx_row_id && !x.bout_id && x.old_partij_nr == null);
+    const invalid = items.find((x) => !x.bout_id && x.old_partij_nr == null);
     if (invalid) {
       setError("Niet alle partijen hebben een geldige bronkoppeling voor reorder.");
       return;
@@ -876,9 +1042,9 @@ export default function MatchmakerMatchmakingPage() {
       });
 
       const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.error ?? "Volgorde opslaan mislukt.");
+      if (!resp.ok) throw new Error(json?.error ?? "Lineup opslaan mislukt.");
 
-      setMsg("✅ Lineup opgeslagen. Volgorde en partijnummers zijn aangepast.");
+      setMsg("✅ Lineup opgeslagen. Volgorde, partijnummers en hoekwissels zijn aangepast.");
       setLineupMode(false);
       setReloadTick((x) => x + 1);
     } catch (e: any) {
@@ -891,7 +1057,6 @@ export default function MatchmakerMatchmakingPage() {
   function cancelLineupMode() {
     setLineupMode(false);
     syncOrderedRowsFromRows(rows);
-    setDragId(null);
   }
 
   async function addPartijSubmit() {
@@ -1011,7 +1176,6 @@ export default function MatchmakerMatchmakingPage() {
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
           partij_nr: partijNr,
-          controle_run_id: run?.id ?? null,
           bout_id: boutId ?? null,
         }),
       });
@@ -1032,7 +1196,7 @@ export default function MatchmakerMatchmakingPage() {
     }
   }
 
-  async function stuurDoorNaarNvb() {
+  async function stuurNaarControle() {
     if (!matchmakingId || releaseBusy) return;
 
     setReleaseBusy(true);
@@ -1043,7 +1207,7 @@ export default function MatchmakerMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/matchmaker/send-to-nvb", {
+      const resp = await authedFetch("/api/matchmaker/submit-to-control", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1056,15 +1220,15 @@ export default function MatchmakerMatchmakingPage() {
 
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(json?.error ?? "Sturen naar NVB mislukt.");
+        throw new Error(json?.error ?? "Sturen naar controle mislukt.");
       }
 
       const successMsg =
-        json?.message ??
-        "✅ Matchmaking is doorgestuurd naar NVB controle.";
+        json?.message ?? "✅ Matchmaking is doorgestuurd naar admin/controle.";
 
       setReleaseMsg(successMsg);
       setMsg(successMsg);
+      setReloadTick((x) => x + 1);
     } catch (e: any) {
       const message = e?.message ?? String(e) ?? "Onbekende fout.";
       setReleaseMsg(`❌ ${message}`);
@@ -1074,7 +1238,7 @@ export default function MatchmakerMatchmakingPage() {
     }
   }
 
-  async function stuurNaarUitslagen() {
+  async function stuurNaarBondteam() {
     if (!matchmakingId || releaseBusy) return;
 
     setReleaseBusy(true);
@@ -1085,7 +1249,7 @@ export default function MatchmakerMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/matchmaking/naar-uitslagen", {
+      const resp = await authedFetch("/api/matchmaker/send-to-bond", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1093,15 +1257,26 @@ export default function MatchmakerMatchmakingPage() {
         },
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
+          direct_to_bondteam: true,
+          bondteam: bondteam ?? undefined,
         }),
       });
 
       const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.error ?? "Naar uitslagen sturen mislukt.");
+      if (!resp.ok) {
+        throw new Error(json?.error ?? "Sturen naar bondteam mislukt.");
+      }
 
-      const successMsg = json?.message ?? "✅ Matchmaking is doorgestuurd naar uitslagen.";
+      const successMsg =
+        json?.message ?? "✅ Matchmaking is doorgestuurd naar bondteam / weegstation.";
+
       setReleaseMsg(successMsg);
       setMsg(successMsg);
+      setReloadTick((x) => x + 1);
+
+      setTimeout(() => {
+        router.push("/dashboard/matchmaker/matchmaking");
+      }, 350);
     } catch (e: any) {
       const message = e?.message ?? String(e) ?? "Onbekende fout.";
       setReleaseMsg(`❌ ${message}`);
@@ -1120,9 +1295,11 @@ export default function MatchmakerMatchmakingPage() {
       if (!matchmakingId) {
         setRows([]);
         setOrderedRows([]);
-        setRun(null);
         setEvenementNaam(null);
         setEvenementDatum(null);
+        setBondteam(null);
+        setStadium(null);
+        setOwnerType(null);
         setStatusByPartij({});
         setRunMeldingen([]);
         setHasDispByPartij({});
@@ -1134,103 +1311,70 @@ export default function MatchmakerMatchmakingPage() {
         return;
       }
 
-      try {
-        const { data: ups, error: upErr } = await supabase
-          .from("matchmaking_uploads")
-          .select("evenement_naam, evenement_datum, event_id")
-          .eq("matchmaking_id", matchmakingId)
-          .order("uploaded_at", { ascending: false })
-          .limit(1);
+      const { data: mm, error: mmErr } = await supabase
+        .from("matchmakings")
+        .select("id, naam, datum, bondteam, stadium, huidige_eigenaar_type, event_id")
+        .eq("id", matchmakingId)
+        .maybeSingle();
 
-        if (upErr) throw upErr;
+      if (mmErr) throw mmErr;
 
-        const up = (ups ?? [])?.[0] as any;
-        let naam = String(up?.evenement_naam ?? "").trim() || null;
-        let datum = String(up?.evenement_datum ?? "").trim() || null;
-        const eventId = String(up?.event_id ?? "").trim() || null;
+      let naam = String((mm as any)?.naam ?? "").trim() || null;
+      let datum = String((mm as any)?.datum ?? "").trim() || null;
+      const eventId = String((mm as any)?.event_id ?? "").trim() || null;
 
-        if (eventId && (!naam || !datum)) {
-          const { data: ev, error: evErr } = await supabase
-            .from("events")
-            .select("naam, datum")
-            .eq("id", eventId)
-            .maybeSingle();
-          if (evErr) throw evErr;
-          if (!naam) naam = String((ev as any)?.naam ?? "").trim() || null;
-          if (!datum) datum = String((ev as any)?.datum ?? "").trim() || null;
-        }
-
-        setEvenementNaam(naam);
-        setEvenementDatum(datum);
-      } catch {
-        setEvenementNaam(null);
-        setEvenementDatum(null);
+      if (eventId && (!naam || !datum)) {
+        const { data: ev, error: evErr } = await supabase
+          .from("events")
+          .select("naam, datum")
+          .eq("id", eventId)
+          .maybeSingle();
+        if (evErr) throw evErr;
+        if (!naam) naam = String((ev as any)?.naam ?? "").trim() || null;
+        if (!datum) datum = String((ev as any)?.datum ?? "").trim() || null;
       }
 
-      const { data: lastCtxRows, error: lastErr } = await supabase
-        .from("matchmaker_fighter_context")
-        .select("controle_run_id, created_at")
-        .eq("matchmaking_id", matchmakingId)
-        .order("created_at", { ascending: false })
-        .limit(1);
+      setEvenementNaam(naam);
+      setEvenementDatum(datum);
+      setBondteam(String((mm as any)?.bondteam ?? "").trim() || null);
+      setStadium(String((mm as any)?.stadium ?? "").trim() || null);
+      setOwnerType(String((mm as any)?.huidige_eigenaar_type ?? "").trim() || null);
 
-      if (lastErr) throw lastErr;
+      const [{ data: boutRows, error: boutErr }, { data: fighterRows, error: fighterErr }] =
+        await Promise.all([
+          supabase
+            .from("matchmaker_bouts_raw")
+            .select("*")
+            .eq("matchmaking_id", matchmakingId)
+            .order("partij_nr", { ascending: true }),
+          supabase.from("matchmaker_fighters_raw").select("*").eq("matchmaking_id", matchmakingId),
+        ]);
 
-      const latestControleRunId = lastCtxRows?.[0]?.controle_run_id
-        ? String(lastCtxRows[0].controle_run_id)
-        : null;
+      if (boutErr) throw boutErr;
+      if (fighterErr) throw fighterErr;
 
-      setRun(
-        latestControleRunId
-          ? ({
-              id: latestControleRunId,
-              matchmaking_id: matchmakingId,
-              status: "unknown",
-              gestart_op: null,
-              afgerond_op: null,
-              run_type: null,
-            } as ControleRun)
-          : null
+      const mergedRows = ((boutRows ?? []) as AnyRow[]).map((row) =>
+        createMergedBoutRow(row, (fighterRows ?? []) as AnyRow[])
       );
 
-      const { data: ctxRows, error: ctxErr } = await supabase
-        .from("matchmaker_bouts_raw")
-        .select("*")
-        .eq("matchmaking_id", matchmakingId)
-        .order("partij_nr", { ascending: true });
-
-      if (ctxErr) throw ctxErr;
-
-      const ctxList = (ctxRows ?? []) as AnyRow[];
-      setRows(ctxList);
-      syncOrderedRowsFromRows(ctxList);
+      setRows(mergedRows);
+      syncOrderedRowsFromRows(mergedRows);
 
       const map: Record<number, PartijStatus> = {};
       const ctxByPn: Record<number, AnyRow> = {};
 
-      for (const r of ctxList) {
+      for (const r of mergedRows) {
         const pn = Number(r.partij_nr);
         if (!Number.isFinite(pn)) continue;
         ctxByPn[pn] = r;
         map[pn] = isContextCompleet(r) ? "ok" : "geen_info";
       }
 
-      if (!latestControleRunId) {
-        setStatusByPartij(map);
-        setRunMeldingen([]);
-        setHasDispByPartij({});
-        setDispRequestByPartij({});
-        setDispResultaatByPartij({});
-        setCountByPartij({});
-        setVerbodByPartij({});
-        setLicentieStatusByPartij({});
-        return;
-      }
-
       const { data: resRows, error: resErr } = await supabase
         .from("matchmaker_controle_resultaten")
-        .select("partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap")
-        .eq("controle_run_id", latestControleRunId);
+        .select("partij_nr, hoek, resultaat, rule, rule_code, boodschap, controle_run_id, created_at")
+        .eq("matchmaking_id", matchmakingId)
+        .order("created_at", { ascending: false });
 
       if (resErr) throw resErr;
 
@@ -1238,9 +1382,7 @@ export default function MatchmakerMatchmakingPage() {
 
       const runRows = allRes.filter((r) => {
         const pn = (r as any)?.partij_nr;
-        const isRunPn = pn == null || Number(pn) === 0;
-        const isRunBout = (r as any)?.bout_id == null;
-        return isRunPn && isRunBout;
+        return pn == null || Number(pn) === 0;
       });
       setRunMeldingen(runRows);
 
@@ -1407,10 +1549,6 @@ export default function MatchmakerMatchmakingPage() {
       else if (s === "ok") ok++;
       else geen++;
 
-      if (anyDispensatieByPartij[pn] && s !== "dispensatie") {
-        disp++;
-      }
-
       if (verbodByPartij[pn]) verbod++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
 
@@ -1431,7 +1569,7 @@ export default function MatchmakerMatchmakingPage() {
       geen,
       geen_licentie,
     };
-  }, [rows, statusByPartij, anyDispensatieByPartij, verbodByPartij, countByPartij, missingLicentieByPartij]);
+  }, [rows, statusByPartij, verbodByPartij, countByPartij, missingLicentieByPartij]);
 
   const filterCounts = useMemo(() => {
     let afk = 0,
@@ -1453,7 +1591,6 @@ export default function MatchmakerMatchmakingPage() {
       else if (s === "ok") ok++;
       else geen++;
 
-      if (anyDispensatieByPartij[pn] && s !== "dispensatie") disp++;
       if (verbodByPartij[pn]) verbod++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
     }
@@ -1468,7 +1605,7 @@ export default function MatchmakerMatchmakingPage() {
       geen_info: geen,
       geen_licentie,
     };
-  }, [rows, statusByPartij, anyDispensatieByPartij, verbodByPartij, missingLicentieByPartij]);
+  }, [rows, statusByPartij, verbodByPartij, missingLicentieByPartij]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1477,9 +1614,7 @@ export default function MatchmakerMatchmakingPage() {
       const originalPn = Number(r.partij_nr);
       if (!Number.isFinite(originalPn) && !lineupMode) return false;
 
-      if (filter === "dispensatie") {
-        return !!anyDispensatieByPartij[originalPn];
-      }
+      if (filter === "dispensatie") return !!anyDispensatieByPartij[originalPn];
       if (filter === "verbod") return !!verbodByPartij[originalPn];
       if (filter === "geen_licentie") return !!missingLicentieByPartij[originalPn];
 
@@ -1586,54 +1721,34 @@ export default function MatchmakerMatchmakingPage() {
                 <div className="flex items-center gap-4 min-w-[240px]">
                   <Image
                     src="/branding/fightsupport/excel-logo.png"
-                    width={180}
-                    height={48}
                     alt="FightSupport"
+                    width={320}
+                    height={120}
                     priority
-                    style={{ width: "auto", height: "44px", objectFit: "contain" }}
+                    unoptimized
+                    style={{ width: "320px", height: "120px", display: "block" }}
                   />
                 </div>
 
                 <div className="flex flex-1 items-center justify-end gap-3 flex-wrap">
                   <DarkActionButton
-                    label={releaseBusy ? "Sturen…" : "→ Stuur naar NVB"}
+                    label={releaseBusy ? "Sturen…" : "→ Stuur naar controle"}
                     tone="orange"
-                    onClick={stuurDoorNaarNvb}
+                    onClick={stuurNaarControle}
                     disabled={releaseBusy || lineupMode}
                     title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
                   />
                   <DarkActionButton
-                    label="Rapportage"
-                    tone="orange"
-                    onClick={openReportHtml}
-                    disabled={lineupMode}
-                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                    label={releaseBusy ? "Sturen…" : "→ Stuur naar bondteam"}
+                    tone="blue"
+                    onClick={stuurNaarBondteam}
+                    disabled={releaseBusy || lineupMode}
+                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
                   />
                   <DarkActionButton
-                    label="Excel"
-                    tone="green"
-                    onClick={openExcel}
-                    disabled={lineupMode}
-                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
-                  />
-                  <DarkActionButton
-                    label="Lineup Excel"
+                    label="Lineup PDF"
                     tone="silver"
-                    onClick={openLineupExcel}
-                    disabled={lineupMode}
-                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
-                  />
-                  <DarkActionButton
-                    label="→ Naar uitslagen"
-                    tone="green"
-                    onClick={stuurNaarUitslagen}
-                    disabled={releaseBusy || lineupMode}
-                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
-                  />
-                  <DarkActionButton
-                    label="CSV Sportdata"
-                    tone="purple"
-                    onClick={openSportdataCsv}
+                    onClick={openLineupPdf}
                     disabled={lineupMode}
                     title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
                   />
@@ -1674,13 +1789,16 @@ export default function MatchmakerMatchmakingPage() {
                 <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                   <button
                     type="button"
-                    onClick={() => router.push("/dashboard/matchmaker/matchmaking")}
+                   onClick={() =>
+  router.push(`/dashboard/matchmaker/matchmaking`)
+}
                     className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-zinc-900 transition hover:translate-y-[-1px]`}
                     style={{
                       background: "linear-gradient(180deg, #f2f2f2 0%, #cfcfcf 48%, #a8a8a8 100%)",
                       border: "1px solid rgba(82,82,91,0.45)",
                       borderRadius: 0,
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 10px 18px rgba(0,0,0,0.12)",
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.85), 0 10px 18px rgba(0,0,0,0.12)",
                       minWidth: 180,
                     }}
                   >
@@ -1697,7 +1815,8 @@ export default function MatchmakerMatchmakingPage() {
                       display: "inline-block",
                       padding: "12px 22px",
                       borderRadius: 0,
-                      background: "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
+                      background:
+                        "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
                       border: "1px solid rgba(42,42,46,0.22)",
                       boxShadow: "0 12px 24px rgba(0,0,0,0.08)",
                     }}
@@ -1714,7 +1833,8 @@ export default function MatchmakerMatchmakingPage() {
                       background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
                       border: "1px solid rgba(150,40,0,0.55)",
                       borderRadius: 0,
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(255,77,0,0.18)",
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(255,77,0,0.18)",
                       minWidth: 180,
                     }}
                     title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
@@ -1729,7 +1849,8 @@ export default function MatchmakerMatchmakingPage() {
                       background: "linear-gradient(180deg, #1e40af 0%, #1d4ed8 55%, #1e3a8a 100%)",
                       border: "1px solid rgba(30,64,175,0.55)",
                       borderRadius: 0,
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(30,64,175,0.18)",
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(30,64,175,0.18)",
                       minWidth: 180,
                       textDecoration: "none",
                       display: "inline-flex",
@@ -1744,64 +1865,69 @@ export default function MatchmakerMatchmakingPage() {
                   </Link>
                 </div>
 
-                <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
-                  <div
-                    className="inline-flex items-center gap-3 rounded-full px-4 py-2"
-                    style={{
-                      background: lineupMode
-                        ? "linear-gradient(180deg, rgba(255,77,0,0.16) 0%, rgba(255,77,0,0.10) 100%)"
-                        : "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(242,242,242,0.96) 100%)",
-                      border: lineupMode
-                        ? "1px solid rgba(255,77,0,0.45)"
-                        : "1px solid rgba(42,42,46,0.20)",
-                      boxShadow: "0 10px 22px rgba(0,0,0,0.07)",
-                    }}
-                  >
-                    <span className={`${inter.className} text-sm font-extrabold text-zinc-900`}>
-                      Lineup bouwen
-                    </span>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                  {stadium ? (
+                    <div
+                      className={`${inter.className} rounded-xl px-4 py-2 text-sm font-semibold`}
+                      style={{
+                        background: "rgba(255,255,255,0.92)",
+                        border: "1px solid rgba(42,42,46,0.20)",
+                        color: "#1f2937",
+                      }}
+                    >
+                      Stadium: <span className="font-extrabold">{stadium}</span>
+                    </div>
+                  ) : null}
 
+                  {ownerType ? (
+                    <div
+                      className={`${inter.className} rounded-xl px-4 py-2 text-sm font-semibold`}
+                      style={{
+                        background: "rgba(255,255,255,0.92)",
+                        border: "1px solid rgba(42,42,46,0.20)",
+                        color: "#1f2937",
+                      }}
+                    >
+                      Eigenaar: <span className="font-extrabold">{ownerType}</span>
+                    </div>
+                  ) : null}
+
+                  {bondteam ? (
+                    <div
+                      className={`${inter.className} rounded-xl px-4 py-2 text-sm font-semibold`}
+                      style={{
+                        background: "rgba(255,255,255,0.92)",
+                        border: "1px solid rgba(42,42,46,0.20)",
+                        color: "#1f2937",
+                      }}
+                    >
+                      Bondteam: <span className="font-extrabold">{bondteam}</span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
+                  {!lineupMode ? (
                     <button
                       type="button"
                       onClick={() => {
-                        if (lineupMode) {
-                          cancelLineupMode();
-                        } else {
-                          syncOrderedRowsFromRows(rows);
-                          setLineupMode(true);
-                        }
+                        syncOrderedRowsFromRows(rows);
+                        setLineupMode(true);
+                        setMsg("");
                       }}
-                      aria-pressed={lineupMode}
-                      className="relative h-8 w-16 rounded-full transition"
+                      className={`${inter.className} px-5 py-3 text-[15px] font-extrabold tracking-[0.02em] text-white transition hover:translate-y-[-1px]`}
                       style={{
-                        background: lineupMode
-                          ? "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)"
-                          : "linear-gradient(180deg, #d6d6d6 0%, #bababa 100%)",
-                        border: lineupMode
-                          ? "1px solid rgba(150,40,0,0.55)"
-                          : "1px solid rgba(82,82,91,0.35)",
+                        background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
+                        border: "1px solid rgba(150,40,0,0.55)",
+                        borderRadius: 0,
                         boxShadow:
-                          "inset 0 1px 0 rgba(255,255,255,0.45), 0 6px 14px rgba(0,0,0,0.12)",
+                          "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(255,77,0,0.18)",
+                        minWidth: 220,
                       }}
                     >
-                      <span
-                        className="absolute top-[3px] h-[24px] w-[24px] rounded-full transition-all"
-                        style={{
-                          left: lineupMode ? "36px" : "4px",
-                          background:
-                            "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(226,226,226,0.96) 100%)",
-                          border: "1px solid rgba(82,82,91,0.25)",
-                          boxShadow: "0 4px 10px rgba(0,0,0,0.18)",
-                        }}
-                      />
+                      Lineup bewerken
                     </button>
-
-                    <span className={`${inter.className} text-xs font-semibold ${lineupMode ? "text-orange-700" : "text-zinc-600"}`}>
-                      {lineupMode ? "AAN" : "UIT"}
-                    </span>
-                  </div>
-
-                  {lineupMode ? (
+                  ) : (
                     <>
                       <div
                         className={`${inter.className} rounded-xl px-4 py-2 text-sm font-semibold`}
@@ -1811,7 +1937,8 @@ export default function MatchmakerMatchmakingPage() {
                           color: "#7c2d12",
                         }}
                       >
-                        Sleep partijen of gebruik de pijltjes. Nummering wordt automatisch 1 t/m {orderedRows.length}.
+                        Gebruik ↑ ↓, typ direct een partijnummer of wissel rood/blauw.
+                        Nummering loopt automatisch door.
                       </div>
 
                       <button
@@ -1823,7 +1950,8 @@ export default function MatchmakerMatchmakingPage() {
                           background: "linear-gradient(180deg, #f2f2f2 0%, #d5d5d5 48%, #bbbbbb 100%)",
                           border: "1px solid rgba(82,82,91,0.35)",
                           borderRadius: 0,
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
+                          boxShadow:
+                            "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
                           minWidth: 220,
                         }}
                       >
@@ -1839,7 +1967,8 @@ export default function MatchmakerMatchmakingPage() {
                           background: "linear-gradient(180deg, #1f7a35 0%, #15803d 55%, #166534 100%)",
                           border: "1px solid rgba(21,128,61,0.55)",
                           borderRadius: 0,
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(21,128,61,0.18)",
+                          boxShadow:
+                            "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 22px rgba(21,128,61,0.18)",
                           minWidth: 180,
                         }}
                       >
@@ -1855,14 +1984,15 @@ export default function MatchmakerMatchmakingPage() {
                           background: "linear-gradient(180deg, #f2f2f2 0%, #d5d5d5 48%, #bbbbbb 100%)",
                           border: "1px solid rgba(82,82,91,0.35)",
                           borderRadius: 0,
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
+                          boxShadow:
+                            "inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(0,0,0,0.10)",
                           minWidth: 180,
                         }}
                       >
                         Annuleren
                       </button>
                     </>
-                  ) : null}
+                  )}
                 </div>
 
                 <div
@@ -1886,15 +2016,12 @@ export default function MatchmakerMatchmakingPage() {
               ) : error ? (
                 <div className="text-red-700">{error}</div>
               ) : rows.length === 0 ? (
-                <div className="text-zinc-700">
-                  Geen partijen gevonden.
-                </div>
+                <div className="text-zinc-700">Geen partijen gevonden.</div>
               ) : (
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="text-sm text-zinc-800">
-                      Partijen:{" "}
-                      <span className="text-zinc-900 font-semibold">{totals.totaal}</span>
+                      Partijen: <span className="text-zinc-900 font-semibold">{totals.totaal}</span>
                     </span>
 
                     <HeaderBadge label="Meldingen totaal" value={totals.meldingen_totaal} tone="white" />
@@ -1927,8 +2054,7 @@ export default function MatchmakerMatchmakingPage() {
                       <div
                         className="px-4 py-3 font-extrabold text-white"
                         style={{
-                          background:
-                            "linear-gradient(180deg, #2a2a2e 0%, #1f1f23 100%)",
+                          background: "linear-gradient(180deg, #2a2a2e 0%, #1f1f23 100%)",
                           borderBottom: "2px solid rgba(255,77,0,0.50)",
                         }}
                       >
@@ -2020,10 +2146,10 @@ export default function MatchmakerMatchmakingPage() {
                         }}
                       >
                         <tr>
-                          <th className="py-3 px-4 text-left w-32">#</th>
+                          <th className="py-3 px-4 text-left w-[170px]">#</th>
                           <th className="py-3 px-4 text-left">Vechters</th>
                           <th className="py-3 px-4 text-left w-[320px]">Info</th>
-                          <th className="py-3 px-4 text-left w-[320px]">Acties</th>
+                          <th className="py-3 px-4 text-left w-[360px]">Acties</th>
                         </tr>
                       </thead>
 
@@ -2040,8 +2166,11 @@ export default function MatchmakerMatchmakingPage() {
                             "-"
                           );
 
-                          const roodGym = safeText(r.rood_gym_mm ?? r.rood_gym, "-");
-                          const blauwGym = safeText(r.blauw_gym_mm ?? r.blauw_gym, "-");
+                          const roodGym = safeText(r.rood_gym_fp ?? r.rood_gym_mm ?? r.rood_gym, "-");
+                          const blauwGym = safeText(
+                            r.blauw_gym_fp ?? r.blauw_gym_mm ?? r.blauw_gym,
+                            "-"
+                          );
 
                           const roodVA = safeText(r.rood_va_mm ?? r.rood_va ?? r.va_rood, "-");
                           const blauwVA = safeText(r.blauw_va_mm ?? r.blauw_va ?? r.va_blauw, "-");
@@ -2058,7 +2187,7 @@ export default function MatchmakerMatchmakingPage() {
                           const discipline = safeText(r.discipline, "-");
                           const klasse = safeText(r.klasse_mm ?? r.klasse, "-");
                           const eventDatum = safeText(
-                            r.evenement_datum ?? r.event_datum ?? r.datum,
+                            r.evenement_datum ?? r.event_datum ?? r.datum ?? evenementDatum,
                             "-"
                           );
                           const sortWeight = getBoutWeightForSort(r);
@@ -2067,8 +2196,12 @@ export default function MatchmakerMatchmakingPage() {
                             ? "border-t border-gray-400/70"
                             : "border-t border-zinc-300";
 
-                          const heeftVerbod = Number.isFinite(originalPn) ? !!verbodByPartij[originalPn] : false;
-                          const heeftDispensatie = Number.isFinite(originalPn) ? !!anyDispensatieByPartij[originalPn] : false;
+                          const heeftVerbod = Number.isFinite(originalPn)
+                            ? !!verbodByPartij[originalPn]
+                            : false;
+                          const heeftDispensatie = Number.isFinite(originalPn)
+                            ? !!anyDispensatieByPartij[originalPn]
+                            : false;
                           const geenTegenstander = isGeenTegenstander(r);
                           const busy = Number.isFinite(originalPn) ? busyPartij[originalPn] : null;
 
@@ -2080,45 +2213,85 @@ export default function MatchmakerMatchmakingPage() {
                           return (
                             <tr
                               key={stableId}
-                              draggable={lineupMode}
-                              onDragStart={() => {
-                                if (!lineupMode) return;
-                                setDragId(stableId);
-                              }}
-                              onDragOver={(e) => {
-                                if (!lineupMode) return;
-                                e.preventDefault();
-                              }}
-                              onDrop={(e) => {
-                                if (!lineupMode || !dragId) return;
-                                e.preventDefault();
-                                const fromIndex = orderedRows.findIndex(
-                                  (x) => getStableRowKey(x) === dragId
-                                );
-                                const toIndex = orderedRows.findIndex(
-                                  (x) => getStableRowKey(x) === stableId
-                                );
-                                if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
-                                  setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
-                                }
-                                setDragId(null);
-                              }}
-                              onDragEnd={() => setDragId(null)}
                               style={{
                                 backgroundColor: zebraWhite ? "#ffffff" : "#0d0d0d",
                                 color: zebraWhite ? "#000" : "#fff",
-                                cursor: lineupMode ? "grab" : "default",
-                                outline:
-                                  lineupMode && dragId === stableId
-                                    ? "2px solid rgba(255,77,0,0.55)"
-                                    : "none",
                               }}
                             >
                               <td className="py-3 px-4 font-semibold align-top">
                                 <div className="flex flex-col gap-2">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="tabular-nums">{visualPn}</span>
-                                    {lineupMode && Number.isFinite(originalPn) && originalPn !== visualPn ? (
+                                    {!lineupMode ? (
+                                      <span className="tabular-nums">{visualPn}</span>
+                                    ) : (
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            currentIndex >= 0 && movePartij(currentIndex, currentIndex - 1)
+                                          }
+                                          disabled={currentIndex <= 0}
+                                          className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
+                                          style={{
+                                            background: zebraWhite
+                                              ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
+                                              : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
+                                            border: zebraWhite
+                                              ? "1px solid rgba(82,82,91,0.35)"
+                                              : "1px solid rgba(255,255,255,0.10)",
+                                            color: zebraWhite ? "#111827" : "#fff",
+                                          }}
+                                        >
+                                          ↑
+                                        </button>
+
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          max={orderedRows.length}
+                                          value={visualPn}
+                                          onChange={(e) => {
+                                            const next = Number(e.target.value);
+                                            if (!Number.isFinite(next)) return;
+                                            if (currentIndex >= 0) movePartijToIndex(currentIndex, next);
+                                          }}
+                                          className="w-[66px] rounded px-2 py-1 text-xs font-extrabold text-center"
+                                          style={{
+                                            background: zebraWhite ? "#fff" : "#18181b",
+                                            color: zebraWhite ? "#111827" : "#fff",
+                                            border: zebraWhite
+                                              ? "1px solid rgba(82,82,91,0.35)"
+                                              : "1px solid rgba(255,255,255,0.16)",
+                                          }}
+                                        />
+
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            currentIndex >= 0 && movePartij(currentIndex, currentIndex + 1)
+                                          }
+                                          disabled={
+                                            currentIndex < 0 || currentIndex >= orderedRows.length - 1
+                                          }
+                                          className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
+                                          style={{
+                                            background: zebraWhite
+                                              ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
+                                              : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
+                                            border: zebraWhite
+                                              ? "1px solid rgba(82,82,91,0.35)"
+                                              : "1px solid rgba(255,255,255,0.10)",
+                                            color: zebraWhite ? "#111827" : "#fff",
+                                          }}
+                                        >
+                                          ↓
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    {lineupMode &&
+                                    Number.isFinite(originalPn) &&
+                                    originalPn !== visualPn ? (
                                       <span
                                         className="px-2 py-1 rounded text-[10px] font-extrabold"
                                         style={{
@@ -2139,57 +2312,12 @@ export default function MatchmakerMatchmakingPage() {
                                       <Chip label="DISPENSATIE" tone="orange" />
                                     ) : null}
                                     {heeftVerbod ? <Chip label="VERBOD" tone="purple" /> : null}
-                                    {Number.isFinite(originalPn) && missingLicentieByPartij[originalPn] ? (
+                                    {Number.isFinite(originalPn) &&
+                                    missingLicentieByPartij[originalPn] ? (
                                       <Chip label="GEEN LICENTIE" tone="blue" />
                                     ) : null}
+                                    {r?.__swapped ? <Chip label="HOEKEN GEWISSELD" tone="white" /> : null}
                                   </div>
-
-                                  {lineupMode ? (
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => currentIndex >= 0 && movePartij(currentIndex, currentIndex - 1)}
-                                        disabled={currentIndex <= 0}
-                                        className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
-                                        style={{
-                                          background: zebraWhite
-                                            ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
-                                            : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
-                                          border: zebraWhite
-                                            ? "1px solid rgba(82,82,91,0.35)"
-                                            : "1px solid rgba(255,255,255,0.10)",
-                                          color: zebraWhite ? "#111827" : "#fff",
-                                        }}
-                                      >
-                                        ↑
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        onClick={() => currentIndex >= 0 && movePartij(currentIndex, currentIndex + 1)}
-                                        disabled={currentIndex < 0 || currentIndex >= orderedRows.length - 1}
-                                        className="px-2 py-1 rounded text-xs font-extrabold disabled:opacity-40"
-                                        style={{
-                                          background: zebraWhite
-                                            ? "linear-gradient(180deg, #f4f4f4 0%, #dadada 100%)"
-                                            : "linear-gradient(180deg, #2c2c31 0%, #1f1f23 100%)",
-                                          border: zebraWhite
-                                            ? "1px solid rgba(82,82,91,0.35)"
-                                            : "1px solid rgba(255,255,255,0.10)",
-                                          color: zebraWhite ? "#111827" : "#fff",
-                                        }}
-                                      >
-                                        ↓
-                                      </button>
-
-                                      <span
-                                        className="text-[11px] font-bold opacity-80"
-                                        style={{ letterSpacing: "0.04em" }}
-                                      >
-                                        SLEEP
-                                      </span>
-                                    </div>
-                                  ) : null}
                                 </div>
                               </td>
 
@@ -2244,7 +2372,9 @@ export default function MatchmakerMatchmakingPage() {
                                   <div>
                                     <span className="font-semibold">Sorteergewicht:</span>{" "}
                                     <span className="opacity-90">
-                                      {Number.isFinite(sortWeight) && sortWeight !== 999 ? `${sortWeight} kg` : "-"}
+                                      {Number.isFinite(sortWeight) && sortWeight !== 999
+                                        ? `${sortWeight} kg`
+                                        : "-"}
                                     </span>
                                   </div>
                                   <div>
@@ -2254,7 +2384,9 @@ export default function MatchmakerMatchmakingPage() {
                                   <div>
                                     <span className="font-semibold">Meldingen:</span>{" "}
                                     <span className="opacity-90">
-                                      {Number.isFinite(originalPn) ? (countByPartij[originalPn] ?? 0) : 0}
+                                      {Number.isFinite(originalPn)
+                                        ? countByPartij[originalPn] ?? 0
+                                        : 0}
                                     </span>
                                   </div>
                                 </div>
@@ -2263,7 +2395,9 @@ export default function MatchmakerMatchmakingPage() {
                               <td className="py-3 px-4 align-top">
                                 <div className="flex flex-wrap gap-2">
                                   <Link
-                                    href={`/dashboard/matchmaker/matchmaking/${encodeURIComponent(matchmakingId)}/${encodeURIComponent(String(r.partij_nr ?? ""))}`}
+                                    href={`/dashboard/matchmaker/matchmaking/${encodeURIComponent(
+                                      matchmakingId
+                                    )}/${encodeURIComponent(String(r.partij_nr ?? ""))}`}
                                     className="px-3 py-1.5 rounded font-extrabold text-sm"
                                     style={{
                                       background: "rgba(0,0,0,0.55)",
@@ -2276,6 +2410,15 @@ export default function MatchmakerMatchmakingPage() {
                                   >
                                     Detail
                                   </Link>
+
+                                  {lineupMode ? (
+                                    <DarkActionButton
+                                      label="Wissel rood/blauw"
+                                      tone="silver"
+                                      disabled={saveOrderBusy}
+                                      onClick={() => swapCorners(stableId)}
+                                    />
+                                  ) : null}
 
                                   <DarkActionButton
                                     label={busy === "delete" ? "… Verwijderen" : "Verwijderen"}
@@ -2354,8 +2497,19 @@ export default function MatchmakerMatchmakingPage() {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <Field label="Naam rood" value={fRoodNaam} onChange={setFRoodNaam} />
                             <Field label="Sportschool rood" value={fRoodGym} onChange={setFRoodGym} />
-                            <Field label="VA nummer rood" value={fRoodVa} onChange={setFRoodVa} placeholder="tekst" />
-                            <Field label="KG rood" value={fRoodKg} onChange={setFRoodKg} type="number" placeholder="bijv. 71.5" />
+                            <Field
+                              label="VA nummer rood"
+                              value={fRoodVa}
+                              onChange={setFRoodVa}
+                              placeholder="tekst"
+                            />
+                            <Field
+                              label="KG rood"
+                              value={fRoodKg}
+                              onChange={setFRoodKg}
+                              type="number"
+                              placeholder="bijv. 71.5"
+                            />
                           </div>
                         </div>
 
@@ -2363,9 +2517,24 @@ export default function MatchmakerMatchmakingPage() {
                           <div className="text-zinc-900 font-extrabold mb-3">Blauw</div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <Field label="Naam blauw" value={fBlauwNaam} onChange={setFBlauwNaam} />
-                            <Field label="Sportschool blauw" value={fBlauwGym} onChange={setFBlauwGym} />
-                            <Field label="VA nummer blauw" value={fBlauwVa} onChange={setFBlauwVa} placeholder="tekst" />
-                            <Field label="KG blauw" value={fBlauwKg} onChange={setFBlauwKg} type="number" placeholder="bijv. 71.5" />
+                            <Field
+                              label="Sportschool blauw"
+                              value={fBlauwGym}
+                              onChange={setFBlauwGym}
+                            />
+                            <Field
+                              label="VA nummer blauw"
+                              value={fBlauwVa}
+                              onChange={setFBlauwVa}
+                              placeholder="tekst"
+                            />
+                            <Field
+                              label="KG blauw"
+                              value={fBlauwKg}
+                              onChange={setFBlauwKg}
+                              type="number"
+                              placeholder="bijv. 71.5"
+                            />
                           </div>
                         </div>
                       </div>
@@ -2379,8 +2548,7 @@ export default function MatchmakerMatchmakingPage() {
                           placeholder="bijv. 72.0"
                         />
                         <div className="md:col-span-2 text-xs text-zinc-700 flex items-center">
-                          Tip: als je “max gewicht” als tolerantie bedoelt (bv 3kg), zeg het even —
-                          dan maak ik er 2 velden van: “gewichtsklasse” + “max afwijking”.
+                          Vul hier het maximumgewicht in waarop je wilt sorteren en tonen.
                         </div>
                       </div>
                     </div>

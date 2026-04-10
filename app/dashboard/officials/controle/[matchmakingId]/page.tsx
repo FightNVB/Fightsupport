@@ -8,7 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { Scale } from "lucide-react";
+import {
+  Scale,
+  RotateCcw,
+  Send,
+  ArrowRightLeft,
+  FileSpreadsheet,
+  FileText,
+  Repeat,
+} from "lucide-react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -359,7 +367,11 @@ function Chip({
       ? "bg-white/90 text-black"
       : "bg-gray-500 text-zinc-900";
 
-  return <span className={`px-2 py-1 rounded text-[11px] font-extrabold ${cls}`}>{label}</span>;
+  return (
+    <span className={`px-2 py-1 rounded text-[11px] font-extrabold ${cls}`}>
+      {label}
+    </span>
+  );
 }
 
 function StatusBadge({ status }: { status: PartijStatus }) {
@@ -436,7 +448,9 @@ function FilterButton({
       }`}
     >
       <span>{label}</span>
-      <span className={`tabular-nums px-2 py-0.5 rounded-full ${active ? "bg-white" : "bg-zinc-100"}`}>
+      <span
+        className={`tabular-nums px-2 py-0.5 rounded-full ${active ? "bg-white" : "bg-zinc-100"}`}
+      >
         {count}
       </span>
     </button>
@@ -468,23 +482,13 @@ function isGeenTegenstander(ctx: AnyRow): boolean {
   return (heeftRood && !heeftBlauw) || (!heeftRood && heeftBlauw);
 }
 
-function parseMinutesFromText(text: string): number | null {
-  const m = String(text).match(/(\d+)\s*min/i);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : null;
-}
-
-function formatQuarterHoursFromMinutes(mins: number): string {
-  const rounded = Math.round(mins / 15) * 15;
+function formatDurationExact(mins: number): string {
+  const rounded = Math.round(mins);
   const h = Math.floor(rounded / 60);
   const m = rounded % 60;
-  const quarters = Math.round(m / 15);
-  const frac =
-    quarters === 0 ? "" : quarters === 1 ? " 1/4" : quarters === 2 ? " 1/2" : " 3/4";
-  const prettyFrac = `${h}${frac} uur`;
-  const hhmm = `${h}u ${String(m).padStart(2, "0")}m`;
-  return `${prettyFrac} (${hhmm}, kwartier-afronding)`;
+  if (h <= 0) return `${m} min`;
+  if (m === 0) return `${h} uur`;
+  return `${h} uur ${m} min`;
 }
 
 function isGalaDuurRow(r: ResRow) {
@@ -510,40 +514,136 @@ const KLASSE_MINUTEN: Record<string, number> = {
   a: 21,
   b: 14,
   c: 13,
-  n: 11.5,
-  "16/17": 10.5,
-  j: 8.5,
+  n: 8,
+  "16/17": 8,
+  j: 8,
+  jeugd: 8,
   demo: 6,
+  boksen: 10,
   "mma pro": 17,
   "mma amateur": 17,
   "mma jeugd": 17,
 };
 
-function matchKlasseMinuten(klasse: string): number | null {
-  const k = String(klasse ?? "").trim().toLowerCase();
-  if (!k || k === "-") return null;
+function normalizeKlasse(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\bklasse\b/g, "")
+    .replace(/\bclass\b/g, "")
+    .replace(/\bheren\b/g, "")
+    .replace(/\bheer\b/g, "")
+    .replace(/\bdames\b/g, "")
+    .replace(/\bdame\b/g, "")
+    .replace(/\bjongens\b/g, "")
+    .replace(/\bjongen\b/g, "")
+    .replace(/\bmeisjes\b/g, "")
+    .replace(/\bmeisje\b/g, "")
+    .trim();
+}
 
-  const stripped = k.replace(/\s*klasse\s*$/i, "").trim();
+function normalizeLookupValue(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[()]/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  if (stripped.includes("mma")) {
-    if (stripped.includes("pro")) return KLASSE_MINUTEN["mma pro"];
-    if (stripped.includes("jeugd") || stripped.includes("youth"))
+function pickFirstFilled(...values: any[]): string {
+  for (const value of values) {
+    const s = String(value ?? "").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function getKlasseEnDiscipline(row: AnyRow): {
+  klasse: string;
+  discipline: string;
+  lookup: string;
+} {
+  const klasse = pickFirstFilled(
+    row?.klasse_mm,
+    row?.klasse,
+    row?.klasse_label,
+    row?.klasse_naam,
+    row?.categorie,
+    row?.category
+  );
+
+  const discipline = pickFirstFilled(
+    row?.discipline,
+    row?.discipline_mm,
+    row?.discipline_naam,
+    row?.sport,
+    row?.sportnaam,
+    row?.style,
+    row?.ruleset
+  );
+
+  const lookup = normalizeLookupValue([klasse, discipline].filter(Boolean).join(" "));
+  return { klasse, discipline, lookup };
+}
+
+function matchKlasseMinuten(klasse: string, discipline?: string): number | null {
+  const rawKlasse = String(klasse ?? "").trim().toLowerCase();
+  const rawDiscipline = String(discipline ?? "").trim().toLowerCase();
+
+  if (!rawKlasse && !rawDiscipline) return null;
+
+  const k = normalizeKlasse(rawKlasse);
+  const lookup = normalizeLookupValue(`${rawKlasse} ${rawDiscipline}`);
+
+  if (lookup.includes("boksen") || lookup.includes("boxing")) {
+    return KLASSE_MINUTEN.boksen;
+  }
+
+  if (lookup.includes("mma") || lookup.includes("mixed martial")) {
+    if (lookup.includes("pro")) return KLASSE_MINUTEN["mma pro"];
+    if (
+      lookup.includes("jeugd") ||
+      lookup.includes("youth") ||
+      lookup.includes("junior")
+    ) {
       return KLASSE_MINUTEN["mma jeugd"];
+    }
     return KLASSE_MINUTEN["mma amateur"];
   }
 
-  if (stripped.includes("titel")) return KLASSE_MINUTEN["a titel"];
-  if (stripped.includes("k1") || stripped.includes("k-1")) return KLASSE_MINUTEN["a"];
-  if (/16|17/.test(stripped)) return KLASSE_MINUTEN["16/17"];
-  if (stripped === "j") return KLASSE_MINUTEN["j"];
-  if (stripped.includes("jeugd") || stripped.includes("youth") || stripped.includes("junior"))
-    return KLASSE_MINUTEN["j"];
-  if (stripped === "n" || stripped.includes("nieuweling") || stripped.includes("novice"))
-    return KLASSE_MINUTEN["n"];
-  if (stripped === "c") return KLASSE_MINUTEN["c"];
-  if (stripped === "b") return KLASSE_MINUTEN["b"];
-  if (stripped === "a") return KLASSE_MINUTEN["a"];
-  if (stripped.includes("demo")) return KLASSE_MINUTEN["demo"];
+  if (k.includes("titel")) return KLASSE_MINUTEN["a titel"];
+
+  if (
+    k === "j" ||
+    k.includes("jeugd") ||
+    k.includes("youth") ||
+    k.includes("junior")
+  ) {
+    return KLASSE_MINUTEN.j;
+  }
+
+  if (/16\s*\/\s*17/.test(k) || (k.includes("16") && k.includes("17"))) {
+    return KLASSE_MINUTEN["16/17"];
+  }
+
+  if (
+    k === "n" ||
+    k.includes("nieuweling") ||
+    k.includes("novice") ||
+    /^n\b/.test(k)
+  ) {
+    return KLASSE_MINUTEN.n;
+  }
+
+  if (k === "c" || /^c\b/.test(k)) return KLASSE_MINUTEN.c;
+  if (k === "b" || /^b\b/.test(k)) return KLASSE_MINUTEN.b;
+  if (k === "a" || /^a\b/.test(k)) return KLASSE_MINUTEN.a;
+
+  if (k.includes("demo")) return KLASSE_MINUTEN.demo;
 
   return null;
 }
@@ -551,18 +651,46 @@ function matchKlasseMinuten(klasse: string): number | null {
 function calcGalaDuurFromRows(rows: AnyRow[]): {
   totalMins: number;
   unknownKlasses: string[];
+  countsByKlasse: Record<string, { count: number; mins: number }>;
 } {
   let totalMins = 0;
   const unknownSet = new Set<string>();
+  const countsByKlasse: Record<string, { count: number; mins: number }> = {};
 
   for (const r of rows) {
-    const klasse = String(r.klasse_mm ?? r.klasse ?? "").trim();
-    const mins = matchKlasseMinuten(klasse);
-    if (mins !== null) totalMins += mins;
-    else if (klasse && klasse !== "-") unknownSet.add(klasse);
+    const { klasse, discipline, lookup } = getKlasseEnDiscipline(r);
+    const mins = matchKlasseMinuten(klasse, discipline);
+
+    let label = pickFirstFilled(klasse, discipline, "-");
+    if (lookup.includes("mma") || lookup.includes("mixed martial")) {
+      if (lookup.includes("pro")) label = "MMA pro";
+      else if (
+        lookup.includes("jeugd") ||
+        lookup.includes("youth") ||
+        lookup.includes("junior")
+      )
+        label = "MMA jeugd";
+      else label = "MMA amateur";
+    } else if (lookup.includes("boksen") || lookup.includes("boxing")) {
+      label = "BOKSEN";
+    }
+
+    if (mins !== null) {
+      totalMins += mins;
+      if (!countsByKlasse[label]) {
+        countsByKlasse[label] = { count: 0, mins };
+      }
+      countsByKlasse[label].count += 1;
+    } else if (label && label != "-") {
+      unknownSet.add(label);
+    }
   }
 
-  return { totalMins, unknownKlasses: Array.from(unknownSet) };
+  return {
+    totalMins,
+    unknownKlasses: Array.from(unknownSet),
+    countsByKlasse,
+  };
 }
 
 function buildGalaDuurFromMins(totalMins: number) {
@@ -576,36 +704,14 @@ function buildGalaDuurFromMins(totalMins: number) {
   else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
   else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
 
-  const q = formatQuarterHoursFromMinutes(totalMins);
   return {
     mins: totalMins,
     needsApproval,
     overMax,
-    text: `Tijdsduur evenement: ${q}. ${extra}`,
+    text: `Geschatte gala-duur: ${formatDurationExact(totalMins)} (${Math.round(
+      totalMins
+    )} min). ${extra}`,
   };
-}
-
-function buildGalaDuurSamenvatting(runMeldingen: ResRow[]) {
-  const hit = runMeldingen.find(isGalaDuurRow);
-  if (!hit?.boodschap) return null;
-  const mins = parseMinutesFromText(hit.boodschap);
-  const approvalMin = 390;
-  const maxMin = 510;
-
-  if (!mins) {
-    return { mins: null as number | null, needsApproval: true, overMax: false, text: hit.boodschap };
-  }
-
-  const needsApproval = mins > approvalMin;
-  const overMax = mins > maxMin;
-
-  let extra = "";
-  if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
-  else if (needsApproval) extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
-  else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
-
-  const q = formatQuarterHoursFromMinutes(mins);
-  return { mins, needsApproval, overMax, text: `Tijdsduur evenement: ${q}. ${extra}` };
 }
 
 function buildCompactRunMeldingen(runMeldingen: ResRow[], galaDuurMinsOverride?: number): ResRow[] {
@@ -616,10 +722,7 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[], galaDuurMinsOverride?:
     galaDuurMinsOverride != null
       ? galaDuurMinsOverride
       : galaRows.length > 0
-      ? (() => {
-          const s = buildGalaDuurSamenvatting(galaRows);
-          return s?.mins ?? null;
-        })()
+      ? null
       : null;
 
   if (mins === null && galaRows.length === 0) return runMeldingen ?? [];
@@ -629,18 +732,18 @@ function buildCompactRunMeldingen(runMeldingen: ResRow[], galaDuurMinsOverride?:
   const needsApproval = mins != null ? mins > approvalMin : true;
   const overMax = mins != null ? mins > maxMin : false;
   const resultaat = overMax ? "afgekeurd" : needsApproval ? "actie" : "ok";
-  const q = mins != null ? formatQuarterHoursFromMinutes(mins) : null;
 
-  const compactMsg = q
-    ? `Geschatte gala-duur: ${q}. ${
-        overMax
-          ? "Overschrijdt max 8.5 uur — AFKEUR."
-          : needsApproval
-          ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
-          : "Binnen 6.5 uur (geen goedkeuring nodig)."
-      }`
-    : galaRows.find((r) => r?.boodschap)?.boodschap ??
-      "Gala-duur kon niet worden berekend.";
+  const compactMsg =
+    mins != null
+      ? `Geschatte gala-duur: ${formatDurationExact(mins)} (${Math.round(mins)} min). ${
+          overMax
+            ? "Overschrijdt max 8.5 uur — AFKEUR."
+            : needsApproval
+            ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
+            : "Binnen 6.5 uur (geen goedkeuring nodig)."
+        }`
+      : galaRows.find((r) => r?.boodschap)?.boodschap ??
+        "Gala-duur kon niet worden berekend.";
 
   const merged: ResRow = {
     partij_nr: null,
@@ -660,12 +763,14 @@ function DarkActionButton({
   tone = "orange",
   title,
   disabled,
+  icon,
 }: {
   label: string;
   onClick: () => void;
-  tone?: "orange" | "green" | "purple" | "red" | "silver";
+  tone?: "orange" | "green" | "purple" | "red" | "silver" | "blue";
   title?: string;
   disabled?: boolean;
+  icon?: ReactNode;
 }) {
   const border =
     tone === "green"
@@ -676,6 +781,8 @@ function DarkActionButton({
       ? "rgba(239,68,68,0.85)"
       : tone === "silver"
       ? "rgba(220,220,220,0.70)"
+      : tone === "blue"
+      ? "rgba(59,130,246,0.85)"
       : "rgba(255,77,0,0.85)";
 
   const text =
@@ -691,17 +798,19 @@ function DarkActionButton({
       disabled={!!disabled}
       title={title}
       onClick={onClick}
-      className={`px-3 py-1.5 rounded font-extrabold text-sm transition ${
-        disabled ? "opacity-50 cursor-not-allowed" : "hover:opacity-90"
+      className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded font-extrabold text-sm transition ${
+        disabled ? "opacity-50 cursor-not-allowed" : "hover:opacity-90 hover:-translate-y-[1px]"
       }`}
       style={{
         background: "rgba(0,0,0,0.55)",
         border: `1px solid ${border}`,
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
         color: text,
+        minHeight: 40,
       }}
     >
-      {label}
+      {icon}
+      <span>{label}</span>
     </button>
   );
 }
@@ -823,6 +932,44 @@ function autoSortLineupRows(input: AnyRow[]): AnyRow[] {
   });
 }
 
+function swapRowCornersLocal(row: AnyRow): AnyRow {
+  const next = { ...row };
+
+  const pairs: Array<[string, string]> = [
+    ["rood_naam_fp", "blauw_naam_fp"],
+    ["rood_naam_mm", "blauw_naam_mm"],
+    ["rood_naam", "blauw_naam"],
+    ["rood_gym_fp", "blauw_gym_fp"],
+    ["rood_gym_mm", "blauw_gym_mm"],
+    ["rood_gym", "blauw_gym"],
+    ["rood_va_mm", "blauw_va_mm"],
+    ["va_rood", "va_blauw"],
+    ["rood_gewicht", "blauw_gewicht"],
+    ["rood_geboortedatum_fp", "blauw_geboortedatum_fp"],
+    ["rood_geboortedatum_mm", "blauw_geboortedatum_mm"],
+    ["rood_geslacht", "blauw_geslacht"],
+    ["rood_licentie", "blauw_licentie"],
+    ["rood_licentie_ok", "blauw_licentie_ok"],
+    ["rood_licentie_geldig", "blauw_licentie_geldig"],
+    ["rood_licentie_status", "blauw_licentie_status"],
+    ["rood_licentie_fp", "blauw_licentie_fp"],
+    ["rood_licentie_ja_nee", "blauw_licentie_ja_nee"],
+    ["rood_nulmeting_klasse", "blauw_nulmeting_klasse"],
+    ["rood_totaal_wedstrijden", "blauw_totaal_wedstrijden"],
+    ["rood_gewonnen", "blauw_gewonnen"],
+  ];
+
+  for (const [a, b] of pairs) {
+    const av = next[a];
+    const bv = next[b];
+    next[a] = bv;
+    next[b] = av;
+  }
+
+  next.__swapped_corners = !next.__swapped_corners;
+  return next;
+}
+
 export default function ControleMatchmakingPage() {
   const params = useParams();
   const router = useRouter();
@@ -853,6 +1000,7 @@ export default function ControleMatchmakingPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [showWeegstationModal, setShowWeegstationModal] = useState(false);
+  const [headerBusy, setHeaderBusy] = useState<string | null>(null);
   const [addBusy, setAddBusy] = useState(false);
   const [fDiscipline, setFDiscipline] = useState("");
   const [fKlasse, setFKlasse] = useState("");
@@ -890,9 +1038,23 @@ export default function ControleMatchmakingPage() {
     []
   );
 
-  function openLineupExcel() {
+  function openExcel() {
+    window.open(
+      `/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+      "_blank"
+    );
+  }
+
+  function openRapportage() {
     window.open(
       `/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+      "_blank"
+    );
+  }
+
+  function openNkfExcel() {
+    window.open(
+      `/api/rapport/nkf-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
       "_blank"
     );
   }
@@ -909,6 +1071,16 @@ export default function ControleMatchmakingPage() {
     setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
   }
 
+  function swapPartijCorners(index: number) {
+    setOrderedRows((prev) => {
+      const copy = [...prev];
+      if (!copy[index]) return prev;
+      copy[index] = swapRowCornersLocal(copy[index]);
+      return copy;
+    });
+    setMsg("✅ Hoeken lokaal gewisseld in lineup. Opslaan om volgorde te bewaren.");
+  }
+
   function applyAutoLineup() {
     setOrderedRows(autoSortLineupRows(orderedRows));
     setMsg(
@@ -923,12 +1095,28 @@ export default function ControleMatchmakingPage() {
 
   function hasOrderChanges() {
     if (orderedRows.length !== rows.length) return false;
+
     for (let i = 0; i < orderedRows.length; i += 1) {
       const visualNr = i + 1;
       const currentNr = Number(orderedRows[i]?.partij_nr ?? 0);
       if (currentNr !== visualNr) return true;
+      if (orderedRows[i]?.__swapped_corners) return true;
     }
+
     return false;
+  }
+
+  async function withHeaderBusy(key: string, fn: () => Promise<void>) {
+    setHeaderBusy(key);
+    setError(null);
+    setMsg("");
+    try {
+      await fn();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setHeaderBusy(null);
+    }
   }
 
   async function saveLineupOrder() {
@@ -950,6 +1138,7 @@ export default function ControleMatchmakingPage() {
           ? Number(r.partij_nr.trim())
           : null,
       partij_nr: index + 1,
+      swap_corners: !!r?.__swapped_corners,
     }));
 
     const invalid = items.find((x) => !x.ctx_row_id && !x.bout_id && x.old_partij_nr == null);
@@ -1056,7 +1245,7 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/matchmaking/add-bout", {
+      const resp = await authedFetch("/api/control-engine/add-bout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1098,7 +1287,7 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/matchmaking/delete-partij", {
+      const resp = await authedFetch("/api/control-engine/delete-partij", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1128,30 +1317,61 @@ export default function ControleMatchmakingPage() {
     }
   }
 
-  async function stuurNaarUitslagen() {
-    setError(null);
-    setMsg("");
 
-    try {
+
+  async function retourNaarMatchmaker() {
+    await withHeaderBusy("retour", async () => {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/matchmaking/naar-uitslagen", {
+      const resp = await authedFetch("/api/admin/controle/return-to-matchmaker", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          return_to: "matchmaker",
+        }),
       });
 
       const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.error ?? "Naar uitslagen sturen mislukt.");
+      if (!resp.ok) throw new Error(json?.error ?? "Retour naar matchmaker mislukt.");
 
-      setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar uitslagen.");
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
+      setMsg(json?.message ?? "✅ Matchmaking is teruggezet naar matchmaker.");
+      router.push("/dashboard/officials/controle");
+    });
+  }
+
+  async function stuurUploadNaarAdmin() {
+    await withHeaderBusy("admin", async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaker/send-to-admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Sturen naar admin mislukt.");
+
+      setMsg(json?.message ?? "✅ Upload-matchmaking is doorgestuurd naar admin.");
+      router.push("/dashboard/officials/controle");
+    });
+  }
+
+  async function stuurNaarUitslagen() {
+    await withHeaderBusy("uitslagen", async () => {
+      router.push("/dashboard/officials/controle");
+    });
   }
 
   async function load() {
@@ -1176,19 +1396,17 @@ export default function ControleMatchmakingPage() {
       }
 
       try {
-        const { data: ups, error: upErr } = await supabase
-          .from("matchmaking_uploads")
-          .select("evenement_naam, evenement_datum, event_id")
-          .eq("matchmaking_id", matchmakingId)
-          .order("uploaded_at", { ascending: false })
-          .limit(1);
+        const { data: mm, error: mmErr } = await supabase
+          .from("matchmakings")
+          .select("naam, datum, event_id")
+          .eq("id", matchmakingId)
+          .maybeSingle();
 
-        if (upErr) throw upErr;
+        if (mmErr) throw mmErr;
 
-        const up = (ups ?? [])?.[0] as any;
-        let naam = String(up?.evenement_naam ?? "").trim() || null;
-        let datum = String(up?.evenement_datum ?? "").trim() || null;
-        const eventId = String(up?.event_id ?? "").trim() || null;
+        let naam = String((mm as any)?.naam ?? "").trim() || null;
+        let datum = String((mm as any)?.datum ?? "").trim() || null;
+        const eventId = String((mm as any)?.event_id ?? "").trim() || null;
 
         if (eventId && (!naam || !datum)) {
           const { data: ev, error: evErr } = await supabase
@@ -1200,6 +1418,21 @@ export default function ControleMatchmakingPage() {
           if (evErr) throw evErr;
           if (!naam) naam = String((ev as any)?.naam ?? "").trim() || null;
           if (!datum) datum = String((ev as any)?.datum ?? "").trim() || null;
+        }
+
+        if (!naam || !datum) {
+          const { data: ups, error: upErr } = await supabase
+            .from("matchmaking_uploads")
+            .select("evenement_naam, evenement_datum, event_id")
+            .eq("matchmaking_id", matchmakingId)
+            .order("uploaded_at", { ascending: false })
+            .limit(1);
+
+          if (upErr) throw upErr;
+
+          const up = (ups ?? [])?.[0] as any;
+          if (!naam) naam = String(up?.evenement_naam ?? "").trim() || null;
+          if (!datum) datum = String(up?.evenement_datum ?? "").trim() || null;
         }
 
         setEvenementNaam(naam);
@@ -1354,8 +1587,8 @@ export default function ControleMatchmakingPage() {
 
   const galaDuur = useMemo(() => {
     if (galaDuurCalc) return buildGalaDuurFromMins(galaDuurCalc.totalMins);
-    return buildGalaDuurSamenvatting(runMeldingen);
-  }, [runMeldingen, galaDuurCalc]);
+    return null;
+  }, [galaDuurCalc]);
 
   const compactRunMeldingen = useMemo(
     () => buildCompactRunMeldingen(runMeldingen, galaDuurCalc?.totalMins),
@@ -1464,7 +1697,11 @@ export default function ControleMatchmakingPage() {
       const pn = Number(r.partij_nr);
       if (!Number.isFinite(pn) && !lineupMode) return false;
       if (filter === "dispensatie")
-        return !!hasDispByPartij[pn] || !!dispRequestByPartij[pn] || statusByPartij[pn] === "dispensatie";
+        return (
+          !!hasDispByPartij[pn] ||
+          !!dispRequestByPartij[pn] ||
+          statusByPartij[pn] === "dispensatie"
+        );
       if (filter === "verbod") return !!verbodByPartij[pn];
       if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
       if (filter !== "all") {
@@ -1513,7 +1750,7 @@ export default function ControleMatchmakingPage() {
       <div style={metalFrameStyle("orange")} className="p-3 md:p-4">
         <div style={metalInnerStyle()} className="p-4 md:p-5">
           <div
-            className="rounded-2xl px-4 py-4 md:px-5"
+            className="rounded-2xl px-4 py-4 md:px-6 md:py-5"
             style={{
               background: "linear-gradient(180deg, #34343a 0%, #23232a 100%)",
               border: "1px solid rgba(255,255,255,0.08)",
@@ -1521,80 +1758,18 @@ export default function ControleMatchmakingPage() {
               color: "#fff",
             }}
           >
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex items-center justify-start">
-                <NvbLightButton
-                  label="← Terug naar Overzicht"
-                  onClick={() => router.push("/dashboard/officials/controle")}
-                />
-              </div>
-
-              <div className="flex justify-center xl:flex-1">
-                <Image
-                  src="/branding/fightsupport/excel-logo.png"
-                  width={180}
-                  height={48}
-                  alt="FightSupport"
-                  priority
-                  style={{ width: "auto", height: "44px", objectFit: "contain" }}
-                />
-              </div>
-
-              <div className="flex flex-col items-stretch gap-3 xl:items-end">
-                <div className="flex flex-wrap justify-end gap-2">
-                  <DarkActionButton
-                    label="Lineup Excel"
-                    tone="silver"
-                    onClick={openLineupExcel}
-                    disabled={lineupMode}
-                    title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
-                  />
-                  <DarkActionButton
-                    label="→ Naar uitslagen"
-                    tone="green"
-                    onClick={stuurNaarUitslagen}
-                    disabled={lineupMode}
-                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowWeegstationModal(true)}
-                  disabled={lineupMode}
-                  className="group rounded-xl border border-black/10 bg-white px-3 py-2 text-left shadow-[0_8px_20px_rgba(0,0,0,0.10)] transition hover:-translate-y-0.5 hover:shadow-[0_12px_26px_rgba(0,0,0,0.14)] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl shrink-0"
-                      style={{
-                        background: "linear-gradient(180deg, #ff6a1a 0%, #ff4d00 100%)",
-                        color: "#111",
-                      }}
-                    >
-                      <Scale className="h-5 w-5" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="text-sm font-black text-zinc-900 group-hover:text-orange-700">
-                        Weegstation
-                      </div>
-                      <div className="text-xs font-semibold text-zinc-600 leading-snug">
-                        Stuur MM naar weegstation
-                      </div>
-                    </div>
-                  </div>
-                </button>
-
-                <div className="text-right">
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto_1fr] items-center gap-4">
+              <div className="flex items-center justify-center xl:justify-start text-center xl:text-left">
+                <div>
                   <div
                     className={inter.className}
                     style={{
                       color: NVB_ORANGE,
                       letterSpacing: "0.14em",
-                      fontSize: 14,
-                      fontWeight: 700,
+                      fontSize: 20,
+                      fontWeight: 800,
                       textTransform: "uppercase",
+                      lineHeight: 1.1,
                     }}
                   >
                     FIGHTSUPPORT
@@ -1602,15 +1777,110 @@ export default function ControleMatchmakingPage() {
                   <div
                     className={inter.className}
                     style={{
-                      color: "rgba(255,255,255,0.80)",
-                      fontSize: 12,
+                      color: "rgba(255,255,255,0.84)",
+                      fontSize: 14,
                       letterSpacing: "0.06em",
                       fontWeight: 500,
+                      marginTop: 4,
                     }}
                   >
                     Vechtsport ondersteuning
                   </div>
                 </div>
+              </div>
+
+              <div className="flex justify-center">
+                <Image
+                  src="/branding/fightsupport/excel-logo.png"
+                  width={340}
+                  height={100}
+                  alt="FightSupport"
+                  priority
+                  style={{ width: "auto", height: "84px", objectFit: "contain" }}
+                />
+              </div>
+
+              <div className="flex items-center justify-center xl:justify-end">
+                <button
+                  type="button"
+                  onClick={() => router.push("/dashboard/officials/controle")}
+                  className="inline-flex items-center justify-center px-4 py-3 text-sm font-extrabold transition hover:-translate-y-[1px]"
+                  style={{
+                    minWidth: 210,
+                    borderRadius: 8,
+                    background:
+                      "linear-gradient(180deg, rgba(250,250,250,0.98) 0%, rgba(226,229,233,0.98) 30%, rgba(195,198,203,0.98) 100%)",
+                    color: "#1f2937",
+                    border: "1px solid rgba(68,68,74,0.42)",
+                    boxShadow:
+                      "inset 0 1px 0 rgba(255,255,255,0.92), inset 0 -1px 0 rgba(0,0,0,0.10), 0 10px 18px rgba(0,0,0,0.18)",
+                  }}
+                >
+                  ← Terug naar overzicht
+                </button>
+              </div>
+            </div>
+
+            <div
+              className="mt-4 rounded-2xl p-3 md:p-4"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <div className="flex flex-wrap items-center justify-center gap-2 md:gap-3">
+                <DarkActionButton
+                  label={headerBusy === "excel" ? "Bezig..." : "Excel"}
+                  tone="silver"
+                  icon={<FileSpreadsheet className="h-4 w-4" />}
+                  onClick={() => withHeaderBusy("excel", async () => openExcel())}
+                  disabled={lineupMode || !!headerBusy}
+                  title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                />
+
+                <DarkActionButton
+                  label={headerBusy === "rapportage" ? "Bezig..." : "Rapportage"}
+                  tone="silver"
+                  icon={<FileText className="h-4 w-4" />}
+                  onClick={() => withHeaderBusy("rapportage", async () => openRapportage())}
+                  disabled={lineupMode || !!headerBusy}
+                  title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                />
+
+                <DarkActionButton
+                  label={headerBusy === "nkf" ? "Bezig..." : "NKF Excel"}
+                  tone="silver"
+                  icon={<FileSpreadsheet className="h-4 w-4" />}
+                  onClick={() => withHeaderBusy("nkf", async () => openNkfExcel())}
+                  disabled={lineupMode || !!headerBusy}
+                  title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
+                />
+
+                <DarkActionButton
+                  label={headerBusy === "retour" ? "Bezig..." : "Retour naar matchmaker"}
+                  tone="purple"
+                  icon={<RotateCcw className="h-4 w-4" />}
+                  onClick={retourNaarMatchmaker}
+                  disabled={!!headerBusy}
+                />
+
+                <DarkActionButton
+  label={headerBusy === "admin" ? "Bezig..." : "Stuur naar admin"}
+  tone="blue"
+  icon={<Send className="h-4 w-4" />}
+  onClick={stuurUploadNaarAdmin}
+  disabled={!!headerBusy}
+  title={undefined}
+/>
+
+                <DarkActionButton
+                  label={headerBusy === "uitslagen" ? "Bezig..." : "Naar uitslagen"}
+                  tone="green"
+                  icon={<ArrowRightLeft className="h-4 w-4" />}
+                  onClick={stuurNaarUitslagen}
+                  disabled={!!headerBusy}
+                />
               </div>
             </div>
           </div>
@@ -1665,6 +1935,41 @@ export default function ControleMatchmakingPage() {
                 title={lineupMode ? "Niet tijdens lineup bouwen." : undefined}
               >
                 Partij toevoegen
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowWeegstationModal(true)}
+                disabled={lineupMode || !!headerBusy}
+                className="group inline-flex items-center gap-3 px-4 py-3 text-left transition disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  borderRadius: 0,
+                  minWidth: 220,
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(241,241,241,0.98) 100%)",
+                  border: "1px solid rgba(35,35,40,0.16)",
+                  boxShadow: "0 10px 22px rgba(0,0,0,0.10)",
+                }}
+              >
+                <div
+                  className="inline-flex h-10 w-10 items-center justify-center shrink-0"
+                  style={{
+                    borderRadius: 10,
+                    background: "linear-gradient(180deg, #ff6a1a 0%, #ff4d00 100%)",
+                    color: "#111",
+                  }}
+                >
+                  <Scale className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0">
+                  <div className="text-sm font-black text-zinc-900 group-hover:text-orange-700">
+                    Weegstation
+                  </div>
+                  <div className="text-xs font-semibold text-zinc-600 leading-snug">
+                    Stuur MM naar weegstation
+                  </div>
+                </div>
               </button>
             </div>
 
@@ -1739,8 +2044,8 @@ export default function ControleMatchmakingPage() {
                       color: "#7c2d12",
                     }}
                   >
-                    Sleep partijen of gebruik de pijltjes. Nummering wordt automatisch 1 t/m{" "}
-                    {orderedRows.length}.
+                    Sleep partijen, gebruik pijltjes of wissel direct rood/blauw met
+                    <span className="font-black"> Hoek wisselen</span>.
                   </div>
 
                   <button
@@ -1840,10 +2145,30 @@ export default function ControleMatchmakingPage() {
                   <HeaderBadge label="Geen info" value={totals.geen} tone="white" />
                 </div>
 
-                {galaDuur?.text && compactRunMeldingen.length === 0 ? (
-                  <div className="rounded-xl border border-zinc-300 bg-white/5 p-3 text-sm">
-                    <span className="font-semibold text-zinc-900">Gala duur:</span>{" "}
-                    <span className="text-zinc-800">{galaDuur.text}</span>
+                {galaDuur?.text ? (
+                  <div className="rounded-xl border border-zinc-300 bg-white/80 p-3 text-sm text-zinc-800">
+                    <div>
+                      <span className="font-semibold text-zinc-900">Gala duur:</span>{" "}
+                      <span>{galaDuur.text}</span>
+                    </div>
+
+                    {galaDuurCalc?.countsByKlasse &&
+                    Object.keys(galaDuurCalc.countsByKlasse).length > 0 ? (
+                      <div className="mt-2 text-xs text-zinc-700">
+                        {Object.entries(galaDuurCalc.countsByKlasse)
+                          .map(([label, item]) => {
+                            return `${label}: ${item.count} × ${item.mins} min = ${item.count * item.mins} min`;
+                          })
+                          .join(" • ")}
+                      </div>
+                    ) : null}
+
+                    {galaDuurCalc?.unknownKlasses?.length ? (
+                      <div className="mt-2 text-xs text-red-700">
+                        Onbekende klasses in duur-berekening:{" "}
+                        {galaDuurCalc.unknownKlasses.join(", ")}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -1948,21 +2273,21 @@ export default function ControleMatchmakingPage() {
                       }}
                     >
                       <tr>
-                        <th className="py-3 px-4 text-left w-32">#</th>
+                        <th className="py-3 px-4 text-left w-40">#</th>
                         <th className="py-3 px-4 text-left">Vechters</th>
                         <th className="py-3 px-4 text-left w-[320px]">Info</th>
-                        <th className="py-3 px-4 text-left w-[320px]">Acties</th>
+                        <th className="py-3 px-4 text-left w-[420px]">Acties</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredRows.map((r, i) => {
                         const zebraWhite = i % 2 === 0;
-                        const roodNaam = safeText(r.rood_naam_fp ?? r.rood_naam_mm, "-");
-                        const blauwNaam = safeText(r.blauw_naam_fp ?? r.blauw_naam_mm, "-");
-                        const roodGym = safeText(r.rood_gym_mm, "-");
-                        const blauwGym = safeText(r.blauw_gym_mm, "-");
-                        const roodVA = safeText(r.rood_va_mm, "-");
-                        const blauwVA = safeText(r.blauw_va_mm, "-");
+                        const roodNaam = safeText(r.rood_naam_fp ?? r.rood_naam_mm ?? r.rood_naam, "-");
+                        const blauwNaam = safeText(r.blauw_naam_fp ?? r.blauw_naam_mm ?? r.blauw_naam, "-");
+                        const roodGym = safeText(r.rood_gym_mm ?? r.rood_gym_fp ?? r.rood_gym, "-");
+                        const blauwGym = safeText(r.blauw_gym_mm ?? r.blauw_gym_fp ?? r.blauw_gym, "-");
+                        const roodVA = safeText(r.rood_va_mm ?? r.va_rood, "-");
+                        const blauwVA = safeText(r.blauw_va_mm ?? r.va_blauw, "-");
                         const roodAge = ageAtEvent(r, "rood");
                         const blauwAge = ageAtEvent(r, "blauw");
 
@@ -1972,8 +2297,9 @@ export default function ControleMatchmakingPage() {
                           ? statusByPartij[originalPn] ?? "geen_info"
                           : "geen_info";
 
-                        const discipline = safeText(r.discipline, "-");
-                        const klasse = safeText(r.klasse_mm ?? r.klasse, "-");
+                        const klasseDiscipline = getKlasseEnDiscipline(r);
+                        const discipline = safeText(klasseDiscipline.discipline, "-");
+                        const klasse = safeText(klasseDiscipline.klasse, "-");
                         const eventDatum = safeText(r.evenement_datum, "-");
                         const sortWeight = getBoutWeightForSort(r);
                         const dividerClass = zebraWhite
@@ -2051,6 +2377,10 @@ export default function ControleMatchmakingPage() {
                                     </span>
                                   ) : null}
 
+                                  {!!r?.__swapped_corners ? (
+                                    <Chip label="HOEKEN GEWISSELD" tone="orange" />
+                                  ) : null}
+
                                   <StatusBadge status={status} />
                                   {heeftVerbod ? <Chip label="VERBOD" tone="purple" /> : null}
                                   {Number.isFinite(originalPn) &&
@@ -2060,7 +2390,7 @@ export default function ControleMatchmakingPage() {
                                 </div>
 
                                 {lineupMode ? (
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -2101,6 +2431,24 @@ export default function ControleMatchmakingPage() {
                                       }}
                                     >
                                       ↓
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => currentIndex >= 0 && swapPartijCorners(currentIndex)}
+                                      className="inline-flex items-center gap-2 px-2.5 py-1 rounded text-[11px] font-extrabold"
+                                      style={{
+                                        background: zebraWhite
+                                          ? "linear-gradient(180deg, #fff5ef 0%, #ffe7d8 100%)"
+                                          : "linear-gradient(180deg, #4a2c1f 0%, #2e1a12 100%)",
+                                        border: zebraWhite
+                                          ? "1px solid rgba(255,77,0,0.30)"
+                                          : "1px solid rgba(255,184,158,0.22)",
+                                        color: zebraWhite ? "#9a3412" : "#ffd0be",
+                                      }}
+                                    >
+                                      <Repeat className="h-3.5 w-3.5" />
+                                      Hoek wisselen
                                     </button>
 
                                     <span
@@ -2161,6 +2509,14 @@ export default function ControleMatchmakingPage() {
                                 <div>
                                   <span className="font-semibold">Klasse:</span>{" "}
                                   <span className="opacity-90">{klasse}</span>
+                                </div>
+                                <div>
+                                  <span className="font-semibold">Klasse duur:</span>{" "}
+                                  <span className="opacity-90">
+                                    {matchKlasseMinuten(klasse, discipline) != null
+                                      ? `${matchKlasseMinuten(klasse, discipline)} min`
+                                      : "-"}
+                                  </span>
                                 </div>
                                 <div>
                                   <span className="font-semibold">Sorteergewicht:</span>{" "}
@@ -2400,7 +2756,11 @@ export default function ControleMatchmakingPage() {
                       <div className="text-zinc-900 font-extrabold mb-3">Blauw</div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <Field label="Naam blauw" value={fBlauwNaam} onChange={setFBlauwNaam} />
-                        <Field label="Sportschool blauw" value={fBlauwGym} onChange={setFBlauwGym} />
+                        <Field
+                          label="Sportschool blauw"
+                          value={fBlauwGym}
+                          onChange={setFBlauwGym}
+                        />
                         <Field
                           label="VA nummer blauw"
                           value={fBlauwVa}

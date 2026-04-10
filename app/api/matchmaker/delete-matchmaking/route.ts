@@ -69,6 +69,7 @@ export async function POST(req: Request) {
     await bestEffortDeleteEq("dispensatie_hits", "matchmaking_id", matchmaking_id);
 
     await bestEffortDeleteEq("matchmaker_controle_resultaten", "matchmaking_id", matchmaking_id);
+    await bestEffortDeleteEq("matchmaker_fighter_resultaten", "matchmaking_id", matchmaking_id);
     await bestEffortDeleteEq("matchmaker_bout_context", "matchmaking_id", matchmaking_id);
     await bestEffortDeleteEq("controle_audit_events", "matchmaking_id", matchmaking_id);
 

@@ -697,18 +697,6 @@ export async function rulesEngine(opts: {
             boodschap: `Rood leeftijd (event): ${ageR} • Blauw leeftijd (event): ${ageB} — mix jeugd/volwassen is niet toegestaan (VERBOD).`,
           });
         }
-      } else {
-        pushHit({
-          matchmaking_id,
-          partij_nr,
-          bout_id,
-          rule: "Jeugd vs volwassen niet controleerbaar",
-          rule_code: "JEUGD_vs_VOLWASSEN_GEEN_DATA_ACTIE",
-          resultaat: "ACTIE",
-          severity: "warning",
-          boodschap:
-            "Geboortedatum en/of event-datum ontbreekt — kan niet bepalen of het een jeugd/volwassen partij is.",
-        });
       }
     }
 
@@ -1012,19 +1000,7 @@ export async function rulesEngine(opts: {
         const bandR = mmaJeugdAgeBand(ageR);
         const bandB = mmaJeugdAgeBand(ageB);
 
-        if (!bandR || !bandB) {
-          pushHit({
-            matchmaking_id,
-            partij_nr,
-            bout_id,
-            rule: "MMA jeugd: leeftijdscategorie niet controleerbaar",
-            rule_code: "MMA_JEUGD_GEEN_INFO",
-            resultaat: "ACTIE",
-            severity: "warning",
-            boodschap:
-              "Geboortedatum en/of event-datum ontbreekt — MMA-jeugd leeftijdscategorie kan niet gecontroleerd worden.",
-          });
-        } else if (bandR.label !== bandB.label) {
+        if (bandR && bandB && bandR.label !== bandB.label) {
           pushHit({
             matchmaking_id,
             partij_nr,
@@ -1041,19 +1017,7 @@ export async function rulesEngine(opts: {
         const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp);
         const lv = leeftijdsVerschilJeugd(dobR, dobB);
 
-        if (lv.type === "ACTIE") {
-          pushHit({
-            matchmaking_id,
-            partij_nr,
-            bout_id,
-            rule: "Leeftijdsverschil niet controleerbaar (jeugd)",
-            rule_code: "LEEFTIJDSVERSCHIL_JEUGD_GEEN_DATA",
-            resultaat: "ACTIE",
-            severity: "warning",
-            boodschap:
-              "Geboortedatum ontbreekt bij rood en/of blauw — jeugd-leeftijdsverschil kan niet gecontroleerd worden.",
-          });
-        } else if (lv.type === "DISPENSATIE") {
+        if (lv.type === "DISPENSATIE") {
           pushHit({
             matchmaking_id,
             partij_nr,

@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       }
     }
 
-    await ensureLifecycleRecord({ matchmakingId: matchmaking_id, bronType: "matchmaker_app", stage: "concept_matchmaking", ownerType: "matchmaker", ownerUserId: userId, actorUserId: userId, actorRole: role, metadata: { route: "api/matchmaker/submit-to-control/route" } });
+    await ensureLifecycleRecord({ matchmakingId: matchmaking_id, bronType: "matchmaker_app", stage: "nieuw", ownerType: "matchmaker", ownerUserId: userId, actorUserId: userId, actorRole: role, metadata: { route: "api/matchmaker/submit-to-control/route" } });
     const lifecycle = await transferLifecycle({ matchmakingId: matchmaking_id, newStage: "ingediend_admin", newOwnerType: "admin", actorUserId: userId, actorRole: role, opmerking: "Matchmaking snapshot doorgestuurd naar admin/controle.", metadata: { route: "api/matchmaker/submit-to-control/route", source_rows: rows.length } });
 
     return NextResponse.json({ ok: true, matchmaking_id, imported_bouts: rows.length, lifecycle, message: "Matchmaking snapshot staat klaar voor admin/controle." });
