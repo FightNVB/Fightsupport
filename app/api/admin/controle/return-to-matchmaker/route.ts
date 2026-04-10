@@ -102,12 +102,12 @@ export async function POST(req: NextRequest) {
           : "official_upload"),
       stage:
         (mm as any)?.stadium && String((mm as any).stadium).trim()
-          ? String((mm as any).stadium)
+          ? (String((mm as any).stadium) as import("@/app/api/_utils/matchmakingLifecycle").MatchmakingStage)
           : "in_controle_admin",
       ownerType:
         (mm as any)?.huidige_eigenaar_type &&
         String((mm as any).huidige_eigenaar_type).trim()
-          ? String((mm as any).huidige_eigenaar_type)
+          ? (String((mm as any).huidige_eigenaar_type) as import("@/app/api/_utils/matchmakingLifecycle").MatchmakingOwnerType)
           : "admin",
       ownerUserId:
         (mm as any)?.huidige_eigenaar_type === "matchmaker"

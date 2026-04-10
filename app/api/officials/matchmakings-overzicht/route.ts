@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserWithRole } from "@/app/api/_utils/authz";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -42,7 +42,7 @@ function inferTab(bronType: string | null | undefined): "uploaded" | "received" 
 
 export async function GET(req: Request) {
   try {
-    const auth = await requireUserWithRole(req, [
+    const auth = await requireAnyRole(req, [
       "official",
       "hoofdofficial",
       "admin",

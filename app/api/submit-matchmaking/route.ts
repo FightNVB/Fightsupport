@@ -507,7 +507,7 @@ export async function POST(req: Request) {
       matchmakerId: role === "matchmaker" ? userId : null,
       eventId: evId || null,
       bronType: lifecycleBronType,
-      stage: "nieuw",
+      stage: "concept_matchmaking",
       ownerType: lifecycleOwnerType,
       ownerUserId: lifecycleOwnerType === "matchmaker" ? userId : null,
       ownerBondteam: lifecycleOwnerType === "bondteam" ? (bondteam || null) : null,

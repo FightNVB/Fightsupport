@@ -20,8 +20,9 @@ function getSupabaseFromAuthHeader(authHeader: string) {
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function writeAuditLog(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   payload: {
     actor_user_id?: string | null;
     actor_email?: string | null;
@@ -49,7 +50,7 @@ async function writeAuditLog(
       old_value: payload.old_value ?? null,
       new_value: payload.new_value ?? null,
       meta: payload.meta ?? null,
-    });
+    } as any);
   } catch (err) {
     console.error("writeAuditLog error:", err);
   }

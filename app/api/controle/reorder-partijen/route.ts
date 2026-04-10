@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
         old_partij_nr: asPositiveInt(x?.old_partij_nr),
         partij_nr: asPositiveInt(x?.partij_nr),
       }))
-      .filter((x) => x.partij_nr != null && (x.ctx_row_id || x.old_partij_nr != null));
+      .filter((x: any) => x.partij_nr != null && (x.ctx_row_id || x.old_partij_nr != null));
 
     if (items.length !== rawItems.length) {
       return jsonError(
@@ -310,13 +310,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const uniquePartijNrs = new Set(items.map((x) => x.partij_nr));
+    const uniquePartijNrs = new Set(items.map((x: any) => x.partij_nr));
     if (uniquePartijNrs.size !== items.length) {
       return jsonError("Er zitten dubbele partij_nr waarden in items.");
     }
 
     const expected = Array.from({ length: items.length }, (_, i) => i + 1);
-    const got = [...uniquePartijNrs].sort((a, b) => a - b);
+    const got = [...uniquePartijNrs].sort((a: any, b: any) => a - b);
     const sameSequence = expected.length === got.length && expected.every((n, i) => got[i] === n);
 
     if (!sameSequence) {
@@ -356,7 +356,7 @@ export async function POST(req: NextRequest) {
       if (rowPn != null) ctxByPartijNr.set(rowPn, row);
     }
 
-    const resolved = items.map((item) => {
+    const resolved = items.map((item: any) => {
       let row: any | null = null;
 
       if (item.ctx_row_id) row = ctxById.get(item.ctx_row_id) ?? null;
@@ -373,24 +373,24 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    const unresolved = resolved.filter((x) => !x.ctx_row_id || x.old_partij_nr == null);
+    const unresolved = resolved.filter((x: any) => !x.ctx_row_id || x.old_partij_nr == null);
     if (unresolved.length > 0) {
       return jsonError(
         "Niet alle items konden gekoppeld worden aan controle_bout_context. Controleer ctx_row_id / old_partij_nr."
       );
     }
 
-    const uniqueCtxIds = new Set(resolved.map((x) => x.ctx_row_id));
+    const uniqueCtxIds = new Set(resolved.map((x: any) => x.ctx_row_id));
     if (uniqueCtxIds.size !== resolved.length) {
       return jsonError("Er zijn dubbele controle-context rijen gevonden bij het koppelen van reorder items.");
     }
 
-    const uniqueOldPn = new Set(resolved.map((x) => x.old_partij_nr));
+    const uniqueOldPn = new Set(resolved.map((x: any) => x.old_partij_nr));
     if (uniqueOldPn.size !== resolved.length) {
       return jsonError("Er zijn dubbele oude partij_nummers gevonden in de reorder-mapping.");
     }
 
-    const mapping = resolved.map((x) => ({
+    const mapping = resolved.map((x: any) => ({
       old_partij_nr: x.old_partij_nr!,
       partij_nr: x.partij_nr,
     }));
@@ -398,7 +398,7 @@ export async function POST(req: NextRequest) {
     await updatePartijNrSequenceByIds(
       "controle_bout_context",
       "id",
-      resolved.map((x) => ({
+      resolved.map((x: any) => ({
         id: x.ctx_row_id,
         partij_nr: x.partij_nr,
       })),
@@ -442,7 +442,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-  const oldPartijNrs = mapping.map((x) => x.old_partij_nr);
+  const oldPartijNrs = mapping.map((x: any) => x.old_partij_nr);
   await ensureOriginalPartijNrRaw(matchmakingId, oldPartijNrs);
 
   await updatePartijNrByOldToNewMap(
@@ -461,7 +461,7 @@ export async function POST(req: NextRequest) {
       matchmaking_id: matchmakingId,
       controle_run_id: latestControleRunId,
       updated: resolved.length,
-      items: resolved.map((x) => ({
+      items: resolved.map((x: any) => ({
         ctx_row_id: x.ctx_row_id,
         original_partij_nr: x.original_partij_nr,
         old_partij_nr: x.old_partij_nr,

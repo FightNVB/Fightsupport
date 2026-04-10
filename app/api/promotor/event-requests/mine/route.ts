@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserWithRole } from "@/app/api/_utils/authz";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -17,7 +17,7 @@ function getErrorMessage(error: unknown) {
 
 export async function GET(req: Request) {
   try {
-    const auth = await requireUserWithRole(req, ["promotor", "admin", "superadmin"]);
+    const auth = await requireAnyRole(req, ["promotor", "admin", "superadmin"]);
 
     const userId = String(auth?.user?.id ?? "").trim();
 

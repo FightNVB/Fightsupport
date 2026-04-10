@@ -21,7 +21,8 @@ function asUuid(v: any): string | null {
  * Voer een supabase query uit, maar negeer fouten (best effort).
  * Handig voor "kolom bestaat niet" of "tabel bestaat niet" scenario's.
  */
-async function bestEffort<T>(promise: Promise<T>): Promise<null> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bestEffort(promise: Promise<any> | PromiseLike<any> | any): Promise<null> {
   try {
     await promise;
   } catch {
@@ -32,7 +33,7 @@ async function bestEffort<T>(promise: Promise<T>): Promise<null> {
 
 export async function POST(req: Request) {
   try {
-    const user = await requireUserFromAuthHeader(req);
+    const authed = await requireUserFromAuthHeader(req);
     const allowed = await hasAnyRoleFromReq(req, ["superadmin", "admin"]);
     if (!allowed) {
       return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
@@ -165,8 +166,8 @@ export async function POST(req: Request) {
         bout_id: bout_id ?? null,
       },
       by: {
-        user_id: user?.id ?? null,
-        email: user?.email ?? null,
+        user_id: authed.user?.id ?? null,
+        email: authed.user?.email ?? null,
       },
     });
   } catch (e: any) {

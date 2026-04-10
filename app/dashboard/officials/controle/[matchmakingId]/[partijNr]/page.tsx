@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
-import { Inter, Bebas_Neue } from "next/font/google";
+import { inter, bebasNeue } from "@/app/fonts";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 
@@ -45,16 +45,7 @@ type UitslagRow = {
   uitslag: string | null;
 };
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
 
-// ✅ Stoere display font voor FIGHTSUPPORT (VS-style / arcade)
-const bebas = Bebas_Neue({
-  subsets: ["latin"],
-  weight: "400",
-});
 
 const NVB_ORANGE = "#ff4d00";
 
@@ -578,7 +569,7 @@ function BruteHeaderA({
         <div className="order-1 md:order-2 flex justify-center items-center">
           <div className="text-center">
             <div
-              className={`${bebas.className} text-[48px] md:text-[60px] leading-none tracking-[0.22em]`}
+              className={`${bebasNeue.className} text-[48px] md:text-[60px] leading-none tracking-[0.22em]`}
               style={{
                 // ✅ Duidelijker: meer wit + NVB-oranje highlight + 3D/emboss
                 ...fightSupportTitleText(),

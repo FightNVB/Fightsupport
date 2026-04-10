@@ -11,7 +11,7 @@ import React, {
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import dayjs from "dayjs";
-import { Bebas_Neue } from "next/font/google";
+import { bebasNeue } from "@/app/fonts";
 import {
   ArrowLeft,
   Save,
@@ -36,10 +36,6 @@ import {
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 
-const bebas = Bebas_Neue({
-  subsets: ["latin"],
-  weight: "400",
-});
 
 const ORANGE = "#ff4d00";
 const DARK = "#2b3138";
@@ -1639,7 +1635,7 @@ function BrutalHeader({
           </div>
 
           <div style={headerCenterBlock}>
-            <div className={bebas.className} style={headerFightsupport}>
+            <div className={bebasNeue.className} style={headerFightsupport}>
               FIGHTSUPPORT
             </div>
             <div style={headerSubline}>VECHTER DETAIL</div>

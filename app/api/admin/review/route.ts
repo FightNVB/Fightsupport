@@ -31,7 +31,7 @@ async function getUserRole(userId: string): Promise<string | null> {
     return null;
   }
 
-  const roleName = data?.roles?.name;
+  const roleName = (data?.roles as any)?.name;
   return roleName ? String(roleName).toLowerCase() : null;
 }
 

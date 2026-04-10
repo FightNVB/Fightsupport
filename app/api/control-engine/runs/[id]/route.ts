@@ -4,10 +4,10 @@ import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_util
 
 export async function GET(
   req: Request,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const runId = context.params.id;
+    const runId = (await context.params).id;
 
     // 1) Haal run op
     const { data: run, error: runErr } = await supabaseAdmin

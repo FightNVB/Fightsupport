@@ -497,7 +497,7 @@ async function rerunSingleFighterRules(opts: {
       matchmaking_id,
       controle_run_id,
       fighter_id,
-      inschrijving_id,
+      inschrijving_id: inschrijving_id != null ? String(inschrijving_id) : null,
       row_nr,
       naam,
       va_nummer,
