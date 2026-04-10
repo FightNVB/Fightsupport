@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserWithRole } from "@/app/api/_utils/authz";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -17,7 +17,7 @@ function asText(v: unknown) {
 
 export async function PATCH(req: Request) {
   try {
-    const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    const auth = await requireAnyRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
     const userId = String((auth as any)?.user?.id ?? "").trim();
     const body = await req.json();
 

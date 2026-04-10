@@ -14,11 +14,11 @@ function normAlias(s: any) {
   return String(s ?? "").trim();
 }
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   await requireAdmin(req);
 
   try {
-    const id = ctx.params.id;
+    const { id } = await ctx.params;
     const body = await req.json().catch(() => ({}));
 
     const patch: any = {};
@@ -52,11 +52,11 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
 }
 
-export async function DELETE(req: Request, ctx: { params: { id: string } }) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
   await requireAdmin(req);
 
   try {
-    const id = ctx.params.id;
+    const { id } = await ctx.params;
 
     const { error } = await supabaseAdmin.from("sportschool_aliases").delete().eq("id", id);
     if (error) throw error;

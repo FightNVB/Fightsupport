@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserWithRole } from "@/app/api/_utils/authz";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -12,7 +12,7 @@ const supabase = createClient(
 
 export async function GET(req: Request) {
   try {
-    await requireUserWithRole(req, ["admin", "superadmin"]);
+    await requireAnyRole(req, ["admin", "superadmin"]);
 
     const { data: roleRows, error: roleError } = await supabase
       .from("user_roles")

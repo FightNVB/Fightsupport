@@ -17,7 +17,8 @@ function asUuid(v: any): string | null {
   return ok ? s : null;
 }
 
-async function bestEffort<T>(promise: Promise<T>): Promise<null> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bestEffort(promise: Promise<any> | PromiseLike<any> | any): Promise<null> {
   try {
     await promise;
   } catch {

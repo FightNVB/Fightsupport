@@ -95,16 +95,16 @@ export async function POST(req: Request) {
         if (cols.has("resultaat")) row.resultaat = h.resultaat ?? "ok";
 
         // ✅ bij jou heet het boodschap (niet message)
-        if (cols.has("boodschap")) row.boodschap = h.message ?? h.boodschap ?? null;
+        if (cols.has("boodschap")) row.boodschap = h.boodschap ?? null;
 
         // optioneel
         if (cols.has("severity")) row.severity = h.severity ?? null;
         if (cols.has("hoek")) row.hoek = h.hoek ?? null;
-        if (cols.has("match_id")) row.match_id = h.match_id ?? ctx?.bout_id ?? null;
+        if (cols.has("match_id")) row.match_id = ctx?.bout_id ?? null;
         if (cols.has("created_at")) row.created_at = now;
 
         // actie velden (alleen als bestaan)
-        if (cols.has("actie_status")) row.actie_status = h.resultaat === "actie" ? "open" : null;
+        if (cols.has("actie_status")) row.actie_status = h.resultaat === "ACTIE" ? "open" : null;
         if (cols.has("actie")) row.actie = null;
         if (cols.has("aantekeningen")) row.aantekeningen = null;
 

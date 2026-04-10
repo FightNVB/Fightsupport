@@ -41,6 +41,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@fontsource/bebas-neue": "^5.2.7",
     "@types/jest": "^30.0.0",
     "@types/react": "^18.3.11",
     "@types/react-big-calendar": "^1.16.3",

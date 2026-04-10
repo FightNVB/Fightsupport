@@ -69,7 +69,7 @@ function buildRawInschrijving(values: any[]) {
   return JSON.stringify({ values });
 }
 
-async function getLatestUpload(admin: ReturnType<typeof createClient>, matchmaking_id: string) {
+async function getLatestUpload(admin: any, matchmaking_id: string) {
   const { data, error } = await admin
     .from("matchmaker_uploads")
     .select("id, matchmaking_id, evenement_naam, evenement_datum, uploaded_by")
@@ -84,7 +84,7 @@ async function getLatestUpload(admin: ReturnType<typeof createClient>, matchmaki
   return data;
 }
 
-async function getNextRowNr(admin: ReturnType<typeof createClient>, matchmaking_id: string) {
+async function getNextRowNr(admin: any, matchmaking_id: string) {
   const { data, error } = await admin
     .from("matchmaker_inschrijvingen")
     .select("row_nr")
@@ -94,10 +94,10 @@ async function getNextRowNr(admin: ReturnType<typeof createClient>, matchmaking_
     .maybeSingle();
 
   if (error) throw new Error(error.message);
-  return Number(data?.row_nr ?? 0) + 1;
+  return Number((data as any)?.row_nr ?? 0) + 1;
 }
 
-async function getNextPartijNr(admin: ReturnType<typeof createClient>, matchmaking_id: string) {
+async function getNextPartijNr(admin: any, matchmaking_id: string) {
   const { data, error } = await admin
     .from("matchmaker_bouts_raw")
     .select("partij_nr")
@@ -107,11 +107,12 @@ async function getNextPartijNr(admin: ReturnType<typeof createClient>, matchmaki
     .maybeSingle();
 
   if (error) throw new Error(error.message);
-  return Number(data?.partij_nr ?? 0) + 1;
+  return Number((data as any)?.partij_nr ?? 0) + 1;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function insertInschrijving(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   args: {
     matchmaking_id: string;
     upload_id: string | number;
@@ -177,7 +178,7 @@ async function insertInschrijving(
 
   const { data, error } = await admin
     .from("matchmaker_inschrijvingen")
-    .insert(insertRow)
+    .insert(insertRow as any)
     .select("*")
     .single();
 

@@ -552,6 +552,589 @@ function getMmaLevelFromCtx(ctx: any, hoek: "rood" | "blauw"): MmaLevel | null {
   return parseMmaLevel(cand);
 }
 
+/**
+ * Runs all per-bout rules synchronously on a single context row.
+ * Pass `uitslagenByVa` (pre-fetched historical results keyed by VA number)
+ * to enable uitslagen-dependent rules; omit or pass an empty Map to skip them.
+ */
+export function runRulesForBoutContext(
+  ctx: any,
+  uitslagenByVa: Map<string, UitslagRow[]> = new Map()
+): RuleHit[] {
+  const matchmaking_id = String(ctx?.matchmaking_id ?? "").trim() || null;
+  const partij_nr = asInt(ctx?.partij_nr);
+  const bout_id = unwrapUuid(ctx?.bout_id);
+
+  const hits: RuleHit[] = [];
+  const pushHit = (h: RuleHit) => hits.push(h);
+
+  const vaRood = String(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.va_rood_mm ?? "").trim();
+  const vaBlauw = String(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.va_blauw_mm ?? "").trim();
+
+  if (!vaRood) {
+    pushHit({
+      matchmaking_id,
+      partij_nr,
+      bout_id,
+      rule: "Fightpaspoort nummer ontbreekt (rood)",
+      rule_code: "FIGHTPASPOORT_ONTBREEKT_ROOD",
+      resultaat: "AFKEUR",
+      severity: "error",
+      boodschap:
+        "Geen Fightpaspoort nummer gevonden voor rood. Zonder Fightpaspoort nummer is er geen deelname mogelijk",
+      hoek: "rood",
+    });
+  }
+
+  if (!vaBlauw) {
+    pushHit({
+      matchmaking_id,
+      partij_nr,
+      bout_id,
+      rule: "Fightpaspoort nummer ontbreekt (blauw)",
+      rule_code: "FIGHTPASPOORT_ONTBREEKT_BLAUW",
+      resultaat: "AFKEUR",
+      severity: "error",
+      boodschap:
+        "Geen Fightpaspoort nummer gevonden voor blauw. Zonder Fightpaspoort nummer is er geen deelname mogelijk",
+      hoek: "blauw",
+    });
+  }
+
+  const jeugd = isJeugdFromCtx(ctx);
+  const volwassenen = isVolwassenePair(ctx);
+  const mma = isMmaBout(ctx);
+  const mmaJeugd = jeugd && mma;
+
+  // 40+ sportmedisch advies
+  {
+    const ageR = ageOnEventFromCtx(ctx, "rood");
+    const ageB = ageOnEventFromCtx(ctx, "blauw");
+
+    if (typeof ageR === "number" && ageR >= 40) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        hoek: "rood",
+        rule: "Sportmedisch advies vereist 40+ (rood)",
+        rule_code: "SPORTMEDISCH_ADVIES_40PLUS_ROOD",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: `Rood is op eventdatum ${ageR} jaar. Vanaf 40 jaar is sportmedisch advies van een sportarts nodig.`,
+      });
+    }
+
+    if (typeof ageB === "number" && ageB >= 40) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        hoek: "blauw",
+        rule: "Sportmedisch advies vereist 40+ (blauw)",
+        rule_code: "SPORTMEDISCH_ADVIES_40PLUS_BLAUW",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: `Blauw is op eventdatum ${ageB} jaar. Vanaf 40 jaar is sportmedisch advies van een sportarts nodig.`,
+      });
+    }
+  }
+
+  // jeugd vs volwassen mix
+  {
+    const ageR = ageOnEventFromCtx(ctx, "rood");
+    const ageB = ageOnEventFromCtx(ctx, "blauw");
+
+    if (typeof ageR === "number" && typeof ageB === "number") {
+      const mix = (ageR < 18 && ageB >= 18) || (ageB < 18 && ageR >= 18);
+      if (mix) {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "Jeugd vs volwassen verboden",
+          rule_code: "JEUGD_vs_VOLWASSEN_AFKEUR",
+          resultaat: "VERBOD",
+          severity: "error",
+          boodschap: `Rood leeftijd (event): ${ageR} • Blauw leeftijd (event): ${ageB} — mix jeugd/volwassen is niet toegestaan (VERBOD).`,
+        });
+      }
+    }
+  }
+
+  // naam mismatch
+  {
+    const roodNaamMM = ctx?.rood_naam_mm;
+    const roodNaamFP = ctx?.rood_naam_fp ?? ctx?.rood_naam_scrape;
+    const blauwNaamMM = ctx?.blauw_naam_mm;
+    const blauwNaamFP = ctx?.blauw_naam_fp ?? ctx?.blauw_naam_scrape;
+
+    if (!nameSimilar(roodNaamMM, roodNaamFP)) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Naam klopt niet met FightPassport (rood)",
+        rule_code: "NAAM_KLOPT_NIET_MET_FIGHTPASSPORT_ROOD",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: `Rood naam matchmaker ("${roodNaamMM ?? "-"}") wijkt af van FightPassport ("${roodNaamFP ?? "-"}"). Controleer VA/vechter.`,
+        hoek: "rood",
+      });
+    }
+
+    if (!nameSimilar(blauwNaamMM, blauwNaamFP)) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Naam klopt niet met FightPassport (blauw)",
+        rule_code: "NAAM_KLOPT_NIET_MET_FIGHTPASSPORT_BLAUW",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: `Blauw naam matchmaker ("${blauwNaamMM ?? "-"}") wijkt af van FightPassport ("${blauwNaamFP ?? "-"}"). Controleer VA/vechter.`,
+        hoek: "blauw",
+      });
+    }
+  }
+
+  // keurmerk sportschool
+  {
+    const kR = ctx?.keurmerk_rood;
+    const kB = ctx?.keurmerk_blauw;
+    const redenR = String(ctx?.keurmerk_reden_rood ?? "").trim();
+    const redenB = String(ctx?.keurmerk_reden_blauw ?? "").trim();
+
+    if (redenR.startsWith("⚠️ België")) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Belgische sportschool (check BKBMO)",
+        rule_code: "KEURMERK_BE_ROOD_INFO",
+        resultaat: "INFO",
+        severity: "info",
+        boodschap: redenR,
+        hoek: "rood",
+      });
+    }
+
+    if (redenB.startsWith("⚠️ België")) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Belgische sportschool (check BKBMO)",
+        rule_code: "KEURMERK_BE_BLAUW_INFO",
+        resultaat: "INFO",
+        severity: "info",
+        boodschap: redenB,
+        hoek: "blauw",
+      });
+    }
+
+    if (kR == null) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Sportschool niet gevonden (rood)",
+        rule_code: "SPORTSCHOOL_NIET_GEVONDEN_ROOD",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: redenR || "NL gym: Gym match onzeker.",
+        hoek: "rood",
+      });
+    } else if (kR === false) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Keurmerk NL Sportschool ongeldig (rood)",
+        rule_code: "KEURMERK_ONGELDIG_ROOD",
+        resultaat: "AFKEUR",
+        severity: "error",
+        boodschap: redenR || "NL gym: geen geldig keurmerk (ontbreekt/verlopen).",
+        hoek: "rood",
+      });
+    }
+
+    if (kB == null) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Sportschool niet gevonden (blauw)",
+        rule_code: "SPORTSCHOOL_NIET_GEVONDEN_BLAUW",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: redenB || "NL gym: Gym match onzeker.",
+        hoek: "blauw",
+      });
+    } else if (kB === false) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Keurmerk NL Sportschool ongeldig (blauw)",
+        rule_code: "KEURMERK_ONGELDIG_BLAUW",
+        resultaat: "AFKEUR",
+        severity: "error",
+        boodschap: redenB || "NL gym: geen geldig keurmerk (ontbreekt/verlopen).",
+        hoek: "blauw",
+      });
+    }
+  }
+
+  // man vs vrouw
+  {
+    const gR = parseGender(ctx?.rood_geslacht);
+    const gB = parseGender(ctx?.blauw_geslacht);
+
+    if (gR && gB && gR !== gB) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Man tegen vrouw niet toegestaan",
+        rule_code: "GESLACHT_AFKEUR",
+        resultaat: "VERBOD",
+        severity: "error",
+        boodschap: `Rood is ${gR === "M" ? "man" : "vrouw"} en Blauw is ${
+          gB === "M" ? "man" : "vrouw"
+        } — VERBOD.`,
+      });
+    }
+  }
+
+  // startverbod
+  {
+    const sbR = normLower(ctx?.rood_heeft_startverbod);
+    const sbB = normLower(ctx?.blauw_heeft_startverbod);
+    const sbR_has = sbR === "ja" || sbR === "true" || sbR === "1";
+    const sbB_has = sbB === "ja" || sbB === "true" || sbB === "1";
+
+    if (sbR_has || sbB_has) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Vechter heeft startverbod",
+        rule_code: "STARTVERBOD_AFKEUR",
+        resultaat: "VERBOD",
+        severity: "error",
+        boodschap: `Rood: ${sbR_has ? "STARTVERBOD" : "OK"} • Blauw: ${
+          sbB_has ? "STARTVERBOD" : "OK"
+        } — VERBOD.`,
+      });
+    }
+  }
+
+  // licentie
+  {
+    const licR = normLower(ctx?.rood_licentie);
+    const licB = normLower(ctx?.blauw_licentie);
+
+    const licR_ok =
+      licR === "ja" ||
+      licR === "j" ||
+      licR === "true" ||
+      licR === "1" ||
+      licR === "geldig";
+    const licB_ok =
+      licB === "ja" ||
+      licB === "j" ||
+      licB === "true" ||
+      licB === "1" ||
+      licB === "geldig";
+
+    if (!licR_ok) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        hoek: "rood",
+        rule: "Licentie ontbreekt/ongeldig (rood)",
+        rule_code: "LICENTIE_ONGELDIG_ROOD",
+        resultaat: "AFKEUR",
+        severity: "error",
+        boodschap: `Rood heeft GEEN/ONGELDIGE licentie (waarde: "${
+          String(ctx?.rood_licentie ?? "").trim() || "leeg"
+        }").`,
+      });
+    }
+
+    if (!licB_ok) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        hoek: "blauw",
+        rule: "Licentie ontbreekt/ongeldig (blauw)",
+        rule_code: "LICENTIE_ONGELDIG_BLAUW",
+        resultaat: "AFKEUR",
+        severity: "error",
+        boodschap: `Blauw heeft GEEN/ONGELDIGE licentie (waarde: "${
+          String(ctx?.blauw_licentie ?? "").trim() || "leeg"
+        }").`,
+      });
+    }
+  }
+
+  // MMA < 12
+  if (mma) {
+    const minAge = minAgeEvent(ctx);
+
+    if (typeof minAge === "number" && minAge < 12) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "MMA onder 12 jaar verboden",
+        rule_code: "MMA_LEEFTIJD_AFKEUR",
+        resultaat: "VERBOD",
+        severity: "error",
+        boodschap: `Minimale leeftijd in de partij is ${minAge} — MMA wedstrijden zijn verboden onder 12 jaar — VERBODEN.`,
+      });
+    }
+  }
+
+  // MMA: Pro vs Amateur mismatch
+  if (mma && volwassenen) {
+    const mmaLevelR = getMmaLevelFromCtx(ctx, "rood");
+    const mmaLevelB = getMmaLevelFromCtx(ctx, "blauw");
+    void mmaLevelR;
+    void mmaLevelB;
+
+    const vaR = String(ctx?.rood_va_mm ?? "").trim();
+    const vaB = String(ctx?.blauw_va_mm ?? "").trim();
+    const rowsR = vaR ? (uitslagenByVa.get(vaR) ?? []) : [];
+    const rowsB = vaB ? (uitslagenByVa.get(vaB) ?? []) : [];
+
+    let proCountR = 0;
+    let amaCountR = 0;
+    let proCountB = 0;
+    let amaCountB = 0;
+
+    for (const r of rowsR) {
+      const level = parseMmaLevel(r?.klasse);
+      if (level === "PRO") proCountR++;
+      if (level === "AMATEUR") amaCountR++;
+    }
+
+    for (const r of rowsB) {
+      const level = parseMmaLevel(r?.klasse);
+      if (level === "PRO") proCountB++;
+      if (level === "AMATEUR") amaCountB++;
+    }
+
+    const proFighterR = proCountR >= 3 && amaCountR === 0;
+    const proFighterB = proCountB >= 3 && amaCountB === 0;
+    const amateurNewR = amaCountR > 0 && proCountR === 0 && amaCountR < 3;
+    const amateurNewB = amaCountB > 0 && proCountB === 0 && amaCountB < 3;
+
+    if ((proFighterR && amateurNewB) || (proFighterB && amateurNewR)) {
+      const proSide = proFighterR ? "rood" : "blauw";
+      const amateurSide = proFighterR ? "blauw" : "rood";
+      const proCount = proFighterR ? proCountR : proCountB;
+      const amaCount = proFighterR ? amaCountB : amaCountR;
+
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "MMA: Pro vs Amateur",
+        rule_code: "MMA_PRO_VS_AMATEUR",
+        resultaat: "DISPENSATIE",
+        severity: "warning",
+        boodschap: `${proSide.toUpperCase()} is Pro fighter (${proCount} pro wedstrijden) en ${amateurSide.toUpperCase()} is nieuweling Amateur (${amaCount} amateur wedstrijd${
+          amaCount > 1 ? "en" : ""
+        }) — DISPENSATIE vereist.`,
+      });
+    }
+  }
+
+  // jeugdregels
+  if (jeugd) {
+    if (mmaJeugd) {
+      const ageR = ageOnEventFromCtx(ctx, "rood");
+      const ageB = ageOnEventFromCtx(ctx, "blauw");
+      const bandR = mmaJeugdAgeBand(ageR);
+      const bandB = mmaJeugdAgeBand(ageB);
+
+      if (bandR && bandB && bandR.label !== bandB.label) {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "MMA jeugd: verschillende leeftijdscategorie",
+          rule_code: "MMA_JEUGD_CAT_AFKEUR",
+          resultaat: "AFKEUR",
+          severity: "error",
+          boodschap: `Rood valt in categorie ${bandR.label} (leeftijd ${ageR}) en Blauw in ${bandB.label} (leeftijd ${ageB}) — AFKEUR.`,
+        });
+      }
+    } else {
+      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp);
+      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp);
+      const lv = leeftijdsVerschilJeugd(dobR, dobB);
+
+      if (lv.type === "DISPENSATIE") {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "Leeftijdsverschil 18-24 maanden (jeugd)",
+          rule_code: "LEEFTIJD_VERSCHIL_JEUGD_DISPENSATIE",
+          resultaat: "DISPENSATIE",
+          severity: "warning",
+          boodschap: `Leeftijdsverschil: ${lv.diffMonths} maanden en ${lv.diffDaysRemainder} dagen — vanaf 18 maanden verschil is DISPENSATIE vereist.`,
+        });
+      } else if (lv.type === "VERBOD") {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "Leeftijdsverschil te groot (jeugd)",
+          rule_code: "LEEFTIJD_VERSCHIL_JEUGD_AFKEUR",
+          resultaat: "VERBOD",
+          severity: "error",
+          boodschap: `Leeftijdsverschil: ${lv.diffMonths} maanden en ${lv.diffDaysRemainder} dagen — vanaf 24 maanden verschil is dit een VERBOD.`,
+        });
+      }
+    }
+  }
+
+  // jeugd partijverschil
+  if (jeugd) {
+    const countDemo = (rows: any[]) =>
+      (rows ?? []).reduce((acc, r) => {
+        const s = String((r as any)?.uitslag ?? "").toLowerCase();
+        return acc + (s.includes("demo") || s.includes("demonstr") ? 1 : 0);
+      }, 0);
+
+    const totalR = toInt(ctx?.rood_totaal_wedstrijden_scrape);
+    const totalB = toInt(ctx?.blauw_totaal_wedstrijden_scrape);
+
+    const vaR = String(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.va_rood_mm ?? "").trim();
+    const vaB = String(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.va_blauw_mm ?? "").trim();
+    const rowsR = vaR ? (uitslagenByVa.get(vaR) ?? []) : [];
+    const rowsB = vaB ? (uitslagenByVa.get(vaB) ?? []) : [];
+
+    const demoR =
+      ctx?.rood_demo_totaal !== null && ctx?.rood_demo_totaal !== undefined
+        ? toInt(ctx?.rood_demo_totaal)
+        : countDemo(rowsR);
+
+    const demoB =
+      ctx?.blauw_demo_totaal !== null && ctx?.blauw_demo_totaal !== undefined
+        ? toInt(ctx?.blauw_demo_totaal)
+        : countDemo(rowsB);
+
+    const effR = Math.max(0, totalR - demoR + Math.floor(demoR / 3));
+    const effB = Math.max(0, totalB - demoB + Math.floor(demoB / 3));
+
+    const hasPrimaryTotals =
+      ctx?.rood_totaal_wedstrijden_scrape !== null &&
+      ctx?.rood_totaal_wedstrijden_scrape !== undefined &&
+      ctx?.blauw_totaal_wedstrijden_scrape !== null &&
+      ctx?.blauw_totaal_wedstrijden_scrape !== undefined;
+
+    if (!hasPrimaryTotals) {
+      const tR = getCurrentTotalsAll(ctx?.rood_uitslagen_per_discipline);
+      const tB = getCurrentTotalsAll(ctx?.blauw_uitslagen_per_discipline);
+      const effR2 = effectiveFromTotals(tR);
+      const effB2 = effectiveFromTotals(tB);
+
+      if (effR2 == null || effB2 == null) {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "Jeugd: partijverschil niet controleerbaar",
+          rule_code: "JEUGD_PARTIJVERSCHIL_GEEN_INFO",
+          resultaat: "ACTIE",
+          severity: "warning",
+          boodschap:
+            "Geen (bruikbare) totalen gevonden voor rood en/of blauw — jeugd partijverschil-regel kan niet worden toegepast.",
+        });
+      } else {
+        const verschil2 = Math.abs(effR2 - effB2);
+        const minEff2 = Math.min(effR2, effB2);
+
+        if (minEff2 < 15 && verschil2 > 4) {
+          pushHit({
+            matchmaking_id,
+            partij_nr,
+            bout_id,
+            rule: "Jeugd: partijverschil te groot",
+            rule_code: "PARTIJVERSCHIL_DISPENSATIE",
+            resultaat: "DISPENSATIE",
+            severity: "warning",
+            boodschap: `Jeugd partijverschil: Rood ${effR2} partijen • Blauw ${effB2} partijen • Verschil ${verschil2}. Regel: zolang één van beide minder dan 15 partijen heeft, is maximaal 4 verschil toegestaan — DISPENSATIE vereist.`,
+          });
+        }
+      }
+    } else {
+      const verschil = Math.abs(effR - effB);
+      const minEff = Math.min(effR, effB);
+
+      if (minEff < 15 && verschil > 4) {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "Jeugd: partijverschil te groot",
+          rule_code: "PARTIJVERSCHIL_DISPENSATIE",
+          resultaat: "DISPENSATIE",
+          severity: "warning",
+          boodschap: `Jeugd partijverschil: Rood ${effR} partijen • Blauw ${effB} partijen • Verschil ${verschil}. Regel: zolang één van beide minder dan 15 partijen heeft, is maximaal 4 verschil toegestaan — DISPENSATIE vereist.`,
+        });
+      }
+    }
+  }
+
+  // volwassen KB/MT klasse
+  if (volwassenen && isKickboksMuayThai(ctx)) {
+    const boutK = parseKbMmKlasseToLetter(ctx?.klasse_mm);
+
+    const vaR = String(ctx?.rood_va_mm ?? "").trim();
+    const vaB = String(ctx?.blauw_va_mm ?? "").trim();
+    const rowsR = vaR ? (uitslagenByVa.get(vaR) ?? []) : [];
+    const rowsB = vaB ? (uitslagenByVa.get(vaB) ?? []) : [];
+
+    const histRowsR = hoogsteKlasseUitUitslagen(rowsR);
+    const histRowsB = hoogsteKlasseUitUitslagen(rowsB);
+
+    const baseR: Klasse = histRowsR ?? "N";
+    const baseB: Klasse = histRowsB ?? "N";
+
+    const recR = recordInKlasse(rowsR, baseR);
+    const recB = recordInKlasse(rowsB, baseB);
+
+    const roodK = promoteFrom(baseR, recR.wins, recR.total);
+    const blauwK = promoteFrom(baseB, recB.wins, recB.total);
+
+    const roodOk = canFightAdultKbMtBoutClass(roodK, boutK);
+    const blauwOk = canFightAdultKbMtBoutClass(blauwK, boutK);
+
+    if (boutK && (!roodOk || !blauwOk)) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Volwassen: verkeerde klasse",
+        rule_code: "VOLWASSEN_VERKEERDE_KLASSE",
+        resultaat: "DISPENSATIE",
+        severity: "warning",
+        boodschap: `Boutklasse klopt niet: ingevoerd ${boutK}. Advies op basis van uitslagen: Rood mag maximaal ${roodK}, Blauw mag maximaal ${blauwK}. Let op: DISPENSATIE verplicht.`,
+      });
+    }
+  }
+
+  return hits;
+}
+
 export async function rulesEngine(opts: {
   controle_run_id: string;
   matchmaking_id: string;

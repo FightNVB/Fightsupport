@@ -417,7 +417,7 @@ async function ensureScopedControleRunId(matchmakingId: string): Promise<string>
     .maybeSingle();
 
   if (latestErr) throw latestErr;
-  if (s(latest?.id)) return s(latest.id);
+  if (s(latest?.id)) return s((latest as any).id);
 
   const now = new Date().toISOString();
 
@@ -711,14 +711,14 @@ export async function POST(req: NextRequest) {
       return jsonError("Je hebt geen toegang tot deze matchmaking.", 403);
     }
 
-    await ensureLifecycleRecord(matchmakingId, {
-      bron_type: "matchmaker_app",
-      stadium: "nieuw",
-      huidige_eigenaar_type: "matchmaker",
-      huidige_eigenaar_user_id: user.id,
-      actor_user_id: user.id,
-      actor_role: roles[0] || "matchmaker",
-      opmerking: "Lifecycle record ensured vanuit create-match",
+    await ensureLifecycleRecord({
+      matchmakingId,
+      bronType: "matchmaker_app",
+      stage: "concept_matchmaking" as import("@/app/api/_utils/matchmakingLifecycle").MatchmakingStage,
+      ownerType: "matchmaker" as import("@/app/api/_utils/matchmakingLifecycle").MatchmakingOwnerType,
+      ownerUserId: user.id,
+      actorUserId: user.id,
+      actorRole: roles[0] || "matchmaker",
     }).catch((err) => {
       console.warn("ensureLifecycleRecord warning:", err);
     });
