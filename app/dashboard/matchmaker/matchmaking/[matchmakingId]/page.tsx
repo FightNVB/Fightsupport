@@ -1735,15 +1735,13 @@ export default function MatchmakerMatchmakingPage() {
                     label={releaseBusy ? "Sturen…" : "→ Stuur naar controle"}
                     tone="orange"
                     onClick={stuurNaarControle}
-                    disabled={releaseBusy || lineupMode}
-                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
+                    disabled={releaseBusy}
                   />
                   <DarkActionButton
                     label={releaseBusy ? "Sturen…" : "→ Stuur naar bondteam"}
                     tone="blue"
                     onClick={stuurNaarBondteam}
-                    disabled={releaseBusy || lineupMode}
-                    title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
+                    disabled={releaseBusy}
                   />
                   <DarkActionButton
                     label="Lineup PDF"
