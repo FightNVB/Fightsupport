@@ -30,28 +30,74 @@ function getUserIdFromAuth(auth: any) {
   ).trim();
 }
 
+function norm(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+function lower(v: unknown) {
+  return norm(v).toLowerCase();
+}
+
 function inferTab(row: any): "app" | "upload" | "retour" {
-  const stadium = String(row?.stadium ?? "").trim().toLowerCase();
-  const bron = String(row?.bron_type ?? "").trim().toLowerCase();
+  const stadium = lower(row?.stadium);
+  const bron = lower(row?.bron_type);
 
-  if (stadium === "retour_naar_eigenaar") {
-    return "retour";
-  }
-
-  if (bron === "matchmaker_upload") {
-    return "upload";
-  }
+  if (stadium === "retour_naar_eigenaar") return "retour";
+  if (bron === "matchmaker_upload") return "upload";
 
   return "app";
 }
 
+function isMatchmakerVisibleRow(row: any, userId: string) {
+  const bronType = lower(row?.bron_type);
+  const eigenaarType = lower(row?.huidige_eigenaar_type);
+  const eigenaarUserId = norm(row?.huidige_eigenaar_user_id);
+  const stadium = lower(row?.stadium);
+  const status = lower(row?.status);
+  const finalStatus = lower(row?.final_status);
+  const isArchived = row?.is_archived === true;
+
+  const isAdminUpload = bronType === "admin_upload";
+
+  const ligtBijDezeMatchmaker =
+    eigenaarType === "matchmaker" && eigenaarUserId === userId;
+
+  const ligtBijAdmin =
+    eigenaarType === "admin" ||
+    stadium === "ingediend_admin" ||
+    stadium === "in_controle_admin" ||
+    status === "ingediend_admin" ||
+    status === "in_controle_admin" ||
+    finalStatus === "ingediend_admin" ||
+    finalStatus === "in_controle_admin";
+
+  const ligtVerderInLifecycle =
+    eigenaarType === "bondteam" ||
+    eigenaarType === "official" ||
+    eigenaarType === "hoofdofficial" ||
+    stadium === "klaar_voor_weegstation" ||
+    stadium === "in_officials" ||
+    stadium === "in_weegstation" ||
+    stadium === "weegstation_verwerkt" ||
+    stadium === "definitieve_lineup" ||
+    stadium === "klaar_voor_uitslagen" ||
+    stadium === "uitslagen_in_bewerking" ||
+    stadium === "uitslagen_definitief" ||
+    stadium === "gearchiveerd" ||
+    finalStatus === "gearchiveerd";
+
+  return (
+    !isArchived &&
+    !isAdminUpload &&
+    ligtBijDezeMatchmaker &&
+    !ligtBijAdmin &&
+    !ligtVerderInLifecycle
+  );
+}
+
 export async function GET(req: Request) {
   try {
-    const auth = await requireUserWithRole(req, [
-      "matchmaker",
-      "admin",
-      "superadmin",
-    ]);
+    const auth = await requireUserWithRole(req);
 
     const userId = getUserIdFromAuth(auth);
 
@@ -69,14 +115,18 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (profileError) {
-      console.error("[matchmaker/matchmakings-overzicht] profile error:", profileError);
+      console.error(
+        "[matchmaker/matchmakings-overzicht] profile error:",
+        profileError
+      );
       return NextResponse.json(
         { ok: false, error: profileError.message },
         { status: 500 }
       );
     }
 
-    const role = String(profile?.role ?? "").trim().toLowerCase();
+    const role = lower(profile?.role);
+
     if (role !== "matchmaker" && role !== "admin" && role !== "superadmin") {
       return NextResponse.json(
         { ok: false, error: "Gebruiker is geen matchmaker." },
@@ -84,7 +134,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data: matchmakings, error } = await supabaseAdmin
+    const { data: matchmakingsRaw, error } = await supabaseAdmin
       .from("matchmakings")
       .select(`
         id,
@@ -113,24 +163,33 @@ export async function GET(req: Request) {
         locked_for_editing,
         is_archived,
         matchmaker_id,
+        maker_type,
+        maker_user_id,
+        matchmaker_naam,
+        uploaded_by,
         hoofdofficial_id
       `)
       .eq("is_archived", false)
-      .eq("huidige_eigenaar_type", "matchmaker")
-      .eq("huidige_eigenaar_user_id", userId)
       .order("datum", { ascending: false })
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("[matchmaker/matchmakings-overzicht] matchmakings error:", error);
+      console.error(
+        "[matchmaker/matchmakings-overzicht] matchmakings error:",
+        error
+      );
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 500 }
       );
     }
 
-    const matchmakingIds = (matchmakings ?? [])
-      .map((r: any) => String(r.id ?? "").trim())
+    const matchmakings = (matchmakingsRaw ?? []).filter((row: any) =>
+      isMatchmakerVisibleRow(row, userId)
+    );
+
+    const matchmakingIds = matchmakings
+      .map((r: any) => norm(r.id))
       .filter(Boolean);
 
     const { data: runs, error: runsError } = matchmakingIds.length
@@ -141,13 +200,16 @@ export async function GET(req: Request) {
       : { data: [] as any[], error: null as any };
 
     if (runsError) {
-      console.error("[matchmaker/matchmakings-overzicht] controle_runs error:", runsError);
+      console.error(
+        "[matchmaker/matchmakings-overzicht] controle_runs error:",
+        runsError
+      );
     }
 
     const latestRunMap = new Map<string, ControleRun>();
 
     for (const run of runs ?? []) {
-      const mmId = String(run.matchmaking_id ?? "").trim();
+      const mmId = norm(run.matchmaking_id);
       if (!mmId) continue;
 
       const existing = latestRunMap.get(mmId);
@@ -166,7 +228,7 @@ export async function GET(req: Request) {
       }
     }
 
-    const rows = (matchmakings ?? []).map((r: any) => ({
+    const rows = matchmakings.map((r: any) => ({
       id: String(r.id),
       naam: r.naam ?? null,
       datum: r.datum ?? null,
@@ -199,6 +261,10 @@ export async function GET(req: Request) {
       is_archived: r.is_archived ?? false,
 
       matchmaker_id: r.matchmaker_id ?? null,
+      maker_type: r.maker_type ?? null,
+      maker_user_id: r.maker_user_id ?? null,
+      matchmaker_naam: r.matchmaker_naam ?? null,
+      uploaded_by: r.uploaded_by ?? null,
       hoofdofficial_id: r.hoofdofficial_id ?? null,
 
       tab: inferTab(r),

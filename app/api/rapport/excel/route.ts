@@ -409,6 +409,201 @@ function getComputedRondetijden(ctx: any, eventDate: any) {
   return "";
 }
 
+function parseMaybeJson(v: any): any {
+  if (!v) return {};
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return {};
+  }
+}
+
+function getToernooiCodeFromCtx(ctx: any) {
+  const extra = parseMaybeJson(ctx?.extra);
+  const raw = parseMaybeJson(ctx?.raw_json);
+  const code =
+    ctx?.toernooi_code ??
+    ctx?.toernooicode ??
+    ctx?.tournament_code ??
+    extra?.toernooi_code ??
+    extra?.toernooicode ??
+    raw?.toernooi_code ??
+    raw?.toernooicode ??
+    raw?.tournament_code;
+
+  const direct = safe(code, "");
+  if (direct) return direct;
+
+  const partij = safe(ctx?.partij_nr ?? ctx?.partij_label, "");
+  return partij.toUpperCase().startsWith("T") ? partij : "";
+}
+
+function isToernooiContext(ctx: any) {
+  const extra = parseMaybeJson(ctx?.extra);
+  const raw = parseMaybeJson(ctx?.raw_json);
+  return Boolean(
+    ctx?.is_toernooi ||
+      ctx?.toernooi_code ||
+      ctx?.toernooicode ||
+      ctx?.tournament_code ||
+      extra?.is_toernooi ||
+      extra?.toernooi_code ||
+      extra?.toernooicode ||
+      raw?.is_toernooi ||
+      raw?.toernooi_code ||
+      raw?.toernooicode ||
+      safe(ctx?.partij_nr ?? ctx?.partij_label, "").toUpperCase().startsWith("T")
+  );
+}
+
+function isTitelpartijContext(ctx: any) {
+  const extra = parseMaybeJson(ctx?.extra);
+  const raw = parseMaybeJson(ctx?.raw_json);
+  const text = [
+    ctx?.titelpartij,
+    ctx?.is_titelpartij,
+    ctx?.titel_partij,
+    ctx?.title_fight,
+    ctx?.opmerking,
+    ctx?.bijzonderheden,
+    extra?.titelpartij,
+    extra?.is_titelpartij,
+    extra?.titel_partij,
+    extra?.title_fight,
+    raw?.titelpartij,
+    raw?.is_titelpartij,
+    raw?.titel_partij,
+    raw?.title_fight,
+    raw?.opmerking,
+    raw?.bijzonderheden,
+  ]
+    .map((v) => safe(v, ""))
+    .join(" ")
+    .toLowerCase();
+
+  return text.includes("titel") || text.includes("title fight") || text.includes("championship");
+}
+
+function buildToernooiFighters(
+  ctxList: any[],
+  eventDateRaw: any,
+  rawMaps: { byBoutId: Map<string, any>; byPartijNr: Map<number, any> }
+) {
+  const rows: any[] = [];
+  const seen = new Set<string>();
+
+  for (const ctx of ctxList ?? []) {
+    if (!isToernooiContext(ctx)) continue;
+
+    const toernooiCode = getToernooiCodeFromCtx(ctx);
+    if (!toernooiCode) continue;
+
+    const addFighter = (side: "rood" | "blauw") => {
+      const va = getVaInfo(ctx, side).current;
+      const naam = getCurrentNaam(ctx, side);
+      const gym = getCurrentGym(ctx, side);
+      const keyBase = normalizeVa(va) || naam.toLowerCase();
+      const key = String(toernooiCode) + "|" + String(keyBase);
+
+      if (!naam && !va) return;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      rows.push({
+        toernooiCode,
+        discipline: safe(ctx?.discipline, ""),
+        klasse: safe(ctx?.klasse_mm ?? ctx?.klasse, ""),
+        naam,
+        gym,
+        va: safe(va, ""),
+        leeftijd: getLeeftijdOpEvenement(ctx, side, eventDateRaw),
+        maxKg: getResolvedMaxGewicht(ctx, rawMaps),
+        titelpartij: isTitelpartijContext(ctx) ? "Ja" : "",
+        rondetijden: getComputedRondetijden(ctx, eventDateRaw),
+      });
+    };
+
+    addFighter("rood");
+    addFighter("blauw");
+  }
+
+  rows.sort((a, b) => {
+    const codeCmp = String(a.toernooiCode).localeCompare(String(b.toernooiCode), "nl", { numeric: true });
+    if (codeCmp !== 0) return codeCmp;
+    return String(a.naam).localeCompare(String(b.naam), "nl");
+  });
+
+  return rows;
+}
+
+function writeToernooiSheet(opts: {
+  wb: ExcelJS.Workbook;
+  eventName: string;
+  eventDate: string;
+  runStart: string;
+  runEnd: string;
+  runId: string;
+  matchmakingId: string;
+  rows: any[];
+}) {
+  const { wb, eventName, eventDate, runStart, runEnd, runId, matchmakingId, rows } = opts;
+  if (!rows.length) return;
+
+  const ws = wb.addWorksheet("Toernooien");
+
+  ws.columns = [
+    { header: "Toernooi", width: 12 },
+    { header: "Discipline", width: 18 },
+    { header: "Klasse", width: 16 },
+    { header: "Naam", width: 32 },
+    { header: "Sportschool", width: 30 },
+    { header: "Fightpaspoort nr", width: 18 },
+    { header: "Leeftijd", width: 10 },
+    { header: "Max KG", width: 12 },
+    { header: "Titelpartij", width: 12 },
+    { header: "Rondetijden", width: 16 },
+  ];
+
+  writeHeaderBlock({
+    ws,
+    title: "FightSupport – Toernooien",
+    eventName,
+    eventDate,
+    runStart,
+    runEnd,
+    runId,
+    matchmakingId,
+    colCount: 10,
+  });
+
+  const HEADER_ROW = 4;
+  ws.getRow(HEADER_ROW).values = (ws.columns ?? []).map((c) => c.header) as any;
+  styleHeaderRow(ws, HEADER_ROW, 10);
+
+  const START_ROW = HEADER_ROW + 1;
+  let rno = START_ROW;
+
+  for (const item of rows) {
+    const row = ws.getRow(rno++);
+    row.values = [
+      item.toernooiCode,
+      item.discipline,
+      item.klasse,
+      item.naam,
+      item.gym,
+      item.va,
+      item.leeftijd,
+      item.maxKg,
+      item.titelpartij,
+      item.rondetijden,
+    ];
+
+    const isWhite = (row.number - START_ROW) % 2 === 0;
+    styleRowFillAndFont(row, isWhite);
+  }
+}
+
 function inferHoek(r: ResultRow): "rood" | "blauw" | null {
   if (r.hoek === "rood" || r.hoek === "blauw") return r.hoek;
 
@@ -1599,6 +1794,18 @@ export async function GET(req: Request) {
         styleRowFillAndFont(row, isWhite);
       }
     }
+
+    const toernooiRows = buildToernooiFighters(ctxList, eventDateRaw, rawMaps);
+    writeToernooiSheet({
+      wb,
+      eventName,
+      eventDate,
+      runStart,
+      runEnd,
+      runId,
+      matchmakingId: matchmaking_id,
+      rows: toernooiRows,
+    });
 
     const sortedMeldingen = [...meldingenVoorTab].sort((a, b) => {
       const ap = Number(a.partij_nr ?? 999999);

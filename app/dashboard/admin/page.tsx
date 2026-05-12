@@ -195,9 +195,9 @@ export default function AdminDashboardPage() {
       icon: Scale,
     },
     {
-      label: "Dispensatie",
+      label: "Algemeen",
       subtitle: "Dispensatie aanvragen",
-      href: "/dashboard/dispensatie",
+      href: "/dashboard/admin/algemeen",
       icon: History,
     },
     {

@@ -12,6 +12,7 @@ import {
   Scale,
   RotateCcw,
   Send,
+  ShieldCheck,
   ArrowRightLeft,
   FileSpreadsheet,
   FileText,
@@ -544,52 +545,6 @@ function normalizeKlasse(raw: string): string {
     .trim();
 }
 
-function normalizeLookupValue(raw: string): string {
-  return String(raw ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[()]/g, " ")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function pickFirstFilled(...values: any[]): string {
-  for (const value of values) {
-    const s = String(value ?? "").trim();
-    if (s) return s;
-  }
-  return "";
-}
-
-function getKlasseEnDiscipline(row: AnyRow): {
-  klasse: string;
-  discipline: string;
-  lookup: string;
-} {
-  const klasse = pickFirstFilled(
-    row?.klasse_mm,
-    row?.klasse,
-    row?.klasse_label,
-    row?.klasse_naam,
-    row?.categorie,
-    row?.category
-  );
-
-  const discipline = pickFirstFilled(
-    row?.discipline,
-    row?.discipline_mm,
-    row?.discipline_naam,
-    row?.sport,
-    row?.sportnaam,
-    row?.style,
-    row?.ruleset
-  );
-
-  const lookup = normalizeLookupValue([klasse, discipline].filter(Boolean).join(" "));
-  return { klasse, discipline, lookup };
-}
-
 function matchKlasseMinuten(klasse: string, discipline?: string): number | null {
   const rawKlasse = String(klasse ?? "").trim().toLowerCase();
   const rawDiscipline = String(discipline ?? "").trim().toLowerCase();
@@ -597,18 +552,27 @@ function matchKlasseMinuten(klasse: string, discipline?: string): number | null 
   if (!rawKlasse && !rawDiscipline) return null;
 
   const k = normalizeKlasse(rawKlasse);
-  const lookup = normalizeLookupValue(`${rawKlasse} ${rawDiscipline}`);
+  const d = rawDiscipline
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  if (lookup.includes("boksen") || lookup.includes("boxing")) {
+  if (
+    d.includes("boksen") ||
+    d.includes("boxing") ||
+    k.includes("boksen") ||
+    k.includes("boxing")
+  ) {
     return KLASSE_MINUTEN.boksen;
   }
 
-  if (lookup.includes("mma") || lookup.includes("mixed martial")) {
-    if (lookup.includes("pro")) return KLASSE_MINUTEN["mma pro"];
+  if (k.includes("mma") || d.includes("mma")) {
+    if (k.includes("pro") || d.includes("pro")) return KLASSE_MINUTEN["mma pro"];
     if (
-      lookup.includes("jeugd") ||
-      lookup.includes("youth") ||
-      lookup.includes("junior")
+      k.includes("jeugd") ||
+      k.includes("youth") ||
+      d.includes("jeugd") ||
+      d.includes("youth")
     ) {
       return KLASSE_MINUTEN["mma jeugd"];
     }
@@ -651,38 +615,23 @@ function matchKlasseMinuten(klasse: string, discipline?: string): number | null 
 function calcGalaDuurFromRows(rows: AnyRow[]): {
   totalMins: number;
   unknownKlasses: string[];
-  countsByKlasse: Record<string, { count: number; mins: number }>;
+  countsByKlasse: Record<string, number>;
 } {
   let totalMins = 0;
   const unknownSet = new Set<string>();
-  const countsByKlasse: Record<string, { count: number; mins: number }> = {};
+  const countsByKlasse: Record<string, number> = {};
 
   for (const r of rows) {
-    const { klasse, discipline, lookup } = getKlasseEnDiscipline(r);
+    const klasse = String(r.klasse_mm ?? r.klasse ?? "").trim();
+    const discipline = String(r.discipline ?? "").trim();
     const mins = matchKlasseMinuten(klasse, discipline);
-
-    let label = pickFirstFilled(klasse, discipline, "-");
-    if (lookup.includes("mma") || lookup.includes("mixed martial")) {
-      if (lookup.includes("pro")) label = "MMA pro";
-      else if (
-        lookup.includes("jeugd") ||
-        lookup.includes("youth") ||
-        lookup.includes("junior")
-      )
-        label = "MMA jeugd";
-      else label = "MMA amateur";
-    } else if (lookup.includes("boksen") || lookup.includes("boxing")) {
-      label = "BOKSEN";
-    }
 
     if (mins !== null) {
       totalMins += mins;
-      if (!countsByKlasse[label]) {
-        countsByKlasse[label] = { count: 0, mins };
-      }
-      countsByKlasse[label].count += 1;
-    } else if (label && label != "-") {
-      unknownSet.add(label);
+      const key = klasse || "-";
+      countsByKlasse[key] = (countsByKlasse[key] ?? 0) + 1;
+    } else if (klasse && klasse !== "-") {
+      unknownSet.add(klasse);
     }
   }
 
@@ -1245,7 +1194,7 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/control-engine/add-bout", {
+      const resp = await authedFetch("/api/matchmaking/add-bout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1287,7 +1236,7 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/control-engine/delete-partij", {
+      const resp = await authedFetch("/api/matchmaking/delete-partij", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1317,7 +1266,53 @@ export default function ControleMatchmakingPage() {
     }
   }
 
+ async function handleSendToBond() {
+  await withHeaderBusy("bond", async () => {
+    const token = await getAccessToken();
+    if (!token) throw new Error("Niet ingelogd.");
 
+    const resp = await authedFetch("/api/matchmaker/send-to-bond", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        matchmaking_id: matchmakingId,
+      }),
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(json?.error ?? "Sturen naar bond mislukt.");
+    }
+
+    setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar bond.");
+    router.refresh();
+  });
+}
+
+  async function stuurNaarControle() {
+    await withHeaderBusy("controle", async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaker/submit-to-control", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Sturen naar controle mislukt.");
+
+      setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar controle.");
+      setReloadTick((x) => x + 1);
+    });
+  }
 
   async function retourNaarMatchmaker() {
     await withHeaderBusy("retour", async () => {
@@ -1340,7 +1335,7 @@ export default function ControleMatchmakingPage() {
       if (!resp.ok) throw new Error(json?.error ?? "Retour naar matchmaker mislukt.");
 
       setMsg(json?.message ?? "✅ Matchmaking is teruggezet naar matchmaker.");
-      router.push("/dashboard/officials/controle");
+      setReloadTick((x) => x + 1);
     });
   }
 
@@ -1364,13 +1359,13 @@ export default function ControleMatchmakingPage() {
       if (!resp.ok) throw new Error(json?.error ?? "Sturen naar admin mislukt.");
 
       setMsg(json?.message ?? "✅ Upload-matchmaking is doorgestuurd naar admin.");
-      router.push("/dashboard/officials/controle");
+      setReloadTick((x) => x + 1);
     });
   }
 
   async function stuurNaarUitslagen() {
     await withHeaderBusy("uitslagen", async () => {
-      router.push("/dashboard/officials/controle");
+      setMsg("ℹ️ Naar uitslagen is nog niet gekoppeld in deze pagina.");
     });
   }
 
@@ -1858,28 +1853,46 @@ export default function ControleMatchmakingPage() {
                 />
 
                 <DarkActionButton
+                  label={headerBusy === "controle" ? "Bezig..." : "Stuur naar controle"}
+                  tone="orange"
+                  icon={<ShieldCheck className="h-4 w-4" />}
+                  onClick={stuurNaarControle}
+                  disabled={lineupMode || !!headerBusy}
+                  title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
+                />
+
+                <DarkActionButton
                   label={headerBusy === "retour" ? "Bezig..." : "Retour naar matchmaker"}
                   tone="purple"
                   icon={<RotateCcw className="h-4 w-4" />}
                   onClick={retourNaarMatchmaker}
+                  disabled={lineupMode || !!headerBusy}
+                  title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
+                />
+
+                <DarkActionButton
+                  label={headerBusy === "admin" ? "Bezig..." : "Stuur upload naar admin"}
+                  tone="blue"
+                  icon={<Send className="h-4 w-4" />}
+                  onClick={stuurUploadNaarAdmin}
                   disabled={!!headerBusy}
                 />
 
                 <DarkActionButton
-  label={headerBusy === "admin" ? "Bezig..." : "Stuur naar admin"}
-  tone="blue"
-  icon={<Send className="h-4 w-4" />}
-  onClick={stuurUploadNaarAdmin}
-  disabled={!!headerBusy}
-  title={undefined}
-/>
+                  label={headerBusy === "bond" ? "Bezig..." : "Stuur naar bond"}
+                  tone="blue"
+                  icon={<Send className="h-4 w-4" />}
+                  onClick={handleSendToBond}
+                  disabled={!!headerBusy}
+                />
 
                 <DarkActionButton
                   label={headerBusy === "uitslagen" ? "Bezig..." : "Naar uitslagen"}
                   tone="green"
                   icon={<ArrowRightLeft className="h-4 w-4" />}
                   onClick={stuurNaarUitslagen}
-                  disabled={!!headerBusy}
+                  disabled={lineupMode || !!headerBusy}
+                  title={lineupMode ? "Sla eerst de lineup-volgorde op of annuleer." : undefined}
                 />
               </div>
             </div>
@@ -2156,8 +2169,9 @@ export default function ControleMatchmakingPage() {
                     Object.keys(galaDuurCalc.countsByKlasse).length > 0 ? (
                       <div className="mt-2 text-xs text-zinc-700">
                         {Object.entries(galaDuurCalc.countsByKlasse)
-                          .map(([label, item]) => {
-                            return `${label}: ${item.count} × ${item.mins} min = ${item.count * item.mins} min`;
+                          .map(([klasse, count]) => {
+                            const mins = matchKlasseMinuten(klasse) ?? 0;
+                            return `${klasse}: ${count} × ${mins} min = ${count * mins} min`;
                           })
                           .join(" • ")}
                       </div>
@@ -2297,9 +2311,8 @@ export default function ControleMatchmakingPage() {
                           ? statusByPartij[originalPn] ?? "geen_info"
                           : "geen_info";
 
-                        const klasseDiscipline = getKlasseEnDiscipline(r);
-                        const discipline = safeText(klasseDiscipline.discipline, "-");
-                        const klasse = safeText(klasseDiscipline.klasse, "-");
+                        const discipline = safeText(r.discipline, "-");
+                        const klasse = safeText(r.klasse_mm ?? r.klasse, "-");
                         const eventDatum = safeText(r.evenement_datum, "-");
                         const sortWeight = getBoutWeightForSort(r);
                         const dividerClass = zebraWhite

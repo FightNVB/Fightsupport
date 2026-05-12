@@ -188,28 +188,28 @@ export default function MatchmakerDashboardPage() {
 
   const actions: MenuAction[] = [
     {
-      label: "Matchmaking controle",
-      subtitle: "Upload en retour ontvangen MM",
-      href: "/dashboard/matchmaker/controle",
-      icon: ClipboardList,
+      label: "Matchmaking",
+      subtitle: "Beheer of bouw MM",
+      href: "/dashboard/matchmaker/matchmaking",
+      icon: ClipboardList as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
-      label: "Matchmaking bouwen",
-      subtitle: "Inschrijvingen verwerken en partijen opbouwen",
+      label: "Matchmakingen",
+      subtitle: "Open matchmakings, aanmeldingen en gecontroleerde vechters",
       href: "/dashboard/matchmaker/matchmaking",
-      icon: Users,
+      icon: Users as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
       label: "FightPassport",
       subtitle: "Open extern vechterprofielen en historie",
       external: "https://fightpassport.nl/",
-      icon: Trophy,
+      icon: Trophy as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
       label: "Belgische clubs",
       subtitle: "Controleer clubs en keurmerken in België",
       external: "https://www.bkbmo.be/clubs-in-belgie",
-      icon: Scale,
+      icon: Scale as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
   ];
 

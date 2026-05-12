@@ -229,6 +229,74 @@ function TabButton({
   );
 }
 
+
+function ActionSquare({
+  title,
+  children,
+  onClick,
+  href,
+  disabled,
+  color,
+  borderColor,
+}: {
+  title: string;
+  children: ReactNode;
+  onClick?: () => void;
+  href?: string;
+  disabled?: boolean;
+  color: string;
+  borderColor?: string;
+}) {
+  const style: CSSProperties = {
+    width: 34,
+    height: 34,
+    minWidth: 34,
+    borderRadius: 8,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: color,
+    color: "#fff",
+    border: `1px solid ${borderColor ?? "rgba(255,255,255,0.22)"}`,
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.22), 0 6px 14px rgba(0,0,0,0.22)",
+    fontSize: 15,
+    fontWeight: 900,
+    lineHeight: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+  };
+
+  if (href) {
+    return (
+      <Link href={href} title={title} aria-label={title} style={style}>
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      style={style}
+    >
+      {children}
+    </button>
+  );
+}
+
+const ACTION_COLORS = {
+  matchmaking: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
+  controle: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
+  opslaan: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
+  annuleren: "linear-gradient(180deg, #8b8b8b 0%, #4b4b4b 100%)",
+  verwijderen: "linear-gradient(180deg, #c53636 0%, #7a1717 100%)",
+};
+
 export default function ControleOverzichtPage() {
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -253,6 +321,7 @@ export default function ControleOverzichtPage() {
   const [filterName, setFilterName] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [filterOwner, setFilterOwner] = useState<string>("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("eigen");
 
   const [ownerMap, setOwnerMap] = useState<Map<string, string>>(new Map());
@@ -852,7 +921,7 @@ export default function ControleOverzichtPage() {
 
                   {!loading && (
                     <div
-                      className="rounded-[24px] border p-4 md:p-4"
+                      className="rounded-2xl border p-3 md:p-3"
                       style={{
                         background:
                           "linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(239,242,246,0.98) 100%)",
@@ -861,10 +930,23 @@ export default function ControleOverzichtPage() {
                           "inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 24px rgba(0,0,0,0.08)",
                       }}
                     >
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setFiltersOpen((v) => !v)}
+                        className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-white/65"
+                        title="Filters open- of dichtklappen"
+                      >
                         <div>
-                          <div className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-700">
-                            Filters
+                          <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.18em] text-zinc-700">
+                            <span>Filters</span>
+                            <span className="text-base text-[var(--brand-orange)]">
+                              {filtersOpen ? "▴" : "▾"}
+                            </span>
+                            {hasActiveFilters ? (
+                              <span className="rounded-full bg-[#ff4d00] px-2 py-0.5 text-[10px] font-black tracking-normal text-white">
+                                actief
+                              </span>
+                            ) : null}
                           </div>
                           <div className="mt-1 text-xs text-zinc-500">
                             {activeTab === "eigen"
@@ -875,12 +957,13 @@ export default function ControleOverzichtPage() {
                           </div>
                         </div>
 
-                        <div className="text-sm text-zinc-600">
+                        <div className="whitespace-nowrap text-sm font-semibold text-zinc-600">
                           {filteredRows.length} van {tabRows.length} zichtbaar
                         </div>
-                      </div>
+                      </button>
 
-                      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[180px_180px_minmax(200px,1fr)_180px_180px_180px]">
+                      {filtersOpen && (
+                        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[150px_160px_minmax(180px,1fr)_160px_160px_150px]">
                         <div>
                           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
                             Maand
@@ -998,7 +1081,27 @@ export default function ControleOverzichtPage() {
                             Filters wissen
                           </button>
                         </div>
-                      </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+
+                  {!loading && (
+                    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-700/30 bg-[#242428] px-3 py-2 text-xs font-semibold text-white shadow-inner">
+                      <span className="mr-1 text-zinc-300">Legenda acties:</span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#238a3b]" /> Matchmaking
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Start controle
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#8b4ab8]" /> Opslaan
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#c53636]" /> Verwijderen
+                      </span>
                     </div>
                   )}
 
@@ -1030,13 +1133,13 @@ export default function ControleOverzichtPage() {
                             }}
                           >
                             <tr>
-                              <th className="px-4 py-3 text-left">Datum</th>
-                              <th className="px-4 py-3 text-left">Evenement</th>
-                              <th className="px-4 py-3 text-left">Bron</th>
-                              <th className="px-4 py-3 text-left">Eigenaar</th>
-                              <th className="px-4 py-3 text-left">Bondteam</th>
-                              <th className="px-4 py-3 text-left">Laatst bijgewerkt</th>
-                              <th className="px-4 py-3 text-left">Acties</th>
+                              <th className="px-3 py-2 text-left">Datum</th>
+                              <th className="px-3 py-2 text-left">Evenement</th>
+                              <th className="px-3 py-2 text-left">Bron</th>
+                              <th className="px-3 py-2 text-left">Eigenaar</th>
+                              <th className="px-3 py-2 text-left">Bondteam</th>
+                              <th className="px-3 py-2 text-left">Laatst bijgewerkt</th>
+                              <th className="px-3 py-2 text-left">Acties</th>
                             </tr>
                           </thead>
 
@@ -1072,9 +1175,9 @@ export default function ControleOverzichtPage() {
                                       color: zebra ? "#000" : "#fff",
                                     }}
                                   >
-                                    <td className="px-4 py-3">{formatDate(r.datum)}</td>
+                                    <td className="px-3 py-2">{formatDate(r.datum)}</td>
 
-                                    <td className="px-4 py-3 font-semibold">
+                                    <td className="px-3 py-2 font-semibold">
                                       {isEditing ? (
                                         <input
                                           className="orange-input h-9 w-full"
@@ -1094,9 +1197,9 @@ export default function ControleOverzichtPage() {
                                       )}
                                     </td>
 
-                                    <td className="px-4 py-3">{formatBronLabel(r.bron_type)}</td>
+                                    <td className="px-3 py-2">{formatBronLabel(r.bron_type)}</td>
 
-                                    <td className="px-4 py-3">
+                                    <td className="px-3 py-2">
                                       <div className="font-semibold">{getOwnerLabel(r)}</div>
                                       {r.huidige_eigenaar_bondteam ? (
                                         <div className="text-xs opacity-75">
@@ -1105,7 +1208,7 @@ export default function ControleOverzichtPage() {
                                       ) : null}
                                     </td>
 
-                                    <td className="px-4 py-3">
+                                    <td className="px-3 py-2">
                                       {isEditing ? (
                                         <input
                                           className="orange-input h-9 w-full"
@@ -1118,7 +1221,7 @@ export default function ControleOverzichtPage() {
                                       )}
                                     </td>
 
-                                    <td className="px-4 py-3 text-sm">
+                                    <td className="px-3 py-2 text-sm">
                                       <div>{formatDateTime(r.last_updated_at)}</div>
                                       {r.last_updated_by ? (
                                         <div className="text-xs opacity-75">
@@ -1128,16 +1231,17 @@ export default function ControleOverzichtPage() {
                                       ) : null}
                                     </td>
 
-                                    <td className="px-4 py-3">
-                                      <div className="flex flex-wrap items-center gap-3">
-                                        <Link
+                                    <td className="px-3 py-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <ActionSquare
                                           href={`/dashboard/admin/controle/${r.id}`}
-                                          className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                          title="Matchmaking openen"
+                                          color={ACTION_COLORS.matchmaking}
                                         >
-                                          Matchmaking
-                                        </Link>
+                                          M
+                                        </ActionSquare>
 
-                                        <button
+                                        <ActionSquare
                                           onClick={() => startControle(r.id)}
                                           disabled={
                                             rowBusy ||
@@ -1145,64 +1249,48 @@ export default function ControleOverzichtPage() {
                                             rowEditBusy ||
                                             rowSnapshotBusy
                                           }
-                                          className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
                                           title="Start volledige controle: scrape + build + enrich + rules"
+                                          color={ACTION_COLORS.controle}
                                         >
-                                          {rowBusy ? "Bezig…" : "Start controle"}
-                                        </button>
+                                          ▶
+                                        </ActionSquare>
 
-                                        {!isEditing ? (
-                                          <button
-                                            onClick={() => openEdit(r)}
-                                            disabled={
-                                              rowBusy ||
-                                              rowEditBusy ||
-                                              rowSnapshotBusy
-                                            }
-                                            className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black disabled:opacity-60"
-                                          >
-                                            Bewerken
-                                          </button>
-                                        ) : (
-                                          <>
-                                            <button
-                                              onClick={() => saveEdit(r)}
-                                              disabled={
-                                                rowBusy ||
-                                                rowEditBusy ||
-                                                rowSnapshotBusy ||
-                                                isBusy
-                                              }
-                                              className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
-                                            >
-                                              {rowEditBusy ? "Opslaan…" : "Opslaan"}
-                                            </button>
-
-                                            <button
-                                              onClick={closeEdit}
-                                              disabled={rowEditBusy || rowSnapshotBusy}
-                                              className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black disabled:opacity-60"
-                                            >
-                                              Annuleren
-                                            </button>
-                                          </>
-                                        )}
-
-                                        <button
+                                        <ActionSquare
                                           onClick={() => saveSnapshot(r)}
                                           disabled={
                                             rowBusy ||
+                                            isBusy ||
                                             rowEditBusy ||
-                                            rowSnapshotBusy ||
-                                            isBusy
+                                            rowSnapshotBusy
                                           }
-                                          className="rounded border border-emerald-600 bg-[#2f2f33] px-3 py-1 text-sm text-emerald-100 hover:bg-emerald-600 hover:text-white disabled:opacity-60"
-                                          title="Sla deze matchmaking op in admin beheer snapshots"
+                                          title="Opslaan in beheer-database"
+                                          color={ACTION_COLORS.opslaan}
                                         >
-                                          {rowSnapshotBusy ? "Bezig…" : "Opslaan"}
-                                        </button>
+                                          💾
+                                        </ActionSquare>
 
-                                        <button
+                                        {isEditing && (
+                                          <>
+                                            <ActionSquare
+                                              onClick={() => saveEdit(r)}
+                                              disabled={rowEditBusy || rowSnapshotBusy}
+                                              title="Bewerking opslaan"
+                                              color={ACTION_COLORS.opslaan}
+                                            >
+                                              ✓
+                                            </ActionSquare>
+                                            <ActionSquare
+                                              onClick={closeEdit}
+                                              disabled={rowEditBusy || rowSnapshotBusy}
+                                              title="Bewerken annuleren"
+                                              color={ACTION_COLORS.annuleren}
+                                            >
+                                              ×
+                                            </ActionSquare>
+                                          </>
+                                        )}
+
+                                        <ActionSquare
                                           onClick={() => deleteMatchmaking(r.id)}
                                           disabled={
                                             rowBusy ||
@@ -1210,11 +1298,11 @@ export default function ControleOverzichtPage() {
                                             rowEditBusy ||
                                             rowSnapshotBusy
                                           }
-                                          className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
                                           title="Verwijdert deze matchmaking met gekoppelde controledata"
+                                          color={ACTION_COLORS.verwijderen}
                                         >
-                                          {rowBusy ? "Bezig…" : "Verwijderen"}
-                                        </button>
+                                          🗑
+                                        </ActionSquare>
 
                                         {rowMsg ? (
                                           <span

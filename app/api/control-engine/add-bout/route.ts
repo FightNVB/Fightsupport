@@ -1,40 +1,19 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { spawn } from "child_process";
+import path from "path";
+
 import {
   assertCanAccessMatchmaking,
   requireAnyRole,
 } from "@/app/api/_utils/authz";
 
+import { buildControleBoutContext } from "@/lib/control/buildControleBoutContext";
+import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
+import { rulesEngine } from "@/lib/rulesEngine";
+
 export const runtime = "nodejs";
-
-type Payload = {
-  matchmaking_id: string;
-
-  discipline: string;
-  klasse: string;
-  geslacht?: string | null;
-
-  rood_naam: string;
-  rood_gym?: string | null;
-  va_rood?: string | number | null;
-  rood_gewicht?: string | number | null;
-  rood_geboortedatum?: string | null;
-  rood_geslacht?: string | null;
-  rood_email?: string | null;
-  rood_telefoon?: string | null;
-
-  blauw_naam: string;
-  blauw_gym?: string | null;
-  va_blauw?: string | number | null;
-  blauw_gewicht?: string | number | null;
-  blauw_geboortedatum?: string | null;
-  blauw_geslacht?: string | null;
-  blauw_email?: string | null;
-  blauw_telefoon?: string | null;
-
-  max_gewicht?: string | number | null;
-  opmerkingen?: string | null;
-};
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -42,63 +21,38 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
-function bad(message: string, status = 400, extra?: unknown) {
-  return NextResponse.json({ ok: false, error: message, extra }, { status });
-}
-
-function clean(v: unknown): string | null {
+// ===== helpers (ongewijzigd) =====
+function clean(v: any) {
   const s = String(v ?? "").trim();
   return s || null;
 }
 
-function toNum(v: unknown): number | null {
+function toNum(v: any) {
   if (v == null || v === "") return null;
-  const n = Number(String(v).replace(",", ".").replace(/[^\d.-]/g, ""));
+  const n = Number(String(v).replace(",", "."));
   return Number.isFinite(n) ? n : null;
 }
 
-function toVa(v: unknown): string | null {
-  if (v == null || v === "") return null;
-  const digits = String(v).replace(/[^\d]/g, "").trim();
-  if (!digits) return null;
-  return digits;
+function toWeightString(v: any) {
+  const n = toNum(v);
+  return n == null ? null : String(n);
 }
 
-async function getMatchmaking(matchmakingId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("matchmakings")
-    .select("id, naam, datum, locatie, status, bondteam")
-    .eq("id", matchmakingId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Matchmaking niet gevonden.");
-
-  return data;
-}
-
-async function getNextPartijNr(matchmakingId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("matchmaking_bouts_raw")
-    .select("partij_nr")
-    .eq("matchmaking_id", matchmakingId)
-    .order("partij_nr", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-
-  return Number(data?.partij_nr ?? 0) + 1;
+function toVa(v: any) {
+  if (!v) return null;
+  const d = String(v).replace(/\D/g, "");
+  return d || null;
 }
 
 function makeBoutUid() {
   try {
     return crypto.randomUUID();
   } catch {
-    return `bout-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    return `bout-${Date.now()}`;
   }
 }
 
+// ===== MAIN =====
 export async function POST(req: NextRequest) {
   try {
     const { userId, role } = await requireAnyRole(req, [
@@ -109,121 +63,123 @@ export async function POST(req: NextRequest) {
       "matchmaker",
     ]);
 
-    const body = (await req.json().catch(() => ({}))) as Partial<Payload>;
+    const body = await req.json();
 
-    const matchmaking_id = String(body?.matchmaking_id ?? "").trim();
+    const matchmaking_id = String(body.matchmaking_id ?? "").trim();
+    if (!matchmaking_id) throw new Error("matchmaking_id ontbreekt");
 
-    if (!matchmaking_id) {
-      return bad("matchmaking_id ontbreekt.");
-    }
+    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
-    await assertCanAccessMatchmaking({
-      matchmaking_id,
-      userId,
-      role,
-    });
+    // ===== insert bout =====
+    const { data: last } = await supabaseAdmin
+      .from("matchmaking_bouts_raw")
+      .select("partij_nr")
+      .eq("matchmaking_id", matchmaking_id)
+      .order("partij_nr", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const mm = await getMatchmaking(matchmaking_id);
+    const partij_nr = Number(last?.partij_nr ?? 0) + 1;
 
-    const discipline = clean(body?.discipline);
-    const klasse = clean(body?.klasse);
-    const geslacht = clean(body?.geslacht);
-
-    const rood_naam = clean(body?.rood_naam);
-    const rood_gym = clean(body?.rood_gym);
-    const va_rood = toVa(body?.va_rood);
-    const rood_gewicht = toNum(body?.rood_gewicht);
-    const rood_geboortedatum = clean(body?.rood_geboortedatum);
-    const rood_geslacht = clean(body?.rood_geslacht) ?? geslacht;
-    const rood_email = clean(body?.rood_email);
-    const rood_telefoon = clean(body?.rood_telefoon);
-
-    const blauw_naam = clean(body?.blauw_naam);
-    const blauw_gym = clean(body?.blauw_gym);
-    const va_blauw = toVa(body?.va_blauw);
-    const blauw_gewicht = toNum(body?.blauw_gewicht);
-    const blauw_geboortedatum = clean(body?.blauw_geboortedatum);
-    const blauw_geslacht = clean(body?.blauw_geslacht) ?? geslacht;
-    const blauw_email = clean(body?.blauw_email);
-    const blauw_telefoon = clean(body?.blauw_telefoon);
-
-    const max_gewicht = toNum(body?.max_gewicht);
-    const opmerkingen = clean(body?.opmerkingen);
-
-    if (!discipline) return bad("discipline ontbreekt.");
-    if (!klasse) return bad("klasse ontbreekt.");
-    if (!rood_naam) return bad("rood_naam ontbreekt.");
-    if (!blauw_naam) return bad("blauw_naam ontbreekt.");
-
-    const partij_nr = await getNextPartijNr(matchmaking_id);
-    const bout_uid = makeBoutUid();
-    const now = new Date().toISOString();
-
-    const insertRow: Record<string, any> = {
+    const insertRow = {
       matchmaking_id,
       partij_nr,
-      bout_uid,
+      bout_uid: makeBoutUid(),
 
-      discipline,
-      klasse,
-      geslacht,
+      discipline: clean(body.discipline),
+      klasse: clean(body.klasse),
 
-      rood_naam,
-      rood_gym,
-      va_rood,
-      rood_gewicht,
-      rood_geboortedatum,
-      rood_geslacht,
-      rood_email,
-      rood_telefoon,
+      rood_naam: clean(body.rood_naam),
+      rood_gym: clean(body.rood_gym),
+      rood_gewicht: toWeightString(body.rood_gewicht),
+      va_rood: toVa(body.va_rood),
 
-      blauw_naam,
-      blauw_gym,
-      va_blauw,
-      blauw_gewicht,
-      blauw_geboortedatum,
-      blauw_geslacht,
-      blauw_email,
-      blauw_telefoon,
+      blauw_naam: clean(body.blauw_naam),
+      blauw_gym: clean(body.blauw_gym),
+      blauw_gewicht: toWeightString(body.blauw_gewicht),
+      va_blauw: toVa(body.va_blauw),
 
-      max_gewicht,
-      opmerkingen,
+      max_gewicht: toNum(body.max_gewicht),
 
+      source_type: "manual_add_bout",
+      laatste_bewerking_op: new Date().toISOString(),
       raw_json: JSON.stringify({
-        source: "manual_add_bout_controle",
-        created_at: now,
         created_by: userId,
-        created_role: role,
-        matchmaking_id,
-        matchmaking_naam: (mm as any)?.naam ?? null,
+        role,
       }),
     };
 
-    const { data: inserted, error: insertErr } = await supabaseAdmin
+    const { error: insertErr } = await supabaseAdmin
       .from("matchmaking_bouts_raw")
-      .insert(insertRow)
-      .select("*")
-      .single();
+      .insert([insertRow]);
 
-    if (insertErr) {
-      return bad("Opslaan in matchmaking_bouts_raw mislukt.", 500, insertErr);
+    if (insertErr) throw insertErr;
+
+    // ===== 🔥 CONTROL ENGINE START =====
+    const controle_run_id = crypto.randomUUID();
+
+    await supabaseAdmin.from("controle_runs").insert({
+      id: controle_run_id,
+      matchmaking_id,
+      status: "running",
+      run_type: "manual_add_bout",
+      gestart_op: new Date().toISOString(),
+    });
+
+    // ===== SCRAPER =====
+    const vas = [toVa(body.va_rood), toVa(body.va_blauw)].filter(Boolean);
+
+    if (vas.length > 0) {
+      await new Promise((resolve, reject) => {
+        const proc = spawn(
+          "node",
+          [
+            path.resolve(
+              "ControlEngine/scrapers/fp_bundle/scraper_fp_bundle.js"
+            ),
+            matchmaking_id,
+            controle_run_id,
+            ...vas,
+          ],
+          { stdio: "inherit" }
+        );
+
+        proc.on("exit", (code) => {
+          if (code === 0) resolve(true);
+          else reject(new Error("scraper failed"));
+        });
+      });
     }
 
+    // ===== BUILD / ENRICH / RULES =====
+    await buildControleBoutContext(matchmaking_id, controle_run_id);
+    await enrichControleBoutContext(matchmaking_id, controle_run_id);
+
+    const { data: ctxRows } = await supabaseAdmin
+      .from("controle_bout_context")
+      .select("*")
+      .eq("matchmaking_id", matchmaking_id)
+      .eq("controle_run_id", controle_run_id);
+
+    await rulesEngine(ctxRows ?? []);
+
+    // ===== afronden =====
     await supabaseAdmin
-      .from("matchmakings")
+      .from("controle_runs")
       .update({
-        last_updated_at: now,
-        last_updated_by: userId,
+        status: "klaar",
+        afgerond_op: new Date().toISOString(),
       })
-      .eq("id", matchmaking_id);
+      .eq("id", controle_run_id);
 
     return NextResponse.json({
       ok: true,
-      message: "Bout toegevoegd aan matchmaking_bouts_raw.",
-      matchmaking: mm,
-      bout: inserted,
+      message: "Bout toegevoegd + volledig gecontroleerd",
     });
   } catch (err: any) {
-    return bad(err?.message ?? "Onbekende fout.", 500);
+    return NextResponse.json(
+      { ok: false, error: err.message },
+      { status: 500 }
+    );
   }
 }

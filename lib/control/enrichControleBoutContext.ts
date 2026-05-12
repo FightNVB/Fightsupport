@@ -669,6 +669,79 @@ function unwrapUuid(v: any): string | null {
   return null;
 }
 
+
+
+function buildKeurmerkPatchForGym(opts: {
+  gym: string;
+  evenement_datum?: string | null;
+  sportscholen: any[];
+  aliasMaps: AliasMaps;
+  valueKey: string;
+  reasonKey: string;
+}) {
+  const { gym, evenement_datum, sportscholen, aliasMaps, valueKey, reasonKey } = opts;
+  const gymValue = String(gym ?? "").trim();
+  const patch: any = {};
+  const mmLine = (value: string) =>
+    value ? `↳ [MM sportschool:] "${value}"` : `↳ [MM sportschool:] -`;
+
+  const match = gymValue
+    ? findGymMatch(sportscholen, gymValue, aliasMaps)
+    : { row: null, reason: null };
+  const found = match.row;
+
+  if (!found) {
+    patch[valueKey] = null;
+    patch[reasonKey] = gymValue
+      ? `${mmLine(gymValue)}
+Geen match in sportscholen. ${match.reason ?? ""}`.trim()
+      : `${mmLine("")}
+Geen sportschool opgegeven.`.trim();
+    return patch;
+  }
+
+  const hint = detectLandHintFromGymText(gymValue);
+  const landDb = found?.land ?? found?.country ?? null;
+  const land = landDb ?? landHintToLabel(hint);
+  const eindeIso = toIsoDateOnly(found?.keurmerk_eind ?? found?.keurmerk_einde ?? found?.einde_keurmerk);
+  const matchInfo =
+    `${mmLine(gymValue)}
+` +
+    `↳ gematcht met "${found.naam}" (${found.plaats ?? found.stad ?? "?"}, ${land ?? "?"})`;
+
+  const isForeign = landDb ? isForeignNonNL(landDb) : hint !== null && hint !== "NL";
+
+  if (isForeign) {
+    patch[valueKey] = true;
+
+    if (landDb ? isBE(landDb) : hint === "BE") {
+      patch[reasonKey] =
+        `⚠️ België — controleer sportschool op BKBMO site + boksboekje. Land: ${land ?? "België"}.
+${matchInfo}`;
+    } else if (landDb ? isDE(landDb) : hint === "DE") {
+      patch[reasonKey] =
+        `ℹ️ Buitenland (Duitsland) — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.
+${matchInfo}`;
+    } else {
+      patch[reasonKey] =
+        `ℹ️ Buitenland — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.
+${matchInfo}`;
+    }
+
+    return patch;
+  }
+
+  const geldig = !!eindeIso && eindeIso >= String(evenement_datum ?? "");
+  patch[valueKey] = geldig;
+  patch[reasonKey] = geldig
+    ? `${matchInfo}
+Keurmerk geldig t/m ${eindeIso}.`
+    : `${matchInfo}
+Geen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`;
+
+  return patch;
+}
+
 function isForeignNonNL(landValue: any) {
   if (!landValue) return false;
   return !isNL(landValue);
@@ -842,4 +915,40 @@ export async function enrichControleBoutContext(
 
     if (uErr) throw uErr;
   }
+
+  let tCtxQ = supabaseAdmin
+    .from("controle_toernooi_context")
+    .select("id, fighter_id, va_nummer, sportschool_mm, sportschool, evenement_datum")
+    .eq("matchmaking_id", matchmaking_id)
+    .eq("controle_run_id", controle_run_id);
+
+  if (scopedPartijNr != null) tCtxQ = tCtxQ.eq("partij_nr", scopedPartijNr);
+
+  const { data: tournamentRows, error: tErr } = await tCtxQ;
+  if (tErr) throw tErr;
+
+  for (const row of tournamentRows ?? []) {
+    const rowId = unwrapUuid((row as any).id) ?? String((row as any).id ?? "").trim();
+    if (!rowId) continue;
+
+    const gym = String((row as any).sportschool_mm ?? (row as any).sportschool ?? "").trim();
+    const patch = buildKeurmerkPatchForGym({
+      gym,
+      evenement_datum: String((row as any).evenement_datum ?? "").trim() || null,
+      sportscholen,
+      aliasMaps,
+      valueKey: "heeft_keurmerk",
+      reasonKey: "keurmerk_reason",
+    });
+
+    const { error: tuErr } = await supabaseAdmin
+      .from("controle_toernooi_context")
+      .update(patch)
+      .eq("matchmaking_id", matchmaking_id)
+      .eq("controle_run_id", controle_run_id)
+      .eq("id", rowId);
+
+    if (tuErr) throw tuErr;
+  }
+
 }

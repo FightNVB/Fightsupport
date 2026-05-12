@@ -112,12 +112,20 @@ function normalizeWeightType(v: any): string | null {
   return null;
 }
 
+function normalizeToernooiCode(v: any): string | null {
+  const s = String(v ?? "").trim().toUpperCase();
+  if (!s) return null;
+  if (/^T\d{1,3}$/.test(s)) return s;
+  return null;
+}
+
 function boutFingerprint(opts: {
   vaR: string | null;
   vaB: string | null;
   discipline: any;
   klasse: any;
   is_toernooi?: any;
+  toernooi_code?: any;
 }) {
   const pair = canonVaPair(opts.vaR, opts.vaB);
   if (!pair) return null;
@@ -128,7 +136,10 @@ function boutFingerprint(opts: {
   const tBool = toBoolLoose(opts.is_toernooi);
   const t = tBool == null ? "" : tBool ? "||T" : "||F";
 
-  return `${pair}||${d}||${k}${t}`;
+  const tc = normalizeToernooiCode(opts.toernooi_code);
+  const tcPart = tc ? `||${tc}` : "";
+
+  return `${pair}||${d}||${k}${t}${tcPart}`;
 }
 
 async function fetchExistingBoutUidIndex(matchmaking_id: string) {
@@ -136,7 +147,9 @@ async function fetchExistingBoutUidIndex(matchmaking_id: string) {
 
   const { data, error } = await supabaseAdmin
     .from("matchmaking_bouts_raw")
-    .select("bout_uid,va_rood,va_blauw,discipline,klasse,is_toernooi")
+    .select(
+      "bout_uid,va_rood,va_blauw,discipline,klasse,is_toernooi,toernooi_code"
+    )
     .eq("matchmaking_id", matchmaking_id);
 
   if (error) throw error;
@@ -154,6 +167,7 @@ async function fetchExistingBoutUidIndex(matchmaking_id: string) {
       discipline: (r as any)?.discipline,
       klasse: (r as any)?.klasse,
       is_toernooi: (r as any)?.is_toernooi,
+      toernooi_code: (r as any)?.toernooi_code,
     });
 
     if (!fp) continue;
@@ -199,12 +213,6 @@ function resolveLifecycleBronType(role: RoleName): string {
   if (role === "matchmaker") return "matchmaker_upload";
   if (role === "admin" || role === "superadmin") return "admin_upload";
   return "official_upload";
-}
-
-function resolveLifecycleOwnerType(role: RoleName): "matchmaker" | "admin" | "bondteam" {
-  if (role === "matchmaker") return "matchmaker";
-  if (role === "admin" || role === "superadmin") return "admin";
-  return "bondteam";
 }
 
 /* =========================================================
@@ -264,7 +272,9 @@ export async function POST(req: Request) {
           ? bondteamRaw
           : bondteamRaw;
 
-      hoofdofficial = body.hoofdofficial ? String(body.hoofdofficial).trim() : null;
+      hoofdofficial = body.hoofdofficial
+        ? String(body.hoofdofficial).trim()
+        : null;
       promotor = body.promotor ? String(body.promotor).trim() : null;
 
       matchmaking_id = body.matchmaking_id
@@ -403,11 +413,19 @@ export async function POST(req: Request) {
     }
 
     let mmId = "";
-    const lifecycleOwnerType = resolveLifecycleOwnerType(role);
-    const lifecycleOwnerUserId =
-      lifecycleOwnerType === "matchmaker" ? userId : null;
-    const lifecycleOwnerBondteam =
-      lifecycleOwnerType === "bondteam" ? bondteam : null;
+
+    const makerType = role === "matchmaker" ? "matchmaker" : null;
+const makerUserId = role === "matchmaker" ? userId : null;
+const matchmakerIdForRow = makerUserId;
+
+const lifecycleStage = "concept_matchmaking" as const;
+const lifecycleOwnerType =
+  role === "admin" || role === "superadmin" ? "admin" : "matchmaker";
+const lifecycleOwnerUserId =
+  lifecycleOwnerType === "admin" || lifecycleOwnerType === "matchmaker"
+    ? userId
+    : null;
+const lifecycleOwnerBondteam = null;
 
     if (!force_new && matchmaking_id) {
       const s = String(matchmaking_id).trim();
@@ -445,12 +463,20 @@ export async function POST(req: Request) {
           naam: evenement_naam,
           datum: evenement_datum,
           locatie,
-          status: "nieuw",
+          bondteam,
+
+          maker_type: makerType,
+          maker_user_id: makerUserId,
+
+          matchmaker_id: matchmakerIdForRow,
+          status: lifecycleStage,
           bron_type: lifecycleBronType,
-          stadium: "nieuw",
+          stadium: lifecycleStage,
+
           huidige_eigenaar_type: lifecycleOwnerType,
           huidige_eigenaar_user_id: lifecycleOwnerUserId,
           huidige_eigenaar_bondteam: lifecycleOwnerBondteam,
+
           last_updated_at: now,
           last_updated_by: userId,
           event_id: evId || null,
@@ -472,13 +498,21 @@ export async function POST(req: Request) {
           naam: evenement_naam,
           datum: evenement_datum,
           locatie,
+          bondteam,
+
+          maker_type: makerType,
+          maker_user_id: makerUserId,
+
+          matchmaker_id: matchmakerIdForRow,
           created_at: now,
-          status: "nieuw",
+          status: lifecycleStage,
           bron_type: lifecycleBronType,
-          stadium: "nieuw",
+          stadium: lifecycleStage,
+
           huidige_eigenaar_type: lifecycleOwnerType,
           huidige_eigenaar_user_id: lifecycleOwnerUserId,
           huidige_eigenaar_bondteam: lifecycleOwnerBondteam,
+
           last_updated_at: now,
           last_updated_by: userId,
           event_id: evId || null,
@@ -504,19 +538,22 @@ export async function POST(req: Request) {
       naam: evenement_naam || null,
       datum: evenement_datum || null,
       locatie: locatie || null,
-      matchmakerId: role === "matchmaker" ? userId : null,
+      matchmakerId: makerUserId,
+      makerType,
+      makerUserId,
+      bondteam: bondteam || null,
       eventId: evId || null,
       bronType: lifecycleBronType,
-      stage: "nieuw",
+      stage: lifecycleStage,
       ownerType: lifecycleOwnerType,
-      ownerUserId: lifecycleOwnerType === "matchmaker" ? userId : null,
-      ownerBondteam: lifecycleOwnerType === "bondteam" ? (bondteam || null) : null,
+      ownerUserId: lifecycleOwnerUserId,
+      ownerBondteam: lifecycleOwnerBondteam,
       actorUserId: userId,
       actorRole: role,
       metadata: { route: "app/api/submit_matchmaking/start/route.ts" },
     });
 
-    const lifecycleBondteam = lifecycleOwnerBondteam;
+    const lifecycleBondteam = bondteam;
 
     const { data: uploadRow, error: uploadErr } = await supabaseAdmin
       .from("matchmaking_uploads")
@@ -570,12 +607,17 @@ export async function POST(req: Request) {
       const is_toernooi =
         (b as any)?.is_toernooi ?? (b as any)?.toernooi ?? null;
 
+      const toernooi_code = normalizeToernooiCode(
+        (b as any)?.toernooi_code ?? (b as any)?.extra?.toernooi_code
+      );
+
       const fp = boutFingerprint({
         vaR,
         vaB,
         discipline,
         klasse,
         is_toernooi,
+        toernooi_code,
       });
 
       let bout_uid = (b as any)?.bout_uid
@@ -619,6 +661,7 @@ export async function POST(req: Request) {
         discipline: discipline || null,
         klasse: klasse || null,
         is_toernooi: toBoolLoose(is_toernooi),
+        toernooi_code,
 
         max_gewicht: normalizeMaxGewicht((b as any)?.max_gewicht),
         max_gewicht_notatie: normalizeWeightNotation(
@@ -628,7 +671,11 @@ export async function POST(req: Request) {
           (b as any)?.extra?.max_gewicht_type
         ),
 
-        raw_json: (b as any)?.extra ?? null,
+        raw_json: {
+          ...((b as any)?.extra ?? {}),
+          toernooi_code:
+            toernooi_code ?? (b as any)?.extra?.toernooi_code ?? null,
+        },
 
         created_at: now,
       });
@@ -652,11 +699,17 @@ export async function POST(req: Request) {
       event_id: evId,
       lifecycle: {
         bron_type: lifecycleBronType,
-        stadium: "nieuw",
+        stadium: lifecycleStage,
         eigenaar_type: lifecycleOwnerType,
         eigenaar_bondteam: lifecycleBondteam,
       },
-      stats: { total: rows.length, reused, ambiguous, created },
+      stats: {
+        total: rows.length,
+        reused,
+        ambiguous,
+        created,
+        toernooi_rows: rows.filter((r) => r.is_toernooi === true).length,
+      },
     });
   } catch (e: any) {
     console.error(e);

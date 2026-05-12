@@ -6,11 +6,11 @@ import { useAuth } from "@/context/AuthContext";
 import {
   Shield,
   ClipboardList,
-  FileText,
   Scale,
   ArrowLeft,
   Building2,
   Megaphone,
+  FileText,
 } from "lucide-react";
 
 type PortalAction = {
@@ -173,7 +173,7 @@ export default function DashboardPage() {
     (roles ?? []).includes("matchmaker") || canAdmin;
 
   const canSportscholen =
-    (roles ?? []).includes("sportscholen_admin") || canAdmin;
+    (roles ?? []).includes("admin") || canAdmin;
 
   const canPromotor =
     (roles ?? []).includes("promotor") || canAdmin;
@@ -217,7 +217,7 @@ export default function DashboardPage() {
             label: "Admin Portaal",
             subtitle: "Beheer, controle en systeemfuncties",
             href: "/dashboard/admin",
-            icon: Shield,
+            icon: Shield as any,
           },
         ]
       : []),
@@ -228,7 +228,7 @@ export default function DashboardPage() {
             label: "Official Portaal",
             subtitle: "Controles, uploads en weegstation",
             href: "/dashboard/officials",
-            icon: Scale,
+            icon: Scale as any,
           },
         ]
       : []),
@@ -239,7 +239,13 @@ export default function DashboardPage() {
             label: "Dispensatie",
             subtitle: "Dispensatie platform",
             href: "/dashboard/dispensatie",
-            icon: Building2,
+            icon: Building2 as any,
+          },
+          {
+            label: "Sportscholen",
+            subtitle: "Beheer sportscholen",
+            href: "/dashboard/sportscholen",
+            icon: Building2 as any,
           },
         ]
       : []),
@@ -250,7 +256,7 @@ export default function DashboardPage() {
             label: "Promotor Portaal",
             subtitle: "Beheer en geef evenementen door",
             href: "/dashboard/promotor",
-            icon: Megaphone,
+            icon: Megaphone as any,
           },
         ]
       : []),
@@ -261,17 +267,10 @@ export default function DashboardPage() {
             label: "Matchmaker",
             subtitle: "Inschrijvingen, uploads en controle",
             href: "/dashboard/matchmaker",
-            icon: ClipboardList,
+            icon: ClipboardList as any,
           },
         ]
       : []),
-
-    {
-      label: "Informatie",
-      subtitle: "Reglementen, documenten en naslag",
-      href: "/dashboard/informatie",
-      icon: FileText,
-    },
   ];
 
   return (
@@ -377,8 +376,10 @@ export default function DashboardPage() {
             padding-right: 14px !important;
           }
 
-          .title-actions-wrap {
+          .title-actions-left,
+          .title-actions-right {
             position: static !important;
+            transform: none !important;
             justify-content: center !important;
             margin-bottom: 10px !important;
           }
@@ -398,6 +399,9 @@ export default function DashboardPage() {
       <TopLogoBand />
       <TitleBand
         email={user.email ?? ""}
+        leftActionLabel="Informatie"
+        leftActionIcon={<FileText size={15} strokeWidth={2.6} />}
+        onLeftAction={() => router.push("/dashboard/informatie")}
         actionLabel="Uitloggen"
         actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
         onAction={async () => {
@@ -517,11 +521,17 @@ function TopLogoBand() {
 
 function TitleBand({
   email,
+  leftActionLabel,
+  leftActionIcon,
+  onLeftAction,
   actionLabel,
   actionIcon,
   onAction,
 }: {
   email: string;
+  leftActionLabel?: string;
+  leftActionIcon?: ReactNode;
+  onLeftAction?: () => void | Promise<void>;
   actionLabel: string;
   actionIcon?: ReactNode;
   onAction: () => void | Promise<void>;
@@ -568,8 +578,27 @@ function TitleBand({
           minHeight: 92,
         }}
       >
+        {leftActionLabel && onLeftAction ? (
+          <div
+            className="title-actions-left"
+            style={{
+              position: "absolute",
+              left: 18,
+              top: "50%",
+              transform: "translateY(-50%)",
+              zIndex: 2,
+            }}
+          >
+            <HeaderSilverButton
+              label={leftActionLabel}
+              icon={leftActionIcon}
+              onClick={onLeftAction}
+            />
+          </div>
+        ) : null}
+
         <div
-          className="title-actions-wrap"
+          className="title-actions-right"
           style={{
             position: "absolute",
             right: 18,
@@ -849,6 +878,7 @@ function HeaderSilverButton({
         minWidth: 162,
         height: 42,
         border: "1px solid rgba(185,185,185,0.95)",
+        borderRadius: 0,
         background: `
           linear-gradient(180deg,
             #ffffff 0%,

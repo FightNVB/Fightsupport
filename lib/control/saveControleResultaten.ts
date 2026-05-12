@@ -17,6 +17,11 @@ export type RuleHit = {
 
   // uuid string
   matchmaking_id?: string | null;
+
+  // toernooi context
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  toernooi_va_nummer?: string | null;
 };
 
 function asUuid(v: any): string | null {
@@ -58,12 +63,23 @@ function normStr(v: any): string | null {
   return s || null;
 }
 
-function reviewKey(row: { partij_nr: any; bout_id: any; rule_code: any; hoek: any }) {
+function reviewKey(row: {
+  partij_nr: any;
+  bout_id: any;
+  rule_code: any;
+  hoek: any;
+  toernooi_code?: any;
+  fighter_id?: any;
+  toernooi_va_nummer?: any;
+}) {
   const partij = asInt(row.partij_nr) ?? -1;
   const bout = asUuid(row.bout_id) ?? "";
   const code = String(row.rule_code ?? "").trim().toUpperCase();
   const hoek = String(row.hoek ?? "").trim().toLowerCase();
-  return `${partij}|${bout}|${code}|${hoek}`;
+  const toernooi = String(row.toernooi_code ?? "").trim().toUpperCase();
+  const fighter = String(row.fighter_id ?? "").trim();
+  const toernooiVa = String(row.toernooi_va_nummer ?? "").trim();
+  return `${partij}|${bout}|${code}|${hoek}|${toernooi}|${fighter}|${toernooiVa}`;
 }
 
 function normalizeReviewStatus(v: any): "approved" | "rejected" | null {
@@ -74,12 +90,21 @@ function normalizeReviewStatus(v: any): "approved" | "rejected" | null {
   return null;
 }
 
-function makePlaceholderKey(opts: { partij_nr?: number | null; bout_id?: string | null }) {
+function makePlaceholderKey(opts: {
+  partij_nr?: number | null;
+  bout_id?: string | null;
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  toernooi_va_nummer?: string | null;
+}) {
   return reviewKey({
     partij_nr: opts.partij_nr ?? null,
     bout_id: opts.bout_id ?? null,
     rule_code: "__NO_RULES__",
     hoek: null,
+    toernooi_code: opts.toernooi_code ?? null,
+    fighter_id: opts.fighter_id ?? null,
+    toernooi_va_nummer: opts.toernooi_va_nummer ?? null,
   });
 }
 
@@ -121,7 +146,7 @@ export async function saveControleResultaten(opts: {
   let exQ = supabaseAdmin
     .from("controle_resultaten")
     .select(
-      "partij_nr,bout_id,rule_code,hoek,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,original_resultaat,resultaat,actie_status"
+      "partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,original_resultaat,resultaat,actie_status"
     )
     .eq("controle_run_id", controle_run_id)
     .eq("matchmaking_id", matchmaking_id);
@@ -174,6 +199,9 @@ export async function saveControleResultaten(opts: {
     const hitBoutId = asUuid(hit?.bout_id);
     const bout_id = hitBoutId ?? scopedBoutId ?? null;
     const mmId = asUuid(hit?.matchmaking_id) ?? matchmaking_id;
+    const toernooi_code = normStr(hit?.toernooi_code)?.toUpperCase() ?? null;
+    const fighter_id = normStr(hit?.fighter_id);
+    const toernooi_va_nummer = normStr(hit?.toernooi_va_nummer);
 
     // safety:
     // - scoped op bout: alleen skippen als hit expliciet een andere bout_id heeft
@@ -190,7 +218,7 @@ export async function saveControleResultaten(opts: {
     }
 
     // helemaal onbruikbare hit overslaan
-    if (partij_nr == null && bout_id == null) {
+    if (partij_nr == null && bout_id == null && !toernooi_code) {
       continue;
     }
 
@@ -201,6 +229,9 @@ export async function saveControleResultaten(opts: {
 
       partij_nr,
       bout_id,
+      toernooi_code,
+      fighter_id,
+      toernooi_va_nummer,
 
       rule_code: normStr(hit.rule_code),
       rule: normStr(hit.rule) ?? normStr(hit.rule_code) ?? "RULE",
@@ -216,6 +247,9 @@ export async function saveControleResultaten(opts: {
       bout_id,
       rule_code: hit.rule_code,
       hoek: hit.hoek,
+      toernooi_code,
+      fighter_id,
+      toernooi_va_nummer,
     });
 
     const prev = reviewMap.get(key);
@@ -246,9 +280,13 @@ export async function saveControleResultaten(opts: {
   if (rowsToInsert.length === 0) {
     // scoped op bout of partij -> placeholder opslaan
     if (scopedBoutId || scopedPartijNr != null) {
+      const placeholderFromHit = hitsIn[0] ?? null;
       const key = makePlaceholderKey({
         partij_nr: scopedPartijNr ?? null,
         bout_id: scopedBoutId ?? null,
+        toernooi_code: normStr((placeholderFromHit as any)?.toernooi_code)?.toUpperCase() ?? null,
+        fighter_id: normStr((placeholderFromHit as any)?.fighter_id),
+        toernooi_va_nummer: normStr((placeholderFromHit as any)?.toernooi_va_nummer),
       });
 
       const prev = reviewMap.get(key);
@@ -260,6 +298,10 @@ export async function saveControleResultaten(opts: {
 
         partij_nr: scopedPartijNr ?? null,
         bout_id: scopedBoutId ?? null,
+        toernooi_code:
+          normStr((placeholderFromHit as any)?.toernooi_code)?.toUpperCase() ?? null,
+        fighter_id: normStr((placeholderFromHit as any)?.fighter_id),
+        toernooi_va_nummer: normStr((placeholderFromHit as any)?.toernooi_va_nummer),
 
         rule_code: "__NO_RULES__",
         rule: "NO_RULES",

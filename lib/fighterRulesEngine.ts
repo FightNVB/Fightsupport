@@ -1,5 +1,3 @@
-// lib/fighterRulesEngine.ts
-
 import dayjs from "dayjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -28,10 +26,6 @@ export type FighterRuleHit = {
 type Klasse = "R" | "N" | "C" | "B" | "A";
 const VOLGORDE: Klasse[] = ["R", "N", "C", "B", "A"];
 
-/* ==========================================================
-   helpers algemeen
-   ========================================================== */
-
 function asInt(v: any): number | null {
   const n = Number(String(v ?? "").trim());
   return Number.isFinite(n) ? n : null;
@@ -52,6 +46,10 @@ function normLower(v: any): string {
   return String(v ?? "").trim().toLowerCase();
 }
 
+function compactDigits(v: any): string {
+  return String(v ?? "").replace(/\D+/g, "").replace(/^0+/, "").trim();
+}
+
 function parseIsoDateOnly(v: any): dayjs.Dayjs | null {
   if (!v) return null;
   const s = String(v).trim();
@@ -60,11 +58,17 @@ function parseIsoDateOnly(v: any): dayjs.Dayjs | null {
   return d.isValid() ? d : null;
 }
 
+function sameDate(a: dayjs.Dayjs | null, b: dayjs.Dayjs | null): boolean {
+  if (!a || !b) return false;
+  return a.format("YYYY-MM-DD") === b.format("YYYY-MM-DD");
+}
+
 function parseEventDateFromCtx(ctx: any): dayjs.Dayjs | null {
   const candidates = [
     ctx?.event_date,
     ctx?.event_datum,
     ctx?.evenement_datum,
+    ctx?.evenement_data,
     ctx?.gala_date,
     ctx?.gala_datum,
     ctx?.datum,
@@ -72,6 +76,9 @@ function parseEventDateFromCtx(ctx: any): dayjs.Dayjs | null {
     ctx?.match_datum,
     ctx?.wedstrijd_datum,
     ctx?.created_at,
+    ctx?.extra?.evenement_datum,
+    ctx?.extra?.evenement_data,
+    ctx?.extra?.event_date_iso,
   ];
 
   for (const v of candidates) {
@@ -82,7 +89,10 @@ function parseEventDateFromCtx(ctx: any): dayjs.Dayjs | null {
   return null;
 }
 
-function ageOnReferenceDate(dob: dayjs.Dayjs | null, ref: dayjs.Dayjs | null): number | null {
+function ageOnReferenceDate(
+  dob: dayjs.Dayjs | null,
+  ref: dayjs.Dayjs | null
+): number | null {
   if (!dob || !ref) return null;
   if (!dob.isValid() || !ref.isValid()) return null;
   return ref.diff(dob, "year");
@@ -91,30 +101,46 @@ function ageOnReferenceDate(dob: dayjs.Dayjs | null, ref: dayjs.Dayjs | null): n
 function parseGender(v: any): "M" | "V" | null {
   const s = normLower(v);
   if (!s) return null;
-  if (s === "m" || s.includes("man") || s === "male") return "M";
-  if (s === "v" || s.includes("vrouw") || s === "female") return "V";
+  if (
+    s === "m" ||
+    s === "man" ||
+    s.includes("man") ||
+    s === "male" ||
+    s === "heer" ||
+    s === "jongen"
+  ) {
+    return "M";
+  }
+  if (
+    s === "v" ||
+    s === "vrouw" ||
+    s.includes("vrouw") ||
+    s === "female" ||
+    s === "dame" ||
+    s === "meisje"
+  ) {
+    return "V";
+  }
   return null;
 }
 
-/* ==========================================================
-   helpers single fighter
-   ========================================================== */
-
-function getNaamMm(ctx: any) {
+function getNaamInput(ctx: any) {
   return (
+    ctx?.naam_input ??
     ctx?.naam_mm ??
     ctx?.fighter_name_mm ??
-    ctx?.naam_input ??
+    [ctx?.voornaam, ctx?.achternaam].filter(Boolean).join(" ").trim() ??
     ctx?.naam
   );
 }
 
 function getNaamFp(ctx: any) {
   return (
-    ctx?.naam_fp ??
     ctx?.fp_naam ??
+    ctx?.naam_fp ??
     ctx?.naam_scrape ??
     ctx?.fighter_name_fp ??
+    ctx?.extra?.raw_scrape?.naam ??
     ctx?.naam
   );
 }
@@ -124,32 +150,40 @@ function getVa(ctx: any) {
     ctx?.va_nummer ??
       ctx?.va_nummer_mm ??
       ctx?.va ??
-      ctx?.fp_va_nummer
+      ctx?.fp_va_nummer ??
+      ctx?.extra?.raw_scrape?.va_nummer
   );
 }
 
-function getDob(ctx: any) {
+function getDobInput(ctx: any) {
+  return (
+    parseIsoDateOnly(ctx?.geboortedatum_input) ??
+    parseIsoDateOnly(ctx?.extra?.geboortedatum_input) ??
+    parseIsoDateOnly(ctx?.geboortedatum_mm) ??
+    parseIsoDateOnly(ctx?.geboortedatum)
+  );
+}
+
+function getDobFp(ctx: any) {
   return (
     parseIsoDateOnly(ctx?.geboortedatum_fp) ??
     parseIsoDateOnly(ctx?.fp_geboortedatum) ??
-    parseIsoDateOnly(ctx?.geboortedatum_input) ??
-    parseIsoDateOnly(ctx?.geboortedatum) ??
-    parseIsoDateOnly(ctx?.dob)
+    parseIsoDateOnly(ctx?.extra?.raw_scrape?.geboortedatum)
   );
 }
 
+function getDobResolved(ctx: any) {
+  return getDobFp(ctx) ?? getDobInput(ctx);
+}
+
 function getAgeOnEvent(ctx: any): number | null {
-  const dob = getDob(ctx);
+  const dob = getDobResolved(ctx);
   const eventDate = parseEventDateFromCtx(ctx);
   return ageOnReferenceDate(dob, eventDate);
 }
 
-function getGenderMm(ctx: any) {
-  return (
-    ctx?.geslacht_mm ??
-    ctx?.geslacht_input ??
-    ctx?.geslacht
-  );
+function getGenderInput(ctx: any) {
+  return ctx?.geslacht_input ?? ctx?.geslacht_mm ?? ctx?.geslacht;
 }
 
 function getGenderFp(ctx: any) {
@@ -157,24 +191,49 @@ function getGenderFp(ctx: any) {
     ctx?.geslacht_fp ??
     ctx?.fp_geslacht ??
     ctx?.geslacht_scrape ??
-    ctx?.geslacht
+    ctx?.extra?.raw_scrape?.geslacht
   );
 }
 
 function getLicentie(ctx: any) {
-  return ctx?.licentie ?? ctx?.fp_licentie;
+  return (
+    ctx?.licentie ??
+    ctx?.fp_licentie ??
+    ctx?.extra?.raw_scrape?.licentie
+  );
 }
 
 function getStartverbod(ctx: any) {
-  return ctx?.heeft_startverbod ?? ctx?.startverbod ?? ctx?.fp_startverbod;
+  return (
+    ctx?.heeft_startverbod ??
+    ctx?.startverbod ??
+    ctx?.fp_startverbod ??
+    ctx?.extra?.raw_scrape?.heeft_startverbod
+  );
 }
 
 function getKeurmerkValue(ctx: any) {
-  return ctx?.keurmerk ?? ctx?.sportschool_keurmerk ?? ctx?.keurmerk_geldig;
+  return (
+    ctx?.keurmerk ??
+    ctx?.sportschool_keurmerk ??
+    ctx?.keurmerk_geldig ??
+    ctx?.extra?.keurmerk_geldig ??
+    (() => {
+      const s = normLower(ctx?.heeft_keurmerk);
+      if (!s) return null;
+      if (["ja", "true", "1", "geldig", "niet_verplicht"].includes(s)) return true;
+      if (["nee", "false", "0", "ongeldig"].includes(s)) return false;
+      return null;
+    })()
+  );
 }
 
 function getKeurmerkReason(ctx: any) {
-  return norm(ctx?.keurmerk_reden ?? ctx?.sportschool_keurmerk_reden);
+  return norm(
+    ctx?.keurmerk_reden ??
+      ctx?.sportschool_keurmerk_reden ??
+      ctx?.extra?.keurmerk_reden
+  );
 }
 
 function getMmaLevelRaw(ctx: any) {
@@ -197,10 +256,6 @@ function getDiscipline(ctx: any) {
 function getSubDiscipline(ctx: any) {
   return ctx?.sub_discipline;
 }
-
-/* ==========================================================
-   naamcheck tolerant
-   ========================================================== */
 
 function normNameSoft(v: any): string {
   return String(v ?? "")
@@ -279,10 +334,6 @@ function nameSimilar(aRaw: any, bRaw: any): boolean {
 
   return bestFirst >= 0.72;
 }
-
-/* ==========================================================
-   klasse helpers KB/MT
-   ========================================================== */
 
 function idxKlasse(k: Klasse | null): number {
   return k ? VOLGORDE.indexOf(k) : -1;
@@ -408,7 +459,10 @@ function hoogsteKlasseUitUitslagen(rows: UitslagRow[]): Klasse | null {
   return best;
 }
 
-function recordInKlasse(rows: UitslagRow[], k: Klasse): { wins: number; total: number } {
+function recordInKlasse(
+  rows: UitslagRow[],
+  k: Klasse
+): { wins: number; total: number } {
   let wins = 0;
   let total = 0;
 
@@ -447,30 +501,26 @@ function promoteFrom(k: Klasse, wins: number, total: number): Klasse {
   return "A";
 }
 
-function canFightAdultKbMtBoutClass(fighterMax: Klasse | null, boutK: Klasse | null): boolean {
+function canFightAdultKbMtBoutClass(
+  fighterMax: Klasse | null,
+  boutK: Klasse | null
+): boolean {
   if (!fighterMax || !boutK) return true;
   if (idxKlasse(boutK) <= idxKlasse(fighterMax)) return true;
   if (fighterMax === "R" && boutK === "N") return true;
   return false;
 }
 
-/* ==========================================================
-   mma helpers
-   ========================================================== */
-
 type MmaLevel = "AMATEUR" | "PRO";
 
 function parseMmaLevel(v: any): MmaLevel | null {
   const s = String(v ?? "").toUpperCase().trim();
   if (!s) return null;
-  if (s === "P" || s === "PRO" || s.includes("PROFESSIONAL") || s.includes("PROF")) return "PRO";
+  if (s === "P" || s === "PRO" || s.includes("PROFESSIONAL") || s.includes("PROF"))
+    return "PRO";
   if (s === "AMA" || s === "AMATEUR" || s.includes("AMATEUR")) return "AMATEUR";
   return null;
 }
-
-/* ==========================================================
-   hoofdengine
-   ========================================================== */
 
 export async function fighterRulesEngine(opts: {
   ctx: any;
@@ -487,15 +537,21 @@ export async function fighterRulesEngine(opts: {
   const row_nr = asInt(ctx?.row_nr);
 
   const va = getVa(ctx);
-  const naamMm = getNaamMm(ctx);
+  const naamInput = getNaamInput(ctx);
   const naamFp = getNaamFp(ctx);
-  const dob = getDob(ctx);
+
+  const dobInput = getDobInput(ctx);
+  const dobFp = getDobFp(ctx);
+
   const eventDate = parseEventDateFromCtx(ctx);
   const ageOnEvent = getAgeOnEvent(ctx);
-  const genderMm = parseGender(getGenderMm(ctx));
+
+  const genderInput = parseGender(getGenderInput(ctx));
   const genderFp = parseGender(getGenderFp(ctx));
+
   const licentie = normLower(getLicentie(ctx));
   const startverbod = normLower(getStartverbod(ctx));
+
   const keurmerk = getKeurmerkValue(ctx);
   const keurmerkReason = getKeurmerkReason(ctx);
 
@@ -506,7 +562,6 @@ export async function fighterRulesEngine(opts: {
     row_nr,
   };
 
-  // fightpaspoort / VA
   if (!va) {
     pushHit({
       ...common,
@@ -519,8 +574,32 @@ export async function fighterRulesEngine(opts: {
     });
   }
 
-  // naamcontrole
-  if (!naamMm || !naamFp) {
+  {
+    const vaInput = compactDigits(
+      ctx?.va_nummer_input ??
+        ctx?.va_nummer_mm ??
+        ctx?.va_nummer ??
+        ctx?.bron_inschrijving?.va_nummer
+    );
+    const vaFp = compactDigits(
+      ctx?.fp_va_nummer ??
+        ctx?.extra?.raw_scrape?.va_nummer ??
+        ctx?.va_nummer
+    );
+
+    if (vaInput && vaFp && vaInput !== vaFp) {
+      pushHit({
+        ...common,
+        rule: "Fightpaspoort nummer wijkt af",
+        rule_code: "VA_NUMMER_MISMATCH",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: `VA nummer opgave ("${vaInput}") wijkt af van scraper/Fightpaspoort ("${vaFp}"). Controleer de juiste vechter.`,
+      });
+    }
+  }
+
+  if (!naamInput || !naamFp) {
     pushHit({
       ...common,
       rule: "Naamcontrole niet volledig",
@@ -528,21 +607,45 @@ export async function fighterRulesEngine(opts: {
       resultaat: "ACTIE",
       severity: "warning",
       boodschap:
-        "Naam uit matchmaking en/of Fightpassport ontbreekt. Naamcontrole kon niet volledig worden uitgevoerd.",
+        "Naam uit opgave en/of Fightpaspoort ontbreekt. Naamcontrole kon niet volledig worden uitgevoerd.",
     });
-  } else if (!nameSimilar(naamMm, naamFp)) {
+  } else if (!nameSimilar(naamInput, naamFp)) {
     pushHit({
       ...common,
-      rule: "Naam klopt niet met Fightpassport",
-      rule_code: "NAAM_KLOPT_NIET_MET_FIGHTPASSPORT",
+      rule: "Naam wijkt af van Fightpaspoort",
+      rule_code: "NAAM_MISMATCH",
       resultaat: "ACTIE",
       severity: "warning",
-      boodschap: `Naam opgave ("${naamMm}") wijkt af van Fightpassport ("${naamFp}"). Controleer VA/vechter.`,
+      boodschap: `Naam opgave ("${naamInput}") wijkt af van Fightpaspoort ("${naamFp}"). Controleer invoer en VA.`,
     });
   }
 
-  // geslachtcheck
-  if (!genderMm || !genderFp) {
+  if (!dobInput || !dobFp) {
+    pushHit({
+      ...common,
+      rule: "Geboortedatum niet volledig controleerbaar",
+      rule_code: "GEBOORTEDATUMCHECK_GEEN_VOLLEDIGE_DATA",
+      resultaat: "ACTIE",
+      severity: "warning",
+      boodschap:
+        "Geboortedatum uit opgave en/of Fightpaspoort ontbreekt. Controle kon niet volledig worden uitgevoerd.",
+    });
+  } else if (!sameDate(dobInput, dobFp)) {
+    pushHit({
+      ...common,
+      rule: "Geboortedatum wijkt af van Fightpaspoort",
+      rule_code: "GEBOORTEDATUM_MISMATCH",
+      resultaat: "ACTIE",
+      severity: "warning",
+      boodschap: `Geboortedatum opgave (${dobInput.format(
+        "DD-MM-YYYY"
+      )}) wijkt af van Fightpaspoort (${dobFp.format(
+        "DD-MM-YYYY"
+      )}). Controleer de juiste vechter.`,
+    });
+  }
+
+  if (!genderInput || !genderFp) {
     pushHit({
       ...common,
       rule: "Geslacht niet volledig controleerbaar",
@@ -550,47 +653,35 @@ export async function fighterRulesEngine(opts: {
       resultaat: "ACTIE",
       severity: "warning",
       boodschap:
-        "Geslacht uit opgave en/of Fightpassport ontbreekt. Controle kon niet volledig worden uitgevoerd.",
+        "Geslacht uit opgave en/of Fightpaspoort ontbreekt. Controle kon niet volledig worden uitgevoerd.",
     });
-  } else if (genderMm !== genderFp) {
+  } else if (genderInput !== genderFp) {
     pushHit({
       ...common,
-      rule: "Geslacht wijkt af van opgave",
+      rule: "Geslacht wijkt af van Fightpaspoort",
       rule_code: "GESLACHT_MISMATCH",
       resultaat: "ACTIE",
       severity: "warning",
-      boodschap: `Geslacht opgave is ${genderMm === "M" ? "man" : "vrouw"} maar Fightpassport geeft ${
+      boodschap: `Geslacht opgave is ${
+        genderInput === "M" ? "man" : "vrouw"
+      } maar Fightpaspoort geeft ${
         genderFp === "M" ? "man" : "vrouw"
       } aan. Controleer invoer en vechtergegevens.`,
-    });
-  }
-
-  // geboortedatum / event datum
-  if (!dob) {
-    pushHit({
-      ...common,
-      rule: "Geboortedatum ontbreekt",
-      rule_code: "GEBOORTEDATUM_ONTBREEKT",
-      resultaat: "ACTIE",
-      severity: "warning",
-      boodschap:
-        "Geboortedatum ontbreekt. Leeftijdsafhankelijke controles konden niet volledig worden uitgevoerd.",
     });
   }
 
   if (!eventDate) {
     pushHit({
       ...common,
-      rule: "Eventdatum ontbreekt",
+      rule: "Eventdatum ontbreekt of ongeldig",
       rule_code: "EVENTDATUM_ONTBREEKT",
-      resultaat: "ACTIE",
-      severity: "warning",
+      resultaat: "AFKEUR",
+      severity: "error",
       boodschap:
-        "Eventdatum ontbreekt. Leeftijd op eventdatum kon niet worden bepaald.",
+        "Geen datum of geen geldige datum op evenement_data/evenement_datum. Zonder geldige eventdatum kan keurmerkcontrole niet goed worden uitgevoerd en mag de vechter niet meedoen.",
     });
   }
 
-  // 40+ sportmedisch
   if (typeof ageOnEvent === "number" && ageOnEvent >= 40) {
     pushHit({
       ...common,
@@ -602,7 +693,6 @@ export async function fighterRulesEngine(opts: {
     });
   }
 
-  // licentie
   {
     const licentieOk =
       licentie === "ja" ||
@@ -618,12 +708,13 @@ export async function fighterRulesEngine(opts: {
         rule_code: "LICENTIE_ONGELDIG",
         resultaat: "AFKEUR",
         severity: "error",
-        boodschap: `Geen geldige licentie gevonden (waarde: "${norm(getLicentie(ctx)) || "leeg"}").`,
+        boodschap: `Geen geldige licentie gevonden (waarde: "${norm(
+          getLicentie(ctx)
+        ) || "leeg"}").`,
       });
     }
   }
 
-  // startverbod
   {
     const heeftStartverbod =
       startverbod === "ja" || startverbod === "true" || startverbod === "1";
@@ -640,19 +731,7 @@ export async function fighterRulesEngine(opts: {
     }
   }
 
-  // keurmerk / belgie
   {
-    if (keurmerkReason.startsWith("⚠️ België")) {
-      pushHit({
-        ...common,
-        rule: "Belgische sportschool",
-        rule_code: "KEURMERK_BE_INFO",
-        resultaat: "INFO",
-        severity: "info",
-        boodschap: keurmerkReason,
-      });
-    }
-
     if (keurmerk == null) {
       pushHit({
         ...common,
@@ -660,7 +739,8 @@ export async function fighterRulesEngine(opts: {
         rule_code: "SPORTSCHOOL_NIET_GEVONDEN",
         resultaat: "ACTIE",
         severity: "warning",
-        boodschap: keurmerkReason || "Gym match onzeker. Controleer sportschool/keurmerk handmatig.",
+        boodschap:
+          keurmerkReason || "Gym match onzeker. Controleer sportschool/keurmerk handmatig.",
       });
     } else if (keurmerk === false) {
       pushHit({
@@ -669,12 +749,12 @@ export async function fighterRulesEngine(opts: {
         rule_code: "KEURMERK_ONGELDIG",
         resultaat: "AFKEUR",
         severity: "error",
-        boodschap: keurmerkReason || "Geen geldig keurmerk gevonden (ontbreekt of verlopen).",
+        boodschap:
+          keurmerkReason || "Geen geldig keurmerk gevonden voor Nederlandse sportschool.",
       });
     }
   }
 
-  // klasse-volwassenen KB/MT
   {
     const volwassen = typeof ageOnEvent === "number" && ageOnEvent >= 18;
     const kbmt = isKickboksMuayThai(ctx);
@@ -741,7 +821,6 @@ export async function fighterRulesEngine(opts: {
     }
   }
 
-  // mma level info
   {
     const raw = getMmaLevelRaw(ctx);
     const mmaLevel = parseMmaLevel(raw);
@@ -753,7 +832,9 @@ export async function fighterRulesEngine(opts: {
         rule_code: "MMA_LEVEL_ONDUIDELIJK",
         resultaat: "ACTIE",
         severity: "warning",
-        boodschap: `MMA niveau kon niet goed worden geïnterpreteerd uit waarde "${String(raw)}".`,
+        boodschap: `MMA niveau kon niet goed worden geïnterpreteerd uit waarde "${String(
+          raw
+        )}".`,
       });
     }
   }

@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 
-import { buildControleBoutContext } from "@/lib/control/buildControleBoutContext";
+import { buildControleBoutContext, buildToernooiContext } from "@/lib/control/buildControleBoutContext";
 import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
 import { rulesEngine } from "@/lib/rulesEngine";
 import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
@@ -259,8 +259,14 @@ export async function POST(req: Request) {
     }
 
     const partij_nr = asPartijNr(body?.partij_nr);
-    if (partij_nr == null) {
-      return NextResponse.json({ error: "partij_nr is verplicht" }, { status: 400 });
+    const toernooi_code = String(body?.toernooi_code ?? body?.toernooiCode ?? "").trim().toUpperCase();
+    const fighter_id_in = toVaStrict(body?.fighter_id ?? body?.va_nummer ?? body?.va ?? body?.fighterId);
+
+    if (partij_nr == null && (!toernooi_code || !fighter_id_in)) {
+      return NextResponse.json(
+        { error: "partij_nr is verplicht voor een partij, of toernooi_code + fighter_id voor een toernooi-vechter" },
+        { status: 400 }
+      );
     }
 
     const { userId, role } = await requireUserWithRole(req);
@@ -274,6 +280,49 @@ export async function POST(req: Request) {
         { error: "Geen controle_run gevonden. Draai eerst /api/control-engine/start." },
         { status: 400 }
       );
+    }
+
+    if (partij_nr == null && toernooi_code && fighter_id_in) {
+      const bundlePath = resolveScriptPath("scrapers", "fp_bundle", "scraper_fp_bundle.js");
+      await runNodeScript(bundlePath, [matchmaking_id, controle_run_id, fighter_id_in], path.dirname(bundlePath));
+
+      const toernooiRows = await buildToernooiContext(matchmaking_id, controle_run_id, {
+        toernooi_code,
+        fighter_id: fighter_id_in,
+      });
+
+      await enrichControleBoutContext(matchmaking_id, controle_run_id);
+
+      const { data: allCtxRows, error: ctxErr } = await supabase
+        .from("controle_bout_context")
+        .select("*")
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("controle_run_id", controle_run_id)
+        .order("partij_nr", { ascending: true });
+
+      if (ctxErr) throw ctxErr;
+
+      await rulesEngine({
+        matchmaking_id,
+        controle_run_id,
+        ctxRows: allCtxRows ?? [],
+      });
+
+      return NextResponse.json({
+        ok: true,
+        type: "toernooi_fighter",
+        matchmaking_id,
+        controle_run_id,
+        toernooi_code,
+        fighter_id: fighter_id_in,
+        toernooi_rows: Array.isArray(toernooiRows) ? toernooiRows.length : 0,
+        used_bundle: true,
+        ms: Date.now() - t0,
+      });
+    }
+
+    if (partij_nr == null) {
+      return NextResponse.json({ error: "partij_nr ontbreekt" }, { status: 400 });
     }
 
     const va_rood_in = toVaStrict(

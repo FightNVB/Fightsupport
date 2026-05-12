@@ -1,163 +1,234 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/matchmaker/access";
-import {
-  assertCanAccessMatchmaking,
-  requireUserWithRole,
-} from "@/app/api/_utils/authz";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-async function deleteEq(table: string, column: string, value: string) {
-  const { error } = await supabaseAdmin.from(table).delete().eq(column, value);
-  if (error) {
-    throw new Error(`[${table}] delete eq ${column} failed: ${error.message}`);
-  }
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } },
+);
+
+function s(v: unknown) {
+  return String(v ?? "").trim();
 }
 
-async function bestEffortDeleteEq(table: string, column: string, value: string) {
-  try {
-    await deleteEq(table, column, value);
-  } catch (e: any) {
-    console.warn(`[matchmaker/delete-matchmaking] skip ${table}:`, e?.message);
+function isMissingTableOrColumn(error: any): boolean {
+  const msg = String(error?.message ?? error ?? "").toLowerCase();
+  const code = String(error?.code ?? "").toLowerCase();
+
+  return (
+    code === "pgrst204" ||
+    code === "pgrst205" ||
+    code === "42p01" ||
+    code === "42703" ||
+    msg.includes("could not find the table") ||
+    msg.includes("could not find the") ||
+    msg.includes("schema cache") ||
+    msg.includes("relation") ||
+    msg.includes("column")
+  );
+}
+
+async function getUser(req: Request) {
+  const auth =
+    req.headers.get("authorization") ||
+    req.headers.get("Authorization") ||
+    "";
+
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+
+  if (!token) throw new Error("Niet ingelogd.");
+
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+
+  if (error || !data.user) {
+    throw new Error(error?.message || "Niet ingelogd.");
+  }
+
+  return data.user;
+}
+
+async function getUserProfile(userId: string) {
+  const { data } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, role, rol, type, bondteam")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return data as any | null;
+}
+
+async function assertCanDelete(matchmakingId: string, userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("matchmakings")
+    .select(
+      "id, matchmaker_id, maker_user_id, uploaded_by, huidige_eigenaar_type, huidige_eigenaar_user_id, stadium, status",
+    )
+    .eq("id", matchmakingId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("Matchmaking niet gevonden.");
+
+  const profile = await getUserProfile(userId);
+  const role = s(profile?.role || profile?.rol || profile?.type).toLowerCase();
+
+  const isAdmin =
+    role.includes("superadmin") ||
+    role === "admin" ||
+    role.includes("admin");
+
+  if (isAdmin) return data;
+
+  const stage = s((data as any).stadium) || s((data as any).status);
+
+  const editableStages = new Set([
+    "",
+    "nieuw",
+    "bouwen_matchmaking",
+    "concept_matchmaking",
+    "bij_matchmaker_in_bewerking",
+    "retour_naar_matchmaker",
+  ]);
+
+  const ownerIds = [
+    (data as any).matchmaker_id,
+    (data as any).maker_user_id,
+    (data as any).uploaded_by,
+    (data as any).huidige_eigenaar_user_id,
+  ]
+    .map(s)
+    .filter(Boolean);
+
+  const isOwner = ownerIds.includes(userId);
+
+  if (!isOwner || !editableStages.has(stage)) {
+    throw new Error(
+      "Deze matchmaking mag door de matchmaker niet verwijderd worden in deze fase.",
+    );
+  }
+
+  return data;
+}
+
+async function deleteBy(table: string, column: string, value: string) {
+  if (!value) return { ok: true, skipped: true };
+
+  const { error } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .eq(column, value);
+
+  if (!error) return { ok: true, skipped: false };
+
+  if (isMissingTableOrColumn(error)) {
+    console.warn(
+      `[delete-matchmaking] ${table}.${column} overgeslagen:`,
+      error.message,
+    );
+
+    return {
+      ok: false,
+      skipped: true,
+      warning: error.message,
+    };
+  }
+
+  throw new Error(`${table} verwijderen mislukt: ${error.message}`);
+}
+
+async function deleteByAny(
+  table: string,
+  filters: Array<{ column: string; value: string }>,
+) {
+  for (const filter of filters) {
+    if (!filter.value) continue;
+    await deleteBy(table, filter.column, filter.value);
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const matchmaking_id = String(body?.matchmaking_id ?? "").trim();
+    const user = await getUser(req);
 
-    if (!matchmaking_id) {
+    const body = await req.json().catch(() => ({}));
+    const matchmakingId = s(
+      body?.matchmaking_id ||
+        body?.matchmakingId ||
+        body?.id,
+    );
+
+    if (!matchmakingId) {
       return NextResponse.json(
-        { error: "matchmaking_id ontbreekt" },
-        { status: 400 }
+        { ok: false, error: "matchmaking_id ontbreekt" },
+        { status: 400 },
       );
     }
 
-    const { userId, role } = await requireUserWithRole(req);
-    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+    await assertCanDelete(matchmakingId, user.id);
 
-    console.log("[matchmaker/delete-matchmaking] start", { matchmaking_id });
+    /**
+     * Volgorde is belangrijk:
+     * eerst afhankelijke resultaten/raw/context/upload-tabellen,
+     * daarna pas de hoofdregel uit matchmakings.
+     */
+    const deletePlan = [
+      // Matchmaker aanmeld-flow
+      "matchmaker_fighter_resultaten",
+      "matchmaker_fighter_rules",
+      "matchmaker_fighter_context",
+      "matchmaker_fighters_raw",
+      "matchmaker_uitslagen_raw",
+      "aanmeldingen",
+      "matchmaker_uploads",
 
-    // 0) centrale hoofdrecord + event_id ophalen
-    const { data: centralRow, error: centralErr } = await supabaseAdmin
-      .from("matchmakings")
-      .select("id, event_id")
-      .eq("id", matchmaking_id)
-      .maybeSingle();
+      // Oude/andere uploadtabel, als die nog bestaat
+      "matchmaking_uploads",
 
-    if (centralErr) throw centralErr;
+      // Wedstrijd/control-flow
+      "controle_resultaten",
+      "controle_uitslagen",
+      "controle_bout_context",
+      "controle_toernooi_context",
+      "fighters_raw",
+      "uitslagen_raw",
+      "controle_runs",
+      "control_runs",
+      "matchmaking_bouts_raw",
+    ];
 
-    const event_id = centralRow?.event_id ? String(centralRow.event_id) : null;
-
-    const { data: insRows, error: insErr } = await supabaseAdmin
-      .from("matchmaker_inschrijvingen")
-      .select("id, upload_id, va_nummer")
-      .eq("matchmaking_id", matchmaking_id);
-
-    if (insErr) throw insErr;
-
-    const { data: runRows, error: runErr } = await supabaseAdmin
-      .from("matchmaker_controle_runs")
-      .select("id")
-      .eq("matchmaking_id", matchmaking_id);
-
-    if (runErr) throw runErr;
-
-    // 1) zwaarste children eerst
-    await bestEffortDeleteEq("dispensatie_requests", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("dispensatie_hits", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("matchmaker_controle_resultaten", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("matchmaker_fighter_resultaten", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("matchmaker_bout_context", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("controle_audit_events", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("matchmaker_bouts_raw", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("lineup_bouts", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("weigh_in_bouts", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("weigh_in_audit", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("matchmaker_fighter_context", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("matchmaker_fighters_raw", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("matchmaker_uitslagen_raw", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("matchmaker_controle_runs", "matchmaking_id", matchmaking_id);
-
-    // 2) centrale / alternatieve tabellen ook opruimen
-    await bestEffortDeleteEq("controle_resultaten", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("controle_bout_context", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("controle_runs", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("controle_uitslagen", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("matchmaking_bouts_raw", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("fighters_raw", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("uitslagen_raw", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("definitive_matchmaking_bouts", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("definitive_matchmakings", "matchmaking_id", matchmaking_id);
-
-    await bestEffortDeleteEq("matchmaker_matches", "matchmaking_id", matchmaking_id);
-
-    // 3) inschrijvingen
-    await bestEffortDeleteEq("matchmaker_inschrijvingen", "matchmaking_id", matchmaking_id);
-
-    // 4) uploads
-    await bestEffortDeleteEq("matchmaking_uploads", "matchmaking_id", matchmaking_id);
-    await bestEffortDeleteEq("matchmaker_uploads", "matchmaking_id", matchmaking_id);
-
-    // 5) flowlog opruimen vóór hoofdrecord
-    await bestEffortDeleteEq("matchmaking_flow_log", "matchmaking_id", matchmaking_id);
-
-    // 6) matchmaker hoofdrecord
-    await bestEffortDeleteEq("matchmaker_matchmakings", "id", matchmaking_id);
-
-    // 7) centraal hoofdrecord
-    if (centralRow) {
-      await deleteEq("matchmakings", "id", matchmaking_id);
+    for (const table of deletePlan) {
+      await deleteByAny(table, [
+        { column: "matchmaking_id", value: matchmakingId },
+        { column: "matchmaker_matchmaking_id", value: matchmakingId },
+      ]);
     }
 
-    // 8) event alleen verwijderen als er geen andere matchmakings meer aan hangen
-    let eventDeleted = false;
+    const { error: deleteMatchmakingError } = await supabaseAdmin
+      .from("matchmakings")
+      .delete()
+      .eq("id", matchmakingId);
 
-    if (event_id) {
-      const { count, error: countErr } = await supabaseAdmin
-        .from("matchmakings")
-        .select("id", { count: "exact", head: true })
-        .eq("event_id", event_id);
-
-      if (countErr) throw countErr;
-
-      if ((count ?? 0) === 0) {
-        const { error: eventDeleteErr } = await supabaseAdmin
-          .from("events")
-          .delete()
-          .eq("id", event_id);
-
-        if (eventDeleteErr) {
-          throw new Error(`[events] delete eq id failed: ${eventDeleteErr.message}`);
-        }
-
-        eventDeleted = true;
-      }
+    if (deleteMatchmakingError) {
+      throw new Error(
+        `matchmakings verwijderen mislukt: ${deleteMatchmakingError.message}`,
+      );
     }
 
     return NextResponse.json({
       ok: true,
-      matchmaking_id,
-      event_id,
-      event_deleted: eventDeleted,
-      deleted: {
-        inschrijvingen: insRows?.length ?? 0,
-        runs: runRows?.length ?? 0,
-      },
+      matchmaking_id: matchmakingId,
     });
-  } catch (e: any) {
-    console.error("❌ delete-matchmaking error:", e);
+  } catch (err: any) {
+    console.error("❌ delete matchmaking fout:", err);
+
     return NextResponse.json(
-      { error: e?.message ?? "Onbekende fout" },
-      { status: 500 }
+      {
+        ok: false,
+        error: err?.message || "Verwijderen mislukt.",
+      },
+      { status: 500 },
     );
   }
 }

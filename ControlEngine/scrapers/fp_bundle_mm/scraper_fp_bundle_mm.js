@@ -1,13 +1,10 @@
-// ControlEngine/scrapers/fp_bundle/scraper_fp_bundle_mm.js
-// ✅ MASTER tab logt 1x in en blijft open (sessie warm)
-// ✅ Per VA: worker opent NIEUWE TAB DIRECT op fighter-url:
-//     https://fightpassport.nl/#va_vechter/<va>
-// ✅ Ziet hij login page? -> master ensureLoggedIn(force) -> cookies refresh (LOCKED)
-// ✅ Ziet hij mismatch header? -> TAB SLUITEN -> NIEUWE TAB OPENEN met dezelfde fighter-url (retry)
-// ✅ GEEN SYS42, GEEN dashboard “fixes”
-//
-// FULLFIGHTER -> matchmaker_fighters_raw
-// UITSLAGEN  -> matchmaker_uitslagen_raw snapshot per (mm, va)
+// ControlEngine/scrapers/fp_bundle_mm/scraper_fp_bundle_mm.js
+// ✅ MATCHMAKER scraper
+// ✅ FULLFIGHTER -> matchmaker_fighters_raw
+// ✅ UITSLAGEN  -> uitslagen_raw
+// ✅ Deze scraper schrijft NIET naar fighters_raw
+// ✅ Gebruikt echte kolommen van matchmaker_fighters_raw
+// ✅ fighter_id = interne UUID, va_nummer = extern VA-nummer
 
 import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
@@ -21,6 +18,7 @@ process.on("unhandledRejection", (err) => {
   console.error("❌ UNHANDLED REJECTION:", err?.stack ?? err);
   process.exitCode = 1;
 });
+
 process.on("uncaughtException", (err) => {
   console.error("❌ UNCAUGHT EXCEPTION:", err?.stack ?? err);
   process.exitCode = 1;
@@ -29,6 +27,9 @@ process.on("uncaughtException", (err) => {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const RAW_FIGHTERS_TABLE = "matchmaker_fighters_raw";
+const RAW_UITSLAGEN_TABLE = process.env.MATCHMAKER_UITSLAGEN_TABLE || "uitslagen_raw";
+
 async function wait(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -36,18 +37,7 @@ async function wait(ms) {
 function normalizeVaStrict(v) {
   const s = String(v ?? "").trim();
   const digits = s.replace(/\D/g, "");
-  return /^\d{3,5}$/.test(digits) ? digits : null;
-}
-
-function normalizeVaLoose(v) {
-  const s = String(v ?? "").trim().replace(/\D/g, "");
-  if (!s) return null;
-  const noZeros = s.replace(/^0+/, "");
-  return noZeros || "0";
-}
-
-function sameVa(a, b) {
-  return normalizeVaLoose(a) === normalizeVaLoose(b);
+  return /^\d{3,6}$/.test(digits) ? digits : null;
 }
 
 function safeSlug(v) {
@@ -56,11 +46,68 @@ function safeSlug(v) {
     .replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
-/**
- * HARD timeout wrapper.
- * Let op: Promise.race annuleert de onderliggende async NIET.
- * Daarom killen we bij timeout de worker-context (hard stop).
- */
+function missingColumnName(error) {
+  const msg = String(error?.message ?? error ?? "");
+  const m = msg.match(/Could not find the ['"]([^'"]+)['"] column/i);
+  return m?.[1] ?? null;
+}
+
+function isMissingTableError(error) {
+  const msg = String(error?.message ?? error ?? "").toLowerCase();
+  return (
+    msg.includes("could not find the table") ||
+    msg.includes("schema cache") ||
+    msg.includes("pgrst205") ||
+    msg.includes("relation")
+  );
+}
+
+async function safeDelete(table, filters) {
+  let q = supabase.from(table).delete();
+
+  for (const [key, value] of Object.entries(filters)) {
+    q = q.eq(key, value);
+  }
+
+  const { error } = await q;
+
+  if (!error) return null;
+  if (isMissingTableError(error) || missingColumnName(error)) return null;
+
+  return error;
+}
+
+async function safeInsertMany(table, rows) {
+  if (!Array.isArray(rows) || !rows.length) return { data: [], error: null };
+
+  let body = rows.map((r) => ({ ...r }));
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const { data, error } = await supabase.from(table).insert(body).select("*");
+
+    if (!error) {
+      return { data: data ?? [], error: null };
+    }
+
+    const col = missingColumnName(error);
+    if (col && body.some((row) => Object.prototype.hasOwnProperty.call(row, col))) {
+      body = body.map((row) => {
+        const next = { ...row };
+        delete next[col];
+        return next;
+      });
+      continue;
+    }
+
+    return { data: null, error };
+  }
+
+  return {
+    data: null,
+    error: new Error(`${table}: te veel schema-aanpassingen nodig`),
+  };
+}
+
 async function withTimeout(promiseFactory, ms, label, onTimeout) {
   let t;
 
@@ -115,7 +162,7 @@ async function readHeaderInfo(page) {
     return await page.evaluate(() => {
       const k1 = document.querySelector(".koptekst1");
       const t = (k1?.innerText || "").trim();
-      const m = t.match(/\((\d{3,5})\)$/);
+      const m = t.match(/\((\d{3,6})\)$/);
       return { gotVa: m ? m[1] : null, koptekst1: t };
     });
   } catch {
@@ -132,20 +179,24 @@ async function isLoginPage(page) {
     const loginEl = await page.$("input.gebruikersnaam").catch(() => null);
     if (loginEl) return true;
   } catch {}
+
   try {
     const u = (page.url() || "").toLowerCase();
     if (u.includes("login") || u.includes("#login") || u.includes("aanmeld")) return true;
   } catch {}
+
   return false;
 }
 
 async function hardClosePage(page) {
   if (!page) return;
+
   try {
     const client = await page.target().createCDPSession();
     await client.send("Page.stopLoading").catch(() => {});
     await client.detach().catch(() => {});
   } catch {}
+
   try {
     await page.close({ runBeforeUnload: true }).catch(() => {});
   } catch {}
@@ -155,29 +206,29 @@ async function createWorkerContext(browser) {
   if (browser && typeof browser.createBrowserContext === "function") {
     return await browser.createBrowserContext();
   }
+
   if (browser && typeof browser.createIncognitoBrowserContext === "function") {
     return await browser.createIncognitoBrowserContext();
   }
+
   return null;
 }
 
 async function closeWorkerContext(ctx) {
   if (!ctx) return;
+
   try {
     const pages = await ctx.pages().catch(() => []);
     for (const p of pages) {
       await hardClosePage(p).catch(() => {});
     }
   } catch {}
+
   try {
     await ctx.close().catch(() => {});
   } catch {}
 }
 
-/* -------------------------------------------------------
-   CORE: Open tab DIRECT fighter-url, verify header,
-   else close and reopen until correct.
-------------------------------------------------------- */
 async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   const {
     maxAttempts = 3,
@@ -188,6 +239,7 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const p = context ? await context.newPage() : await browser.newPage();
+
     await p.setCacheEnabled(false);
 
     try {
@@ -210,11 +262,11 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
     const info = await readHeaderInfo(p);
     const gotVa = info?.gotVa ?? null;
     const koptekst1 = info?.koptekst1 ?? "";
-    const ok = sameVa(gotVa, va);
+    const ok = gotVa && String(gotVa) === String(va);
 
     if (ok) return p;
 
-    console.log(`[bundle] ↪️ openTab mismatch/empty ${workerLabel}`, {
+    console.log(`[bundle-mm] ↪️ openTab mismatch/empty ${workerLabel}`, {
       requested: String(va),
       gotVa: gotVa ?? null,
       attempt,
@@ -229,9 +281,6 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   return null;
 }
 
-/* -------------------------------------------------------
-   FULLFIGHTER scrape
-------------------------------------------------------- */
 async function scrapeHeader(page) {
   await page.waitForSelector(".koptekst1", { timeout: 20000 });
 
@@ -273,16 +322,20 @@ async function scrapeHeader(page) {
 async function openTile(page, va, title) {
   await closeAnyModal(page);
 
-  await page.evaluate((va, title) => {
-    const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
-    if (!tab) return;
+  await page.evaluate(
+    (va, title) => {
+      const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
+      if (!tab) return;
 
-    const head = [...tab.querySelectorAll(".tileHeader.enabled")].find(
-      (h) => (h.innerText || "").trim().toUpperCase() === title.toUpperCase()
-    );
+      const head = [...tab.querySelectorAll(".tileHeader.enabled")].find(
+        (h) => (h.innerText || "").trim().toUpperCase() === title.toUpperCase()
+      );
 
-    head?.closest(".tile")?.click();
-  }, va, title);
+      head?.closest(".tile")?.click();
+    },
+    va,
+    title
+  );
 
   await wait(650);
 }
@@ -310,14 +363,17 @@ async function scrapeDetails(page, va) {
         const parts = raw.split(":");
         licentie = (parts[1] ?? "").trim() || null;
       }
+
       if (txt.startsWith("wedstrijden")) {
         const m = raw.match(/\d+/);
         totaal = m ? parseInt(m[0], 10) : null;
       }
+
       if (txt.startsWith("gewonnen")) {
         const m = raw.match(/\d+/);
         gewonnen = m ? parseInt(m[0], 10) : null;
       }
+
       if (txt.includes("startverbod")) {
         if (txt.includes("nee") || txt.includes("geen")) {
           heeft_startverbod = false;
@@ -341,6 +397,7 @@ async function scrapeDetails(page, va) {
 
 async function scrapeZeroMeting(page) {
   const exists = await page.$("input.dnva_nulmetingaantalwedstr");
+
   if (!exists) {
     await closeAnyModal(page);
     return { totaal: 0, opmerking: "", klasse: null };
@@ -356,6 +413,7 @@ async function scrapeZeroMeting(page) {
 
     let klasse = null;
     const sel = document.querySelector("select.dvnulmetingklasseoms");
+
     if (sel) {
       const opt = sel.options[sel.selectedIndex];
       klasse = opt?.textContent?.trim() || sel.value || null;
@@ -371,8 +429,8 @@ async function scrapeZeroMeting(page) {
 async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id, controle_run_id) {
   if (!header?.va_nummer) return;
 
-  if (!sameVa(header.va_nummer, requestedVA)) {
-    console.log("[fullfighter] ⚠️ VA mismatch!", {
+  if (String(header.va_nummer) !== String(requestedVA)) {
+    console.log("[fullfighter-mm] ⚠️ VA mismatch!", {
       requested: String(requestedVA),
       got: String(header.va_nummer),
       naam: header?.naam ?? null,
@@ -381,39 +439,85 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
   }
 
   let geboortedatum_correct = null;
+
   if (header.geboortedatum) {
     const [dd, mm, yyyy] = header.geboortedatum.split("-");
-    geboortedatum_correct = `${yyyy}-${mm}-${dd}`;
+    if (dd && mm && yyyy) geboortedatum_correct = `${yyyy}-${mm}-${dd}`;
   }
 
+  const now = new Date().toISOString();
+  const vaNummer = Number(String(header.va_nummer).replace(/\D/g, ""));
+
+  const { data: existing, error: findErr } = await supabase
+    .from(RAW_FIGHTERS_TABLE)
+    .select("id, fighter_id")
+    .eq("matchmaking_id", matchmaking_id)
+    .eq("va_nummer", vaNummer)
+    .maybeSingle();
+
+  if (findErr) {
+    console.log("[fullfighter-mm] ❌ matchmaker_fighters_raw lookup fout:", findErr.message);
+    return;
+  }
+
+  const fighterId = existing?.fighter_id || crypto.randomUUID();
+
   const payload = {
-    matchmaking_id: matchmaking_id ?? null,
-    controle_run_id: controle_run_id ?? null,
-    va_nummer: String(header.va_nummer),
-    naam: header.naam,
+    fighter_id: fighterId,
+    va_nummer: vaNummer,
+
+    naam: header.naam ?? null,
     geboortedatum: geboortedatum_correct,
-    geslacht: header.geslacht,
+    geslacht: header.geslacht ?? null,
+
     licentie: details?.licentie || null,
     heeft_startverbod: details?.heeft_startverbod === "Ja" ? "Ja" : "Nee",
+
     totaal_wedstrijden: details?.totaal ?? null,
     gewonnen: details?.gewonnen ?? null,
+
     nulmeting_totaal: zero?.totaal ?? null,
     nulmeting_opmerking: zero?.opmerking || null,
     nulmeting_klasse: zero?.klasse || null,
+
+    matchmaking_id: matchmaking_id ?? null,
+    controle_run_id: controle_run_id ?? null,
+
+    scraped_at: now,
+    updated_at: now,
   };
 
-  const { error } = await supabase.from("matchmaker_fighters_raw").upsert(payload, {
-    onConflict: "matchmaking_id,va_nummer",
-  });
+  if (existing?.id) {
+    const { error: updateErr } = await supabase
+      .from(RAW_FIGHTERS_TABLE)
+      .update(payload)
+      .eq("id", existing.id);
 
-  if (error) console.log("[fullfighter] ❌ matchmaker_fighters_raw upsert fout:", error.message);
-  else console.log("[fullfighter] ✅ matchmaker_fighters_raw upsert OK:", header.va_nummer);
+    if (updateErr) {
+      console.log("[fullfighter-mm] ❌ matchmaker_fighters_raw update fout:", updateErr.message);
+    } else {
+      console.log("[fullfighter-mm] ✅ matchmaker_fighters_raw update OK:", header.va_nummer);
+    }
+
+    return;
+  }
+
+  const { error: insertErr } = await supabase
+    .from(RAW_FIGHTERS_TABLE)
+    .insert(payload);
+
+  if (insertErr) {
+    console.log("[fullfighter-mm] ❌ matchmaker_fighters_raw insert fout:", insertErr.message);
+  } else {
+    console.log("[fullfighter-mm] ✅ matchmaker_fighters_raw insert OK:", header.va_nummer);
+  }
 }
 
 async function doFullfighter(page, va, matchmaking_id, controle_run_id) {
   const header = await scrapeHeader(page);
+
   if (!header?.va_nummer) {
-    console.log("[fullfighter] ❌ header.va_nummer ontbreekt:", va);
+    console.log("[fullfighter-mm] ❌ header.va_nummer ontbreekt:", va);
     return;
   }
 
@@ -424,11 +528,9 @@ async function doFullfighter(page, va, matchmaking_id, controle_run_id) {
   await saveFighterRaw(va, header, details, zero, matchmaking_id, controle_run_id);
 }
 
-/* -------------------------------------------------------
-   UITSLAGEN scrape
-------------------------------------------------------- */
 function parseNlDate(v) {
   if (!v) return null;
+
   const s = String(v).trim();
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -447,12 +549,63 @@ function parseNlDate(v) {
 
 function toStr(v) {
   if (v == null) return null;
+
   const s = String(v).trim();
   return s.length ? s : null;
 }
 
 async function fetchPartijNrByVa(matchmaking_id) {
-  return new Map();
+  const { data, error } = await supabase
+    .from("matchmaking_bouts_raw")
+    .select("partij_nr, va_rood, va_blauw")
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (error) {
+    console.log("[bundle-mm] partijNrByVa niet beschikbaar:", error.message);
+    return new Map();
+  }
+
+  const normVa = (v) => {
+    const s = String(v ?? "")
+      .trim()
+      .replace(/\D+/g, "");
+
+    if (!s) return null;
+
+    const noZeros = s.replace(/^0+/, "");
+    return noZeros ? noZeros : null;
+  };
+
+  const tmp = new Map();
+
+  for (const r of data ?? []) {
+    const nr = r?.partij_nr ?? null;
+    if (!nr) continue;
+
+    const vaR = normVa(r?.va_rood);
+    const vaB = normVa(r?.va_blauw);
+
+    if (vaR) {
+      if (!tmp.has(vaR)) tmp.set(vaR, new Set());
+      tmp.get(vaR).add(nr);
+    }
+
+    if (vaB) {
+      if (!tmp.has(vaB)) tmp.set(vaB, new Set());
+      tmp.get(vaB).add(nr);
+    }
+  }
+
+  const out = new Map();
+
+  for (const [va, set] of tmp.entries()) {
+    out.set(
+      va,
+      Array.from(set).sort((a, b) => a - b)
+    );
+  }
+
+  return out;
 }
 
 async function openUitslagenTile(page, va) {
@@ -464,6 +617,7 @@ async function openUitslagenTile(page, va) {
 
     const headers = [...tab.querySelectorAll(".tileHeader.enabled")];
     const target = headers.find((h) => (h.innerText || "").trim().toUpperCase() === "UITSLAGEN");
+
     target?.closest(".tile")?.click();
   }, va);
 
@@ -472,8 +626,10 @@ async function openUitslagenTile(page, va) {
 
 async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) {
   const start = Date.now();
+
   while (Date.now() - start < timeoutMs) {
     const frames = page.frames();
+
     for (const fr of frames) {
       for (const sel of selectors) {
         try {
@@ -482,8 +638,10 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
         } catch {}
       }
     }
+
     await wait(250);
   }
+
   return null;
 }
 
@@ -496,10 +654,14 @@ async function downloadExcel(page, matchmaking_id, va) {
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const client = await page.target().createCDPSession();
-  await client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloadDir });
+  await client.send("Page.setDownloadBehavior", {
+    behavior: "allow",
+    downloadPath: downloadDir,
+  });
 
   const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
   const found = await waitForAnySelectorInAnyFrame(page, selectors, 45000);
+
   if (!found) throw new Error(`Download knop niet gevonden — VA ${va}`);
 
   const clickDownload = async () => {
@@ -524,7 +686,28 @@ async function downloadExcel(page, matchmaking_id, va) {
       .map((f) => path.join(downloadDir, f))
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
-    if (xlsx[0]) return xlsx[0];
+    if (xlsx[0]) {
+  const downloadedFile = xlsx[0];
+
+  // klein beetje wachten zodat excel lock weg is
+  await wait(300);
+
+  // bestand automatisch opruimen zodra node afsluit
+  process.on("exit", () => {
+    try {
+      if (fs.existsSync(downloadedFile)) {
+        fs.unlinkSync(downloadedFile);
+      }
+
+      // map ook verwijderen als leeg
+      if (fs.existsSync(downloadDir)) {
+        fs.rmSync(downloadDir, { recursive: true, force: true });
+      }
+    } catch {}
+  });
+
+  return downloadedFile;
+}
 
     const hasCr = lower.some((f) => f.endsWith(".crdownload"));
 
@@ -539,7 +722,7 @@ async function downloadExcel(page, matchmaking_id, va) {
   return null;
 }
 
-async function parseExcel(filePath, va, matchmaking_id) {
+async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
   const rows = await readXlsxToRows(filePath, { sheetIndex: 0 });
 
   const headerRow = rows[4] || [];
@@ -561,16 +744,22 @@ async function parseExcel(filePath, va, matchmaking_id) {
     ["Discipline", idxDiscipline],
     ["Uitslag", idxUitslag],
   ];
+
   const missing = must.filter(([, idx]) => idx === -1).map(([name]) => name);
 
   if (missing.length) {
     return {
       rows: [],
-      meta: { ok: false, missingHeaders: missing, headers: headers.filter(Boolean) },
+      meta: {
+        ok: false,
+        missingHeaders: missing,
+        headers: headers.filter(Boolean),
+      },
     };
   }
 
   const out = [];
+
   for (let r = 5; r < rows.length; r++) {
     const row = rows[r];
     if (!row) continue;
@@ -583,24 +772,29 @@ async function parseExcel(filePath, va, matchmaking_id) {
 
     out.push({
       matchmaking_id,
+      controle_run_id,
       va_nummer: String(va),
+
       datum: isoDatum,
       evenement: toStr(row[idxEvenement]) ?? null,
       tegenstander: toStr(row[idxTegenstander]) ?? null,
-      sportschool: idxSportschool !== -1 ? (toStr(row[idxSportschool]) ?? null) : null,
+
+      sportschool: idxSportschool !== -1 ? toStr(row[idxSportschool]) ?? null : null,
       discipline: toStr(row[idxDiscipline]) ?? null,
-      klasse: idxKlasse !== -1 ? (toStr(row[idxKlasse]) ?? null) : null,
-      gewicht: idxGewicht !== -1 ? (toStr(row[idxGewicht]) ?? null) : null,
+      klasse: idxKlasse !== -1 ? toStr(row[idxKlasse]) ?? null : null,
+      gewicht: idxGewicht !== -1 ? toStr(row[idxGewicht]) ?? null : null,
       uitslag: toStr(row[idxUitslag]) ?? null,
     });
   }
 
   const seen = new Set();
   const deduped = [];
+
   for (const r of out) {
     const k = [
       r.matchmaking_id,
-      normalizeVaLoose(r.va_nummer),
+      r.controle_run_id,
+      r.va_nummer,
       r.datum,
       r.evenement,
       r.tegenstander,
@@ -612,13 +806,18 @@ async function parseExcel(filePath, va, matchmaking_id) {
       .join("||");
 
     if (seen.has(k)) continue;
+
     seen.add(k);
     deduped.push(r);
   }
 
   return {
     rows: deduped,
-    meta: { ok: true, missingHeaders: [], headers: headers.filter(Boolean) },
+    meta: {
+      ok: true,
+      missingHeaders: [],
+      headers: headers.filter(Boolean),
+    },
   };
 }
 
@@ -626,43 +825,42 @@ async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, 
   const vaStr = String(va ?? "").trim();
   const data = Array.isArray(rows) ? rows : [];
 
-  let partij_nr = null;
-  try {
-    const direct = partijNrByVaMap?.get?.(vaStr);
-    const loose = partijNrByVaMap?.get?.(normalizeVaLoose(vaStr));
-    partij_nr = direct ?? loose ?? null;
-  } catch {
-    partij_nr = null;
-  }
+  const partijList = partijNrByVaMap?.get?.(vaStr) ?? [];
+  const partij_nr = Array.isArray(partijList) && partijList.length ? Number(partijList[0]) : null;
 
-  const { error: delErr } = await supabase
-    .from("matchmaker_uitslagen_raw")
-    .delete()
-    .eq("matchmaking_id", matchmaking_id)
-    .eq("va_nummer", vaStr);
+  await safeDelete(RAW_UITSLAGEN_TABLE, {
+    matchmaking_id,
+    va_nummer: vaStr,
+  });
 
-  if (delErr) throw delErr;
-  if (!data.length) return { saved: 0 };
+  if (!data.length) return { saved: 0, table: RAW_UITSLAGEN_TABLE };
 
   const normalized = data.map((row) => ({
-    ...row,
     matchmaking_id,
-    controle_run_id: controle_run_id ?? null,
-    va_nummer: vaStr,
+    controle_run_id,
+    va_nummer: row.va_nummer,
+    datum: row.datum,
+    evenement: row.evenement,
+    tegenstander: row.tegenstander,
+    sportschool: row.sportschool,
+    discipline: row.discipline,
+    klasse: row.klasse,
+    gewicht: row.gewicht,
+    uitslag: row.uitslag,
     partij_nr,
   }));
 
-  const { error: insErr } = await supabase
-    .from("matchmaker_uitslagen_raw")
-    .insert(normalized);
+  const insert = await safeInsertMany(RAW_UITSLAGEN_TABLE, normalized);
 
-  if (insErr) throw insErr;
+  if (!insert.error) {
+    return { saved: normalized.length, table: RAW_UITSLAGEN_TABLE };
+  }
 
-  return { saved: normalized.length };
+  throw insert.error;
 }
 
 async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrByVaMap) {
-  console.log(`[uitslagen] ▶️ start VA ${va}`);
+  console.log(`[uitslagen-mm] ▶️ start VA ${va}`);
 
   const MAX_TRIES = Number(process.env.UITSLAGEN_TRIES ?? "1");
 
@@ -670,13 +868,14 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
     await openUitslagenTile(page, va);
 
     const file = await downloadExcel(page, matchmaking_id, va);
+
     if (!file) {
       await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
-      console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
+      console.log(`[uitslagen-mm] ✅ done VA ${va} (n=0) (no file)`);
       return { ok: true, n: 0, reason: "no_file" };
     }
 
-    const parsed = await parseExcel(file, va, matchmaking_id);
+    const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
 
     if (parsed?.meta?.ok) {
       const res = await saveUitslagenSnapshot(
@@ -686,41 +885,44 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
         va,
         partijNrByVaMap
       );
+
       const n = res?.saved ?? parsed.rows.length ?? 0;
-      console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
+
+      console.log(`[uitslagen-mm] ✅ done VA ${va} (n=${n}) table=${res?.table ?? "unknown"}`);
       return { ok: true, n, reason: "ok" };
     }
 
     const missing = (parsed?.meta?.missingHeaders ?? []).join(", ");
     const hdrs = (parsed?.meta?.headers ?? []).join(" | ");
+
     console.log(
-      `[uitslagen] ❌ Kolomkoppen niet gevonden (attempt ${attempt}/${MAX_TRIES}) — VA ${va}. Missing: ${missing}`
+      `[uitslagen-mm] ❌ Kolomkoppen niet gevonden (attempt ${attempt}/${MAX_TRIES}) — VA ${va}. Missing: ${missing}`
     );
-    console.log(`[uitslagen] ➡️ Headers: ${hdrs}`);
+
+    console.log(`[uitslagen-mm] ➡️ Headers: ${hdrs}`);
 
     await closeAnyModal(page).catch(() => {});
     await wait(600 + attempt * 400);
   }
 
   await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
-  console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
+
+  console.log(`[uitslagen-mm] ✅ done VA ${va} (n=0)`);
   return { ok: true, n: 0, reason: "no_uitslagen" };
 }
 
-/* -------------------------------------------------------
-   RUN (worker pool)
-------------------------------------------------------- */
 async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
   const partijNrByVaMap = await fetchPartijNrByVa(matchmaking_id);
 
   const { browser, page: masterPage } = await loginFightPassport();
 
   let cookies = [];
+
   try {
     cookies = await masterPage.cookies();
   } catch {}
 
-  console.log("[bundle] ✅ Master logged in (cookies captured)");
+  console.log("[bundle-mm] ✅ Master logged in (cookies captured)");
 
   let masterRefreshPromise = null;
 
@@ -729,16 +931,21 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
       try {
         await masterRefreshPromise;
       } catch {}
+
       return cookies;
     }
 
     masterRefreshPromise = (async () => {
-      console.log(`[bundle] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
+      console.log(`[bundle-mm] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
+
       await ensureLoggedIn(masterPage, { force: true });
+
       try {
         cookies = await masterPage.cookies();
       } catch {}
-      console.log("[bundle] ✅ master refreshed (cookies updated)");
+
+      console.log("[bundle-mm] ✅ master refreshed (cookies updated)");
+
       return cookies;
     })();
 
@@ -756,24 +963,29 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
 
   async function workerLoop(workerIdx) {
     const STAGGER = Number(process.env.STAGGER_MS ?? "350");
+
     await wait(workerIdx * STAGGER);
 
     let ctx = await createWorkerContext(browser);
 
     async function resetWorkerContext(reason) {
-      console.log(`[bundle] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
+      console.log(
+        `[bundle-mm] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`
+      );
+
       await closeWorkerContext(ctx).catch(() => {});
       ctx = await createWorkerContext(browser);
     }
 
     while (true) {
       const myIdx = idx++;
+
       if (myIdx >= vaList.length) break;
 
       const va = vaList[myIdx];
       const label = `worker${workerIdx + 1}/${workers}`;
 
-      console.log(`[bundle] 🤖 ${label} → VA ${va} (run=${controle_run_id})`);
+      console.log(`[bundle-mm] 🤖 ${label} → VA ${va} (run=${controle_run_id})`);
 
       let page = null;
       let fullfighterStatus = "skip";
@@ -788,9 +1000,11 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
         });
 
         if (!page) {
-          console.log(`[bundle] ❌ ${label} kon fighter niet openen na retries: VA ${va}`);
+          console.log(`[bundle-mm] ❌ ${label} kon fighter niet openen na retries: VA ${va}`);
+
           fullfighterStatus = "open_fail";
           uitslagenStatus = "open_fail";
+
           continue;
         }
 
@@ -803,6 +1017,7 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
             page = null;
           }
         );
+
         fullfighterStatus = "ok";
 
         const uRes = await withTimeout(
@@ -814,19 +1029,24 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
             page = null;
           }
         );
+
         uitslagenStatus = uRes?.ok ? `ok(n=${uRes?.n ?? 0})` : `fail(${uRes?.reason ?? "unknown"})`;
       } catch (e) {
         const msg = e?.message ?? String(e);
 
         if (msg === "LOGIN_PAGE") {
-          console.log(`[bundle] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
+          console.log(
+            `[bundle-mm] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies`
+          );
+
           fullfighterStatus = "login_page";
           uitslagenStatus = "login_page";
+
           try {
             await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
             await resetWorkerContext(`login refresh VA ${va}`);
           } catch (err) {
-            console.log("[bundle] ❌ master refresh failed:", err?.message ?? String(err));
+            console.log("[bundle-mm] ❌ master refresh failed:", err?.message ?? String(err));
           }
         } else if (String(msg).startsWith("HARD TIMEOUT")) {
           if (msg.includes("fullfighter")) {
@@ -835,14 +1055,18 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           } else if (msg.includes("uitslagen")) {
             uitslagenStatus = "timeout";
           }
-          console.log(`[bundle] ❌ ${label} fout VA ${va}:`, msg);
+
+          console.log(`[bundle-mm] ❌ ${label} fout VA ${va}:`, msg);
         } else {
-          console.log(`[bundle] ❌ ${label} fout VA ${va}:`, msg);
+          console.log(`[bundle-mm] ❌ ${label} fout VA ${va}:`, msg);
+
           if (fullfighterStatus === "skip") fullfighterStatus = "error";
           if (uitslagenStatus === "skip") uitslagenStatus = "error";
         }
       } finally {
-        console.log(`[bundle] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`);
+        console.log(
+          `[bundle-mm] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`
+        );
 
         try {
           if (page) {
@@ -862,15 +1086,13 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     try {
       await masterPage.close();
     } catch {}
+
     try {
       await browser.close();
     } catch {}
   }
 }
 
-/* -------------------------------------------------------
-   CLI
-------------------------------------------------------- */
 const matchmaking_id = (process.argv[2] ?? "").trim();
 const controle_run_id = (process.argv[3] ?? "").trim();
 const args = process.argv.slice(4);
@@ -881,29 +1103,36 @@ if (!matchmaking_id) {
   console.error("❌ matchmaking_id ontbreekt");
   process.exit(1);
 }
+
 if (!controle_run_id) {
   console.error("❌ controle_run_id ontbreekt");
   process.exit(1);
 }
+
 if (!vaList.length) {
-  console.error("❌ Geen geldige VA’s meegegeven (verwacht 3–5 cijfers).");
+  console.error("❌ Geen geldige VA’s meegegeven.");
   process.exit(1);
 }
 
 const WORKERS = Number(process.env.WORKERS ?? "5");
-const workers =
-  Number.isFinite(WORKERS) && WORKERS > 0 ? Math.min(10, Math.max(1, Math.floor(WORKERS))) : 5;
 
-console.log("SCRAPER — FP_BUNDLE_MM (reopen tab until header matches)", {
+const workers =
+  Number.isFinite(WORKERS) && WORKERS > 0
+    ? Math.min(10, Math.max(1, Math.floor(WORKERS)))
+    : 5;
+
+console.log("SCRAPER — FP_BUNDLE_MM", {
   matchmaking_id,
   controle_run_id,
+  target_fighters_table: RAW_FIGHTERS_TABLE,
+  target_uitslagen_table: RAW_UITSLAGEN_TABLE,
   count: vaList.length,
   workers,
   stagger_ms: Number(process.env.STAGGER_MS ?? "350"),
   tab_attempts: Number(process.env.TAB_ATTEMPTS ?? "6"),
   soft_wait_ms: Number(process.env.SOFT_WAIT_MS ?? "900"),
   between_attempts_ms: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "450"),
-  uitslagen_tries: Number(process.env.UITSLAGEN_TRIES ?? "2"),
+  uitslagen_tries: Number(process.env.UITSLAGEN_TRIES ?? "1"),
   fullfighter_timeout_ms: Number(process.env.FULLFIGHTER_TIMEOUT_MS ?? "35000"),
   uitslagen_timeout_ms: Number(process.env.UITSLAGEN_TIMEOUT_MS ?? "90000"),
   va_sample: vaList.slice(0, 6),

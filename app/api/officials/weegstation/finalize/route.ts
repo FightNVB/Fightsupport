@@ -1,252 +1,366 @@
-import { NextResponse } from "next/server";
-import { getWeegstationAuthContext } from "@/lib/weegstation/routeAuth";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { evaluateWeighInBout } from "@/lib/weegstation/weighInRulesEngine";
 
 export const runtime = "nodejs";
 
-function normalizeRoleNames(roleNames?: unknown[]): string[] {
-  return (roleNames ?? [])
-    .map((x) => String(x ?? "").trim().toLowerCase())
-    .filter(Boolean);
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } }
+);
+
+function s(v: unknown) {
+  return String(v ?? "").trim();
 }
 
-function canFinalize(ctx: {
-  isHoofdofficialLike?: boolean;
-  roleNames?: unknown[];
-}) {
-  const names = normalizeRoleNames(ctx.roleNames);
+function toNum(v: unknown): number | null {
+  if (v == null) return null;
+  const x = Number(String(v).replace(",", ".").trim());
+  return Number.isFinite(x) ? Number(x.toFixed(2)) : null;
+}
 
-  if (ctx.isHoofdofficialLike) return true;
+function toPenalty(v: unknown): 0 | 1 {
+  return Number(String(v ?? "0").trim()) === 1 ? 1 : 0;
+}
 
-  return (
-    names.includes("official") ||
-    names.includes("hoofdofficial") ||
-    names.includes("admin") ||
-    names.includes("superadmin")
+function normalizeStatus(v: unknown): string {
+  const raw = s(v).toUpperCase();
+  if (!raw) return "WACHT_OP_WEGEN";
+  if (raw.includes("AFKEUR")) return "AFKEUR";
+  if (raw.includes("DISPENSATIE")) return "DISPENSATIE_NODIG";
+  if (raw.includes("NIET_VERSCHENEN")) return "NIET_VERSCHENEN";
+  if (raw.includes("HANDMATIG")) return "HANDMATIGE_BEOORDELING";
+  if (raw === "OK") return "OK";
+  return raw;
+}
+
+async function getUserFromBearer(req: NextRequest) {
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+
+  if (!token) return { user: null, error: "Geen bearer token ontvangen." };
+
+  const supabaseUser = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    }
+  );
+
+  const { data, error } = await supabaseUser.auth.getUser();
+  if (error || !data?.user) {
+    return { user: null, error: error?.message ?? "Niet ingelogd." };
+  }
+
+  return { user: data.user, error: null };
+}
+
+async function getRolesForUser(userId: string): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("roles(name)")
+    .eq("user_id", userId);
+
+  if (error) throw error;
+
+  return Array.from(
+    new Set(
+      (data ?? [])
+        .map((r: any) => String(r?.roles?.name ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    )
   );
 }
 
-function getDispDecision(row: any): "VERLEEND" | "AFGEWEZEN" | "NODIG" | null {
-  const reason = String(row?.dispensatie_reason ?? "").trim().toUpperCase();
-
-  if (row?.dispensatie_verleend || reason === "VERLEEND") return "VERLEEND";
-  if (reason === "AFGEWEZEN") return "AFGEWEZEN";
-  if (row?.dispensatie_nodig) return "NODIG";
-  return null;
-}
-
-function normalizeStatus(status: unknown): string {
-  const s = String(status ?? "").trim().toUpperCase();
-
-  if (!s) return "WACHT_OP_WEGEN";
-  if (s === "OK") return "OK";
-  if (s.includes("DISPENSATIE")) return "DISPENSATIE_NODIG";
-  if (s.includes("AFKEUR")) return "AFKEUR";
-  if (s.includes("DEELS")) return "DEELS_GEWOGEN";
-  if (s.includes("WACHT")) return "WACHT_OP_WEGEN";
-  if (s.includes("HANDMATIG")) return "HANDMATIGE_BEOORDELING";
-
-  return s;
-}
-
-function getFinalBoutStatus(row: any, evalStatus?: string): string {
-  const rowStatus = normalizeStatus(row?.eindstatus || row?.praktijk_status || row?.reglement_status);
-  const normalizedEval = normalizeStatus(evalStatus);
-  const dispDecision = getDispDecision(row);
-
-  let finalStatus = rowStatus || normalizedEval || "WACHT_OP_WEGEN";
-
-  if (
-    rowStatus === "WACHT_OP_WEGEN" ||
-    rowStatus === "DEELS_GEWOGEN" ||
-    rowStatus === "HANDMATIGE_BEOORDELING" ||
-    !row?.eindstatus
-  ) {
-    if (normalizedEval && normalizedEval !== "HANDMATIGE_BEOORDELING") {
-      finalStatus = normalizedEval;
-    }
-  }
-
-  if (dispDecision === "VERLEEND") {
-    finalStatus = "OK";
-  } else if (dispDecision === "AFGEWEZEN") {
-    finalStatus = "AFKEUR";
-  } else if (dispDecision === "NODIG" && finalStatus !== "AFKEUR") {
-    finalStatus = "DISPENSATIE_NODIG";
-  }
-
-  return finalStatus;
-}
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const matchmakingId = String((body as any)?.matchmakingId ?? "").trim();
-
-    if (!matchmakingId) {
-      return NextResponse.json({ error: "matchmakingId ontbreekt." }, { status: 400 });
+    const { user, error: authErr } = await getUserFromBearer(req);
+    if (!user) {
+      return NextResponse.json(
+        { error: authErr ?? "Niet ingelogd." },
+        { status: 401 }
+      );
     }
 
-    const auth = await getWeegstationAuthContext(req, matchmakingId);
-    const { admin } = auth;
+    const roles = await getRolesForUser(user.id);
+    const canFinalize =
+      roles.includes("hoofdofficial") || roles.includes("superadmin");
 
-    if (!canFinalize(auth)) {
+    if (!canFinalize) {
       return NextResponse.json(
-        {
-          error:
-            "Alleen official, hoofdofficial, admin of superadmin mag de definitieve lineup bouwen.",
-          debug_roles: normalizeRoleNames((auth as any)?.roleNames),
-          debug_isHoofdofficialLike: !!(auth as any)?.isHoofdofficialLike,
-        },
+        { error: "Alleen hoofdofficial of superadmin mag de weging definitief afsluiten." },
         { status: 403 }
       );
     }
 
-    const { data: latestRow, error: latestErr } = await admin
-      .from("weigh_in_bouts")
-      .select("controle_run_id, laatste_bewerking_op, updated_at, created_at")
-      .eq("matchmaking_id", matchmakingId)
-      .not("controle_run_id", "is", null)
-      .order("controle_run_id", { ascending: false })
-      .order("laatste_bewerking_op", { ascending: false, nullsFirst: false })
-      .order("updated_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false, nullsFirst: false })
-      .limit(1)
-      .maybeSingle();
+    const body = await req.json().catch(() => ({}));
+    const matchmakingId = s(body?.matchmakingId);
+    const absentStatus = s(body?.mark_absent_as || "NIET_VERSCHENEN").toUpperCase();
 
-    if (latestErr) {
-      throw new Error(latestErr.message);
-    }
-
-    if (!latestRow?.controle_run_id) {
+    if (!matchmakingId) {
       return NextResponse.json(
-        { error: "Geen controle_run_id gevonden voor deze matchmaking." },
+        { error: "matchmakingId ontbreekt." },
         { status: 400 }
       );
     }
 
-    const activeControleRunId = latestRow.controle_run_id;
+    const nowIso = new Date().toISOString();
 
-    const { data: rows, error: rowsErr } = await admin
+    const { data: weighRows, error: weighErr } = await supabaseAdmin
       .from("weigh_in_bouts")
       .select("*")
       .eq("matchmaking_id", matchmakingId)
-      .eq("controle_run_id", activeControleRunId)
       .order("partij_nr", { ascending: true });
 
-    if (rowsErr) {
-      throw new Error(rowsErr.message);
-    }
+    if (weighErr) throw weighErr;
 
-    const allRows = rows ?? [];
-
-    if (allRows.length === 0) {
+    if (!weighRows?.length) {
       return NextResponse.json(
-        { error: "Geen weegstation-partijen gevonden voor de actieve controle-run." },
-        { status: 400 }
+        { error: "Geen weigh_in_bouts gevonden voor deze matchmaking." },
+        { status: 404 }
       );
     }
 
-    const now = new Date().toISOString();
+    for (const row of weighRows as any[]) {
+      const roodGewogen = toNum(row.rood_gewogen_gewicht);
+      const blauwGewogen = toNum(row.blauw_gewogen_gewicht);
+      const sourceId = s(row.id) || null;
 
-    const evaluatedRows = allRows.map((row: any) => {
-      const evalResult = evaluateWeighInBout({
-        discipline: row.discipline,
-        klasse_mm: row.klasse_mm,
-        leeftijd_type: row.leeftijd_type,
-        max_gewicht: row.max_gewicht,
-        rood_doorgegeven_gewicht: row.rood_doorgegeven_gewicht,
-        blauw_doorgegeven_gewicht: row.blauw_doorgegeven_gewicht,
-        rood_gewogen_gewicht: row.rood_gewogen_gewicht,
-        blauw_gewogen_gewicht: row.blauw_gewogen_gewicht,
-        dispensatie_verleend: row.dispensatie_verleend,
-      });
+      let eindstatus = absentStatus;
+      let praktijkStatus = absentStatus;
+      let reglementStatus = absentStatus;
+      let gewichtVerschil: number | null = null;
+      let dispensatieNodig = false;
+      let adminSanctieNodig = false;
+      let adminSanctieReason: string | null = null;
 
-      const finalStatus = getFinalBoutStatus(row, evalResult.eindStatus);
+      if (roodGewogen != null && blauwGewogen != null) {
+        const evalResult = evaluateWeighInBout({
+          discipline: row.discipline,
+          klasse_mm: row.klasse_mm,
+          leeftijd_type: row.leeftijd_type,
+          max_gewicht: row.max_gewicht,
+          rood_doorgegeven_gewicht: row.rood_doorgegeven_gewicht,
+          blauw_doorgegeven_gewicht: row.blauw_doorgegeven_gewicht,
+          rood_gewogen_gewicht: roodGewogen,
+          blauw_gewogen_gewicht: blauwGewogen,
+          dispensatie_verleend: !!row.dispensatie_verleend,
+        });
 
-      return {
-        row,
-        evalResult,
-        finalStatus,
-      };
-    });
+        eindstatus = normalizeStatus(evalResult?.eindStatus);
+        praktijkStatus = eindstatus;
+        reglementStatus = eindstatus;
+        gewichtVerschil = toNum(evalResult?.diff);
+        dispensatieNodig =
+          !!row.dispensatie_nodig || eindstatus === "DISPENSATIE_NODIG";
+        adminSanctieNodig =
+          !!evalResult?.adminSanctieNodig || !!row.admin_sanctie_nodig;
+        adminSanctieReason =
+          s(row.admin_sanctie_reason) || s(evalResult?.adminSanctieReason) || null;
 
-    const payload = evaluatedRows
-      .filter(({ finalStatus }) => finalStatus === "OK")
-      .map(({ row, evalResult, finalStatus }) => ({
-        matchmaking_id: row.matchmaking_id,
-        partij_nr: row.partij_nr,
-        weigh_in_bout_id: row.id,
-        controle_run_id: row.controle_run_id ?? null,
+        if (row.dispensatie_verleend) {
+          eindstatus = "OK";
+          praktijkStatus = "OK";
+          reglementStatus = "OK";
+        }
 
-        bondteam: row.bondteam ?? null,
-        evenement_naam: row.evenement_naam ?? null,
-        evenement_datum: row.evenement_datum ?? null,
-        discipline: row.discipline ?? null,
-        klasse_mm: row.klasse_mm ?? null,
-        max_gewicht: row.max_gewicht ?? null,
+        if (s(row.dispensatie_reason).toUpperCase() === "AFGEWEZEN") {
+          eindstatus = "AFKEUR";
+          praktijkStatus = "AFKEUR";
+          reglementStatus = "AFKEUR";
+        }
+      }
 
-        rood_naam: row.rood_naam ?? null,
-        rood_gym: row.rood_gym ?? null,
-        rood_va: row.rood_va ?? null,
-        rood_geboortedatum: row.rood_geboortedatum ?? null,
-        rood_leeftijd_event: row.rood_leeftijd_event ?? null,
-        rood_doorgegeven_gewicht: row.rood_doorgegeven_gewicht ?? null,
-        rood_gewogen_gewicht: row.rood_gewogen_gewicht ?? null,
-
-        blauw_naam: row.blauw_naam ?? null,
-        blauw_gym: row.blauw_gym ?? null,
-        blauw_va: row.blauw_va ?? null,
-        blauw_geboortedatum: row.blauw_geboortedatum ?? null,
-        blauw_leeftijd_event: row.blauw_leeftijd_event ?? null,
-        blauw_doorgegeven_gewicht: row.blauw_doorgegeven_gewicht ?? null,
-        blauw_gewogen_gewicht: row.blauw_gewogen_gewicht ?? null,
-
-        gewicht_verschil: row.gewicht_verschil ?? evalResult.diff ?? null,
-        leeftijd_type: row.leeftijd_type ?? evalResult.leeftijdType ?? null,
-        eindstatus: finalStatus,
-
-        dispensatie_nodig: !!row.dispensatie_nodig,
+      const rawUpdate = {
+        eindstatus,
+        praktijk_status: praktijkStatus,
+        reglement_status: reglementStatus,
+        rood_gewogen_gewicht: roodGewogen,
+        blauw_gewogen_gewicht: blauwGewogen,
+        gewicht_verschil: gewichtVerschil,
+        dispensatie_nodig: dispensatieNodig,
         dispensatie_verleend: !!row.dispensatie_verleend,
         dispensatie_reason: row.dispensatie_reason ?? null,
-
-        gewicht_strafpunt_rood: row.gewicht_strafpunt_rood ?? 0,
-        gewicht_strafpunt_blauw: row.gewicht_strafpunt_blauw ?? 0,
-
-        admin_sanctie_nodig: !!row.admin_sanctie_nodig,
-        admin_sanctie_reason: row.admin_sanctie_reason ?? null,
-
+        gewicht_strafpunt_rood: toPenalty(row.gewicht_strafpunt_rood),
+        gewicht_strafpunt_blauw: toPenalty(row.gewicht_strafpunt_blauw),
         weging_notitie: row.weging_notitie ?? null,
-        bron: "weegstation",
-        updated_at: now,
-      }));
+        laatste_bewerking_op: nowIso,
+      };
 
-    if (payload.length === 0) {
-      return NextResponse.json(
-        { error: "Er zijn geen partijen met status OK in de actieve controle-run." },
-        { status: 400 }
-      );
+      const { error: rawErr } = await supabaseAdmin
+        .from("matchmaking_bouts_raw")
+        .update(rawUpdate)
+        .eq("matchmaking_id", matchmakingId)
+        .eq("partij_nr", row.partij_nr);
+
+      if (rawErr) throw rawErr;
+
+      const { error: ctxErr } = await supabaseAdmin
+        .from("controle_bout_context")
+        .update({
+          ...rawUpdate,
+          admin_sanctie_nodig: adminSanctieNodig,
+          admin_sanctie_reason: adminSanctieReason,
+          updated_at: nowIso,
+        })
+        .eq("matchmaking_id", matchmakingId)
+        .eq("partij_nr", row.partij_nr);
+
+      if (ctxErr) {
+        const msg = String(ctxErr.message || "").toLowerCase();
+        if (
+          !msg.includes("admin_sanctie_nodig") &&
+          !msg.includes("admin_sanctie_reason") &&
+          !msg.includes("admin_sanctie")
+        ) {
+          throw ctxErr;
+        }
+      }
+
+      const { error: delErr } = await supabaseAdmin
+        .from("controle_resultaten")
+        .delete()
+        .eq("matchmaking_id", matchmakingId)
+        .eq("partij_nr", row.partij_nr)
+        .in("rule", [
+          "weegstation_status",
+          "weegstation_dispensatie",
+          "weegstation_minpunt",
+        ]);
+
+      if (delErr) throw delErr;
+
+      const insertRows: any[] = [
+        {
+          matchmaking_id: matchmakingId,
+          partij_nr: row.partij_nr,
+          hoek: null,
+          resultaat:
+            eindstatus === "OK"
+              ? "ok"
+              : eindstatus === "AFKEUR"
+              ? "afgekeurd"
+              : "actie",
+          rule: "weegstation_status",
+          rule_code: eindstatus,
+          boodschap: `Weegstation afgesloten met status ${eindstatus}.`,
+          review_status: "definitief",
+          source_table: "weigh_in_bouts",
+          source_id: sourceId,
+          created_at: nowIso,
+        },
+      ];
+
+      if (toPenalty(row.gewicht_strafpunt_rood) === 1) {
+        insertRows.push({
+          matchmaking_id: matchmakingId,
+          partij_nr: row.partij_nr,
+          hoek: "rood",
+          resultaat: "actie",
+          rule: "weegstation_minpunt",
+          rule_code: "MINPUNT_ROOD",
+          boodschap: "Minpunt eerste ronde rood.",
+          review_status: "definitief",
+          source_table: "weigh_in_bouts",
+          source_id: sourceId,
+          created_at: nowIso,
+        });
+      }
+
+      if (toPenalty(row.gewicht_strafpunt_blauw) === 1) {
+        insertRows.push({
+          matchmaking_id: matchmakingId,
+          partij_nr: row.partij_nr,
+          hoek: "blauw",
+          resultaat: "actie",
+          rule: "weegstation_minpunt",
+          rule_code: "MINPUNT_BLAUW",
+          boodschap: "Minpunt eerste ronde blauw.",
+          review_status: "definitief",
+          source_table: "weigh_in_bouts",
+          source_id: sourceId,
+          created_at: nowIso,
+        });
+      }
+
+      if (dispensatieNodig || row.dispensatie_verleend) {
+        insertRows.push({
+          matchmaking_id: matchmakingId,
+          partij_nr: row.partij_nr,
+          hoek: null,
+          resultaat: row.dispensatie_verleend ? "ok" : "dispensatie",
+          rule: "weegstation_dispensatie",
+          rule_code: row.dispensatie_verleend ? "VERLEEND" : "NODIG",
+          boodschap: row.dispensatie_verleend
+            ? "Dispensatie verleend."
+            : "Dispensatie nodig op basis van weging.",
+          review_status: "definitief",
+          source_table: "weigh_in_bouts",
+          source_id: sourceId,
+          created_at: nowIso,
+        });
+      }
+
+      const { error: insErr } = await supabaseAdmin
+        .from("controle_resultaten")
+        .insert(insertRows);
+
+      if (insErr) throw insErr;
+
+      const { error: weighUpdErr } = await supabaseAdmin
+        .from("weigh_in_bouts")
+        .update({
+          ...rawUpdate,
+          admin_sanctie_nodig: adminSanctieNodig,
+          admin_sanctie_reason: adminSanctieReason,
+          laatste_bewerking_op: nowIso,
+        })
+        .eq("id", row.id);
+
+      if (weighUpdErr) throw weighUpdErr;
     }
 
-    const { error: upsertErr } = await admin
-      .from("definitive_matchmaking_bouts")
-      .upsert(payload, {
-        onConflict: "matchmaking_id,partij_nr",
-      });
+    const { error: uploadErr } = await supabaseAdmin
+      .from("matchmaking_uploads")
+      .update({
+        flow_status: "weging_afgesloten",
+        weging_afgesloten_op: nowIso,
+      })
+      .eq("matchmaking_id", matchmakingId);
 
-    if (upsertErr) {
-      throw new Error(upsertErr.message);
+    if (uploadErr) {
+      const msg = String(uploadErr.message || "").toLowerCase();
+      if (!msg.includes("weging_afgesloten_op")) throw uploadErr;
     }
+
+    const { error: mmErr } = await supabaseAdmin
+      .from("matchmakings")
+      .update({
+        stadium: "weegstation_verwerkt",
+        weegstation_processed_at: nowIso,
+        last_updated_at: nowIso,
+        last_updated_by: user.id,
+      })
+      .eq("id", matchmakingId);
+
+    if (mmErr) throw mmErr;
 
     return NextResponse.json({
       ok: true,
-      controle_run_id: activeControleRunId,
-      saved_bouts: payload.length,
-      saved_partij_nrs: payload.map((x) => x.partij_nr),
+      matchmaking_id: matchmakingId,
+      updated_bouts: weighRows.length,
+      stadium: "weegstation_verwerkt",
+      message:
+        "Weging definitief afgesloten. Resultaten zijn teruggezet naar matchmaking_bouts_raw, controle_bout_context en controle_resultaten.",
+      open_url: `/dashboard/officials/controle/${matchmakingId}`,
     });
-  } catch (e: any) {
+  } catch (err: any) {
+    console.error("weegstation/finalize POST error:", err);
     return NextResponse.json(
-      { error: e?.message ?? "Finaliseren van weegstation mislukt." },
+      { error: err?.message ?? "Weging definitief afsluiten mislukt." },
       { status: 500 }
     );
   }

@@ -8,6 +8,8 @@
 //
 // FULLFIGHTER -> fighters_raw
 // UITSLAGEN  -> uitslagen_raw snapshot per (mm, run, va)
+// ⚠️ DB verwachting fighters unique:
+// UNIQUE (matchmaking_id, controle_run_id, va_nummer)
 // ⚠️ DB verwachting uitslagen unique:
 // UNIQUE (matchmaking_id, controle_run_id, va_nummer, datum, evenement, tegenstander)
 
@@ -408,7 +410,7 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
   };
 
   const { error } = await supabase.from("fighters_raw").upsert(payload, {
-    onConflict: "matchmaking_id,va_nummer",
+    onConflict: "matchmaking_id,controle_run_id,va_nummer",
   });
 
   if (error) console.log("[fullfighter] ❌ fighters_raw upsert fout:", error.message);
@@ -436,10 +438,8 @@ function parseNlDate(v) {
   if (!v) return null;
   const s = String(v).trim();
 
-  // ✅ ExcelJS helper kan al ISO leveren: 2024-07-14
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // ✅ NL formaat: 14-07-2024 / 14/07/2024 / 14.07.2024
   const m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (!m) return null;
 
@@ -466,7 +466,6 @@ async function fetchPartijNrByVa(matchmaking_id) {
 
   if (error) throw error;
 
-  // Zelf-contained normalisatie (niet afhankelijk van andere helpers)
   const normVa = (v) => {
     const s = String(v ?? "").trim().replace(/\D+/g, "");
     if (!s) return null;
@@ -474,7 +473,7 @@ async function fetchPartijNrByVa(matchmaking_id) {
     return noZeros ? noZeros : null;
   };
 
-  const tmp = new Map(); // va -> Set(partij_nr)
+  const tmp = new Map();
 
   for (const r of data ?? []) {
     const nr = r?.partij_nr ?? null;
@@ -493,7 +492,7 @@ async function fetchPartijNrByVa(matchmaking_id) {
     }
   }
 
-  const out = new Map(); // va -> number[]
+  const out = new Map();
   for (const [va, set] of tmp.entries()) {
     out.set(va, Array.from(set).sort((a, b) => a - b));
   }
@@ -532,11 +531,6 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
   return null;
 }
 
-/**
- * downloadExcel:
- * - herklik download knop 1x als er na 8s nog niets verschijnt
- * - wacht ook op .crdownload -> uiteindelijk .xlsx
- */
 async function downloadExcel(page, matchmaking_id, va) {
   const mm = safeSlug(matchmaking_id);
   const vaSafe = String(va ?? "").replace(/[^0-9]/g, "");
@@ -574,7 +568,28 @@ async function downloadExcel(page, matchmaking_id, va) {
       .map((f) => path.join(downloadDir, f))
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
-    if (xlsx[0]) return xlsx[0];
+    if (xlsx[0]) {
+  const downloadedFile = xlsx[0];
+
+  // klein beetje wachten zodat excel lock weg is
+  await wait(300);
+
+  // bestand automatisch opruimen zodra node afsluit
+  process.on("exit", () => {
+    try {
+      if (fs.existsSync(downloadedFile)) {
+        fs.unlinkSync(downloadedFile);
+      }
+
+      // map ook verwijderen als leeg
+      if (fs.existsSync(downloadDir)) {
+        fs.rmSync(downloadDir, { recursive: true, force: true });
+      }
+    } catch {}
+  });
+
+  return downloadedFile;
+}
 
     const hasCr = lower.some((f) => f.endsWith(".crdownload"));
 
@@ -726,7 +741,7 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
       console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
       return { ok: true, n: 0, reason: "no_file" };
     }
-    
+
     const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
     lastMeta = parsed?.meta ?? null;
 
@@ -748,10 +763,9 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
     await wait(600 + attempt * 400);
   }
 
-// headers missing => behandel als "geen uitslagen"
-await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
-console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
-return { ok: true, n: 0, reason: "no_uitslagen" };
+  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
+  console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
+  return { ok: true, n: 0, reason: "no_uitslagen" };
 }
 
 /* -------------------------------------------------------
@@ -769,7 +783,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
 
   console.log("[bundle] ✅ Master logged in (cookies captured)");
 
-  // 🔒 MASTER REFRESH LOCK
   let masterRefreshPromise = null;
 
   async function refreshMasterSessionLocked(reason = "") {
@@ -806,7 +819,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     const STAGGER = Number(process.env.STAGGER_MS ?? "350");
     await wait(workerIdx * STAGGER);
 
-    // ✅ eigen context per worker (compat)
     let ctx = await createWorkerContext(browser);
 
     async function resetWorkerContext(reason) {
@@ -843,20 +855,17 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           continue;
         }
 
-        // FULLFIGHTER
         await withTimeout(
           () => doFullfighter(page, va, matchmaking_id, controle_run_id),
           FULLFIGHTER_TIMEOUT_MS,
           `fullfighter ${va}`,
           async () => {
-            // kill worker context => stopt echt alles (minimaliseert ghost upserts)
             await resetWorkerContext(`fullfighter timeout VA ${va}`);
             page = null;
           }
         );
         fullfighterStatus = "ok";
 
-        // UITSLAGEN
         const uRes = await withTimeout(
           () => doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrByVaMap),
           UITSLAGEN_TIMEOUT_MS,
@@ -867,7 +876,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           }
         );
         uitslagenStatus = uRes?.ok ? `ok(n=${uRes?.n ?? 0})` : `fail(${uRes?.reason ?? "unknown"})`;
-
       } catch (e) {
         const msg = e?.message ?? String(e);
 
@@ -894,7 +902,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           if (fullfighterStatus === "skip") fullfighterStatus = "error";
           if (uitslagenStatus === "skip") uitslagenStatus = "error";
         }
-
       } finally {
         console.log(`[bundle] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`);
 
@@ -907,7 +914,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
       }
     }
 
-    // worker klaar
     await closeWorkerContext(ctx).catch(() => {});
   }
 

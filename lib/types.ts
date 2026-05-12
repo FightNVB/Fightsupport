@@ -70,6 +70,10 @@ export interface ParsedPartij {
 
   rondes?: number | null;
   tijd_per_ronde?: string | null;
+
+  // 👇 NIEUW
+  is_toernooi?: boolean | null;
+  toernooi_id?: string | null;
 }
 
 export type RuleSeverity = "info" | "warning" | "error";

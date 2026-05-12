@@ -1,17 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  RefreshCcw,
   Scale,
   Search,
   ShieldCheck,
   CalendarDays,
   Swords,
   ChevronDown,
+  Trash2,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
@@ -29,21 +28,15 @@ type RoleName =
   | "dispensatie_admin";
 
 type MatchmakingRow = {
-  matchmaking_id: string;
-  evenement_naam: string | null;
-  evenement_datum: string | null;
+  id: string;
+  matchmaking_id?: string | null;
+  naam: string | null;
+  datum: string | null;
   bondteam: string | null;
-  discipline: string | null;
   locatie: string | null;
+  stadium?: string | null;
   created_at?: string | null;
-
-  uploaded_by?: string | null;
-  created_by?: string | null;
-  created_by_user_id?: string | null;
-  owner_user_id?: string | null;
-  user_id?: string | null;
-  geupload_door?: string | null;
-  aangemaakt_door?: string | null;
+  huidige_eigenaar_user_id?: string | null;
 };
 
 function pageBgStyle(): CSSProperties {
@@ -129,7 +122,7 @@ function ActionButton({
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  tone?: "dark" | "orange";
+  tone?: "dark" | "orange" | "silver" | "danger";
 }) {
   const styles =
     tone === "orange"
@@ -137,6 +130,18 @@ function ActionButton({
           background: "linear-gradient(180deg, #ff6a2b 0%, #ff4d00 100%)",
           border: "1px solid #c93e00",
           color: "#111",
+        }
+      : tone === "silver"
+      ? {
+          background: "linear-gradient(180deg, #d7dde5 0%, #aab3bf 100%)",
+          border: "1px solid #7d8794",
+          color: "#111827",
+        }
+      : tone === "danger"
+      ? {
+          background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+          border: "1px solid #7f1d1d",
+          color: "#fff",
         }
       : {
           background: "linear-gradient(180deg, #3d434d 0%, #22262d 100%)",
@@ -159,25 +164,6 @@ function ActionButton({
       {children}
     </button>
   );
-}
-
-function getOwnerUserId(row: MatchmakingRow) {
-  const candidates = [
-    row.uploaded_by,
-    row.created_by,
-    row.created_by_user_id,
-    row.owner_user_id,
-    row.user_id,
-    row.geupload_door,
-    row.aangemaakt_door,
-  ];
-
-  for (const candidate of candidates) {
-    const value = String(candidate ?? "").trim();
-    if (value) return value;
-  }
-
-  return "";
 }
 
 function getBondteamBadgeStyle(
@@ -221,13 +207,63 @@ function getBondteamBadgeStyle(
       };
 }
 
+function isWeegstationFlow(stadium: unknown) {
+  const s = String(stadium ?? "").trim().toLowerCase();
+
+  return [
+    "klaar_voor_weegstation",
+    "in_weegstation",
+    "weegstation_verwerkt",
+    "definitieve_matchmaking_ingediend",
+    "klaar_voor_uitslagen",
+    "uitslagen_in_bewerking",
+    "uitslagen_definitief",
+  ].includes(s);
+}
+
+function HeaderLogo() {
+  const [broken, setBroken] = useState(false);
+
+  if (broken) {
+    return (
+      <div
+        className="flex h-[90px] w-full items-center justify-center rounded-[12px] border border-white/10 bg-white/5 px-6"
+        style={{
+          boxShadow:
+            "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 18px rgba(255,77,0,0.08)",
+        }}
+      >
+        <div
+          className="text-center text-[28px] font-black uppercase tracking-[0.14em]"
+          style={{ color: "#f3f4f6", textShadow: "0 0 14px rgba(255,77,0,0.22)" }}
+        >
+          FIGHTSUPPORT
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src="/branding/fightsupport/logo-header.png"
+      alt="FightSupport"
+      onError={() => setBroken(true)}
+      className="block h-auto w-full"
+      style={{
+        filter:
+          "drop-shadow(0 0 10px rgba(255,77,0,0.18)) drop-shadow(0 0 22px rgba(255,77,0,0.10))",
+      }}
+    />
+  );
+}
+
 export default function WeegstationOverzichtPage() {
   const router = useRouter();
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [melding, setMelding] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
   const [search, setSearch] = useState("");
@@ -259,7 +295,8 @@ export default function WeegstationOverzichtPage() {
 
       if (profileErr) throw profileErr;
 
-      setMyBondteam(String(profile?.bondteam ?? "").trim());
+      const normalizedMyBondteam = String(profile?.bondteam ?? "").trim();
+      setMyBondteam(normalizedMyBondteam);
 
       const { data: userRoles, error: urErr } = await supabase
         .from("user_roles")
@@ -287,7 +324,7 @@ export default function WeegstationOverzichtPage() {
       setRoleNames(names);
 
       const canAccess = names.some((r) =>
-        ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin", "matchmaker"].includes(r)
+        ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin"].includes(r)
       );
 
       if (!canAccess) {
@@ -295,9 +332,21 @@ export default function WeegstationOverzichtPage() {
       }
 
       const { data, error } = await supabase
-        .from("matchmaking_uploads")
-        .select("*")
-        .order("evenement_datum", { ascending: false });
+        .from("matchmakings")
+        .select(
+          `
+            id,
+            naam,
+            datum,
+            bondteam,
+            locatie,
+            stadium,
+            created_at,
+            huidige_eigenaar_user_id
+          `
+        )
+        .order("datum", { ascending: false })
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
 
@@ -309,21 +358,19 @@ export default function WeegstationOverzichtPage() {
       const isOfficial =
         names.includes("official") || names.includes("hoofdofficial");
 
-      const isMatchmaker = names.includes("matchmaker");
+      const normalizedBondteam = normalizedMyBondteam.toLowerCase();
 
-      const normalizedBondteam = String(profile?.bondteam ?? "").trim().toLowerCase();
+      const filtered = (data ?? []).filter((raw: any) => {
+        const row = raw as MatchmakingRow;
+        const id = String(row?.id ?? "").trim();
+        if (!id) return false;
 
-      const filtered = (data ?? []).filter((row: any) => {
-        if (!row?.matchmaking_id) return false;
+        if (!isWeegstationFlow(row?.stadium)) return false;
+
         if (isSuper) return true;
 
         if (isOfficial) {
           return String(row?.bondteam ?? "").trim().toLowerCase() === normalizedBondteam;
-        }
-
-        if (isMatchmaker) {
-          const ownerId = getOwnerUserId(row as MatchmakingRow);
-          return ownerId === uid;
         }
 
         return false;
@@ -331,10 +378,10 @@ export default function WeegstationOverzichtPage() {
 
       const deduped = new Map<string, MatchmakingRow>();
       for (const row of filtered) {
-        const id = String((row as any)?.matchmaking_id ?? "").trim();
+        const id = String(row?.id ?? "").trim();
         if (!id) continue;
         if (!deduped.has(id)) {
-          deduped.set(id, row as MatchmakingRow);
+          deduped.set(id, { ...row, matchmaking_id: id });
         }
       }
 
@@ -347,10 +394,36 @@ export default function WeegstationOverzichtPage() {
     }
   }
 
-  async function handleRefresh() {
-    setRefreshing(true);
-    await loadRows();
-    setRefreshing(false);
+  async function handleDelete(matchmakingId: string) {
+    if (!matchmakingId) return;
+
+    const ok = window.confirm("Weet je zeker dat je deze matchmaking wilt verwijderen?");
+    if (!ok) return;
+
+    setDeletingId(matchmakingId);
+    setMelding(null);
+
+    try {
+      const res = await fetch("/api/control-engine/delete-matchmaking", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+
+      const text = await res.text();
+
+      if (!res.ok) {
+        throw new Error(text || "Verwijderen mislukt.");
+      }
+
+      setRows((prev) => prev.filter((r) => String(r.id) !== matchmakingId));
+    } catch (e: any) {
+      setMelding(e?.message ?? "Verwijderen mislukt.");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   const bondteamOptions = useMemo(() => {
@@ -358,32 +431,39 @@ export default function WeegstationOverzichtPage() {
       new Set(rows.map((row) => String(row.bondteam ?? "").trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b, "nl"));
 
+    if (roleNames.includes("official") || roleNames.includes("hoofdofficial")) {
+      return myBondteam ? [myBondteam] : [];
+    }
+
     return ["ALLE", ...unique];
-  }, [rows]);
+  }, [rows, roleNames, myBondteam]);
 
   const filteredRows = useMemo(() => {
     const q = normalizeSearchText(search);
+    const isOfficialRole =
+      roleNames.includes("official") || roleNames.includes("hoofdofficial");
 
     return rows.filter((row) => {
-      if (bondteamFilter !== "ALLE" && safeText(row.bondteam, "") !== bondteamFilter) {
+      if (isOfficialRole) {
+        const rowBondteam = String(row.bondteam ?? "").trim().toLowerCase();
+        const ownBondteam = String(myBondteam ?? "").trim().toLowerCase();
+        if (!ownBondteam || rowBondteam !== ownBondteam) return false;
+      } else if (
+        bondteamFilter !== "ALLE" &&
+        safeText(row.bondteam, "") !== bondteamFilter
+      ) {
         return false;
       }
 
       if (!q) return true;
 
       const haystack = normalizeSearchText(
-        [
-          row.evenement_naam,
-          row.evenement_datum,
-          row.bondteam,
-          row.locatie,
-          row.matchmaking_id,
-        ].join(" ")
+        [row.naam, row.datum, row.bondteam, row.locatie, row.id, row.stadium].join(" ")
       );
 
       return haystack.includes(q);
     });
-  }, [rows, search, bondteamFilter]);
+  }, [rows, search, bondteamFilter, roleNames, myBondteam]);
 
   const roleLabel = useMemo(() => {
     if (roleNames.includes("superadmin")) return "SUPERADMIN";
@@ -418,31 +498,17 @@ export default function WeegstationOverzichtPage() {
                 </div>
 
                 <div className="mt-2 text-[13px] font-semibold text-white/75">
-                  Kies een matchmaking om direct de weging te openen
+                  Alleen matchmakings die naar weegstation zijn gestuurd
                 </div>
               </div>
 
               <div className="flex items-center justify-center">
                 <div className="w-full max-w-[440px]">
-                  <Image
-                    src="/branding/fightsupport/logo-header.png"
-                    width={440}
-                    height={90}
-                    alt="FightSupport"
-                    priority
-                    sizes="(max-width: 1024px) 280px, 440px"
-                    style={{
-                      width: "100%",
-                      height: "auto",
-                      display: "block",
-                      filter:
-                        "drop-shadow(0 0 10px rgba(255,77,0,0.18)) drop-shadow(0 0 22px rgba(255,77,0,0.10))",
-                    }}
-                  />
+                  <HeaderLogo />
                 </div>
               </div>
 
-              <div className="flex justify-end">
+              <div className="flex items-center justify-end gap-3">
                 <div className="min-w-[170px] rounded-[10px] border border-white/10 bg-white/5 px-3 py-2">
                   <div
                     className="text-[10px] font-black uppercase tracking-[0.1em]"
@@ -455,6 +521,14 @@ export default function WeegstationOverzichtPage() {
                     Bondteam: {safeText(myBondteam)}
                   </div>
                 </div>
+
+                <ActionButton
+                  onClick={() => router.push("/dashboard/officials")}
+                  tone="silver"
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Terug
+                </ActionButton>
               </div>
             </div>
           </div>
@@ -466,7 +540,7 @@ export default function WeegstationOverzichtPage() {
                   Kies matchmaking voor wegen
                 </div>
                 <div className="text-sm font-semibold text-zinc-600">
-                  Compact overzicht — alleen kiezen en openen
+                  Alleen lifecycle-items vanaf weegstation / send to bond
                 </div>
               </div>
 
@@ -482,31 +556,23 @@ export default function WeegstationOverzichtPage() {
                   />
                 </label>
 
-                <div className="relative min-w-[180px]">
-                  <select
-                    value={bondteamFilter}
-                    onChange={(e) => setBondteamFilter(e.target.value)}
-                    className="w-full appearance-none rounded-[8px] border border-black/15 bg-white/85 px-3 py-2 pr-10 text-sm font-black text-zinc-900 outline-none"
-                  >
-                    {bondteamOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option === "ALLE" ? "Alle bondteams" : option}
-                      </option>
-                    ))}
-                  </select>
+                {!(roleNames.includes("official") || roleNames.includes("hoofdofficial")) ? (
+                  <div className="relative min-w-[180px]">
+                    <select
+                      value={bondteamFilter}
+                      onChange={(e) => setBondteamFilter(e.target.value)}
+                      className="w-full appearance-none rounded-[8px] border border-black/15 bg-white/85 px-3 py-2 pr-10 text-sm font-black text-zinc-900 outline-none"
+                    >
+                      {bondteamOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option === "ALLE" ? "Alle bondteams" : option}
+                        </option>
+                      ))}
+                    </select>
 
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                </div>
-
-                <ActionButton onClick={handleRefresh} tone="orange" disabled={refreshing}>
-                  <RefreshCcw className="mr-2 h-4 w-4" />
-                  {refreshing ? "Verversen..." : "Vernieuwen"}
-                </ActionButton>
-
-                <ActionButton onClick={() => router.push("/dashboard/officials")} tone="dark">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Terug
-                </ActionButton>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -527,7 +593,7 @@ export default function WeegstationOverzichtPage() {
               <div
                 className="grid items-center gap-3 px-4 py-3 text-[11px] font-black uppercase tracking-[0.08em]"
                 style={{
-                  gridTemplateColumns: "minmax(260px, 2fr) 130px 160px 130px",
+                  gridTemplateColumns: "minmax(260px,2fr) 130px 160px 180px 260px",
                   background: "linear-gradient(180deg, #2f323a 0%, #1e2025 100%)",
                   color: "#fff",
                 }}
@@ -535,6 +601,7 @@ export default function WeegstationOverzichtPage() {
                 <div>Evenement</div>
                 <div>Datum</div>
                 <div>Bondteam</div>
+                <div>Stadium</div>
                 <div className="text-right">Actie</div>
               </div>
 
@@ -549,13 +616,14 @@ export default function WeegstationOverzichtPage() {
               ) : (
                 filteredRows.map((row, index) => {
                   const darkRow = index % 2 === 1;
+                  const matchmakingId = String(row.id ?? "").trim();
 
                   return (
                     <div
-                      key={row.matchmaking_id}
+                      key={matchmakingId}
                       className="grid items-center gap-3 px-4 py-3"
                       style={{
-                        gridTemplateColumns: "minmax(260px, 2fr) 130px 160px 130px",
+                        gridTemplateColumns: "minmax(260px,2fr) 130px 160px 180px 260px",
                         background: darkRow
                           ? "linear-gradient(180deg, #3a3f48 0%, #2d3138 100%)"
                           : "linear-gradient(180deg, #ffffff 0%, #eef2f6 100%)",
@@ -565,7 +633,7 @@ export default function WeegstationOverzichtPage() {
                     >
                       <div className="min-w-0">
                         <div className="truncate text-[18px] font-black">
-                          {safeText(row.evenement_naam, "Onbekend evenement")}
+                          {safeText(row.naam, "Onbekend evenement")}
                         </div>
 
                         <div
@@ -577,7 +645,7 @@ export default function WeegstationOverzichtPage() {
                             Matchmaking
                           </span>
 
-                          <span className="truncate">ID: {row.matchmaking_id}</span>
+                          <span className="truncate">ID: {matchmakingId}</span>
 
                           {row.locatie ? (
                             <span className="truncate">Locatie: {row.locatie}</span>
@@ -588,7 +656,7 @@ export default function WeegstationOverzichtPage() {
                       <div className="text-sm font-black">
                         <span className="inline-flex items-center gap-1.5">
                           <CalendarDays className="h-4 w-4" />
-                          {formatDate(row.evenement_datum)}
+                          {formatDate(row.datum)}
                         </span>
                       </div>
 
@@ -602,23 +670,28 @@ export default function WeegstationOverzichtPage() {
                         </span>
                       </div>
 
-                      <div className="text-right">
-                        <button
-                          type="button"
+                      <div className="text-xs font-black uppercase tracking-[0.04em]">
+                        {safeText(row.stadium)}
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2">
+                        <ActionButton
                           onClick={() =>
-                            router.push(`/dashboard/officials/weegstation/${row.matchmaking_id}`)
+                            router.push(`/dashboard/officials/weegstation/${matchmakingId}`)
                           }
-                          className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 text-xs font-black"
-                          style={{
-                            borderRadius: 4,
-                            border: "1px solid #c93e00",
-                            background: "linear-gradient(180deg, #ff6a2b 0%, #ff4d00 100%)",
-                            color: "#111",
-                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10)",
-                          }}
+                          tone="orange"
                         >
                           Open weegstation
-                        </button>
+                        </ActionButton>
+
+                        <ActionButton
+                          onClick={() => handleDelete(matchmakingId)}
+                          tone="danger"
+                          disabled={deletingId === matchmakingId}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          {deletingId === matchmakingId ? "Verwijderen..." : "Verwijder"}
+                        </ActionButton>
                       </div>
                     </div>
                   );
