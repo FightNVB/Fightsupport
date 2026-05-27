@@ -27,3 +27,7 @@ tsconfig.tsbuildinfo
 
 ControlEngine/scrapers/utils/cookies.json
 ControlEngine/scrapers/fp_bundle/downloads/
+ControlEngine/scrapers/cookies.json
+ControlEngine/scrapers/utils/fp_session_state.json
+ControlEngine/scrapers/config/login_master.json
+ControlEngine/scrapers/.env

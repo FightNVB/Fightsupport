@@ -1,7 +1,6 @@
 // lib/workflow/stateGates.ts
 // State transition logic with pre-condition checks.
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MatchmakingState, StateTransitionResult, RoleName } from "@/lib/types/workflow";
 import { isValidTransition } from "@/lib/constants/states";
 import { canDo } from "@/lib/constants/roleMatrix";
@@ -16,7 +15,7 @@ import { logStateTransition } from "@/lib/workflow/auditLogger";
  * No 'pending' or 'afgewezen'/'afgekeurd' meldingen allowed.
  */
 async function checkApprovedToWeging(
-  supabase: SupabaseClient,
+  supabase: any,
   matchmaking_id: string
 ): Promise<string | null> {
   const { data: rows, error } = await supabase
@@ -47,7 +46,7 @@ async function checkApprovedToWeging(
  * All bouts must have both fighters weighed (gewogen_gewicht set).
  */
 async function checkWegingToLineup(
-  supabase: SupabaseClient,
+  supabase: any,
   matchmaking_id: string
 ): Promise<string | null> {
   const { data: bouts, error } = await supabase
@@ -74,7 +73,7 @@ async function checkWegingToLineup(
  * All bouts must have an uitslag (uitslag_rood is set).
  */
 async function checkLineupToComplete(
-  supabase: SupabaseClient,
+  supabase: any,
   matchmaking_id: string
 ): Promise<string | null> {
   const { data: bouts, error } = await supabase
@@ -105,7 +104,7 @@ async function checkLineupToComplete(
  * Returns a StateTransitionResult — never throws.
  */
 export async function attemptStateTransition(
-  supabase: SupabaseClient,
+  supabase: any,
   opts: {
     matchmaking_id: string;
     from_state: MatchmakingState;
@@ -174,7 +173,7 @@ export async function attemptStateTransition(
  * Returns null when not found.
  */
 export async function getMatchmakingState(
-  supabase: SupabaseClient,
+  supabase: any,
   matchmaking_id: string
 ): Promise<MatchmakingState | null> {
   const { data, error } = await supabase

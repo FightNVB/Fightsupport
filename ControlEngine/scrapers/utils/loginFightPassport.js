@@ -4,6 +4,7 @@ import path from "path";
 import puppeteer from "puppeteer";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
+import supabase from "./supabaseClient.js";
 
 dotenv.config();
 
@@ -93,9 +94,24 @@ async function loggedInDomProof(page) {
   }
 }
 
-async function saveCookies(page) {
+async function saveCookies(page, matchmakerId = null) {
   try {
     const newCookies = await page.cookies();
+    if (matchmakerId) {
+      const { error } = await supabase.from("fightpassport_sessions").upsert(
+        {
+          matchmaker_id: matchmakerId,
+          cookies: newCookies,
+          status: "active",
+          message: "FightPassport sessie actief.",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "matchmaker_id" }
+      );
+      if (error) throw error;
+      console.log("Matchmaker-cookies opgeslagen in database");
+      return;
+    }
     fs.writeFileSync(COOKIES_PATH, JSON.stringify(newCookies, null, 2));
     console.log("💾 Cookies opgeslagen");
   } catch (e) {
@@ -103,7 +119,25 @@ async function saveCookies(page) {
   }
 }
 
-async function loadCookiesIfAny(page) {
+async function loadCookiesIfAny(page, matchmakerId = null) {
+  if (matchmakerId) {
+    try {
+      const { data, error } = await supabase
+        .from("fightpassport_sessions")
+        .select("cookies")
+        .eq("matchmaker_id", matchmakerId)
+        .maybeSingle();
+      if (error) throw error;
+      const cookies = data?.cookies;
+      if (!Array.isArray(cookies) || !cookies.length) return false;
+      await page.setCookie(...cookies);
+      return true;
+    } catch (e) {
+      console.log("Matchmaker-cookies konden niet geladen worden:", e?.message ?? e);
+      return false;
+    }
+  }
+
   if (!fs.existsSync(COOKIES_PATH)) return false;
   try {
     const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
@@ -324,13 +358,23 @@ export async function ensureLoggedIn(page, opts = {}) {
 // --------------------------------------------------
 // HOOFDLOGIN (ongewijzigd gedrag)
 // --------------------------------------------------
-export async function loginFightPassport() {
-  if (!fs.existsSync(LOGIN_PATH)) {
+export async function loginFightPassport(options = {}) {
+  const matchmakerId = String(options?.matchmakerId ?? "").trim() || null;
+  const usernameFromOptions = String(options?.username ?? "").trim();
+  const passwordFromOptions = String(options?.password ?? "").trim();
+
+  if (!matchmakerId && !fs.existsSync(LOGIN_PATH)) {
     throw new Error("❌ login_master.json NIET gevonden");
   }
 
-  const login = JSON.parse(fs.readFileSync(LOGIN_PATH, "utf8"));
+  const login = matchmakerId
+    ? { username: usernameFromOptions, password: passwordFromOptions }
+    : JSON.parse(fs.readFileSync(LOGIN_PATH, "utf8"));
   const { username, password } = login;
+
+  if (!username || !password) {
+    throw new Error("FightPassport gebruikersnaam of wachtwoord ontbreekt.");
+  }
 
   const browser = await puppeteer.launch({
     headless: false,
@@ -355,7 +399,7 @@ export async function loginFightPassport() {
     if (await loggedInDomProof(page)) return;
 
     // 2) cookies proberen
-    const hadCookies = await loadCookiesIfAny(page);
+    const hadCookies = await loadCookiesIfAny(page, matchmakerId);
     if (hadCookies) {
       await safeGoto(page, FP_URL);
       await safeZoom100(page);
@@ -476,7 +520,7 @@ export async function loginFightPassport() {
       console.log("⚠️ Ingelogd, maar dashboard nog niet gevonden. Scraper probeert alsnog verder.");
     }
 
-    await saveCookies(page);
+    await saveCookies(page, matchmakerId);
   }
 
   // 2 pogingen

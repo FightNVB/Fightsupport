@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
-import { Inter, Bebas_Neue } from "next/font/google";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 
@@ -55,15 +54,9 @@ type UitslagRow = {
   uitslag: string | null;
 };
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
+const inter = { className: "font-sans" };
 
-const bebas = Bebas_Neue({
-  subsets: ["latin"],
-  weight: "400",
-});
+const bebas = { className: "font-sans" };
 
 const NVB_ORANGE = "#ff4d00";
 const SHOW_HEADER_LOGO = false;
@@ -1853,7 +1846,7 @@ export default function PartijDetailPage() {
         if (ctxErr) throw ctxErr;
 
         const rowRaw = (ctxRows?.[0] ?? null) as AnyRow | null;
-        const row = rowRaw
+        const row: AnyRow | null = rowRaw
           ? {
               ...rowRaw,
               evenement_naam: rowRaw.evenement_naam ?? evenementNaam ?? null,

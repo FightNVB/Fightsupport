@@ -35,7 +35,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    matchmaking_id = body?.matchmaking_id as string | undefined;
+    matchmaking_id = (body?.matchmaking_id as string | undefined) ?? null;
 
     if (!matchmaking_id) {
       return NextResponse.json(

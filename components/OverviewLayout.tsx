@@ -4,12 +4,8 @@ import Image from "next/image";
 import { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import NvbLightButton from "@/components/NvbLightButton";
-import { Cinzel_Decorative } from "next/font/google";
 
-const cinzel = Cinzel_Decorative({
-  subsets: ["latin"],
-  weight: ["700"],
-});
+const cinzel = { className: "font-sans" };
 
 const NVB_ORANGE = "#ff4d00";
 

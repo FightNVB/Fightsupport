@@ -505,7 +505,7 @@ export default function MatchmakingOverzichtPage() {
           directResult.value.error,
         );
       } else {
-        ownDbRows = (directResult.value.data ?? []) as MatchmakingDbRow[];
+        ownDbRows = (directResult.value.data ?? []) as unknown as MatchmakingDbRow[];
       }
     } else {
       console.error(

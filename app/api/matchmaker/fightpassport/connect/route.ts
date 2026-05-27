@@ -8,6 +8,8 @@ import { requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
+const CONNECT_STALE_MS = 5 * 60 * 1000;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -49,8 +51,10 @@ function runNodeScript(scriptPath: string, envExtra: Record<string,string>) {
 }
 
 export async function POST(req: Request) {
+  let currentUserId: string | null = null;
   try {
     const { userId } = await requireUserWithRole(req);
+    currentUserId = userId;
     const body = await req.json().catch(() => ({}));
     const username = s(body?.username);
     const password = s(body?.password);
@@ -62,6 +66,27 @@ export async function POST(req: Request) {
     }
     if (unlockCode && !/^\d{7}$/.test(unlockCode)) {
       return NextResponse.json({ ok: false, error: "Unlockcode moet 7 cijfers zijn." }, { status: 400 });
+    }
+
+    const { data: existingSession } = await supabase
+      .from("fightpassport_sessions")
+      .select("status, updated_at")
+      .eq("matchmaker_id", userId)
+      .maybeSingle();
+
+    const existingUpdated = existingSession?.updated_at
+      ? new Date(existingSession.updated_at).getTime()
+      : 0;
+
+    if (
+      existingSession?.status === "connecting" &&
+      existingUpdated &&
+      Date.now() - existingUpdated < CONNECT_STALE_MS
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "FightPassport koppeling loopt al voor deze matchmaker. Wacht even of probeer opnieuw over enkele minuten." },
+        { status: 409 }
+      );
     }
 
     await supabase.from("fightpassport_sessions").upsert({
@@ -90,6 +115,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, session: data ?? null });
   } catch (err: any) {
     console.error("❌ FightPassport connect fout:", err);
+    if (currentUserId) {
+      await supabase.from("fightpassport_sessions").upsert({
+        matchmaker_id: currentUserId,
+        status: "failed",
+        message: err?.message ?? "Koppelen mislukt",
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "matchmaker_id" });
+    }
     return NextResponse.json({ ok: false, error: err?.message ?? "Koppelen mislukt" }, { status: 500 });
   }
 }
+

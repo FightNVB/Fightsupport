@@ -1362,7 +1362,7 @@ async function addOverviewLogo(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet) {
   if (!ext) return;
 
   const buf = await fs.readFile(found);
-  const imageId = wb.addImage({ buffer: buf, extension: ext as any });
+  const imageId = wb.addImage({ buffer: buf as any, extension: ext as any });
 
   ws.addImage(imageId, {
     tl: { col: 0.35, row: 0.2 },

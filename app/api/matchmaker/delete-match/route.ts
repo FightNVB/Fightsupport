@@ -559,7 +559,7 @@ async function verifyDeleted(matchmakingId: string, rows: AnyRow[]) {
     new Set(rows.map((r) => s(r.id)).filter((x) => /^\d+$/.test(x))),
   );
 
-  const checks: AnyRow[] = [];
+  const checks: Array<{ key: string; values: any[] }> = [];
 
   if (partijNrs.length) checks.push({ key: "partij_nr", values: partijNrs });
   if (boutUids.length) checks.push({ key: "bout_uid", values: boutUids });
@@ -567,12 +567,13 @@ async function verifyDeleted(matchmakingId: string, rows: AnyRow[]) {
     checks.push({ key: "id", values: numericIds.map(Number) });
 
   for (const check of checks) {
-    const { data, error } = await supabaseAdmin
+    const query: any = supabaseAdmin
       .from("matchmaking_bouts_raw")
       .select("id, partij_nr, bout_uid")
       .eq("matchmaking_id", matchmakingId)
       .in(check.key, check.values)
       .limit(10);
+    const { data, error } = await query;
 
     if (error) {
       if (!isMissingSchemaError(error))
@@ -636,8 +637,8 @@ export async function DELETE(req: Request) {
         ok: true,
         deleted: rows.length,
         deleted_partij_nrs: rows
-          .map((r) => r.partij_nr)
-          .filter((v) => v !== null && v !== undefined),
+          .map((r: AnyRow) => r.partij_nr)
+          .filter((v: any) => v !== null && v !== undefined),
         reset_inschrijving_ids: reset.inschrijvingIds,
         reset_va_nummers: reset.vaList,
         reset_by_ids: reset.updatedByIds,

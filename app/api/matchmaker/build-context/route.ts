@@ -220,7 +220,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       matchmaking_id: matchmakingId,
-      count: inserted.data?.length ?? contextRows.length,
+      count: inserted.data?.length ?? 0,
       fighters_raw_count: rawRows?.length ?? 0,
       gecontroleerd: found.length,
       controle_mislukt: missing.length,

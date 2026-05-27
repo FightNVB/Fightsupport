@@ -15,11 +15,11 @@ function normalizeVa(v: unknown) {
 
 export async function GET(
   _req: NextRequest,
-  ctx: { params: Promise<{ matchmakingId: string }> | { matchmakingId: string } },
+  ctx: { params: Promise<{ matchmakingid: string }> },
 ) {
   try {
     const params = await ctx.params;
-    const matchmakingId = String(params?.matchmakingId ?? "").trim();
+    const matchmakingId = String(params?.matchmakingid ?? "").trim();
 
     if (!matchmakingId) {
       return NextResponse.json({ error: "Ongeldige matchmaking id" }, { status: 400 });

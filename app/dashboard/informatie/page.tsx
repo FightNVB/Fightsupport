@@ -17,7 +17,7 @@ type MenuAction = {
   subtitle: string;
   href?: string;
   external?: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  icon: any;
 };
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";

@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Geen rechten" }, { status: 403 });
     }
 
-    const admin = createClient(getBaseUrl(), getServiceKey(), {
+    const admin: any = createClient(getBaseUrl(), getServiceKey(), {
       auth: { persistSession: false },
     });
 
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
 
     const vaList = [
       ...new Set((fighterRows ?? []).map((row: any) => normalizeVa(row.va_nummer)).filter(Boolean)),
-    ];
+    ] as string[];
 
     if (!vaList.length) {
       return NextResponse.json(
@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
 
     logLine(logFile, `Command: ${process.execPath} ${scraperArgs.join(" ")}`);
 
-    const child = spawn(process.execPath, scraperArgs, {
+    const child: any = spawn(process.execPath, scraperArgs, {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -215,15 +215,15 @@ export async function POST(req: NextRequest) {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    child.stdout?.on("data", (chunk) => {
+    child.stdout?.on("data", (chunk: Buffer) => {
       logLine(logFile, String(chunk).trimEnd());
     });
 
-    child.stderr?.on("data", (chunk) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       logLine(logFile, `[stderr] ${String(chunk).trimEnd()}`);
     });
 
-    child.on("error", async (err) => {
+    child.on("error", async (err: Error) => {
       const msg = err?.message ?? "Beperkte vechter scraper kon niet starten";
       logLine(logFile, `[error] ${msg}`);
 
@@ -237,7 +237,7 @@ export async function POST(req: NextRequest) {
         .eq("sportschool_id", Number(sportschoolKey));
     });
 
-    child.on("close", async (code) => {
+    child.on("close", async (code: number | null) => {
       const ok = code === 0;
       logLine(logFile, `Beperkte vechter scraper klaar met exit code ${code}`);
 

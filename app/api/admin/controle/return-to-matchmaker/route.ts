@@ -100,15 +100,17 @@ export async function POST(req: NextRequest) {
         (role === "admin" || role === "superadmin"
           ? "admin_upload"
           : "official_upload"),
-      stage:
+      stage: (
         (mm as any)?.stadium && String((mm as any).stadium).trim()
           ? String((mm as any).stadium)
-          : "in_controle_admin",
-      ownerType:
+          : "in_controle_admin"
+      ) as any,
+      ownerType: (
         (mm as any)?.huidige_eigenaar_type &&
         String((mm as any).huidige_eigenaar_type).trim()
           ? String((mm as any).huidige_eigenaar_type)
-          : "admin",
+          : "admin"
+      ) as any,
       ownerUserId:
         (mm as any)?.huidige_eigenaar_type === "matchmaker"
           ? (mm as any)?.huidige_eigenaar_user_id

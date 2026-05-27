@@ -1,7 +1,6 @@
 // lib/workflow/auditLogger.ts
 // Audit log helpers — write structured audit entries to the database.
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuditLogEntry, RoleName } from "@/lib/types/workflow";
 
 /**
@@ -9,7 +8,7 @@ import type { AuditLogEntry, RoleName } from "@/lib/types/workflow";
  * Non-throwing: errors are logged to console but do not propagate.
  */
 export async function writeAuditLog(
-  supabase: SupabaseClient,
+  supabase: any,
   entry: Omit<AuditLogEntry, "created_at">
 ): Promise<void> {
   try {
@@ -36,7 +35,7 @@ export async function writeAuditLog(
  * Convenience: log a state transition.
  */
 export async function logStateTransition(
-  supabase: SupabaseClient,
+  supabase: any,
   opts: {
     matchmaking_id: string;
     from_state: string;
@@ -63,7 +62,7 @@ export async function logStateTransition(
  * Convenience: log a melding status change.
  */
 export async function logMeldingUpdate(
-  supabase: SupabaseClient,
+  supabase: any,
   opts: {
     melding_id: string;
     matchmaking_id: string | null;
@@ -93,7 +92,7 @@ export async function logMeldingUpdate(
  * Convenience: log an uitslag entry.
  */
 export async function logUitslagEntry(
-  supabase: SupabaseClient,
+  supabase: any,
   opts: {
     uitslag_id: string;
     matchmaking_id: string;

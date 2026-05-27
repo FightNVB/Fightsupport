@@ -1543,14 +1543,14 @@ export default function FightersPage() {
             <span style={railLabel}>Acties</span>
             <button
               className="fs-orange-btn"
-              onClick={herscrapeSelected}
+              onClick={() => herscrapeSelected()}
               disabled={!selected.length || !!busyId}
             >
               <RefreshCw size={16} />
               Herscrape geselecteerden{" "}
               {selected.length ? `(${selected.length})` : ""}
             </button>
-            <button className="fs-dark-btn" onClick={load} disabled={loading}>
+            <button className="fs-dark-btn" onClick={() => load()} disabled={loading}>
               <RefreshCw size={16} />
               Vernieuwen
             </button>

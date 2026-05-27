@@ -84,13 +84,14 @@ export interface RuleResult {
   message: string;
 
   matchmaking_id: string;
-  partij_id: string;
+  partij_id?: string | null;
 
   // ✅ nieuw:
   partij_nr?: number | null;
 
-  hoek_rood_nvb: string;
-  hoek_blauw_nvb: string;
+  hoek_rood_nvb?: string | null;
+  hoek_blauw_nvb?: string | null;
+  hoek?: "rood" | "blauw" | string;
 }
 
 /**

@@ -55,7 +55,7 @@ export async function POST(req: Request) {
 
     if (!allowedStateChecks.some((check) => check.ok)) {
       return NextResponse.json(
-        { error: allowedStateChecks[0]?.error ?? "Matchmaking staat niet in uitslagenfase." },
+        { error: allowedStateChecks.find((check) => !check.ok)?.error ?? "Matchmaking staat niet in uitslagenfase." },
         { status: 422 }
       );
     }

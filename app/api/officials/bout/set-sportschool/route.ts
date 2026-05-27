@@ -1,8 +1,7 @@
 // app/api/officials/bout/set-sportschool/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { randomUUID } from "crypto";
-import { runRulesForBoutContext } from "@/lib/rulesEngine";
+import { rulesEngine } from "@/lib/rulesEngine";
 
 export const runtime = "nodejs";
 
@@ -118,42 +117,12 @@ export async function POST(req: Request) {
     if (ctx2Err) throw ctx2Err;
     if (!ctx2) return NextResponse.json({ ok: false, error: "Bout context niet gevonden na update" }, { status: 404 });
 
-    // 6) event_id (voor controle_resultaten)
-    const cols = await detectColumns("controle_resultaten");
-    const event_id = cols.has("event_id") ? await getEventIdForMatchmaking(matchmaking_id) : null;
-    const now = new Date().toISOString();
-
-    // 7) rules opnieuw
-    const hits = runRulesForBoutContext(ctx2 as AnyRow);
-    const inserts: AnyRow[] = [];
-
-    for (const h of hits) {
-      const row: AnyRow = {
-        id: randomUUID(),
-        matchmaking_id,
-        controle_run_id,
-        partij_nr: (ctx2 as any)?.partij_nr ?? null,
-      };
-
-      if (cols.has("event_id")) row.event_id = event_id;
-      if (cols.has("bout_id")) row.bout_id = bout_id;
-
-      if (cols.has("rule")) row.rule = h.rule ?? h.rule_code ?? "RULE";
-      if (cols.has("rule_code")) row.rule_code = h.rule_code ?? null;
-      if (cols.has("resultaat")) row.resultaat = h.resultaat ?? "ok";
-      if (cols.has("boodschap")) row.boodschap = h.message ?? h.boodschap ?? null;
-      if (cols.has("severity")) row.severity = h.severity ?? null;
-      if (cols.has("hoek")) row.hoek = h.hoek ?? null;
-      if (cols.has("created_at")) row.created_at = now;
-      if (cols.has("review_status")) row.review_status = "open";
-
-      inserts.push(row);
-    }
-
-    if (inserts.length > 0) {
-      const { error: insErr } = await supabaseAdmin.from("controle_resultaten").insert(inserts);
-      if (insErr) throw insErr;
-    }
+    const hits = await rulesEngine({
+      matchmaking_id,
+      controle_run_id,
+      ctxRows: [ctx2 as AnyRow],
+      scoped_bout_id: bout_id,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -162,7 +131,7 @@ export async function POST(req: Request) {
       hoek,
       sportschool_id,
       keurmerkOk,
-      inserted: inserts.length,
+      inserted: hits.length,
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "Onbekende fout" }, { status: 500 });

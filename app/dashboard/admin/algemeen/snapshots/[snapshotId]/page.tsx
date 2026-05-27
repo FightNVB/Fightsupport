@@ -913,7 +913,7 @@ function InfoCard({
 }
 
 function InfoGrid({ children }: { children: ReactNode }) {
-  return
+  return (
     <div
       style={{
         display: "grid",
@@ -922,7 +922,8 @@ function InfoGrid({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-    </div>;
+    </div>
+  );
 }
 
 function MessagePanel({

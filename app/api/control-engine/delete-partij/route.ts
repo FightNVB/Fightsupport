@@ -21,7 +21,7 @@ function asUuid(v: any): string | null {
  * Voer een supabase query uit, maar negeer fouten (best effort).
  * Handig voor "kolom bestaat niet" of "tabel bestaat niet" scenario's.
  */
-async function bestEffort<T>(promise: Promise<T>): Promise<null> {
+async function bestEffort<T>(promise: any): Promise<null> {
   try {
     await promise;
   } catch {
@@ -165,8 +165,8 @@ export async function POST(req: Request) {
         bout_id: bout_id ?? null,
       },
       by: {
-        user_id: user?.id ?? null,
-        email: user?.email ?? null,
+        user_id: user?.userId ?? user?.user?.id ?? null,
+        email: user?.user?.email ?? null,
       },
     });
   } catch (e: any) {

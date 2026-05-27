@@ -421,7 +421,7 @@ export default function ContactpersonenFightcrewPage() {
     if (!loading && user && !canAdmin) router.replace("/dashboard");
   }, [loading, user, canAdmin, router]);
 
-  async function tokenHeaders() {
+  async function tokenHeaders(): Promise<HeadersInit> {
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token
       ? { Authorization: `Bearer ${data.session.access_token}` }
@@ -668,7 +668,7 @@ export default function ContactpersonenFightcrewPage() {
   }
 
   async function sendTrainerLogin(contact: Contact) {
-    setLoginKey(contact.sportschool_id);
+    setLoginKey(contact.sportschool_id ?? null);
     try {
       const res = await fetch(
         `/api/admin/sportscholen/contactpersonen/login-versturen`,
@@ -1561,7 +1561,7 @@ export default function ContactpersonenFightcrewPage() {
                         <td style={{ ...td, fontWeight: 1000 }}>
                           {clean(
                             c.sportschool?.naam,
-                            selected?.naam || c.sportschool_id,
+                            selected?.naam || String(c.sportschool_id ?? ""),
                           )}
                         </td>
                         <td style={td}>{clean(c.naam)}</td>

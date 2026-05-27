@@ -40,7 +40,7 @@ export async function parseExcelToBoutsWithMapping(opts: {
   const { fileBuffer, sheet_name, header_row, mapping } = opts;
 
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(fileBuffer);
+  await wb.xlsx.load(fileBuffer as any);
 
   const ws = wb.getWorksheet(sheet_name) || wb.worksheets[0];
   if (!ws) return [];

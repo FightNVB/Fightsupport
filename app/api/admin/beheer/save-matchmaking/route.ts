@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-function getSupabaseFromAuthHeader(authHeader: string) {
+function getSupabaseFromAuthHeader(authHeader: string): any {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -21,7 +21,7 @@ function getSupabaseFromAuthHeader(authHeader: string) {
 }
 
 async function writeAuditLog(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   payload: {
     actor_user_id?: string | null;
     actor_email?: string | null;

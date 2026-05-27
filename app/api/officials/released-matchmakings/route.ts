@@ -42,7 +42,7 @@ function toSafeErrorMessage(error: any, fallback: string) {
 }
 
 async function safeSelect<T>(
-  promise: Promise<{ data: T[] | null; error: any }>,
+  promise: any,
   label: string,
   fallback: T[] = []
 ): Promise<T[]> {

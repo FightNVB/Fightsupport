@@ -7,6 +7,7 @@ export type MatchmakingStage =
   | "ingediend_admin"
   | "in_controle_admin"
   | "review"
+  | "bij_eigenaar"
   | "klaar_voor_weegstation"
   | "in_officials"
   | "in_weegstation"
@@ -30,6 +31,7 @@ export const ALL_MATCHMAKING_STAGES: MatchmakingStage[] = [
   "ingediend_admin",
   "in_controle_admin",
   "review",
+  "bij_eigenaar",
   "klaar_voor_weegstation",
   "in_officials",
   "in_weegstation",
@@ -48,6 +50,7 @@ export const STAGE_LABELS: Record<MatchmakingStage, string> = {
   ingediend_admin: "Ingediend admin",
   in_controle_admin: "In controle admin",
   review: "Review",
+  bij_eigenaar: "Bij eigenaar",
   klaar_voor_weegstation: "Klaar voor weegstation",
   in_officials: "In officials",
   in_weegstation: "In weegstation",
@@ -66,6 +69,7 @@ export const STAGE_OWNER: Record<MatchmakingStage, MatchmakingOwnerType> = {
   ingediend_admin: "admin",
   in_controle_admin: "admin",
   review: "matchmaker",
+  bij_eigenaar: "matchmaker",
   klaar_voor_weegstation: "admin",
   in_officials: "bondteam",
   in_weegstation: "bondteam",
@@ -88,11 +92,13 @@ export const MATCHMAKING_STAGE_TRANSITIONS: Record<
   in_controle_admin: ["review", "klaar_voor_weegstation"],
   review: [
     "review",
+    "bij_eigenaar",
     "bouwen_matchmaking",
     "concept_matchmaking",
     "ingediend_admin",
     "klaar_voor_weegstation",
   ],
+  bij_eigenaar: ["bouwen_matchmaking", "concept_matchmaking", "ingediend_admin"],
   klaar_voor_weegstation: ["in_officials"],
   in_officials: ["review", "in_weegstation"],
   in_weegstation: ["review", "weegstation_verwerkt"],
@@ -132,6 +138,7 @@ export function stageAllowsBuilding(stage: MatchmakingStage) {
     "bouwen_matchmaking",
     "concept_matchmaking",
     "review",
+    "bij_eigenaar",
   ].includes(stage);
 }
 
@@ -162,6 +169,7 @@ export function stageDisplayOrder(stage: MatchmakingStage): number {
     "ingediend_admin",
     "in_controle_admin",
     "review",
+    "bij_eigenaar",
     "klaar_voor_weegstation",
     "in_officials",
     "in_weegstation",

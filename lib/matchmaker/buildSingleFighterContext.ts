@@ -265,3 +265,75 @@ export function buildSingleFighterContext(params: {
     updated_at: now,
   };
 }
+
+export async function buildFighterContextsForAanmeldingen(params: {
+  supabase: any;
+  matchmakingId: string;
+  controleRunId: string;
+  aanmeldingen: AnyRow[];
+  rawRows?: AnyRow[];
+  uitslagenRows?: AnyRow[];
+  eventDate?: string | null;
+  writeRules?: boolean;
+}) {
+  const {
+    supabase,
+    matchmakingId,
+    controleRunId,
+    aanmeldingen,
+    rawRows = [],
+    uitslagenRows = [],
+    eventDate = null,
+    writeRules = false,
+  } = params;
+
+  const rawByVa = new Map<string, AnyRow>();
+  for (const raw of rawRows) {
+    const va = normalizeVa(raw?.va_nummer ?? raw?.fighter_id ?? raw?.va);
+    if (va && !rawByVa.has(va)) rawByVa.set(va, raw);
+  }
+
+  const uitslagenByVa = new Map<string, AnyRow[]>();
+  for (const row of uitslagenRows) {
+    const va = normalizeVa(row?.va_nummer ?? row?.fighter_id ?? row?.va);
+    if (!va) continue;
+    const list = uitslagenByVa.get(va) ?? [];
+    list.push(row);
+    uitslagenByVa.set(va, list);
+  }
+
+  const contextRows = (aanmeldingen ?? []).map((aanmelding) => {
+    const va = normalizeVa(aanmelding?.va_nummer ?? aanmelding?.va ?? aanmelding?.va_nr ?? aanmelding?.vanummer);
+    return buildSingleFighterContext({
+      matchmakingId,
+      controleRunId,
+      aanmelding,
+      fightersRaw: va ? rawByVa.get(va) ?? null : null,
+      uitslagen: va ? uitslagenByVa.get(va) ?? [] : [],
+      eventDate,
+    });
+  });
+
+  if (!contextRows.length) return { data: [], error: null };
+
+  await supabase
+    .from("controle_bout_context")
+    .delete()
+    .eq("matchmaking_id", matchmakingId)
+    .eq("controle_run_id", controleRunId)
+    .eq("bron", "aanmeldingen");
+
+  const { data, error } = await supabase.from("controle_bout_context").insert(contextRows).select("*");
+  if (error) return { data: null, error };
+
+  if (writeRules) {
+    const { rulesEngine } = await import("@/lib/rulesEngine");
+    await rulesEngine({
+      matchmaking_id: matchmakingId,
+      controle_run_id: controleRunId,
+      ctxRows: data ?? contextRows,
+    });
+  }
+
+  return { data: data ?? contextRows, error: null };
+}

@@ -241,7 +241,7 @@ function mergeFighter(context: AnyRow | null, aanmelding: AnyRow | null, raw: An
 
 export async function GET(
   _req: Request,
-  ctx: { params: Promise<{ matchmakingId?: string; id?: string }> },
+  ctx: { params: Promise<{ matchmakingid: string }> },
 ) {
   try {
     const params = await ctx.params;
@@ -249,9 +249,8 @@ export async function GET(
     console.log("MATCHMAKER ROUTE PARAMS:", params);
 
     const mmId = s(
-      (params as any)?.matchmakingId ??
       (params as any)?.matchmakingid ??
-      (params as any)?.id
+      (params as any)?.matchmakingId
     );
 
     console.log("MATCHMAKER ROUTE MMID:", mmId);

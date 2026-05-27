@@ -902,12 +902,12 @@ function getLiveEval(row: WeighInBout, draft?: DraftState) {
     leeftijd_type: row.leeftijd_type,
     max_gewicht: toNum(row.max_gewicht),
     max_gewicht_notatie: row.max_gewicht_notatie ?? null,
-    rood_doorgegeven_gewicht: row.rood_doorgegeven_gewicht,
-    blauw_doorgegeven_gewicht: row.blauw_doorgegeven_gewicht,
-    rood_gewogen_gewicht: draft ? toNum(draft.rood) : row.rood_gewogen_gewicht,
+    rood_doorgegeven_gewicht: toNum(row.rood_doorgegeven_gewicht),
+    blauw_doorgegeven_gewicht: toNum(row.blauw_doorgegeven_gewicht),
+    rood_gewogen_gewicht: draft ? toNum(draft.rood) : toNum(row.rood_gewogen_gewicht),
     blauw_gewogen_gewicht: draft
       ? toNum(draft.blauw)
-      : row.blauw_gewogen_gewicht,
+      : toNum(row.blauw_gewogen_gewicht),
     dispensatie_verleend: row.dispensatie_verleend,
   });
 }
@@ -1525,7 +1525,7 @@ export default function WeegstationDetailPage() {
         fighterName: safeText(row.rood_naam, ""),
         fighterGym: safeText(row.rood_gym, ""),
         fighterVa: safeText(row.rood_va, ""),
-        fighterDoorgegeven: row.rood_doorgegeven_gewicht,
+        fighterDoorgegeven: toNum(row.rood_doorgegeven_gewicht),
         fighterGewogen: liveRood,
         opponentName: safeText(row.blauw_naam, "-"),
         opponentGym: safeText(row.blauw_gym, "-"),
@@ -1543,7 +1543,7 @@ export default function WeegstationDetailPage() {
         fighterName: safeText(row.blauw_naam, ""),
         fighterGym: safeText(row.blauw_gym, ""),
         fighterVa: safeText(row.blauw_va, ""),
-        fighterDoorgegeven: row.blauw_doorgegeven_gewicht,
+        fighterDoorgegeven: toNum(row.blauw_doorgegeven_gewicht),
         fighterGewogen: liveBlauw,
         opponentName: safeText(row.rood_naam, "-"),
         opponentGym: safeText(row.rood_gym, "-"),
@@ -1793,12 +1793,12 @@ export default function WeegstationDetailPage() {
           bout: safeUpdated,
           fighterGewogen:
             prev.corner === "red"
-              ? safeUpdated.rood_gewogen_gewicht
-              : safeUpdated.blauw_gewogen_gewicht,
+              ? toNum(safeUpdated.rood_gewogen_gewicht)
+              : toNum(safeUpdated.blauw_gewogen_gewicht),
           opponentGewogen:
             prev.corner === "red"
-              ? safeUpdated.blauw_gewogen_gewicht
-              : safeUpdated.rood_gewogen_gewicht,
+              ? toNum(safeUpdated.blauw_gewogen_gewicht)
+              : toNum(safeUpdated.rood_gewogen_gewicht),
         };
       });
 
@@ -1872,12 +1872,12 @@ export default function WeegstationDetailPage() {
           bout: safeUpdated,
           fighterGewogen:
             prev.corner === "red"
-              ? safeUpdated.rood_gewogen_gewicht
-              : safeUpdated.blauw_gewogen_gewicht,
+              ? toNum(safeUpdated.rood_gewogen_gewicht)
+              : toNum(safeUpdated.blauw_gewogen_gewicht),
           opponentGewogen:
             prev.corner === "red"
-              ? safeUpdated.blauw_gewogen_gewicht
-              : safeUpdated.rood_gewogen_gewicht,
+              ? toNum(safeUpdated.blauw_gewogen_gewicht)
+              : toNum(safeUpdated.rood_gewogen_gewicht),
         };
       });
 

@@ -12,7 +12,6 @@ import React, {
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import dayjs from "dayjs";
-import { Bebas_Neue } from "next/font/google";
 import {
   ArrowLeft,
   Phone,
@@ -40,10 +39,7 @@ import {
 import { authedFetch } from "@/lib/api/authedFetch";
 import { supabase } from "@/lib/supabaseClient";
 
-const bebas = Bebas_Neue({
-  subsets: ["latin"],
-  weight: "400",
-});
+const bebas = { className: "font-sans" };
 
 const ORANGE = "#ff4d00";
 const DARK = "#2b3138";

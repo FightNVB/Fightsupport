@@ -99,13 +99,13 @@ export default function MenuTemplate({
   return (
     <main className="login-wrap animate-fade-in">
       {theme === "light" ? (
-        <LightCardLayout title={title} subtitle={subtitle}>
+        <DarkCardLayout title={title} subtitle={subtitle}>
           {/* ✅ Eerst de children (zoals formulieren of lijsten) */}
           {children}
           {/* ✅ Daarna eventuele knoppen */}
           {buttons.length > 0 && renderButtons()}
           {renderFooter()}
-        </LightCardLayout>
+        </DarkCardLayout>
       ) : (
         <DarkCardLayout title={title} subtitle={subtitle}>
           {children}

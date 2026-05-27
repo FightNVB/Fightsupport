@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
-import { Inter, Bebas_Neue } from "next/font/google";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 
@@ -49,16 +48,10 @@ type UitslagRow = {
   uitslag: string | null;
 };
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
+const inter = { className: "font-sans" };
 
 // ✅ Stoere display font voor FIGHTSUPPORT (VS-style / arcade)
-const bebas = Bebas_Neue({
-  subsets: ["latin"],
-  weight: "400",
-});
+const bebas = { className: "font-sans" };
 
 const NVB_ORANGE = "#ff4d00";
 
@@ -2073,7 +2066,7 @@ export default function PartijDetailPage() {
       x?.resultaat === "ACTIE" ? 2 :
       x?.resultaat === "INFO" ? 1 : 0;
 
-    const best = (resultaten ?? [])
+    const best = (regels ?? [])
       .filter((r: any) => Number(r.partij_nr) === partij)
       .sort((a: any, b: any) => prio(b) - prio(a))[0];
 

@@ -10,6 +10,7 @@ export type RoleName =
   | "official"
   | "hoofdofficial"
   | "dispensatie_admin"
+  | "trainer"
   | "unknown";
 
 // ─── Matchmaking states ───────────────────────────────────────────────────────
@@ -19,7 +20,23 @@ export type MatchmakingState =
   | "approved"
   | "weging"
   | "lineup"
-  | "complete";
+  | "complete"
+  | "nieuw"
+  | "bouwen_matchmaking"
+  | "concept_matchmaking"
+  | "ingediend_admin"
+  | "in_controle_admin"
+  | "review"
+  | "bij_eigenaar"
+  | "klaar_voor_weegstation"
+  | "in_officials"
+  | "in_weegstation"
+  | "weegstation_verwerkt"
+  | "definitieve_lineup"
+  | "klaar_voor_uitslagen"
+  | "uitslagen_in_bewerking"
+  | "uitslagen_definitief"
+  | "gearchiveerd";
 
 // ─── Meldingen (controle_resultaten) ─────────────────────────────────────────
 

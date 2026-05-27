@@ -81,9 +81,13 @@ export async function parseMatchmaking(matchmakingId: string): Promise<ParsedPar
       // jouw ParsedPartij velden (ik laat gyms alleen staan als je type het heeft)
       rood_nvb: roodVa,
       blauw_nvb: blauwVa,
+      hoek_rood_nvb: roodVa,
+      hoek_blauw_nvb: blauwVa,
 
       rood_naam: b.rood_naam ?? "",
       blauw_naam: b.blauw_naam ?? "",
+      hoek_rood_naam: b.rood_naam ?? "",
+      hoek_blauw_naam: b.blauw_naam ?? "",
 
       // als je ParsedPartij ook gyms heeft: zet ze erbij
       // rood_gym: b.rood_gym ?? null,
@@ -102,6 +106,6 @@ export async function parseMatchmaking(matchmakingId: string): Promise<ParsedPar
 
       leeftijd_rood: null,
       leeftijd_blauw: null,
-    } as ParsedPartij;
+    } as unknown as ParsedPartij;
   });
 }

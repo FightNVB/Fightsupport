@@ -43,14 +43,20 @@ export async function getUserRole(userId: string): Promise<RoleName> {
   return normalizeRole((data as any)?.roles?.name);
 }
 
-export async function requireUserWithRole(req: Request): Promise<{ userId: string; role: RoleName }> {
+export async function requireUserWithRole(
+  req: Request,
+  allowed?: RoleName[]
+): Promise<{ userId: string; role: RoleName; user: { id: string; email?: string | null } }> {
   const token = getBearerToken(req);
   if (!token) throw new Response("Unauthorized", { status: 401 });
   const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
   if (userErr || !userData?.user?.id) throw new Response("Unauthorized", { status: 401 });
   const userId = userData.user.id;
   const role = await getUserRole(userId);
-  return { userId, role };
+  if (allowed?.length && role !== "superadmin" && !allowed.includes(role)) {
+    throw new Response("Forbidden", { status: 403 });
+  }
+  return { userId, role, user: { id: userId, email: userData.user.email ?? null } };
 }
 
 export async function requireAdmin(req: Request): Promise<{ userId: string; role: RoleName }> {

@@ -127,11 +127,11 @@ export async function POST(req: NextRequest) {
     });
 
     // ===== SCRAPER =====
-    const vas = [toVa(body.va_rood), toVa(body.va_blauw)].filter(Boolean);
+    const vas = [toVa(body.va_rood), toVa(body.va_blauw)].filter(Boolean) as string[];
 
     if (vas.length > 0) {
       await new Promise((resolve, reject) => {
-        const proc = spawn(
+        const proc: any = spawn(
           "node",
           [
             path.resolve(
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
           { stdio: "inherit" }
         );
 
-        proc.on("exit", (code) => {
+        proc.on("exit", (code: number | null) => {
           if (code === 0) resolve(true);
           else reject(new Error("scraper failed"));
         });
@@ -161,7 +161,11 @@ export async function POST(req: NextRequest) {
       .eq("matchmaking_id", matchmaking_id)
       .eq("controle_run_id", controle_run_id);
 
-    await rulesEngine(ctxRows ?? []);
+    await rulesEngine({
+      matchmaking_id,
+      controle_run_id,
+      ctxRows: ctxRows ?? [],
+    });
 
     // ===== afronden =====
     await supabaseAdmin

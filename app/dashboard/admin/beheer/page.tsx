@@ -73,7 +73,7 @@ type ActionCard = {
   title: string;
   subtitle: string;
   href: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  icon: any;
 };
 
 export default function BeheerPortalPage() {

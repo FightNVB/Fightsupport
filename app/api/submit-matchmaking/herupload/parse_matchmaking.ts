@@ -649,7 +649,7 @@ function detectTemplateCols(headerRow: any[]): TemplateCols | null {
 
 async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(fileBuffer);
+  await wb.xlsx.load(fileBuffer as any);
 
   const ws = wb.worksheets?.[0];
   if (!ws) return null;
@@ -1751,7 +1751,7 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
   } else {
     try {
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(fileBuffer);
+      await workbook.xlsx.load(fileBuffer as any);
       const ws = workbook.worksheets[0];
       if (!ws) return [];
       sheet = exceljsToSheetLike(ws);

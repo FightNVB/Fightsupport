@@ -26,12 +26,8 @@ import { authedFetch } from "@/lib/api/authedFetch";
 import NvbDarkButton from "@/components/NvbDarkButton";
 import NvbLightButton from "@/components/NvbLightButton";
 
-import { Inter } from "next/font/google";
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
+const inter = { className: "font-sans" };
 
 const NVB_ORANGE = "#ff4d00";
 

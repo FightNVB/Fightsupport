@@ -37,7 +37,7 @@ async function getUserFromBearer(authHeader: string | null) {
   return { user: data.user, error: null };
 }
 
-async function getUserRoles(admin: ReturnType<typeof createClient>, userId: string): Promise<string[]> {
+async function getUserRoles(admin: any, userId: string): Promise<string[]> {
   const { data, error } = await admin
     .from("user_roles")
     .select("roles(name)")
@@ -49,7 +49,7 @@ async function getUserRoles(admin: ReturnType<typeof createClient>, userId: stri
     .map((row: any) => String(row?.roles?.name ?? "").trim().toLowerCase())
     .filter(Boolean);
 
-  return [...new Set(names)];
+  return [...new Set(names)] as string[];
 }
 
 export async function POST(req: Request) {

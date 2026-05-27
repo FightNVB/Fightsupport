@@ -709,7 +709,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const rows = fighters.map((f: any) => {
+    const rows: any[] = fighters.map((f: any) => {
       const naam = fullNameOrNull({
         naam: f.naam,
         voornaam: f.voornaam,
@@ -833,7 +833,7 @@ export async function POST(req: Request) {
       addDuplicateKeys(row, uploadKeys);
       dedupedRows.push({
         ...row,
-        duplicate_key: buildDuplicateKeys(row)[0] ?? null,
+        duplicate_key: buildDuplicateKeys(row)[0] ?? "",
       });
     }
 

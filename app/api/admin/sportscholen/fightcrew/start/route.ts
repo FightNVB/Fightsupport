@@ -76,7 +76,7 @@ function makeScrapeRunId(sportschoolKey: string) {
 }
 
 async function startVaEnrichAfterFightcrew(params: {
-  admin: ReturnType<typeof createClient>;
+  admin: any;
   sportschoolKey: string;
   schoolName: string;
   parentLogFile: string;
@@ -118,7 +118,7 @@ async function startVaEnrichAfterFightcrew(params: {
         .map((row: any) => String(row?.va_nummer ?? "").replace(/\D/g, "").replace(/^0+/, ""))
         .filter(Boolean)
     ),
-  ];
+  ] as string[];
 
   if (!vaList.length) {
     logLine(parentLogFile, "[enrich] Geen VA-nummers gevonden na fightcrew import");

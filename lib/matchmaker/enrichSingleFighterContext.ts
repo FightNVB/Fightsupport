@@ -772,7 +772,7 @@ export async function enrichSingleFighterContext(params: {
     aliasMaps,
   });
 
-  const mergedContext = {
+  const mergedContext: AnyRow = {
     ...context,
     evenement_datum,
     ...keurmerkPatch,
