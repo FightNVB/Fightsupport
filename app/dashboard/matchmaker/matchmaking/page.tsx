@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Suspense,
   useEffect,
   useMemo,
   useState,
@@ -325,6 +326,14 @@ function mergeRows(apiRows: MatchmakingRow[], ownDbRows: MatchmakingDbRow[]) {
 }
 
 export default function MatchmakingOverzichtPage() {
+  return (
+    <Suspense fallback={<div>Matchmakings laden...</div>}>
+      <MatchmakingPageContent />
+    </Suspense>
+  );
+}
+
+function MatchmakingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
