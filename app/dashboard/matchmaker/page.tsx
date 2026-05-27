@@ -194,13 +194,13 @@ export default function MatchmakerDashboardPage() {
       icon: ClipboardList as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
-      label: "Matchmakingen",
-      subtitle: "Open matchmakings, aanmeldingen en gecontroleerde vechters",
-      href: "/dashboard/matchmaker/matchmaking",
+      label: "Inlog FightPassport",
+      subtitle: "Log in voor automatische controle fightpaspoort",
+      href: "/dashboard/matchmaker/fightpassport",
       icon: Users as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
-      label: "FightPassport",
+      label: "FightPassport site",
       subtitle: "Open extern vechterprofielen en historie",
       external: "https://fightpassport.nl/",
       icon: Trophy as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,

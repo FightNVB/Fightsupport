@@ -730,28 +730,88 @@ function hasFilledValue(v: any) {
   return v !== null && v !== undefined && String(v).trim() !== "";
 }
 
+function formatMaxGewichtVoorExcel(notatie: any, gewicht: any, type: any = "") {
+  const notationRaw = safe(notatie, "");
+  const typeRaw = safe(type, "").toLowerCase();
+  const weightRaw = safe(gewicht, "");
+
+  // Belangrijk: 95+ / +95 / open_above mag nooit als 95 of -95 in Excel komen.
+  const source = notationRaw || weightRaw;
+  const plusMatch =
+    source.match(/^(\d+(?:[,.]\d+)?)\s*\+/) ||
+    source.match(/^\+\s*(\d+(?:[,.]\d+)?)/);
+
+  if (plusMatch) {
+    return `${plusMatch[1].replace(".", ",")}+`;
+  }
+
+  if (typeRaw === "open_above" || typeRaw === "above" || typeRaw === "plus") {
+    const n = weightRaw.replace(",", ".").replace(/[^\d.]/g, "");
+    return n ? `${n.replace(".", ",")}+` : notationRaw;
+  }
+
+  if (notationRaw) return notationRaw;
+  return numOrBlank(weightRaw);
+}
+
+function resolveMaxGewichtFromObject(obj: any) {
+  if (!obj) return "";
+
+  const extra = parseMaybeJson(obj?.extra);
+  const raw = parseMaybeJson(obj?.raw_json);
+
+  const notation =
+    obj?.max_gewicht_notatie ??
+    obj?.max_gewicht_weergave ??
+    obj?.max_kg_notatie ??
+    extra?.max_gewicht_notatie ??
+    extra?.max_gewicht_weergave ??
+    extra?.max_kg_notatie ??
+    raw?.max_gewicht_notatie ??
+    raw?.max_gewicht_weergave ??
+    raw?.max_kg_notatie;
+
+  const type =
+    obj?.max_gewicht_type ??
+    obj?.gewicht_max_type ??
+    extra?.max_gewicht_type ??
+    extra?.gewicht_max_type ??
+    raw?.max_gewicht_type ??
+    raw?.gewicht_max_type;
+
+  const gewicht =
+    obj?.max_gewicht ??
+    obj?.max_gewicht_mm ??
+    obj?.gewicht_max_mm ??
+    obj?.matchmaking_bouts_raw_max_gewicht ??
+    obj?.gewicht_max ??
+    obj?.max_kg ??
+    obj?.maximum_gewicht ??
+    obj?.gewichtslimiet ??
+    extra?.max_gewicht ??
+    extra?.max_kg ??
+    extra?.gewicht_max ??
+    extra?.maximum_gewicht ??
+    extra?.gewichtslimiet ??
+    raw?.max_gewicht ??
+    raw?.max_kg ??
+    raw?.gewicht_max ??
+    raw?.maximum_gewicht ??
+    raw?.gewichtslimiet;
+
+  if (hasFilledValue(notation) || hasFilledValue(gewicht)) {
+    return formatMaxGewichtVoorExcel(notation, gewicht, type);
+  }
+
+  return "";
+}
+
 function getResolvedMaxGewicht(
   ctx: any,
   rawMaps: { byBoutId: Map<string, any>; byPartijNr: Map<number, any> }
 ) {
-  const directCandidates = [
-    ctx?.max_gewicht,
-    ctx?.max_gewicht_mm,
-    ctx?.gewicht_max_mm,
-    ctx?.matchmaking_bouts_raw_max_gewicht,
-    ctx?.gewicht_max,
-    ctx?.max_kg,
-    ctx?.maximum_gewicht,
-    ctx?.gewichtslimiet,
-    ctx?.extra?.max_gewicht,
-    ctx?.extra?.max_kg,
-    ctx?.extra?.gewicht_max,
-    ctx?.extra?.maximum_gewicht,
-  ];
-
-  for (const candidate of directCandidates) {
-    if (hasFilledValue(candidate)) return numOrBlank(candidate);
-  }
+  const fromCtx = resolveMaxGewichtFromObject(ctx);
+  if (hasFilledValue(fromCtx)) return fromCtx;
 
   const boutIdCandidates = [ctx?.bout_id, ctx?.bout_uid, ctx?.match_bout_id, ctx?.wedstrijd_id]
     .map((v: any) => safe(v, ""))
@@ -759,8 +819,8 @@ function getResolvedMaxGewicht(
 
   for (const boutId of boutIdCandidates) {
     if (!rawMaps.byBoutId.has(boutId)) continue;
-    const v = rawMaps.byBoutId.get(boutId);
-    if (hasFilledValue(v)) return numOrBlank(v);
+    const fromRaw = resolveMaxGewichtFromObject(rawMaps.byBoutId.get(boutId));
+    if (hasFilledValue(fromRaw)) return fromRaw;
   }
 
   const partijNrCandidates = [Number(ctx?.partij_nr), Number(ctx?.partij_nummer), Number(ctx?.partij_label)].filter(
@@ -769,11 +829,235 @@ function getResolvedMaxGewicht(
 
   for (const partijNr of partijNrCandidates) {
     if (!rawMaps.byPartijNr.has(partijNr)) continue;
-    const v = rawMaps.byPartijNr.get(partijNr);
-    if (hasFilledValue(v)) return numOrBlank(v);
+    const fromRaw = resolveMaxGewichtFromObject(rawMaps.byPartijNr.get(partijNr));
+    if (hasFilledValue(fromRaw)) return fromRaw;
   }
 
   return "";
+}
+
+
+function onlyDigits(v: any) {
+  const s = String(v ?? "")
+    .replace(/[^\d]/g, "")
+    .trim();
+  return s || "";
+}
+
+function recordValueForExcel(v: any): number | string {
+  const raw = safe(v, "");
+  if (!raw) return "";
+
+  const simpleNumber = raw.match(/^\d+$/);
+  if (!simpleNumber) return raw;
+
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : raw;
+}
+
+type UitslagRow = {
+  va_nummer?: string | number | null;
+  bron_va_nummer?: string | number | null;
+  uitslag?: string | null;
+  klasse?: string | null;
+  datum?: string | null;
+  matchmaking_id?: string | null;
+  controle_run_id?: string | null;
+};
+
+type KlasseCode = "J" | "R" | "N" | "C" | "B" | "A";
+
+const KLASSE_RANK: Record<KlasseCode, number> = {
+  J: 0,
+  R: 1,
+  N: 2,
+  C: 3,
+  B: 4,
+  A: 5,
+};
+
+function normalizeKlasseForRanking(rawKlasse: any, dob: any, resultDate: any): KlasseCode | null {
+  const klasse = safe(rawKlasse, "").toLowerCase();
+  const ageAtFight = calcAgeAtDateNumber(dob, resultDate);
+
+  if (ageAtFight != null && ageAtFight < 18) return "J";
+
+  if (
+    klasse.includes("jeugd") ||
+    klasse === "j" ||
+    klasse.startsWith("j ") ||
+    klasse.includes(" klasse j") ||
+    klasse.includes("j klasse")
+  ) return "J";
+
+  if (
+    klasse === "r" || klasse.startsWith("r ") || klasse.includes(" r ") ||
+    klasse.includes("r-") || klasse.includes("klasse r") || klasse.includes("r klasse")
+  ) return "R";
+
+  if (
+    klasse === "n" || klasse.startsWith("n ") || klasse.includes(" n ") ||
+    klasse.includes("n-") || klasse.includes("klasse n") || klasse.includes("n klasse") ||
+    klasse.includes("nieuweling")
+  ) return "N";
+
+  if (
+    klasse === "c" || klasse.startsWith("c ") || klasse.includes(" c ") ||
+    klasse.includes("c-") || klasse.includes("klasse c") || klasse.includes("c klasse")
+  ) return "C";
+
+  if (
+    klasse === "b" || klasse.startsWith("b ") || klasse.includes(" b ") ||
+    klasse.includes("b-") || klasse.includes("klasse b") || klasse.includes("b klasse")
+  ) return "B";
+
+  if (
+    klasse === "a" || klasse.startsWith("a ") || klasse.includes(" a ") ||
+    klasse.includes("a-") || klasse.includes("klasse a") || klasse.includes("a klasse")
+  ) return "A";
+
+  if (ageAtFight != null && ageAtFight >= 18) return "N";
+  return null;
+}
+
+function classifyUitslag(raw: any): "win" | "loss" | "draw" | "demo" | null {
+  const txt = safe(raw, "").toLowerCase();
+  if (!txt) return null;
+
+  if (txt.includes("demo")) return "demo";
+  if (txt.includes("no contest") || txt.includes("no-contest")) return "draw";
+  if (txt.includes("onbeslist")) return "draw";
+  if (txt.includes("verlies") || txt.includes("verliest")) return "loss";
+  if (txt.includes("wint")) return "win";
+
+  return null;
+}
+
+function formatRecordString(win: number, loss: number, draw: number, demo: number, includeDemo: boolean) {
+  if (includeDemo) return `${win}-${loss}-${draw} (${demo} demo)`;
+  return `${win}-${loss}-${draw}`;
+}
+
+function buildRecordHighestClassFromUitslagen(rows: UitslagRow[], dob: any) {
+  if (!rows.length) return { record: "", highestClass: null as KlasseCode | null, recordWithClass: "" };
+
+  let highestClass: KlasseCode | null = null;
+  for (const row of rows) {
+    const normalized = normalizeKlasseForRanking(row?.klasse, dob, row?.datum);
+    if (!normalized) continue;
+    if (!highestClass || KLASSE_RANK[normalized] > KLASSE_RANK[highestClass]) {
+      highestClass = normalized;
+    }
+  }
+
+  if (!highestClass) return { record: "", highestClass: null as KlasseCode | null, recordWithClass: "" };
+
+  let win = 0;
+  let loss = 0;
+  let draw = 0;
+  let demo = 0;
+
+  for (const row of rows) {
+    const normalized = normalizeKlasseForRanking(row?.klasse, dob, row?.datum);
+    if (normalized !== highestClass) continue;
+
+    const kind = classifyUitslag(row?.uitslag);
+    if (kind === "win") win += 1;
+    else if (kind === "loss") loss += 1;
+    else if (kind === "draw") draw += 1;
+    else if (kind === "demo") demo += 1;
+  }
+
+  const includeDemo = highestClass === "J";
+  const record = formatRecordString(win, loss, draw, demo, includeDemo);
+  return { record, highestClass, recordWithClass: `${highestClass} ${record}` };
+}
+
+function getScraperTotaal(ctx: any, side: "rood" | "blauw") {
+  return side === "rood"
+    ? safe(ctx?.rood_totaal_wedstrijden_scrape, "")
+    : safe(ctx?.blauw_totaal_wedstrijden_scrape, "");
+}
+
+function getContextTotaalWedstrijden(ctx: any, side: "rood" | "blauw") {
+  if (side === "rood") {
+    return safe(
+      ctx?.rood_totaal_wedstrijden_mm ??
+        ctx?.rood_totaal_wedstrijden ??
+        ctx?.rood_total_fights ??
+        ctx?.rood_fights_total ??
+        ctx?.rood_aantal_partijen ??
+        ctx?.rood_partijen ??
+        ctx?.rood_record_totaal ??
+        ctx?.totaal_wedstrijden_rood,
+      "",
+    );
+  }
+
+  return safe(
+    ctx?.blauw_totaal_wedstrijden_mm ??
+      ctx?.blauw_totaal_wedstrijden ??
+      ctx?.blauw_total_fights ??
+      ctx?.blauw_fights_total ??
+      ctx?.blauw_aantal_partijen ??
+      ctx?.blauw_partijen ??
+      ctx?.blauw_record_totaal ??
+      ctx?.totaal_wedstrijden_blauw,
+    "",
+  );
+}
+
+function getRecordOfErvaring(ctx: any, side: "rood" | "blauw", uitslagenByVa: Map<string, UitslagRow[]>) {
+  const va = onlyDigits(getVaInfo(ctx, side).current);
+  const dob = getDobForSide(ctx, side);
+
+  if (va) {
+    const rows = uitslagenByVa.get(va) ?? [];
+    const built = buildRecordHighestClassFromUitslagen(rows, dob);
+    if (built.recordWithClass) return built.recordWithClass;
+  }
+
+  const contextTotaal = getContextTotaalWedstrijden(ctx, side);
+  if (contextTotaal) return contextTotaal;
+
+  return getScraperTotaal(ctx, side);
+}
+
+async function loadUitslagenByVa(vaNumbers: string[]) {
+  const cleaned = Array.from(new Set((vaNumbers ?? []).map((v) => onlyDigits(v)).filter(Boolean)));
+  const map = new Map<string, UitslagRow[]>();
+  if (!cleaned.length) return map;
+
+  const lookup = new Set(cleaned);
+
+  const { data, error } = await supabase
+    .from("uitslagen_raw")
+    .select("va_nummer, bron_va_nummer, uitslag, klasse, datum, matchmaking_id, controle_run_id")
+    .or(cleaned.map((v) => `va_nummer.eq.${v},bron_va_nummer.eq.${v}`).join(","));
+
+  if (error) throw error;
+
+  const allRows = (data ?? []) as UitslagRow[];
+
+  for (const row of allRows) {
+    const primaryVa = onlyDigits(row?.va_nummer);
+    const backupVa = onlyDigits(row?.bron_va_nummer);
+    const matchedVa = lookup.has(primaryVa) ? primaryVa : lookup.has(backupVa) ? backupVa : "";
+    if (!matchedVa) continue;
+
+    if (!map.has(matchedVa)) map.set(matchedVa, []);
+    map.get(matchedVa)!.push({
+      va_nummer: matchedVa,
+      bron_va_nummer: backupVa || null,
+      uitslag: row?.uitslag ?? null,
+      klasse: row?.klasse ?? null,
+      datum: row?.datum ?? null,
+      matchmaking_id: row?.matchmaking_id ?? null,
+      controle_run_id: row?.controle_run_id ?? null,
+    });
+  }
+
+  return map;
 }
 
 async function getLatestRun(matchmaking_id: string) {
@@ -884,7 +1168,7 @@ async function getMatchmakingRawMap(matchmaking_id: string) {
 
   const { data, error } = await supabase
     .from("matchmaking_bouts_raw")
-    .select("bout_uid, partij_nr, max_gewicht")
+    .select("bout_uid, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
     .eq("matchmaking_id", matchmaking_id);
 
   if (error) throw error;
@@ -895,12 +1179,12 @@ async function getMatchmakingRawMap(matchmaking_id: string) {
       .filter(Boolean);
 
     const partijNr = Number((row as any)?.partij_nr);
-    const maxGewicht = (row as any)?.max_gewicht ?? null;
+    const rawRow = row as any;
 
     for (const boutId of boutIdCandidates) {
-      byBoutId.set(boutId, maxGewicht);
+      byBoutId.set(boutId, rawRow);
     }
-    if (Number.isFinite(partijNr)) byPartijNr.set(partijNr, maxGewicht);
+    if (Number.isFinite(partijNr)) byPartijNr.set(partijNr, rawRow);
   }
 
   return { byBoutId, byPartijNr };
@@ -1033,14 +1317,16 @@ function styleUploadSheetLayout(ws: ExcelJS.Worksheet) {
   ws.getColumn(4).width = 34;
   ws.getColumn(5).width = 28;
   ws.getColumn(6).width = 18;
-  ws.getColumn(7).width = 10;
+  ws.getColumn(7).width = 16;
   ws.getColumn(8).width = 6;
-  ws.getColumn(9).width = 34;
+  ws.getColumn(9).width = 20;
   ws.getColumn(10).width = 28;
   ws.getColumn(11).width = 18;
   ws.getColumn(12).width = 10;
-  ws.getColumn(13).width = 14;
-  ws.getColumn(14).width = 18;
+  ws.getColumn(13).width = 18;
+  ws.getColumn(14).width = 10;
+  ws.getColumn(15).width = 14;
+  ws.getColumn(16).width = 18;
 
   ws.getRow(1).height = 24;
   ws.getRow(2).height = 22;
@@ -1133,11 +1419,13 @@ function writeUploadLikeOverviewHeader(opts: {
     "Naam atleet (1)",
     "Sportschool (1)",
     "Fightpaspoort nr (1)",
+    "Record (1)",
     "Leeftijd",
     "VS",
     "Naam atleet (2)",
     "Sportschool (2)",
     "Fightpaspoort nr (2)",
+    "Record (2)",
     "Leeftijd",
     "Max KG",
     "Rondetijden",
@@ -1288,6 +1576,16 @@ export async function GET(req: Request) {
 
     const ctxList = (ctxRows ?? []) as any[];
 
+    const allVaNumbers = Array.from(
+      new Set(
+        ctxList
+          .flatMap((p) => [getVaInfo(p, "rood").current, getVaInfo(p, "blauw").current])
+          .map((v) => onlyDigits(v))
+          .filter(Boolean),
+      ),
+    );
+    const uitslagenByVa = await loadUitslagenByVa(allVaNumbers);
+
     const eventName = safe(eventMeta?.naam, "-");
     const eventDate = fmtNlDateOnly(eventMeta?.datum);
     const eventDateRaw = eventMeta?.datum ?? null;
@@ -1340,22 +1638,24 @@ export async function GET(req: Request) {
         row.getCell(4).value = getCurrentNaam(p, "rood");
         row.getCell(5).value = getCurrentGym(p, "rood");
         row.getCell(6).value = safe(roodVa.current, "");
-        row.getCell(7).value = getLeeftijdOpEvenement(p, "rood", eventDateRaw);
-        row.getCell(8).value = "vs";
-        row.getCell(9).value = getCurrentNaam(p, "blauw");
-        row.getCell(10).value = getCurrentGym(p, "blauw");
-        row.getCell(11).value = safe(blauwVa.current, "");
-        row.getCell(12).value = getLeeftijdOpEvenement(p, "blauw", eventDateRaw);
-        row.getCell(13).value = getResolvedMaxGewicht(p, rawMaps);
-        row.getCell(14).value = getComputedRondetijden(p, eventDateRaw);
+        row.getCell(7).value = recordValueForExcel(getRecordOfErvaring(p, "rood", uitslagenByVa));
+        row.getCell(8).value = getLeeftijdOpEvenement(p, "rood", eventDateRaw);
+        row.getCell(9).value = "vs";
+        row.getCell(10).value = getCurrentNaam(p, "blauw");
+        row.getCell(11).value = getCurrentGym(p, "blauw");
+        row.getCell(12).value = safe(blauwVa.current, "");
+        row.getCell(13).value = recordValueForExcel(getRecordOfErvaring(p, "blauw", uitslagenByVa));
+        row.getCell(14).value = getLeeftijdOpEvenement(p, "blauw", eventDateRaw);
+        row.getCell(15).value = getResolvedMaxGewicht(p, rawMaps);
+        row.getCell(16).value = getComputedRondetijden(p, eventDateRaw);
 
-        for (let c = 1; c <= 14; c++) {
+        for (let c = 1; c <= 16; c++) {
           styleUploadDataCell(row.getCell(c), {
-            center: c === 1 || c === 7 || c === 8 || c === 12 || c === 13 || c === 14,
+            center: c === 1 || c === 7 || c === 8 || c === 9 || c === 13 || c === 14 || c === 15 || c === 16,
           });
         }
 
-        row.getCell(8).font = {
+        row.getCell(9).font = {
           name: "Calibri",
           size: 11,
           bold: true,

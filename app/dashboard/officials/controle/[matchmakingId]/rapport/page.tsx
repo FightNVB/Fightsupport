@@ -38,6 +38,12 @@ type ResultRow = {
   created_at: string | null;
   review_status?: string | null;
   hoek?: "rood" | "blauw" | null;
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  toernooi_va_nummer?: string | null;
+  va_nummer?: string | null;
+  naam?: string | null;
+  sportschool?: string | null;
 };
 
 type AuditEvent = {
@@ -59,6 +65,7 @@ type IssueSummaryItem = {
   gym: string;
   label: string;
   detail: string;
+  sortNaam?: string;
 };
 
 type VerbodSummaryItem = {
@@ -69,6 +76,18 @@ type VerbodSummaryItem = {
   gym: string;
   type: "STARTVERBOD" | "VERBOD";
   detail: string;
+};
+
+type ToernooiFighterIssue = {
+  toernooiCode: string;
+  fighterKey: string;
+  naam: string;
+  gym: string;
+  hoek: "rood" | "blauw" | null;
+  scope: "fighter" | "pair";
+  labels: string[];
+  details: string[];
+  status: PartijStatus;
 };
 
 function safe(v: any, fallback = "-") {
@@ -203,7 +222,6 @@ function isMissingVARow(row: ResultRow) {
 
 function isGenericMissingVARow(row: ResultRow) {
   const text = `${row.rule ?? ""} ${row.boodschap ?? ""}`.trim().toLowerCase().replace(/\s+/g, " ");
-
   return (
     text === "fightpaspoortnummer ontbreekt" ||
     text === "fightpaspoort nummer ontbreekt" ||
@@ -216,12 +234,10 @@ function isGenericMissingVARow(row: ResultRow) {
 function missingVARowSpecificity(row: ResultRow) {
   const msg = safeRaw(row.boodschap ?? row.rule);
   let score = 0;
-
   if (!isGenericMissingVARow(row)) score += 100;
   if (msg) score += Math.min(msg.length, 80);
   if (safeRaw(row.aantekeningen)) score += 10;
   if (safeRaw(row.rule_code)) score += 5;
-
   return score;
 }
 
@@ -256,7 +272,6 @@ function dedupeRows(rows: ResultRow[]) {
           missingVaBest.set(key, row);
         }
       }
-
       continue;
     }
 
@@ -400,23 +415,17 @@ function isVaAuditEventType(v: any) {
 }
 
 function getCurrentVaFromCtx(ctx: any, hoek: "rood" | "blauw") {
-  if (hoek === "rood") {
-    return safeRaw(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.rood_va);
-  }
+  if (hoek === "rood") return safeRaw(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.rood_va);
   return safeRaw(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.blauw_va);
 }
 
 function getPrevVaFromCtx(ctx: any, hoek: "rood" | "blauw") {
-  if (hoek === "rood") {
-    return safeRaw(ctx?.rood_va_mm_prev);
-  }
+  if (hoek === "rood") return safeRaw(ctx?.rood_va_mm_prev);
   return safeRaw(ctx?.blauw_va_mm_prev);
 }
 
 function hasPrevVaField(ctx: any, hoek: "rood" | "blauw") {
-  if (hoek === "rood") {
-    return ctx?.rood_va_mm_prev !== undefined && ctx?.rood_va_mm_prev !== null;
-  }
+  if (hoek === "rood") return ctx?.rood_va_mm_prev !== undefined && ctx?.rood_va_mm_prev !== null;
   return ctx?.blauw_va_mm_prev !== undefined && ctx?.blauw_va_mm_prev !== null;
 }
 
@@ -426,19 +435,21 @@ function statusFromResultaat(resultaat: any, rule_code?: any): PartijStatus {
     if (c.includes("JEUGD_VOLWASSEN_MIX")) return "VERBOD";
     if (c.includes("LEEFTIJD_VERSCHIL") && c.includes("AFKEUR")) return "VERBOD";
     if (c.includes("VERBOD")) return "VERBOD";
+    if (c.includes("DISPENSATIE")) return "DISPENSATIE";
     if (c.includes("AFKEUR")) return "AFKEUR";
   }
 
   const s = String(resultaat ?? "").trim().toLowerCase();
   if (s === "verbod") return "VERBOD";
-  if (s === "afkeur" || s === "afgekeurd") return "AFKEUR";
   if (s === "dispensatie") return "DISPENSATIE";
+  if (s === "afkeur" || s === "afgekeurd") return "AFKEUR";
   if (s === "actie") return "ACTIE";
   return "OK";
 }
 
 function statusPrio(s: PartijStatus) {
-  return s === "VERBOD" ? 0 : s === "AFKEUR" ? 1 : s === "DISPENSATIE" ? 2 : s === "ACTIE" ? 3 : 9;
+  // Hoogste prioriteit eerst: VERBOD > DISPENSATIE > AFKEUR > ACTIE > OK
+  return s === "VERBOD" ? 0 : s === "DISPENSATIE" ? 1 : s === "AFKEUR" ? 2 : s === "ACTIE" ? 3 : 9;
 }
 
 function partyStatusVoorMeldingen(meldingen: ResultRow[]): PartijStatus {
@@ -470,6 +481,87 @@ function maxGewichtLabel(p: any) {
   const raw = p.max_gewicht ?? p.maxgewicht ?? p.max_kg ?? null;
   if (raw == null || raw === "") return "-";
   return String(raw).replace(".", ",");
+}
+
+function isTrueLike(v: any) {
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "true" || s === "1" || s === "ja" || s === "yes";
+}
+
+function getToernooiCode(row: any) {
+  return String(
+    row?.toernooi_code ??
+      row?.toernooi_id ??
+      row?.toernooi_nummer ??
+      row?.toernooi ??
+      ""
+  )
+    .trim()
+    .toUpperCase();
+}
+
+function parseRawJsonSafe(v: any): any | null {
+  if (!v) return null;
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return null;
+  }
+}
+
+function getToernooiCodeSafe(row: any) {
+  const direct = getToernooiCode(row);
+  if (direct) return direct;
+  const raw = parseRawJsonSafe(row?.raw_json);
+  const fromRaw = String(raw?.toernooi_code ?? raw?.toernooi_id ?? raw?.toernooi_nummer ?? "").trim().toUpperCase();
+  if (fromRaw) return fromRaw;
+  return "TOERNOOI";
+}
+
+function getPartijLabel(row: any) {
+  if (isTrueLike(row?.is_toernooi)) return getToernooiCodeSafe(row);
+  return safe(row?.partij_label ?? row?.partij_nr);
+}
+
+function getToernooiFighterKey(row: any, hoek: "rood" | "blauw") {
+  const va = normalizeVa(hoek === "rood" ? row?.rood_va_mm ?? row?.va_rood ?? row?.rood_va : row?.blauw_va_mm ?? row?.va_blauw ?? row?.blauw_va);
+  if (va) return `va:${va}`;
+
+  const naam = String(
+    hoek === "rood"
+      ? row?.rood_naam_fp ?? row?.rood_naam_mm ?? row?.rood_naam ?? ""
+      : row?.blauw_naam_fp ?? row?.blauw_naam_mm ?? row?.blauw_naam ?? ""
+  )
+    .trim()
+    .toLowerCase();
+
+  const gym = String(
+    hoek === "rood"
+      ? row?.rood_gym_fp ?? row?.rood_gym_mm ?? row?.rood_gym ?? ""
+      : row?.blauw_gym_fp ?? row?.blauw_gym_mm ?? row?.blauw_gym ?? ""
+  )
+    .trim()
+    .toLowerCase();
+
+  return `fallback:${naam}__${gym}`;
+}
+function getToernooiPairKey(row: any) {
+  const rood = getToernooiFighterKey(row, "rood");
+  const blauw = getToernooiFighterKey(row, "blauw");
+  return [rood, blauw].sort().join("__");
+}
+
+function getToernooiPairNaam(row: any) {
+  const rood = safe(row?.rood_naam_fp ?? row?.rood_naam_mm ?? row?.rood_naam);
+  const blauw = safe(row?.blauw_naam_fp ?? row?.blauw_naam_mm ?? row?.blauw_naam);
+  return `${rood} / ${blauw}`;
+}
+
+function getToernooiPairGym(row: any) {
+  const rood = safe(row?.rood_gym_fp ?? row?.rood_gym_mm ?? row?.rood_gym, "");
+  const blauw = safe(row?.blauw_gym_fp ?? row?.blauw_gym_mm ?? row?.blauw_gym, "");
+  return [rood, blauw].filter(Boolean).join(" / ") || "-";
 }
 
 function Badge({ status }: { status: PartijStatus }) {
@@ -541,20 +633,19 @@ function keurmerkTekst(row: ResultRow) {
 }
 
 function isKeurmerkOpenIssue(row: ResultRow) {
-  if (!isKeurmerkRow(row)) return false;
+  if (!isKeurmerkRow(row) && !isSportschoolMatchRow(row)) return false;
   if (isBelgischeManualCheckRow(row)) return false;
 
   const tekst = keurmerkTekst(row);
 
-  if (!isApprovedOrClosed(row.review_status)) {
-    return true;
-  }
-
-  if (normResultaatLower(row.resultaat) !== "ok") {
-    return true;
-  }
-
   if (
+    tekst.includes("sportschool_niet_gevonden") ||
+    tekst.includes("sportschool niet gevonden") ||
+    tekst.includes("geen sportschool match") ||
+    tekst.includes("geen match in sportscholen") ||
+    tekst.includes("lege/ongeldige sportschoolnaam") ||
+    tekst.includes("ongeldige sportschoolnaam") ||
+    tekst.includes("leeg sportschool") ||
     tekst.includes("geen match") ||
     tekst.includes("geen match gevonden") ||
     tekst.includes("niet gevonden") ||
@@ -576,7 +667,7 @@ function isKeurmerkOpenIssue(row: ResultRow) {
     return true;
   }
 
-  return false;
+  return normResultaatLower(row.resultaat) !== "ok";
 }
 
 async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
@@ -649,6 +740,7 @@ export default function RapportPage() {
   const [run, setRun] = useState<ControleRun | null>(null);
   const [eventMeta, setEventMeta] = useState<EventMeta | null>(null);
   const [ctxRows, setCtxRows] = useState<any[]>([]);
+  const [toernooiCtxRows, setToernooiCtxRows] = useState<any[]>([]);
   const [resultaten, setResultaten] = useState<ResultRow[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
 
@@ -676,6 +768,7 @@ export default function RapportPage() {
 
         if (!lastRun?.id) {
           setCtxRows([]);
+          setToernooiCtxRows([]);
           setResultaten([]);
           setAuditEvents([]);
           setLoading(false);
@@ -692,9 +785,24 @@ export default function RapportPage() {
         if (ctxErr) throw ctxErr;
         setCtxRows(ctx ?? []);
 
+        const { data: toernooiCtx, error: toernooiCtxErr } = await supabase
+          .from("controle_toernooi_context")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("controle_run_id", lastRun.id)
+          .order("toernooi_code", { ascending: true })
+          .order("naam", { ascending: true });
+
+        if (toernooiCtxErr) {
+          console.warn("controle_toernooi_context load failed:", toernooiCtxErr.message);
+          setToernooiCtxRows([]);
+        } else {
+          setToernooiCtxRows(toernooiCtx ?? []);
+        }
+
         const { data: res, error: resErr } = await supabase
           .from("controle_resultaten")
-          .select("partij_nr, rule, rule_code, resultaat, boodschap, aantekeningen, created_at, review_status, hoek")
+          .select("partij_nr, rule, rule_code, resultaat, boodschap, aantekeningen, created_at, review_status, hoek, toernooi_code, fighter_id, toernooi_va_nummer")
           .eq("controle_run_id", lastRun.id);
 
         if (resErr) throw resErr;
@@ -723,6 +831,9 @@ export default function RapportPage() {
 
   const openMeldingen = useMemo(() => {
     const filtered = (resultaten ?? []).filter((r) => {
+      // Goedgekeurde/afgehandelde meldingen horen niet meer in het rapport.
+      if (isApprovedOrClosed(r.review_status)) return false;
+
       if (isNameMismatch(r) && !isFightpaspoortGewijzigd(r)) return false;
 
       if (isMissingVARow(r)) {
@@ -730,9 +841,7 @@ export default function RapportPage() {
         return true;
       }
 
-      if (isFightpaspoortGewijzigd(r)) {
-        return true;
-      }
+      if (isFightpaspoortGewijzigd(r)) return true;
 
       if (isBelgischeManualCheckRow(r)) {
         if (isApprovedOrClosed(r.review_status)) return false;
@@ -742,9 +851,7 @@ export default function RapportPage() {
 
       if (isKeurmerkOpenIssue(r)) return true;
 
-      if (isSportschoolMatchRow(r) && !isApprovedOrClosed(r.review_status)) {
-        return true;
-      }
+      if (isSportschoolMatchRow(r) && !isApprovedOrClosed(r.review_status)) return true;
 
       if (isApprovedOrClosed(r.review_status)) return false;
       if (normResultaatLower(r.resultaat) === "ok") return false;
@@ -753,10 +860,6 @@ export default function RapportPage() {
     });
 
     return dedupeRows(filtered);
-  }, [resultaten]);
-
-  const openKeurmerkRows = useMemo(() => {
-    return (resultaten ?? []).filter((r) => isKeurmerkOpenIssue(r) && !isBelgischeManualCheckRow(r));
   }, [resultaten]);
 
   const ctxByPartij = useMemo(() => {
@@ -769,79 +872,48 @@ export default function RapportPage() {
     return map;
   }, [ctxRows]);
 
-  const verbodStartverbodIssues = useMemo(() => {
-    const items: VerbodSummaryItem[] = [];
-    const seen = new Set<string>();
-
-    for (const r of resultaten ?? []) {
-      const resultaat = normResultaatLower(r.resultaat);
-      const notApproved = !isApprovedOrClosed(r.review_status);
-
-      let type: "STARTVERBOD" | "VERBOD" | null = null;
-
-      if (isStartverbodRow(r)) {
-        if (resultaat === "ok") continue;
-        if (!notApproved && resultaat !== "verbod") continue;
-        type = "STARTVERBOD";
-      } else if (isVerbodRow(r)) {
-        if (!notApproved) continue;
-        if (resultaat === "ok") continue;
-        type = "VERBOD";
-      } else if (resultaat === "verbod" && notApproved) {
-        type = "VERBOD";
-      } else {
-        continue;
-      }
-
-      const pn = Number(r.partij_nr);
+  const gewonePartijNrs = useMemo(() => {
+    const s = new Set<number>();
+    for (const row of ctxRows ?? []) {
+      const pn = Number(row?.partij_nr);
       if (!Number.isFinite(pn)) continue;
+      if (!isTrueLike(row?.is_toernooi)) s.add(pn);
+    }
+    return s;
+  }, [ctxRows]);
 
-      const ctx = ctxByPartij.get(pn);
-      const inferredHoek = inferHoek(r);
-      const hoek: "rood" | "blauw" | "-" = inferredHoek ?? "-";
+  const toernooiRows = useMemo(() => {
+    return [
+      ...(ctxRows ?? []).filter((row: any) => isTrueLike(row?.is_toernooi)),
+      ...(toernooiCtxRows ?? []),
+    ];
+  }, [ctxRows, toernooiCtxRows]);
 
-      let naam = "-";
-      let gym = "-";
-
-      if (inferredHoek === "rood") {
-        naam = safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm);
-        gym = safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym);
-      } else if (inferredHoek === "blauw") {
-        naam = safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
-        gym = safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
-      } else {
-        const roodNaam = safeRaw(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm);
-        const blauwNaam = safeRaw(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
-        const roodGym = safeRaw(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym);
-        const blauwGym = safeRaw(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
-
-        naam = [roodNaam, blauwNaam].filter(Boolean).join(" / ") || "-";
-        gym = [roodGym, blauwGym].filter(Boolean).join(" / ") || "-";
-      }
-
-      const detail = safe(r.boodschap ?? r.rule ?? r.rule_code ?? type);
-      const key = `${type}-${pn}-${hoek}-${detail}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      items.push({
-        partij_nr: pn,
-        partij: safe(ctx?.partij_label ?? pn),
-        hoek,
-        naam,
-        gym,
-        type,
-        detail,
-      });
+  const toernooiInfo = useMemo(() => {
+    if (!toernooiRows.length) {
+      return {
+        isToernooi: false,
+        code: "-",
+        codes: [] as string[],
+        aantalToernooien: 0,
+      };
     }
 
-    return items.sort((a, b) => {
-      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
-      if (a.type !== b.type) return a.type === "STARTVERBOD" ? -1 : 1;
-      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
-      return a.naam.localeCompare(b.naam, "nl");
-    });
-  }, [resultaten, ctxByPartij]);
+    const codes = Array.from(
+      new Set(
+        toernooiRows
+          .map((row: any) => getToernooiCodeSafe(row))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "nl"));
+
+    return {
+      isToernooi: true,
+      code: codes.join(" / ") || "-",
+      codes,
+      aantalToernooien: codes.length,
+    };
+  }, [toernooiRows]);
 
   const meldByPartij = useMemo(() => {
     const m = new Map<number, ResultRow[]>();
@@ -877,8 +949,8 @@ export default function RapportPage() {
 
       if (isApprovedOrClosed(r.review_status) || normResultaatLower(r.resultaat) === "ok") {
         prev.state = "ok";
-      } else {
-        if (prev.state !== "ok") prev.state = "issue";
+      } else if (prev.state !== "ok") {
+        prev.state = "issue";
       }
 
       map.set(key, prev);
@@ -888,41 +960,163 @@ export default function RapportPage() {
   }, [resultaten]);
 
   const partijenCompact = useMemo(() => {
-    return (ctxRows ?? []).map((p: any) => {
-      const pn = Number(p.partij_nr);
-      const meldingen = Number.isFinite(pn) ? meldByPartij.get(pn) ?? [] : [];
-      return {
-        partij_nr: pn,
-        partij_label: safe(p.partij_label ?? p.partij_nr),
-        discipline: safe(p.discipline),
-        klasse: safe(p.klasse_mm ?? p.klasse),
-        max_gewicht: maxGewichtLabel(p),
-        rood: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-        rood_gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
-        blauw: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
-        blauw_gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
-        status: partyStatusVoorMeldingen(meldingen),
-      };
-    });
+    return (ctxRows ?? [])
+      .filter((p: any) => !isTrueLike(p?.is_toernooi))
+      .map((p: any) => {
+        const pn = Number(p.partij_nr);
+        const meldingen = Number.isFinite(pn) ? meldByPartij.get(pn) ?? [] : [];
+        return {
+          partij_nr: pn,
+          partij_label: safe(p.partij_label ?? p.partij_nr),
+          discipline: safe(p.discipline),
+          klasse: safe(p.klasse_mm ?? p.klasse),
+          max_gewicht: maxGewichtLabel(p),
+          rood: safe(p.rood_naam_fp ?? p.rood_naam_mm),
+          rood_gym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
+          blauw: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
+          blauw_gym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
+          status: partyStatusVoorMeldingen(meldingen),
+        };
+      });
   }, [ctxRows, meldByPartij]);
+
+  const wedstrijdenMetMeldingen = useMemo(() => {
+    return (ctxRows ?? [])
+      .filter((p: any) => !isTrueLike(p?.is_toernooi))
+      .map((p: any) => {
+        const pn = Number(p.partij_nr);
+        const meldingen = Number.isFinite(pn) ? meldByPartij.get(pn) ?? [] : [];
+        if (!meldingen.length) return null;
+        return {
+          partij_nr: pn,
+          partij_label: safe(p.partij_label ?? p.partij_nr),
+          status: partyStatusVoorMeldingen(meldingen),
+          discipline: safe(p.discipline),
+          klasse: safe(p.klasse_mm ?? p.klasse),
+          max_gewicht: maxGewichtLabel(p),
+          roodNaam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
+          roodGym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
+          roodVa: safe(p.rood_va_mm ?? p.va_rood ?? p.rood_va),
+          blauwNaam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
+          blauwGym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
+          blauwVa: safe(p.blauw_va_mm ?? p.va_blauw ?? p.blauw_va),
+          meldingen,
+        };
+      })
+      .filter(Boolean) as Array<{
+      partij_nr: number;
+      partij_label: string;
+      status: PartijStatus;
+      discipline: string;
+      klasse: string;
+      max_gewicht: string;
+      roodNaam: string;
+      roodGym: string;
+      roodVa: string;
+      blauwNaam: string;
+      blauwGym: string;
+      blauwVa: string;
+      meldingen: ResultRow[];
+    }>;
+  }, [ctxRows, meldByPartij]);
+
+  const verbodStartverbodIssues = useMemo(() => {
+    const items: VerbodSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const r of resultaten ?? []) {
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) continue;
+
+      const resultaat = normResultaatLower(r.resultaat);
+      const notApproved = !isApprovedOrClosed(r.review_status);
+
+      let type: "STARTVERBOD" | "VERBOD" | null = null;
+
+      if (isStartverbodRow(r)) {
+        if (resultaat === "ok") continue;
+        if (!notApproved && resultaat !== "verbod") continue;
+        type = "STARTVERBOD";
+      } else if (isVerbodRow(r)) {
+        if (!notApproved) continue;
+        if (resultaat === "ok") continue;
+        type = "VERBOD";
+      } else if (resultaat === "verbod" && notApproved) {
+        type = "VERBOD";
+      } else {
+        continue;
+      }
+
+      const ctx = ctxByPartij.get(pn);
+      const inferredHoek = inferHoek(r);
+      const hoek: "rood" | "blauw" | "-" = inferredHoek ?? "-";
+
+      let naam = "-";
+      let gym = "-";
+
+      if (inferredHoek === "rood") {
+        naam = safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm);
+        gym = safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym);
+      } else if (inferredHoek === "blauw") {
+        naam = safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
+        gym = safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
+      } else {
+        const roodNaam = safeRaw(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm);
+        const blauwNaam = safeRaw(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm);
+        const roodGym = safeRaw(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym);
+        const blauwGym = safeRaw(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
+        naam = [roodNaam, blauwNaam].filter(Boolean).join(" / ") || "-";
+        gym = [roodGym, blauwGym].filter(Boolean).join(" / ") || "-";
+      }
+
+      const detail = safe(r.boodschap ?? r.rule ?? r.rule_code ?? type);
+      const key = `${type}-${pn}-${hoek}-${detail}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      items.push({
+        partij_nr: pn,
+        partij: safe(ctx?.partij_label ?? pn),
+        hoek,
+        naam,
+        gym,
+        type,
+        detail,
+      });
+    }
+
+    return items.sort((a, b) => {
+      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
+      if (a.type !== b.type) return a.type === "STARTVERBOD" ? -1 : 1;
+      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
+      return a.naam.localeCompare(b.naam, "nl");
+    });
+  }, [resultaten, ctxByPartij, gewonePartijNrs]);
 
   const licentieIssues = useMemo(() => {
     const items: IssueSummaryItem[] = [];
+    const seen = new Set<string>();
 
     for (const p of ctxRows ?? []) {
       const pn = Number(p.partij_nr);
       if (!Number.isFinite(pn)) continue;
-      const partij = safe(p.partij_label ?? p.partij_nr);
+
+      const partij = getPartijLabel(p);
 
       const add = (hoek: "rood" | "blauw", naam: string, gym: string, detail: string) => {
+        const key = `${naam.toLowerCase()}__licentie`;
+        if (seen.has(key)) return;
+        seen.add(key);
+
         items.push({
           partij_nr: pn,
           partij,
           hoek,
           naam,
           gym,
-          label: "Licentie",
+          label: "Geen licentie",
           detail,
+          sortNaam: naam.toLowerCase(),
         });
       };
 
@@ -936,24 +1130,24 @@ export default function RapportPage() {
         roodMeta?.state === "ok"
           ? false
           : roodMeta?.state === "issue"
-            ? true
-            : roodMeta?.hasRow
-              ? false
-              : licentieIsProbleem(p.rood_licentie);
+          ? true
+          : roodMeta?.hasRow
+          ? false
+          : licentieIsProbleem(p.rood_licentie);
 
       const blauwIssue =
         blauwMeta?.state === "ok"
           ? false
           : blauwMeta?.state === "issue"
-            ? true
-            : blauwMeta?.hasRow
-              ? false
-              : licentieIsProbleem(p.blauw_licentie);
+          ? true
+          : blauwMeta?.hasRow
+          ? false
+          : licentieIsProbleem(p.blauw_licentie);
 
       if (roodIssue) {
         add(
           "rood",
-          safe(p.rood_naam_fp ?? p.rood_naam_mm),
+          safe(p.rood_naam_fp ?? p.rood_naam_mm ?? p.rood_naam),
           safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
           `licentie: ${licentieLabel(p.rood_licentie)}`
         );
@@ -962,25 +1156,26 @@ export default function RapportPage() {
       if (blauwIssue) {
         add(
           "blauw",
-          safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
+          safe(p.blauw_naam_fp ?? p.blauw_naam_mm ?? p.blauw_naam),
           safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
           `licentie: ${licentieLabel(p.blauw_licentie)}`
         );
       }
     }
 
-    return items.sort((a, b) => {
-      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
-      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
-      return a.naam.localeCompare(b.naam, "nl");
-    });
+    return items.sort((a, b) =>
+      (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl")
+    );
   }, [ctxRows, licentieMetaByPartijHoek]);
 
   const missingVaIssues = useMemo(() => {
     const items: IssueSummaryItem[] = [];
+    const seen = new Set<string>();
 
     const missingRows = dedupeRows(
       (resultaten ?? []).filter((r) => {
+        const pn = Number(r.partij_nr);
+        if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) return false;
         if (!isMissingVARow(r)) return false;
         if (isApprovedOrClosed(r.review_status)) return false;
         return true;
@@ -993,26 +1188,45 @@ export default function RapportPage() {
       if (!Number.isFinite(pn) || !hoek) continue;
 
       const ctx = ctxByPartij.get(pn);
+      if (!ctx) continue;
+
+      const partij = getPartijLabel(ctx);
+      const naam =
+        hoek === "rood"
+          ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? ctx?.rood_naam)
+          : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? ctx?.blauw_naam);
+
+      const key = `${naam.toLowerCase()}__va-ontbreekt`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
       items.push({
         partij_nr: pn,
-        partij: safe(ctx?.partij_label ?? pn),
+        partij,
         hoek,
-        naam: hoek === "rood" ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm) : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm),
+        naam,
         gym:
           hoek === "rood"
             ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
             : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym),
         label: "VA ontbreekt",
         detail: safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer ontbreekt"),
+        sortNaam: naam.toLowerCase(),
       });
     }
 
-    return items.sort((a, b) => {
-      if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
-      if (a.hoek !== b.hoek) return a.hoek.localeCompare(b.hoek);
-      return a.naam.localeCompare(b.naam, "nl");
+    return items.sort((a, b) =>
+      (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl")
+    );
+  }, [resultaten, ctxByPartij, gewonePartijNrs]);
+
+  const openKeurmerkRows = useMemo(() => {
+    return (resultaten ?? []).filter((r) => {
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) return false;
+      return isKeurmerkOpenIssue(r) && !isBelgischeManualCheckRow(r);
     });
-  }, [resultaten, ctxByPartij]);
+  }, [resultaten, gewonePartijNrs]);
 
   const keurmerkIssues = useMemo(() => {
     const items: IssueSummaryItem[] = [];
@@ -1063,7 +1277,7 @@ export default function RapportPage() {
 
     for (const p of ctxRows ?? []) {
       const pn = Number(p.partij_nr);
-      if (!Number.isFinite(pn)) continue;
+      if (!Number.isFinite(pn) || isTrueLike(p?.is_toernooi)) continue;
       const partij = safe(p.partij_label ?? p.partij_nr);
 
       const roodPrevRaw = getPrevVaFromCtx(p, "rood");
@@ -1111,7 +1325,7 @@ export default function RapportPage() {
       if (!isVaAuditEventType(ev.event_type)) continue;
 
       const pn = Number(ev.partij_nr);
-      if (!Number.isFinite(pn)) continue;
+      if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) continue;
       const hoek = (ev.hoek ?? "rood") as "rood" | "blauw";
       const key = `${pn}-${hoek}`;
       if (seen.has(key)) continue;
@@ -1142,11 +1356,12 @@ export default function RapportPage() {
     }
 
     for (const r of resultaten ?? []) {
+      if (isApprovedOrClosed(r.review_status)) continue;
       if (!isFightpaspoortGewijzigd(r)) continue;
 
       const pn = Number(r.partij_nr);
       const hoek = inferHoek(r);
-      if (!Number.isFinite(pn) || !hoek) continue;
+      if (!Number.isFinite(pn) || !hoek || !gewonePartijNrs.has(pn)) continue;
 
       const key = `${pn}-${hoek}`;
       if (seen.has(key)) continue;
@@ -1176,17 +1391,20 @@ export default function RapportPage() {
       if (a.partij_nr !== b.partij_nr) return a.partij_nr - b.partij_nr;
       return a.hoek.localeCompare(b.hoek);
     });
-  }, [auditEvents, ctxByPartij, ctxRows, resultaten]);
+  }, [auditEvents, ctxByPartij, ctxRows, resultaten, gewonePartijNrs]);
 
   const sportschoolIssues = useMemo(() => {
+    const belgischeCheck = new Set<string>();
+    const nietGevonden = new Set<string>();
     const geenKeurmerk = new Set<string>();
     const geenData = new Set<string>();
     const verlopen = new Set<string>();
     const datumOntbreekt = new Set<string>();
-    const nietGevonden = new Set<string>();
-    const belgischeCheck = new Set<string>();
 
     for (const r of resultaten ?? []) {
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) continue;
+
       const isRelevant =
         isBelgischeManualCheckRow(r) ||
         isKeurmerkOpenIssue(r) ||
@@ -1196,16 +1414,15 @@ export default function RapportPage() {
 
       const tekst = `${r.rule_code ?? ""} ${r.rule ?? ""} ${r.boodschap ?? ""} ${r.aantekeningen ?? ""}`.toLowerCase();
       const quoted = String(r.boodschap ?? "").match(/"([^"]+)"/);
-      const pn = Number(r.partij_nr);
       const hoek = inferHoek(r);
-      const ctx = Number.isFinite(pn) ? ctxByPartij.get(pn) : null;
+      const ctx = ctxByPartij.get(pn);
 
       const gymFromCtx =
         hoek === "rood"
           ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "")
           : hoek === "blauw"
-            ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "")
-            : "";
+          ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "")
+          : "";
 
       const gym = quoted?.[1]?.trim() || gymFromCtx || "-";
       if (!gym) continue;
@@ -1254,22 +1471,18 @@ export default function RapportPage() {
         nietGevonden.add(gym);
         continue;
       }
-
       if (isGeenData) {
         geenData.add(gym);
         continue;
       }
-
       if (isDatumOntbreekt) {
         datumOntbreekt.add(gym);
         continue;
       }
-
       if (isVerlopen) {
         verlopen.add(gym);
         continue;
       }
-
       if (isGeenKeurmerk || !isApprovedOrClosed(r.review_status) || normResultaatLower(r.resultaat) !== "ok") {
         geenKeurmerk.add(gym);
       }
@@ -1282,25 +1495,21 @@ export default function RapportPage() {
       verlopen.delete(gym);
       datumOntbreekt.delete(gym);
     }
-
     for (const gym of nietGevonden) {
       geenData.delete(gym);
       geenKeurmerk.delete(gym);
       verlopen.delete(gym);
       datumOntbreekt.delete(gym);
     }
-
     for (const gym of geenData) {
       geenKeurmerk.delete(gym);
       verlopen.delete(gym);
       datumOntbreekt.delete(gym);
     }
-
     for (const gym of datumOntbreekt) {
       geenKeurmerk.delete(gym);
       verlopen.delete(gym);
     }
-
     for (const gym of verlopen) {
       geenKeurmerk.delete(gym);
     }
@@ -1313,55 +1522,368 @@ export default function RapportPage() {
       verlopen: Array.from(verlopen).sort((a, b) => a.localeCompare(b, "nl")),
       datumOntbreekt: Array.from(datumOntbreekt).sort((a, b) => a.localeCompare(b, "nl")),
     };
-  }, [resultaten, ctxByPartij]);
+  }, [resultaten, ctxByPartij, gewonePartijNrs]);
 
-  const partijMetOpenMeldingen = useMemo(() => {
-    return (ctxRows ?? [])
-      .map((p: any) => {
-        const pn = Number(p.partij_nr);
-        if (!Number.isFinite(pn)) return null;
-        const meldingen = meldByPartij.get(pn) ?? [];
-        if (!meldingen.length) return null;
-        return {
-          partij_nr: pn,
-          partij_label: safe(p.partij_label ?? p.partij_nr),
-          status: partyStatusVoorMeldingen(meldingen),
-          discipline: safe(p.discipline),
-          klasse: safe(p.klasse_mm ?? p.klasse),
-          max_gewicht: maxGewichtLabel(p),
-          roodNaam: safe(p.rood_naam_fp ?? p.rood_naam_mm),
-          roodGym: safe(p.rood_gym_fp ?? p.rood_gym_mm ?? p.rood_gym),
-          roodVa: safe(p.rood_va_mm ?? p.va_rood ?? p.rood_va),
-          blauwNaam: safe(p.blauw_naam_fp ?? p.blauw_naam_mm),
-          blauwGym: safe(p.blauw_gym_fp ?? p.blauw_gym_mm ?? p.blauw_gym),
-          blauwVa: safe(p.blauw_va_mm ?? p.va_blauw ?? p.blauw_va),
-          meldingen,
-        };
-      })
-      .filter(Boolean) as Array<{
-      partij_nr: number;
-      partij_label: string;
+  const sportschoolIssueCount = useMemo(() => {
+    return (
+      sportschoolIssues.nietGevonden.length +
+      sportschoolIssues.geenData.length +
+      sportschoolIssues.datumOntbreekt.length +
+      sportschoolIssues.verlopen.length +
+      sportschoolIssues.geenKeurmerk.length
+    );
+  }, [sportschoolIssues]);
+
+  const toernooiMeldingen = useMemo(() => {
+    const map = new Map<string, ToernooiFighterIssue>();
+    const seen = new Set<string>();
+
+    const normalizeIssueGroup = (label: string, detail: string) => {
+      const l = String(label ?? "").trim().toLowerCase();
+      const d = String(detail ?? "").trim().toLowerCase();
+
+      if (
+        l.includes("verkeerde klasse") ||
+        l.includes("boutklasse") ||
+        l.includes("klasse") ||
+        d.includes("verkeerde klasse") ||
+        d.includes("boutklasse klopt niet") ||
+        d.includes("hoort niet in") ||
+        d.includes("mag maximaal")
+      ) {
+        return "klasse_mismatch";
+      }
+
+      if (l.includes("leeftijd") || d.includes("maanden") || d.includes("jeugd/volwassen")) return "leeftijd";
+      if (l.includes("partijverschil") || d.includes("partijverschil") || d.includes("verschil")) return "partijverschil";
+      if (l.includes("gewicht") || d.includes("gewicht") || d.includes("kg")) return "gewicht";
+      if (l.includes("rondetijd") || l.includes("ronde") || d.includes("rondetijd") || d.includes("ronde")) return "rondetijd";
+      if (l.includes("verbod") || d.includes("verbod")) return "verbod";
+      if (l.includes("dispensatie") || d.includes("dispensatie")) return "dispensatie";
+      if (l.includes("afkeur") || d.includes("afkeur")) return "afkeur";
+      if (l.includes("actie") || d.includes("actie")) return "actie";
+
+      return `${l}__${d}`;
+    };
+
+    const isBijzonderhedenRow = (res: ResultRow) => {
+      return (
+        isLicentieRow(res) ||
+        isMissingVARow(res) ||
+        isStartverbodRow(res) ||
+        isKeurmerkRow(res) ||
+        isSportschoolMatchRow(res) ||
+        isBelgischeManualCheckRow(res) ||
+        isFightpaspoortGewijzigd(res)
+      );
+    };
+
+    const isOpenToernooiMelding = (res: ResultRow) => {
+      if (isApprovedOrClosed(res.review_status)) return false;
+      if (normResultaatLower(res.resultaat) === "ok") return false;
+      if (isBijzonderhedenRow(res)) return false;
+      return true;
+    };
+
+    const codeFromAny = (row: any) =>
+      String(row?.toernooi_code ?? row?.toernooiCode ?? "").trim().toUpperCase();
+
+    const fighterIdFromAny = (row: any) =>
+      normalizeVa(row?.fighter_id ?? row?.toernooi_va_nummer ?? row?.va_nummer ?? row?.fighterId);
+
+    const ctxByToernooiFighter = new Map<string, any>();
+
+    for (const row of toernooiRows) {
+      const code = codeFromAny(row) || getToernooiCodeSafe(row);
+      const fighterId = fighterIdFromAny(row);
+      if (!code || !fighterId) continue;
+      ctxByToernooiFighter.set(`${code}__${fighterId}`, row);
+    }
+
+    const addIssue = (args: {
+      code: string;
+      fighterKey: string;
+      naam: string;
+      gym: string;
+      label: string;
+      detail: string;
       status: PartijStatus;
-      discipline: string;
-      klasse: string;
-      max_gewicht: string;
-      roodNaam: string;
-      roodGym: string;
-      roodVa: string;
-      blauwNaam: string;
-      blauwGym: string;
-      blauwVa: string;
-      meldingen: ResultRow[];
-    }>;
-  }, [ctxRows, meldByPartij]);
+    }) => {
+      const code = args.code || "TOERNOOI";
+      const fighterKey = args.fighterKey || "algemeen";
+      const issueGroup = normalizeIssueGroup(args.label, args.detail);
+      const baseKey = `${code}__fighter__${fighterKey}`;
+      const onceKey = `${baseKey}__${issueGroup}`;
 
-  if (loading) {
-    return <div className="p-6 text-sm">Rapport laden…</div>;
-  }
+      if (seen.has(onceKey)) return;
+      seen.add(onceKey);
 
-  if (error) {
-    return <div className="p-6 text-sm text-red-700">Fout: {error}</div>;
-  }
+      const existing = map.get(baseKey);
+
+      if (!existing) {
+        map.set(baseKey, {
+          toernooiCode: code,
+          fighterKey,
+          naam: safe(args.naam, "Toernooi algemeen"),
+          gym: safe(args.gym),
+          hoek: null,
+          scope: fighterKey.startsWith("algemeen") ? "pair" : "fighter",
+          labels: [args.label],
+          details: [args.detail],
+          status: args.status,
+        });
+        return;
+      }
+
+      if (!existing.labels.some((x) => x.toLowerCase() === args.label.toLowerCase())) existing.labels.push(args.label);
+      if (!existing.details.some((x) => x.toLowerCase() === args.detail.toLowerCase())) existing.details.push(args.detail);
+      if (statusPrio(args.status) < statusPrio(existing.status)) existing.status = args.status;
+    };
+
+    // Nieuwe toernooi-opslag: controle_resultaten heeft toernooi_code + fighter_id/toernooi_va_nummer.
+    for (const res of resultaten ?? []) {
+      const code = codeFromAny(res);
+      if (!code || !isOpenToernooiMelding(res)) continue;
+
+      const status = statusFromResultaat(res.resultaat, res.rule_code);
+      if (status === "OK") continue;
+
+      const fighterId = fighterIdFromAny(res);
+      const ctx = fighterId ? ctxByToernooiFighter.get(`${code}__${fighterId}`) : null;
+      const label = safe(res.rule ?? res.rule_code ?? "Toernooi melding");
+      const detail = safe(res.boodschap ?? res.aantekeningen ?? res.rule ?? "Toernooi melding");
+
+      addIssue({
+        code,
+        fighterKey: fighterId || `algemeen:${normalizeIssueGroup(label, detail)}`,
+        naam: safeRaw(ctx?.naam ?? ctx?.naam_fp ?? ctx?.naam_mm ?? res.naam) || (fighterId ? `VA ${fighterId}` : "Toernooi algemeen"),
+        gym: safeRaw(ctx?.sportschool ?? ctx?.sportschool_mm ?? res.sportschool),
+        label,
+        detail,
+        status,
+      });
+    }
+
+    // Fallback voor oude runs: melding is nog gekoppeld via partij_nr aan een is_toernooi-row.
+    for (const row of (ctxRows ?? []).filter((r: any) => isTrueLike(r?.is_toernooi))) {
+      const pn = Number(row?.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+      const code = getToernooiCodeSafe(row);
+
+      const rows = (resultaten ?? []).filter((res) => !codeFromAny(res) && Number(res.partij_nr) === pn && isOpenToernooiMelding(res));
+
+      for (const res of rows) {
+        const status = statusFromResultaat(res.resultaat, res.rule_code);
+        if (status === "OK") continue;
+
+        const hoek = inferHoek(res);
+        const label = safe(res.rule ?? res.rule_code ?? "Toernooi melding");
+        const detail = safe(res.boodschap ?? res.aantekeningen ?? res.rule ?? "Toernooi melding");
+
+        if (hoek) {
+          addIssue({
+            code,
+            fighterKey: getToernooiFighterKey(row, hoek),
+            naam: safeRaw(hoek === "rood" ? row?.rood_naam_fp ?? row?.rood_naam_mm ?? row?.rood_naam : row?.blauw_naam_fp ?? row?.blauw_naam_mm ?? row?.blauw_naam),
+            gym: safeRaw(hoek === "rood" ? row?.rood_gym_fp ?? row?.rood_gym_mm ?? row?.rood_gym : row?.blauw_gym_fp ?? row?.blauw_gym_mm ?? row?.blauw_gym),
+            label,
+            detail,
+            status,
+          });
+        } else {
+          addIssue({
+            code,
+            fighterKey: getToernooiPairKey(row),
+            naam: getToernooiPairNaam(row),
+            gym: getToernooiPairGym(row),
+            label,
+            detail,
+            status,
+          });
+        }
+      }
+    }
+
+    return Array.from(map.values())
+      .map((item) => ({
+        ...item,
+        labels: item.labels.sort((a, b) => a.localeCompare(b, "nl")),
+        details: item.details.sort((a, b) => a.localeCompare(b, "nl")),
+      }))
+      .sort((a, b) => {
+        if (a.toernooiCode !== b.toernooiCode) return a.toernooiCode.localeCompare(b.toernooiCode, "nl");
+        if (a.scope !== b.scope) return a.scope === "fighter" ? -1 : 1;
+        if (statusPrio(a.status) !== statusPrio(b.status)) return statusPrio(a.status) - statusPrio(b.status);
+        return a.naam.localeCompare(b.naam, "nl");
+      });
+  }, [resultaten, toernooiRows, ctxRows]);
+
+  const toernooiMeldingenByCode = useMemo(() => {
+    const groups = new Map<string, ToernooiFighterIssue[]>();
+    for (const item of toernooiMeldingen) {
+      const code = item.toernooiCode || "TOERNOOI";
+      const arr = groups.get(code) ?? [];
+      arr.push(item);
+      groups.set(code, arr);
+    }
+
+    return Array.from(groups.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], "nl"))
+      .map(([code, items]) => ({
+        code,
+        items: items.sort((a, b) => {
+          if (a.scope !== b.scope) return a.scope === "fighter" ? -1 : 1;
+          if (statusPrio(a.status) !== statusPrio(b.status)) return statusPrio(a.status) - statusPrio(b.status);
+          return a.naam.localeCompare(b.naam, "nl");
+        }),
+      }));
+  }, [toernooiMeldingen]);
+
+  const toernooiVerbodStartverbodIssues = useMemo(() => {
+    const items: VerbodSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const item of toernooiMeldingen) {
+      const hasStartverbod = item.labels.some((x) => x.toLowerCase().includes("startverbod"));
+      const hasVerbod = item.labels.some((x) => x.toLowerCase().includes("verbod"));
+      if (!hasStartverbod && !hasVerbod) continue;
+
+      const type: "STARTVERBOD" | "VERBOD" = hasStartverbod ? "STARTVERBOD" : "VERBOD";
+      const detail = item.details.join(" • ") || type;
+      const key = `${item.toernooiCode}-${type}-${item.fighterKey}-${detail}`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      items.push({
+        partij_nr: 999999,
+        partij: item.toernooiCode || "TOERNOOI",
+        hoek: item.hoek ?? "-",
+        naam: item.naam,
+        gym: item.gym,
+        type,
+        detail,
+      });
+    }
+
+    return items.sort((a, b) => {
+      if (a.partij !== b.partij) return a.partij.localeCompare(b.partij, "nl");
+      if (a.type !== b.type) return a.type === "STARTVERBOD" ? -1 : 1;
+      return a.naam.localeCompare(b.naam, "nl");
+    });
+  }, [toernooiMeldingen]);
+
+  const allVerbodStartverbodIssues = useMemo(() => {
+    return [...verbodStartverbodIssues, ...toernooiVerbodStartverbodIssues];
+  }, [verbodStartverbodIssues, toernooiVerbodStartverbodIssues]);
+
+  const toernooiMissingVaIssues = useMemo(() => {
+    const items: IssueSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const item of toernooiMeldingen) {
+      if (!item.labels.some((x) => x.toLowerCase().includes("geen va"))) continue;
+      const key = `${item.toernooiCode}-${item.fighterKey}-va`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        partij_nr: 999999,
+        partij: item.toernooiCode || "TOERNOOI",
+        hoek: item.hoek ?? "rood",
+        naam: item.naam,
+        gym: item.gym,
+        label: "VA ontbreekt",
+        detail: item.details.join(" • ") || "Fightpaspoortnummer ontbreekt",
+        sortNaam: item.naam.toLowerCase(),
+      });
+    }
+
+    return items.sort((a, b) => (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl"));
+  }, [toernooiMeldingen]);
+
+  const allMissingVaIssues = useMemo(() => {
+    return [...missingVaIssues, ...toernooiMissingVaIssues];
+  }, [missingVaIssues, toernooiMissingVaIssues]);
+
+  const toernooiKeurmerkIssues = useMemo(() => {
+    const items: IssueSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const item of toernooiMeldingen) {
+      if (!item.labels.some((x) => x.toLowerCase().includes("keurmerk"))) continue;
+      const key = `${item.toernooiCode}-${item.fighterKey}-keurmerk`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        partij_nr: 999999,
+        partij: item.toernooiCode || "TOERNOOI",
+        hoek: item.hoek ?? "rood",
+        naam: item.naam,
+        gym: item.gym,
+        label: "Keurmerk",
+        detail: item.details.join(" • ") || "Geen geldig keurmerk",
+        sortNaam: item.naam.toLowerCase(),
+      });
+    }
+
+    return items.sort((a, b) => (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl"));
+  }, [toernooiMeldingen]);
+
+  const allKeurmerkIssues = useMemo(() => {
+    return [...keurmerkIssues, ...toernooiKeurmerkIssues];
+  }, [keurmerkIssues, toernooiKeurmerkIssues]);
+
+  const toernooiFightpaspoortGewijzigd = useMemo(() => {
+    const items: IssueSummaryItem[] = [];
+    const seen = new Set<string>();
+
+    for (const item of toernooiMeldingen) {
+      if (!item.labels.some((x) => x.toLowerCase().includes("fightpaspoort gewijzigd"))) continue;
+      const key = `${item.toernooiCode}-${item.fighterKey}-va-gewijzigd`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        partij_nr: 999999,
+        partij: item.toernooiCode || "TOERNOOI",
+        hoek: item.hoek ?? "rood",
+        naam: item.naam,
+        gym: item.gym,
+        label: "Fightpaspoort gewijzigd",
+        detail: `${item.naam}: ${item.details.join(" • ") || "Fightpaspoortnummer gewijzigd"}`,
+        sortNaam: item.naam.toLowerCase(),
+      });
+    }
+
+    return items.sort((a, b) => (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl"));
+  }, [toernooiMeldingen]);
+
+  const allFightpaspoortGewijzigd = useMemo(() => {
+    return [...fightpaspoortGewijzigd, ...toernooiFightpaspoortGewijzigd];
+  }, [fightpaspoortGewijzigd, toernooiFightpaspoortGewijzigd]);
+
+  const allSportschoolIssues = useMemo(() => {
+    const toernooiGeenKeurmerk = toernooiKeurmerkIssues.map((x) => x.gym).filter((x) => x && x !== "-");
+    const geenKeurmerk = Array.from(new Set([...sportschoolIssues.geenKeurmerk, ...toernooiGeenKeurmerk])).sort((a, b) =>
+      a.localeCompare(b, "nl")
+    );
+
+    return {
+      ...sportschoolIssues,
+      geenKeurmerk,
+    };
+  }, [sportschoolIssues, toernooiKeurmerkIssues]);
+
+  const allSportschoolIssueCount = useMemo(() => {
+    return (
+      allSportschoolIssues.nietGevonden.length +
+      allSportschoolIssues.geenData.length +
+      allSportschoolIssues.datumOntbreekt.length +
+      allSportschoolIssues.verlopen.length +
+      allSportschoolIssues.geenKeurmerk.length
+    );
+  }, [allSportschoolIssues]);
+
+  if (loading) return <div className="p-6 text-sm">Rapport laden…</div>;
+  if (error) return <div className="p-6 text-sm text-red-700">Fout: {error}</div>;
 
   return (
     <div className="fs-report min-h-screen bg-[#eceff3] text-[#111827]">
@@ -1398,14 +1920,9 @@ export default function RapportPage() {
             break-after: page !important;
           }
 
-          .page-break {
-            page-break-before: always !important;
-            break-before: page !important;
-          }
-
           .avoid-break {
-            break-inside: auto !important;
-            page-break-inside: auto !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
           }
 
           table {
@@ -1444,16 +1961,18 @@ export default function RapportPage() {
               </div>
             </div>
 
-            <div className="mb-8">
+            <div className="mb-5">
               <div className="mb-2 text-[11px] font-black uppercase tracking-[0.22em] text-[#ff4d00]">Controle rapport</div>
               <div className="text-4xl font-black leading-tight">{safe(eventMeta?.naam)}</div>
+              <div className="mt-2 text-lg font-black text-black/80">{fmtNlDateOnly(eventMeta?.datum)}</div>
+              {toernooiInfo.isToernooi ? (
+                <div className="mt-3 inline-flex items-center rounded-full border border-[#ff4d00]/25 bg-[#fff3eb] px-4 py-2 text-sm font-black text-[#111827]">
+                  Toernooi: {toernooiInfo.code} • {toernooiInfo.aantalToernooien} {toernooiInfo.aantalToernooien === 1 ? "toernooi aanwezig" : "toernooien aanwezig"}
+                </div>
+              ) : null}
             </div>
 
             <div className="mx-auto grid w-full max-w-4xl gap-3 text-left md:grid-cols-2">
-              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
-                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Datum</div>
-                <div className="mt-1 text-lg font-black">{fmtNlDateOnly(eventMeta?.datum)}</div>
-              </div>
 
               <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
                 <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Bond</div>
@@ -1483,14 +2002,73 @@ export default function RapportPage() {
                 <div className="text-sm font-bold">afgerond: {fmtDateTime(run?.afgerond_op)}</div>
                 <div className="mt-2 text-xs font-semibold text-black/70">Matchmaking ID: {matchmakingId}</div>
               </div>
+
+              {toernooiInfo.isToernooi ? (
+                <div className="rounded-2xl border border-[#ff4d00]/25 bg-[#fff7f3] px-5 py-4 md:col-span-2">
+                  <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Toernooi</div>
+                  <div className="mt-1 text-lg font-black">{toernooiInfo.code}</div>
+                  <div className="mt-1 text-sm font-semibold text-black/70">
+                    {toernooiInfo.aantalToernooien} {toernooiInfo.aantalToernooien === 1 ? "toernooi aanwezig" : "toernooien aanwezig"}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
 
-        <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-[0_12px_30px_rgba(0,0,0,0.08)]">
+        {toernooiMeldingenByCode.length ? (
+          <div className="mt-4 space-y-4">
+            {toernooiMeldingenByCode.map(({ code, items }) => (
+                <section
+                  key={code}
+                  className="avoid-break overflow-hidden rounded-[18px] border border-black/10 bg-[linear-gradient(180deg,#fff5ef_0%,#fff 100%)]"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-[#ff4d00] px-4 py-2">
+                    <div className="text-sm font-black text-black">TOERNOOI {code} — MELDINGENBLOK</div>
+                    <div className="rounded-full bg-black px-3 py-1 text-[11px] font-black uppercase tracking-[0.14em] text-white">
+                      {items.length} unieke meldingen
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    <div className="mb-3 text-sm font-semibold text-black/75">
+                      Alle unieke meldingen van de vechters binnen {code}
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                        <thead>
+                          <tr>
+                            <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Vechter</th>
+                            <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
+                            <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soorten</th>
+                            <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Status</th>
+                            <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Details</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {items.map((item, idx) => (
+                            <tr key={`${code}-${item.fighterKey}-${item.scope}`}>
+                              <td className={`rounded-l-md px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
+                              <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
+                              <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.labels.join(" • ")}</td>
+                              <td className={`px-2 py-1.5 ${rowBg(idx)}`}><Badge status={item.status} /></td>
+                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.details.join(" • ")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+              ))}
+          </div>
+        ) : null}
+
+        <section className="mt-4 rounded-[24px] border border-black/10 bg-white p-4 shadow-[0_12px_30px_rgba(0,0,0,0.08)]">
           <div className="space-y-4">
             <div className="overflow-hidden rounded-[18px] border border-black/10">
-              <SectionTitle right={`${verbodStartverbodIssues.length}`}>VERBOD / STARTVERBOD</SectionTitle>
+              <SectionTitle right={`${allVerbodStartverbodIssues.length}`}>VERBOD / STARTVERBOD</SectionTitle>
               <div className="overflow-x-auto px-3 pb-3">
                 <table className="w-full border-separate border-spacing-y-[2px] text-xs">
                   <thead>
@@ -1504,8 +2082,8 @@ export default function RapportPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {verbodStartverbodIssues.length ? (
-                      verbodStartverbodIssues.map((item, idx) => (
+                    {allVerbodStartverbodIssues.length ? (
+                      allVerbodStartverbodIssues.map((item, idx) => (
                         <tr key={`${item.type}-${item.partij_nr}-${item.hoek}-${idx}`}>
                           <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
                           <td className={`px-2 py-1.5 font-black ${rowBg(idx)}`}>{item.type}</td>
@@ -1534,28 +2112,24 @@ export default function RapportPage() {
                   <thead>
                     <tr>
                       <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
-                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
-                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Vechter</th>
                       <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
-                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soort</th>
                       <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
                     </tr>
                   </thead>
                   <tbody>
                     {licentieIssues.length ? (
                       licentieIssues.map((item, idx) => (
-                        <tr key={`${item.partij_nr}-${item.hoek}-${item.label}-${idx}`}>
+                        <tr key={`${item.partij}-${item.naam}-${item.label}-${idx}`}>
                           <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
-                          <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
                           <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
                           <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
-                          <td className={`px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.label}</td>
                           <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={6} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                        <td colSpan={4} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
                           Geen open licentieproblemen.
                         </td>
                       </tr>
@@ -1566,24 +2140,22 @@ export default function RapportPage() {
             </div>
 
             <div className="overflow-hidden rounded-[18px] border border-black/10">
-              <SectionTitle right={missingVaIssues.length}>ONTBREKENDE VA NUMMERS</SectionTitle>
+              <SectionTitle right={allMissingVaIssues.length}>ONTBREKENDE VA NUMMERS</SectionTitle>
               <div className="overflow-x-auto px-3 pb-3">
                 <table className="w-full border-separate border-spacing-y-[2px] text-xs">
                   <thead>
                     <tr>
                       <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
-                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
-                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Vechter</th>
                       <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
                       <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {missingVaIssues.length ? (
-                      missingVaIssues.map((item, idx) => (
-                        <tr key={`${item.partij_nr}-${item.hoek}-missing-va-${idx}`}>
+                    {allMissingVaIssues.length ? (
+                      allMissingVaIssues.map((item, idx) => (
+                        <tr key={`${item.partij}-${item.naam}-missing-va-${idx}`}>
                           <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
-                          <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
                           <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
                           <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
                           <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
@@ -1591,8 +2163,8 @@ export default function RapportPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={5} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
-                          Geen.
+                        <td colSpan={4} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen ontbrekende VA-nummers.
                         </td>
                       </tr>
                     )}
@@ -1602,7 +2174,7 @@ export default function RapportPage() {
             </div>
 
             <div className="overflow-hidden rounded-[18px] border border-black/10">
-              <SectionTitle right={fightpaspoortGewijzigd.length}>FIGHTPASPOORT NUMMER GEWIJZIGD</SectionTitle>
+              <SectionTitle right={allFightpaspoortGewijzigd.length}>FIGHTPASPOORT NUMMER GEWIJZIGD</SectionTitle>
               <div className="overflow-x-auto px-3 pb-3">
                 <table className="w-full border-separate border-spacing-y-[2px] text-xs">
                   <thead>
@@ -1615,8 +2187,8 @@ export default function RapportPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {fightpaspoortGewijzigd.length ? (
-                      fightpaspoortGewijzigd.map((item, idx) => (
+                    {allFightpaspoortGewijzigd.length ? (
+                      allFightpaspoortGewijzigd.map((item, idx) => (
                         <tr key={`${item.partij_nr}-${item.hoek}-${idx}`}>
                           <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
                           <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
@@ -1628,7 +2200,7 @@ export default function RapportPage() {
                     ) : (
                       <tr>
                         <td colSpan={5} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
-                          Geen.
+                          Geen wijzigingen.
                         </td>
                       </tr>
                     )}
@@ -1638,9 +2210,81 @@ export default function RapportPage() {
             </div>
 
             <div className="overflow-hidden rounded-[18px] border border-black/10">
-              <SectionTitle right={`${sportschoolIssues.belgischeCheck.length}`}>
-                BELGIË / BKBMO / BOKSBOEKJE CONTROLE
-              </SectionTitle>
+              <SectionTitle right={allSportschoolIssueCount}>SPORTSCHOLEN ZONDER KEURMERK / GEEN KEURMERK INFO</SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soort</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Sportschool</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allSportschoolIssueCount ? (
+                      <>
+                        {allSportschoolIssues.nietGevonden.map((gym, idx) => (
+                          <tr key={`sportschool-niet-gevonden-${gym}-${idx}`}>
+                            <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>Niet gevonden</td>
+                            <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{gym}</td>
+                            <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>Geen match in sportscholen. Maak alias aan of koppel juiste sportschool.</td>
+                          </tr>
+                        ))}
+                        {allSportschoolIssues.geenData.map((gym, idx) => {
+                          const rowIndex = allSportschoolIssues.nietGevonden.length + idx;
+                          return (
+                            <tr key={`sportschool-geen-data-${gym}-${idx}`}>
+                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Geen keurmerk info</td>
+                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
+                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Geen bruikbare keurmerkdata gevonden of meerdere matches.</td>
+                            </tr>
+                          );
+                        })}
+                        {allSportschoolIssues.datumOntbreekt.map((gym, idx) => {
+                          const rowIndex = allSportschoolIssues.nietGevonden.length + allSportschoolIssues.geenData.length + idx;
+                          return (
+                            <tr key={`sportschool-datum-ontbreekt-${gym}-${idx}`}>
+                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Datum ontbreekt</td>
+                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
+                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Keurmerkinfo gevonden maar datum/vervaldatum ontbreekt.</td>
+                            </tr>
+                          );
+                        })}
+                        {allSportschoolIssues.verlopen.map((gym, idx) => {
+                          const rowIndex = allSportschoolIssues.nietGevonden.length + allSportschoolIssues.geenData.length + allSportschoolIssues.datumOntbreekt.length + idx;
+                          return (
+                            <tr key={`sportschool-verlopen-${gym}-${idx}`}>
+                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Keurmerk verlopen</td>
+                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
+                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Keurmerk gevonden maar niet meer geldig op eventdatum.</td>
+                            </tr>
+                          );
+                        })}
+                        {allSportschoolIssues.geenKeurmerk.map((gym, idx) => {
+                          const rowIndex = allSportschoolIssues.nietGevonden.length + allSportschoolIssues.geenData.length + allSportschoolIssues.datumOntbreekt.length + allSportschoolIssues.verlopen.length + idx;
+                          return (
+                            <tr key={`sportschool-geen-keurmerk-${gym}-${idx}`}>
+                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Geen keurmerk</td>
+                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
+                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Sportschool heeft geen geldig keurmerk op datum evenement.</td>
+                            </tr>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen open sportschool- of keurmerkmeldingen.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={`${allSportschoolIssues.belgischeCheck.length}`}>BELGIË / BKBMO / BOKSBOEKJE CONTROLE</SectionTitle>
               <div className="overflow-x-auto px-3 pb-3">
                 <table className="w-full border-separate border-spacing-y-[2px] text-xs">
                   <thead>
@@ -1651,8 +2295,8 @@ export default function RapportPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sportschoolIssues.belgischeCheck.length ? (
-                      sportschoolIssues.belgischeCheck.map((gym, idx) => (
+                    {allSportschoolIssues.belgischeCheck.length ? (
+                      allSportschoolIssues.belgischeCheck.map((gym, idx) => (
                         <tr key={`belgische-check-${gym}-${idx}`}>
                           <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>België / BKBMO check</td>
                           <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{gym}</td>
@@ -1664,7 +2308,7 @@ export default function RapportPage() {
                     ) : (
                       <tr>
                         <td colSpan={3} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
-                          Geen open Belgische sportschoolcontroles.
+                          Geen open Belgische meldingen.
                         </td>
                       </tr>
                     )}
@@ -1674,268 +2318,124 @@ export default function RapportPage() {
             </div>
 
             <div className="overflow-hidden rounded-[18px] border border-black/10">
-              <SectionTitle
-                right={`${
-                  keurmerkIssues.length +
-                  sportschoolIssues.nietGevonden.length +
-                  sportschoolIssues.geenKeurmerk.length +
-                  sportschoolIssues.geenData.length +
-                  sportschoolIssues.verlopen.length +
-                  sportschoolIssues.datumOntbreekt.length
-                }`}
-              >
-                KEURMERK CONTROLE
-              </SectionTitle>
-              <div className="space-y-4 px-3 pb-3">
-                <div className="overflow-x-auto">
-                  <table className="w-full border-separate border-spacing-y-[2px] text-xs">
-                    <thead>
-                      <tr>
-                        <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soort</th>
-                        <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Waarde</th>
-                        <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sportschoolIssues.nietGevonden.length === 0 &&
-                      sportschoolIssues.geenKeurmerk.length === 0 &&
-                      sportschoolIssues.geenData.length === 0 &&
-                      sportschoolIssues.verlopen.length === 0 &&
-                      sportschoolIssues.datumOntbreekt.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
-                            Geen.
-                          </td>
-                        </tr>
-                      ) : (
-                        <>
-                          {sportschoolIssues.nietGevonden.map((gym, idx) => (
-                            <tr key={`niet-gevonden-${gym}-${idx}`}>
-                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>Niet gevonden</td>
-                              <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{gym}</td>
-                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>
-                                Sportschool niet gevonden. Onbekend of sportschool keurmerk heeft.
-                              </td>
-                            </tr>
-                          ))}
+              <SectionTitle right={wedstrijdenMetMeldingen.length}>WEDSTRIJDMELDINGEN</SectionTitle>
+              <div className="px-3 pb-3">
+                {wedstrijdenMetMeldingen.length ? (
+                  <div className="space-y-4">
+                    {wedstrijdenMetMeldingen.map((item) => (
+                      <section
+                        key={`wedstrijd-meldingen-${item.partij_nr}`}
+                        className="avoid-break overflow-hidden rounded-[16px] border border-black/10 bg-[#f8fafc]"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#e9edf2] px-3 py-2">
+                          <div>
+                            <div className="text-sm font-black text-black">Partij {item.partij_label}</div>
+                            <div className="text-xs font-semibold text-black/70">
+                              {item.discipline} • {item.klasse} • Max {item.max_gewicht} kg
+                            </div>
+                          </div>
+                          <Badge status={item.status} />
+                        </div>
 
-                          {sportschoolIssues.geenKeurmerk.map((gym, idx) => {
-                            const offset = sportschoolIssues.nietGevonden.length + idx;
-                            return (
-                              <tr key={`geen-keurmerk-${gym}-${idx}`}>
-                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Zonder geldig keurmerk</td>
-                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
-                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Sportschool heeft geen geldig keurmerk</td>
+                        <div className="grid gap-3 border-b border-black/10 px-3 py-3 md:grid-cols-2">
+                          <div className="rounded-xl border border-[#ff4d00]/30 bg-white p-3">
+                            <div className="mb-1 text-[11px] font-black uppercase tracking-[0.16em] text-[#ff4d00]">Rood</div>
+                            <div className="font-black">{item.roodNaam}</div>
+                            <div className="text-xs text-black/70">{item.roodGym}</div>
+                            <div className="mt-1 text-xs font-mono text-black/70">VA: {item.roodVa}</div>
+                          </div>
+                          <div className="rounded-xl border border-[#2563eb]/30 bg-white p-3">
+                            <div className="mb-1 text-[11px] font-black uppercase tracking-[0.16em] text-[#2563eb]">Blauw</div>
+                            <div className="font-black">{item.blauwNaam}</div>
+                            <div className="text-xs text-black/70">{item.blauwGym}</div>
+                            <div className="mt-1 text-xs font-mono text-black/70">VA: {item.blauwVa}</div>
+                          </div>
+                        </div>
+
+                        <div className="overflow-x-auto px-3 py-3">
+                          <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                            <thead>
+                              <tr>
+                                <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Resultaat</th>
+                                <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Regel</th>
+                                <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Melding</th>
                               </tr>
-                            );
-                          })}
-
-                          {sportschoolIssues.verlopen.map((gym, idx) => {
-                            const offset =
-                              sportschoolIssues.nietGevonden.length +
-                              sportschoolIssues.geenKeurmerk.length +
-                              idx;
-                            return (
-                              <tr key={`verlopen-${gym}-${idx}`}>
-                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Keurmerk verlopen</td>
-                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
-                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Keurmerk aanwezig maar verlopen</td>
-                              </tr>
-                            );
-                          })}
-
-                          {sportschoolIssues.datumOntbreekt.map((gym, idx) => {
-                            const offset =
-                              sportschoolIssues.nietGevonden.length +
-                              sportschoolIssues.geenKeurmerk.length +
-                              sportschoolIssues.verlopen.length +
-                              idx;
-                            return (
-                              <tr key={`datum-ontbreekt-${gym}-${idx}`}>
-                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Datum ontbreekt</td>
-                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
-                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Keurmerkdatum ontbreekt</td>
-                              </tr>
-                            );
-                          })}
-
-                          {sportschoolIssues.geenData.map((gym, idx) => {
-                            const offset =
-                              sportschoolIssues.nietGevonden.length +
-                              sportschoolIssues.geenKeurmerk.length +
-                              sportschoolIssues.verlopen.length +
-                              sportschoolIssues.datumOntbreekt.length +
-                              idx;
-                            return (
-                              <tr key={`geen-data-${gym}-${idx}`}>
-                                <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(offset)}`}>Niet gevonden / geen data</td>
-                                <td className={`px-2 py-1.5 font-semibold ${rowBg(offset)}`}>{gym}</td>
-                                <td className={`rounded-r-md px-2 py-1.5 ${rowBg(offset)}`}>Sportschool niet gevonden of onvoldoende data</td>
-                              </tr>
-                            );
-                          })}
-                        </>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div>
-                  <div className="mb-2 text-sm font-black">Open keurmerkmeldingen per vechter</div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-separate border-spacing-y-[2px] text-xs">
-                      <thead>
-                        <tr>
-                          <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
-                          <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Hoek</th>
-                          <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Naam</th>
-                          <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
-                          <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {keurmerkIssues.length ? (
-                          keurmerkIssues.map((item, idx) => (
-                            <tr key={`${item.partij_nr}-${item.hoek}-keurmerk-${idx}`}>
-                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
-                              <td className={`px-2 py-1.5 capitalize ${rowBg(idx)}`}>{item.hoek}</td>
-                              <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.naam}</td>
-                              <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.gym}</td>
-                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={5} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
-                              Geen open keurmerkproblemen.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                              {item.meldingen.map((m, idx) => {
+                                const st = statusFromResultaat(m.resultaat, m.rule_code);
+                                return (
+                                  <tr key={`${item.partij_nr}-${idx}-${m.rule_code || m.rule || "melding"}`}>
+                                    <td className={`rounded-l-md px-2 py-2 ${rowBg(idx)}`}>
+                                      <Badge status={st} />
+                                    </td>
+                                    <td className={`px-2 py-2 font-mono text-[12px] ${rowBg(idx)}`}>
+                                      {safe(m.rule_code ?? m.rule)}
+                                    </td>
+                                    <td className={`rounded-r-md px-2 py-2 ${rowBg(idx)}`}>
+                                      <div>{safe(m.boodschap ?? m.rule)}</div>
+                                      {m.aantekeningen ? (
+                                        <div className="mt-1 text-xs opacity-80">Notitie: {m.aantekeningen}</div>
+                                      ) : null}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    ))}
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                    Geen open wedstrijdmeldingen.
+                  </div>
+                )}
               </div>
             </div>
-          </div>
 
-          <div className="mt-4 space-y-4">
-            {partijMetOpenMeldingen.map((item) => (
-              <section
-                key={item.partij_nr}
-                className="avoid-break overflow-hidden rounded-[18px] border border-black/10 bg-[linear-gradient(180deg,#f9f9f9_0%,#eeeeee_100%)]"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 bg-[#ff4d00] px-4 py-2">
-                  <div className="text-sm font-black text-black">
-                    Partij {item.partij_label} • {item.discipline} • {item.klasse} • max {item.max_gewicht} kg
-                  </div>
-                  <Badge status={item.status} />
-                </div>
 
-                <div className="grid gap-3 p-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-black/10 bg-white px-3 py-3">
-                    <div className="mb-1 text-[11px] font-black uppercase tracking-[0.16em] text-[#ff4d00]">Rood</div>
-                    <div className="font-black">{item.roodNaam}</div>
-                    <div className="text-sm text-black/75">{item.roodGym}</div>
-                    <div className="mt-1 text-xs font-bold text-black/60">VA: {item.roodVa}</div>
-                  </div>
-                  <div className="rounded-xl border border-black/10 bg-white px-3 py-3">
-                    <div className="mb-1 text-[11px] font-black uppercase tracking-[0.16em] text-[#ff4d00]">Blauw</div>
-                    <div className="font-black">{item.blauwNaam}</div>
-                    <div className="text-sm text-black/75">{item.blauwGym}</div>
-                    <div className="mt-1 text-xs font-bold text-black/60">VA: {item.blauwVa}</div>
-                  </div>
-                </div>
-
-                <div className="px-4 pb-4">
-                  <div className="mb-2 text-sm font-black">Open meldingen</div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-separate border-spacing-y-[2px] text-sm">
-                      <thead>
-                        <tr>
-                          <th className="w-[110px] rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">
-                            Resultaat
-                          </th>
-                          <th className="w-[280px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">
-                            Regel
-                          </th>
-                          <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">
-                            Melding
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {item.meldingen.map((m, idx) => {
-                          const st = statusFromResultaat(m.resultaat, m.rule_code);
-                          return (
-                            <tr key={`${item.partij_nr}-${idx}-${m.rule_code || m.rule || "melding"}`}>
-                              <td className={`rounded-l-md px-2 py-2 ${rowBg(idx)}`}>
-                                <Badge status={st} />
-                              </td>
-                              <td className={`px-2 py-2 font-mono text-[12px] ${rowBg(idx)}`}>
-                                {safe(m.rule_code ?? m.rule)}
-                              </td>
-                              <td className={`rounded-r-md px-2 py-2 ${rowBg(idx)}`}>
-                                <div>{safe(m.boodschap ?? m.rule)}</div>
-                                {m.aantekeningen ? (
-                                  <div className="mt-1 text-xs opacity-80">Notitie: {m.aantekeningen}</div>
-                                ) : null}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </section>
-            ))}
-          </div>
-
-          <div className="page-break mt-4 overflow-hidden rounded-[18px] border border-black/10">
-            <SectionTitle right={`${partijenCompact.length} partijen`}>TOTAAL OVERZICHT PARTIJEN</SectionTitle>
-            <div className="overflow-x-auto px-3 pb-3">
-              <table className="w-full table-fixed border-separate border-spacing-y-[2px] text-[10px] leading-[1.15] md:text-[11px]">
-                <thead>
-                  <tr>
-                    <th className="w-[42px] rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Nr</th>
-                    <th className="w-[95px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Disc.</th>
-                    <th className="w-[90px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Klasse</th>
-                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Rood</th>
-                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
-                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Blauw</th>
-                    <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Gym</th>
-                    <th className="w-[70px] bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Max KG</th>
-                    <th className="w-[92px] rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {partijenCompact.map((p, idx) => (
-                    <tr key={p.partij_nr || idx}>
-                      <td className={`rounded-l-md px-2 py-[5px] font-black ${rowBg(idx)}`}>{p.partij_label}</td>
-                      <td className={`px-2 py-[5px] ${rowBg(idx)}`}>{p.discipline}</td>
-                      <td className={`px-2 py-[5px] ${rowBg(idx)}`}>{p.klasse}</td>
-                      <td className={`truncate px-2 py-[5px] font-semibold ${rowBg(idx)}`} title={p.rood}>
-                        {p.rood}
-                      </td>
-                      <td className={`truncate px-2 py-[5px] ${rowBg(idx)}`} title={p.rood_gym}>
-                        {p.rood_gym}
-                      </td>
-                      <td className={`truncate px-2 py-[5px] font-semibold ${rowBg(idx)}`} title={p.blauw}>
-                        {p.blauw}
-                      </td>
-                      <td className={`truncate px-2 py-[5px] ${rowBg(idx)}`} title={p.blauw_gym}>
-                        {p.blauw_gym}
-                      </td>
-                      <td className={`${rowBg(idx)} px-2 py-[5px]`}>{p.max_gewicht}</td>
-                      <td className={`rounded-r-md px-2 py-[5px] ${rowBg(idx)}`}>
-                        <Badge status={p.status} />
-                      </td>
+            <div className="overflow-hidden rounded-[18px] border border-black/10">
+              <SectionTitle right={partijenCompact.length}>WEDSTRIJDEN</SectionTitle>
+              <div className="overflow-x-auto px-3 pb-3">
+                <table className="w-full border-separate border-spacing-y-[2px] text-xs">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Partij</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Discipline</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Klasse</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Max KG</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Rood</th>
+                      <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Blauw</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {partijenCompact.length ? (
+                      partijenCompact.map((item, idx) => (
+                        <tr key={`compact-${item.partij_nr}-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij_label}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.discipline}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.klasse}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.max_gewicht}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.rood} • {item.rood_gym}</td>
+                          <td className={`px-2 py-1.5 ${rowBg(idx)}`}>{item.blauw} • {item.blauw_gym}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}><Badge status={item.status} /></td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen wedstrijden gevonden.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
+
           </div>
         </section>
       </div>

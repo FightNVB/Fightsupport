@@ -115,9 +115,9 @@ export async function GET(req: Request) {
         matchmaker_id,
         hoofdofficial_id
       `)
-      .eq("is_archived", false)
+      .or("is_archived.is.null,is_archived.eq.false")
       .in("huidige_eigenaar_type", ["bondteam", "official"])
-      .eq("huidige_eigenaar_bondteam", bondteam)
+      .or(`huidige_eigenaar_bondteam.eq.${bondteam},bondteam.eq.${bondteam}`)
       .order("datum", { ascending: false })
       .order("created_at", { ascending: false });
 

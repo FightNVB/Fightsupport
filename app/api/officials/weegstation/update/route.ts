@@ -16,6 +16,35 @@ function toPenalty(v: unknown): 0 | 1 {
   return Number(String(v ?? "0").trim()) === 1 ? 1 : 0;
 }
 
+async function enrichWithControleBadges(admin: any, bout: any) {
+  if (!bout?.matchmaking_id || bout?.partij_nr == null) return bout;
+
+  const { data: ctx, error } = await admin
+    .from("controle_bout_context")
+    .select(
+      "rood_licentie, blauw_licentie, rood_heeft_startverbod, blauw_heeft_startverbod, keurmerk_rood, keurmerk_blauw"
+    )
+    .eq("matchmaking_id", bout.matchmaking_id)
+    .eq("partij_nr", bout.partij_nr)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Badge-info is aanvullend. Opslaan van gewicht mag niet mislukken als
+  // controle_bout_context tijdelijk niet beschikbaar is.
+  if (error || !ctx) return bout;
+
+  return {
+    ...bout,
+    rood_licentie: ctx.rood_licentie,
+    blauw_licentie: ctx.blauw_licentie,
+    rood_heeft_startverbod: ctx.rood_heeft_startverbod,
+    blauw_heeft_startverbod: ctx.blauw_heeft_startverbod,
+    keurmerk_rood: ctx.keurmerk_rood,
+    keurmerk_blauw: ctx.keurmerk_blauw,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -58,15 +87,13 @@ export async function POST(req: Request) {
       dispensatie_verleend: row.dispensatie_verleend,
     });
 
+    // Hoofdofficial/superadmin moet strafpunten altijd expliciet kunnen opslaan.
+    // Oude logica resette ze terug naar 0 zodra de live evaluatie veranderde.
     const finalStrafpuntRood =
-      isHoofdofficialLike && evalResult.canProceedWithPenalty && evalResult.nietOpGewichtRood
-        ? requestedStrafpuntRood
-        : 0;
+      isHoofdofficialLike ? requestedStrafpuntRood : 0;
 
     const finalStrafpuntBlauw =
-      isHoofdofficialLike && evalResult.canProceedWithPenalty && evalResult.nietOpGewichtBlauw
-        ? requestedStrafpuntBlauw
-        : 0;
+      isHoofdofficialLike ? requestedStrafpuntBlauw : 0;
 
     const nextDispensatieNodig = !!evalResult.dispensatieNodig;
     const nextDispensatieVerleend = nextDispensatieNodig ? !!row.dispensatie_verleend : false;
@@ -103,9 +130,11 @@ export async function POST(req: Request) {
       throw new Error(updErr?.message ?? "Opslaan mislukt.");
     }
 
+    const updatedWithBadges = await enrichWithControleBadges(admin, updated);
+
     return NextResponse.json({
       ok: true,
-      bout: updated,
+      bout: updatedWithBadges,
       eval: evalResult,
       hoofdofficial_required_for_penalty:
         !isHoofdofficialLike &&

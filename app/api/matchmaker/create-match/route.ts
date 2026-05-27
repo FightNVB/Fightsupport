@@ -166,6 +166,35 @@ async function markContextMatched(matchmakingId: string, ids: any[], partijNr: n
   }
 }
 
+async function setMatchmakingControlLock(matchmakingId: string, locked: boolean) {
+  const now = new Date().toISOString();
+
+  const payloads = locked
+    ? [
+        { locked_for_editing: true, control_engine_busy: true, control_engine_started_at: now },
+        { locked_for_editing: true, control_engine_busy: true },
+        { locked_for_editing: true },
+      ]
+    : [
+        { locked_for_editing: false, control_engine_busy: false, control_engine_finished_at: now },
+        { locked_for_editing: false, control_engine_busy: false },
+        { locked_for_editing: false },
+      ];
+
+  for (const payload of payloads) {
+    const { error } = await supabaseAdmin
+      .from("matchmakings")
+      .update(payload)
+      .eq("id", matchmakingId);
+
+    if (!error) return;
+    if (!isMissingColumnError(error)) {
+      console.warn("matchmaking lock update mislukt", error);
+      return;
+    }
+  }
+}
+
 function startControlEngineFireAndForget(req: Request, matchmakingId: string, partijNr: number) {
   const origin =
     req.headers.get("origin") ||
@@ -190,7 +219,10 @@ function startControlEngineFireAndForget(req: Request, matchmakingId: string, pa
         console.error("control-engine/start gaf fout", controlResponse.status, controlText);
       }
     })
-    .catch((e) => console.error("control-engine/start fout", e));
+    .catch((e) => console.error("control-engine/start fout", e))
+    .finally(() => {
+      void setMatchmakingControlLock(matchmakingId, false);
+    });
 }
 
 export async function POST(req: Request) {
@@ -277,6 +309,7 @@ export async function POST(req: Request) {
     await safeUpdateAanmeldingenMatched(matchmakingId, matchedIds, partijNr);
     await markContextMatched(matchmakingId, matchedIds, partijNr);
 
+    await setMatchmakingControlLock(matchmakingId, true);
     startControlEngineFireAndForget(req, matchmakingId, partijNr);
 
     return NextResponse.json({

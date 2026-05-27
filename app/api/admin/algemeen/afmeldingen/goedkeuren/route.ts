@@ -1,0 +1,179 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } },
+);
+
+type AnyRow = Record<string, any>;
+
+function s(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+function asString(v: unknown) {
+  const x = s(v);
+  return x || null;
+}
+
+function isUuid(v: unknown) {
+  const x = s(v);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(x);
+}
+
+function isValidId(v: unknown) {
+  const x = s(v);
+  return isUuid(x) || /^\d+$/.test(x);
+}
+
+function bad(msg: string, status = 400, extra?: unknown) {
+  return NextResponse.json({ ok: false, error: msg, extra }, { status });
+}
+
+function isMissingColumnError(error: any) {
+  const msg = String(error?.message || "").toLowerCase();
+  const code = String(error?.code || "");
+  return code === "42703" || code === "PGRST204" || msg.includes("could not find") || msg.includes("does not exist");
+}
+
+function missingColumnName(error: any) {
+  const msg = String(error?.message || "");
+  return (
+    msg.match(/column\s+["']?([a-zA-Z0-9_]+)["']?\s+does not exist/i)?.[1] ||
+    msg.match(/Could not find the ['"]?([a-zA-Z0-9_]+)['"]? column/i)?.[1] ||
+    msg.match(/'([a-zA-Z0-9_]+)' column/i)?.[1] ||
+    null
+  );
+}
+
+function dropUndefined(row: AnyRow) {
+  return Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+}
+
+function mergeJson(current: unknown, patch: AnyRow) {
+  const base = current && typeof current === "object" && !Array.isArray(current) ? (current as AnyRow) : {};
+  return { ...base, ...patch };
+}
+
+async function safeUpdate(table: string, filters: AnyRow, patch: AnyRow) {
+  let payload = dropUndefined({ ...patch });
+  for (let i = 0; i < 20; i += 1) {
+    let query = supabase.from(table).update(payload);
+    for (const [key, value] of Object.entries(filters)) query = query.eq(key, value);
+    const { error } = await query;
+    if (!error) return { error: null, payload };
+    if (!isMissingColumnError(error)) return { error, payload };
+    const col = missingColumnName(error);
+    if (!col || !(col in payload)) return { error, payload };
+    delete payload[col];
+  }
+  return { error: { message: `Update in ${table} mislukt door schema-afwijkingen` }, payload };
+}
+
+async function readBody(req: Request) {
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) return await req.json();
+  if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
+    const form = await req.formData();
+    return Object.fromEntries(form.entries());
+  }
+  const text = await req.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { return {}; }
+}
+
+async function getUserId(req: Request) {
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return null;
+  const { data } = await supabase.auth.getUser(token);
+  return data.user?.id ?? null;
+}
+
+async function setAanmeldingStatus(row: AnyRow, status: string, extraPatch: AnyRow = {}) {
+  if (!row?.inschrijving_id || !row?.matchmaking_id) return null;
+  const result = await safeUpdate(
+    "aanmeldingen",
+    { id: row.inschrijving_id, matchmaking_id: row.matchmaking_id },
+    {
+      status,
+      raw: mergeJson(row.raw, extraPatch),
+      updated_at: new Date().toISOString(),
+    },
+  );
+  return result.error;
+}
+
+async function setContextStatus(row: AnyRow, status: string, extraPatch: AnyRow = {}) {
+  if (!row?.fighter_context_id) return null;
+
+  const { data: ctx } = await supabase
+    .from("matchmaker_fighter_context")
+    .select("id, extra")
+    .eq("id", row.fighter_context_id)
+    .maybeSingle();
+
+  const result = await safeUpdate(
+    "matchmaker_fighter_context",
+    { id: row.fighter_context_id },
+    {
+      status,
+      afmelding_status: extraPatch.afmelding_status,
+      afgemeld: status === "afgemeld",
+      beschikbaar: status !== "afgemeld",
+      extra: mergeJson(ctx?.extra, extraPatch),
+      updated_at: new Date().toISOString(),
+    },
+  );
+  return result.error;
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await readBody(req);
+    const id = asString(body.afmelding_id ?? body.afmeldingId ?? body.id);
+    if (!id || !isValidId(id)) return bad("Geldige afmelding_id ontbreekt");
+
+    const { data: current, error: loadError } = await supabase.from("afmeldingen").select("*").eq("id", id).maybeSingle();
+    if (loadError) return bad("Afmelding laden mislukt", 500, loadError.message);
+    if (!current) return bad("Afmelding niet gevonden", 404);
+
+    const now = new Date().toISOString();
+    const userId = await getUserId(req);
+
+    const { data, error } = await supabase
+      .from("afmeldingen")
+      .update({
+        status: "goedgekeurd",
+        beoordeeld_at: now,
+        beoordeeld_door: userId,
+        beoordelings_opmerking: asString(body.beoordelings_opmerking ?? body.opmerking ?? body.reason),
+        updated_at: now,
+      })
+      .eq("id", id)
+      .select("*")
+      .maybeSingle();
+
+    if (error) return bad("Afmelding goedkeuren mislukt", 500, error.message);
+
+    // Bij goedkeuren blijft de aanmelding/context afgemeld.
+    const statusPatch = { afmelding_id: id, afmelding_status: "goedgekeurd", afgemeld: true };
+    const statusError = await setAanmeldingStatus(current, "afgemeld", statusPatch);
+    if (statusError) return bad("Aanmeldingstatus bijwerken mislukt", 500, statusError.message);
+
+    const contextError = await setContextStatus(current, "afgemeld", statusPatch);
+    if (contextError) return bad("Fighter context bijwerken mislukt", 500, contextError.message);
+
+    return NextResponse.json({ ok: true, afmelding: data });
+  } catch (e: any) {
+    return bad(e?.message || "Server fout", 500);
+  }
+}
+
+export async function PATCH(req: Request) {
+  return POST(req);
+}

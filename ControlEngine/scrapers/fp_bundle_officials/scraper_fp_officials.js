@@ -25,6 +25,7 @@ process.on("unhandledRejection", (err) => {
   console.error("❌ UNHANDLED REJECTION:", err?.stack ?? err);
   process.exitCode = 1;
 });
+
 process.on("uncaughtException", (err) => {
   console.error("❌ UNCAUGHT EXCEPTION:", err?.stack ?? err);
   process.exitCode = 1;
@@ -125,10 +126,12 @@ async function isLoginPage(page) {
     const loginEl = await page.$("input.gebruikersnaam").catch(() => null);
     if (loginEl) return true;
   } catch {}
+
   try {
     const u = (page.url() || "").toLowerCase();
     if (u.includes("login") || u.includes("#login") || u.includes("aanmeld")) return true;
   } catch {}
+
   return false;
 }
 
@@ -137,11 +140,13 @@ async function isLoginPage(page) {
  */
 async function hardClosePage(page) {
   if (!page) return;
+
   try {
     const client = await page.target().createCDPSession();
     await client.send("Page.stopLoading").catch(() => {});
     await client.detach().catch(() => {});
   } catch {}
+
   try {
     await page.close({ runBeforeUnload: true }).catch(() => {});
   } catch {}
@@ -157,20 +162,24 @@ async function createWorkerContext(browser) {
   if (browser && typeof browser.createBrowserContext === "function") {
     return await browser.createBrowserContext();
   }
+
   if (browser && typeof browser.createIncognitoBrowserContext === "function") {
     return await browser.createIncognitoBrowserContext();
   }
+
   return null;
 }
 
 async function closeWorkerContext(ctx) {
   if (!ctx) return;
+
   try {
     const pages = await ctx.pages().catch(() => []);
     for (const p of pages) {
       await hardClosePage(p).catch(() => {});
     }
   } catch {}
+
   try {
     await ctx.close().catch(() => {});
   } catch {}
@@ -205,6 +214,7 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
     await wait(softWaitMs);
 
     const loginNow = await isLoginPage(p);
+
     if (loginNow) {
       await hardClosePage(p).catch(() => {});
       throw new Error("LOGIN_PAGE");
@@ -254,6 +264,7 @@ async function scrapeHeader(page) {
     const infoBlock = k2?.innerText?.trim() || "";
 
     const m = nameBlock.match(/^(.+)\((\d+)\)$/);
+
     if (m) {
       r.naam = m[1].trim();
       r.va_nummer = m[2].trim();
@@ -266,6 +277,7 @@ async function scrapeHeader(page) {
     if (age) r.leeftijd = parseInt(age[1], 10);
 
     const low = infoBlock.toLowerCase();
+
     if (low.includes("man")) r.geslacht = "man";
     if (low.includes("vrouw")) r.geslacht = "vrouw";
 
@@ -276,16 +288,20 @@ async function scrapeHeader(page) {
 async function openTile(page, va, title) {
   await closeAnyModal(page);
 
-  await page.evaluate((va, title) => {
-    const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
-    if (!tab) return;
+  await page.evaluate(
+    (va, title) => {
+      const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
+      if (!tab) return;
 
-    const head = [...tab.querySelectorAll(".tileHeader.enabled")].find(
-      (h) => (h.innerText || "").trim().toUpperCase() === title.toUpperCase()
-    );
+      const head = [...tab.querySelectorAll(".tileHeader.enabled")].find(
+        (h) => (h.innerText || "").trim().toUpperCase() === title.toUpperCase()
+      );
 
-    head?.closest(".tile")?.click();
-  }, va, title);
+      head?.closest(".tile")?.click();
+    },
+    va,
+    title
+  );
 
   await wait(650);
 }
@@ -313,14 +329,17 @@ async function scrapeDetails(page, va) {
         const parts = raw.split(":");
         licentie = (parts[1] ?? "").trim() || null;
       }
+
       if (txt.startsWith("wedstrijden")) {
         const m = raw.match(/\d+/);
         totaal = m ? parseInt(m[0], 10) : null;
       }
+
       if (txt.startsWith("gewonnen")) {
         const m = raw.match(/\d+/);
         gewonnen = m ? parseInt(m[0], 10) : null;
       }
+
       if (txt.includes("startverbod")) {
         if (txt.includes("nee") || txt.includes("geen")) {
           heeft_startverbod = false;
@@ -344,6 +363,7 @@ async function scrapeDetails(page, va) {
 
 async function scrapeZeroMeting(page) {
   const exists = await page.$("input.dnva_nulmetingaantalwedstr");
+
   if (!exists) {
     await closeAnyModal(page);
     return { totaal: 0, opmerking: "", klasse: null };
@@ -359,6 +379,7 @@ async function scrapeZeroMeting(page) {
 
     let klasse = null;
     const sel = document.querySelector("select.dvnulmetingklasseoms");
+
     if (sel) {
       const opt = sel.options[sel.selectedIndex];
       klasse = opt?.textContent?.trim() || sel.value || null;
@@ -384,6 +405,7 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
   }
 
   let geboortedatum_correct = null;
+
   if (header.geboortedatum) {
     const [dd, mm, yyyy] = header.geboortedatum.split("-");
     geboortedatum_correct = `${yyyy}-${mm}-${dd}`;
@@ -419,6 +441,7 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
 
 async function doFullfighter(page, va, matchmaking_id, controle_run_id) {
   const header = await scrapeHeader(page);
+
   if (!header?.va_nummer) {
     console.log("[fullfighter] ❌ header.va_nummer ontbreekt:", va);
     return;
@@ -436,6 +459,7 @@ async function doFullfighter(page, va, matchmaking_id, controle_run_id) {
 ------------------------------------------------------- */
 function parseNlDate(v) {
   if (!v) return null;
+
   const s = String(v).trim();
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -454,6 +478,7 @@ function parseNlDate(v) {
 
 function toStr(v) {
   if (v == null) return null;
+
   const s = String(v).trim();
   return s.length ? s : null;
 }
@@ -467,8 +492,12 @@ async function fetchPartijNrByVa(matchmaking_id) {
   if (error) throw error;
 
   const normVa = (v) => {
-    const s = String(v ?? "").trim().replace(/\D+/g, "");
+    const s = String(v ?? "")
+      .trim()
+      .replace(/\D+/g, "");
+
     if (!s) return null;
+
     const noZeros = s.replace(/^0+/, "");
     return noZeros ? noZeros : null;
   };
@@ -486,6 +515,7 @@ async function fetchPartijNrByVa(matchmaking_id) {
       if (!tmp.has(vaR)) tmp.set(vaR, new Set());
       tmp.get(vaR).add(nr);
     }
+
     if (vaB) {
       if (!tmp.has(vaB)) tmp.set(vaB, new Set());
       tmp.get(vaB).add(nr);
@@ -493,9 +523,14 @@ async function fetchPartijNrByVa(matchmaking_id) {
   }
 
   const out = new Map();
+
   for (const [va, set] of tmp.entries()) {
-    out.set(va, Array.from(set).sort((a, b) => a - b));
+    out.set(
+      va,
+      Array.from(set).sort((a, b) => a - b)
+    );
   }
+
   return out;
 }
 
@@ -508,6 +543,7 @@ async function openUitslagenTile(page, va) {
 
     const headers = [...tab.querySelectorAll(".tileHeader.enabled")];
     const target = headers.find((h) => (h.innerText || "").trim().toUpperCase() === "UITSLAGEN");
+
     target?.closest(".tile")?.click();
   }, va);
 
@@ -516,8 +552,10 @@ async function openUitslagenTile(page, va) {
 
 async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) {
   const start = Date.now();
+
   while (Date.now() - start < timeoutMs) {
     const frames = page.frames();
+
     for (const fr of frames) {
       for (const sel of selectors) {
         try {
@@ -526,8 +564,10 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
         } catch {}
       }
     }
+
     await wait(250);
   }
+
   return null;
 }
 
@@ -540,17 +580,39 @@ async function downloadExcel(page, matchmaking_id, va) {
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const client = await page.target().createCDPSession();
-  await client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloadDir });
 
-  const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
+  await client.send("Page.setDownloadBehavior", {
+    behavior: "allow",
+    downloadPath: downloadDir,
+  });
+
+  const selectors = [
+    '[title="download als excel"]',
+    '[title*="download"][title*="excel"]',
+    'svg use[href*="#img_41"]',
+    'svg use[href*="img_41"]',
+  ];
+
   const found = await waitForAnySelectorInAnyFrame(page, selectors, 45000);
+
   if (!found) throw new Error(`Download knop niet gevonden — VA ${va}`);
 
   const clickDownload = async () => {
     await found.frame.evaluate((sel) => {
       const el = document.querySelector(sel);
-      el?.scrollIntoView?.({ block: "center" });
-      el?.click?.();
+
+      if (!el) return;
+
+      const clickable =
+        el.closest?.('[title="download als excel"]') ||
+        el.closest?.('[title*="download"][title*="excel"]') ||
+        el.closest?.(".icon") ||
+        el.closest?.(".has_action") ||
+        el.closest?.("div") ||
+        el;
+
+      clickable?.scrollIntoView?.({ block: "center", inline: "center" });
+      clickable?.click?.();
     }, found.selector);
   };
 
@@ -560,7 +622,7 @@ async function downloadExcel(page, matchmaking_id, va) {
   let retried = false;
 
   while (Date.now() - start < 60000) {
-    const filesNow = fs.readdirSync(downloadDir);
+    const filesNow = fs.existsSync(downloadDir) ? fs.readdirSync(downloadDir) : [];
     const lower = filesNow.map((f) => f.toLowerCase());
 
     const xlsx = filesNow
@@ -568,28 +630,25 @@ async function downloadExcel(page, matchmaking_id, va) {
       .map((f) => path.join(downloadDir, f))
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
-   if (xlsx[0]) {
-  const downloadedFile = xlsx[0];
+    if (xlsx[0]) {
+      const downloadedFile = xlsx[0];
 
-  // klein beetje wachten zodat excel lock weg is
-  await wait(300);
+      await wait(300);
 
-  // bestand automatisch opruimen zodra node afsluit
-  process.on("exit", () => {
-    try {
-      if (fs.existsSync(downloadedFile)) {
-        fs.unlinkSync(downloadedFile);
-      }
+      process.once("exit", () => {
+        try {
+          if (fs.existsSync(downloadedFile)) {
+            fs.unlinkSync(downloadedFile);
+          }
 
-      // map ook verwijderen als leeg
-      if (fs.existsSync(downloadDir)) {
-        fs.rmSync(downloadDir, { recursive: true, force: true });
-      }
-    } catch {}
-  });
+          if (fs.existsSync(downloadDir)) {
+            fs.rmSync(downloadDir, { recursive: true, force: true });
+          }
+        } catch {}
+      });
 
-  return downloadedFile;
-}
+      return downloadedFile;
+    }
 
     const hasCr = lower.some((f) => f.endsWith(".crdownload"));
 
@@ -626,16 +685,29 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
     ["Discipline", idxDiscipline],
     ["Uitslag", idxUitslag],
   ];
+
   const missing = must.filter(([, idx]) => idx === -1).map(([name]) => name);
 
+  /**
+   * BELANGRIJK:
+   * Geen kolomkoppen betekent bij FightPassport meestal:
+   * "deze vechter heeft geen uitslagen".
+   * Dit is dus GEEN scraper-fout.
+   */
   if (missing.length) {
     return {
       rows: [],
-      meta: { ok: false, missingHeaders: missing, headers: headers.filter(Boolean) },
+      meta: {
+        ok: true,
+        emptyExport: true,
+        missingHeaders: missing,
+        headers: headers.filter(Boolean),
+      },
     };
   }
 
   const out = [];
+
   for (let r = 5; r < rows.length; r++) {
     const row = rows[r];
     if (!row) continue;
@@ -655,16 +727,17 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
       evenement: toStr(row[idxEvenement]) ?? null,
       tegenstander: toStr(row[idxTegenstander]) ?? null,
 
-      sportschool: idxSportschool !== -1 ? (toStr(row[idxSportschool]) ?? null) : null,
+      sportschool: idxSportschool !== -1 ? toStr(row[idxSportschool]) ?? null : null,
       discipline: toStr(row[idxDiscipline]) ?? null,
-      klasse: idxKlasse !== -1 ? (toStr(row[idxKlasse]) ?? null) : null,
-      gewicht: idxGewicht !== -1 ? (toStr(row[idxGewicht]) ?? null) : null,
+      klasse: idxKlasse !== -1 ? toStr(row[idxKlasse]) ?? null : null,
+      gewicht: idxGewicht !== -1 ? toStr(row[idxGewicht]) ?? null : null,
       uitslag: toStr(row[idxUitslag]) ?? null,
     });
   }
 
   const seen = new Set();
   const deduped = [];
+
   for (const r of out) {
     const k = [
       r.matchmaking_id,
@@ -681,14 +754,36 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
       .join("||");
 
     if (seen.has(k)) continue;
+
     seen.add(k);
     deduped.push(r);
   }
 
   return {
     rows: deduped,
-    meta: { ok: true, missingHeaders: [], headers: headers.filter(Boolean) },
+    meta: {
+      ok: true,
+      emptyExport: false,
+      missingHeaders: [],
+      headers: headers.filter(Boolean),
+    },
   };
+}
+
+async function cleanupDownloadedFile(filePath) {
+  if (!filePath) return;
+
+  try {
+    const dir = path.dirname(filePath);
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {}
 }
 
 async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, partijNrByVaMap) {
@@ -706,6 +801,7 @@ async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, 
     .eq("va_nummer", vaStr);
 
   if (delErr) throw delErr;
+
   if (!data.length) return { saved: 0 };
 
   const normalized = data.map((row) => ({
@@ -733,38 +829,65 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
   let lastMeta = null;
 
   for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
-    await openUitslagenTile(page, va);
+    let file = null;
 
-    const file = await downloadExcel(page, matchmaking_id, va);
-    if (!file) {
-      await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
-      console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
-      return { ok: true, n: 0, reason: "no_file" };
+    try {
+      await openUitslagenTile(page, va);
+
+      file = await downloadExcel(page, matchmaking_id, va);
+
+      if (!file) {
+        await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(
+          () => {}
+        );
+
+        console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
+        return { ok: true, n: 0, reason: "no_file" };
+      }
+
+      const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
+      lastMeta = parsed?.meta ?? null;
+
+      /**
+       * Ook bij lege export is parsed.meta.ok === true.
+       * Dan worden bestaande oude uitslagen voor deze run/VA verwijderd
+       * en slaan we gewoon 0 regels op.
+       */
+      if (parsed?.meta?.ok) {
+        const res = await saveUitslagenSnapshot(
+          parsed.rows,
+          matchmaking_id,
+          controle_run_id,
+          va,
+          partijNrByVaMap
+        );
+
+        const n = res?.saved ?? parsed.rows.length ?? 0;
+
+        if (parsed?.meta?.emptyExport) {
+          console.log(`[uitslagen] ℹ️ Geen uitslagen voor VA ${va} (lege export / geen kolomkoppen)`);
+          console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
+          return { ok: true, n: 0, reason: "geen_uitslagen" };
+        }
+
+        console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
+        return { ok: true, n, reason: "ok" };
+      }
+
+      await closeAnyModal(page).catch(() => {});
+      await wait(600 + attempt * 400);
+    } finally {
+      await cleanupDownloadedFile(file).catch(() => {});
     }
-
-    const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
-    lastMeta = parsed?.meta ?? null;
-
-    if (parsed?.meta?.ok) {
-      const res = await saveUitslagenSnapshot(parsed.rows, matchmaking_id, controle_run_id, va, partijNrByVaMap);
-      const n = res?.saved ?? parsed.rows.length ?? 0;
-      console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
-      return { ok: true, n, reason: "ok" };
-    }
-
-    const missing = (parsed?.meta?.missingHeaders ?? []).join(", ");
-    const hdrs = (parsed?.meta?.headers ?? []).join(" | ");
-    console.log(
-      `[uitslagen] ❌ Kolomkoppen niet gevonden (attempt ${attempt}/${MAX_TRIES}) — VA ${va}. Missing: ${missing}`
-    );
-    console.log(`[uitslagen] ➡️ Headers: ${hdrs}`);
-
-    await closeAnyModal(page).catch(() => {});
-    await wait(600 + attempt * 400);
   }
 
-  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
+  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(
+    () => {}
+  );
+
+  console.log(`[uitslagen] ℹ️ Geen uitslagen gevonden voor VA ${va}`, lastMeta ?? "");
   console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
+
   return { ok: true, n: 0, reason: "no_uitslagen" };
 }
 
@@ -777,6 +900,7 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
   const { browser, page: masterPage } = await loginFightPassport();
 
   let cookies = [];
+
   try {
     cookies = await masterPage.cookies();
   } catch {}
@@ -790,16 +914,21 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
       try {
         await masterRefreshPromise;
       } catch {}
+
       return cookies;
     }
 
     masterRefreshPromise = (async () => {
       console.log(`[bundle] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
+
       await ensureLoggedIn(masterPage, { force: true });
+
       try {
         cookies = await masterPage.cookies();
       } catch {}
+
       console.log("[bundle] ✅ master refreshed (cookies updated)");
+
       return cookies;
     })();
 
@@ -822,13 +951,19 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     let ctx = await createWorkerContext(browser);
 
     async function resetWorkerContext(reason) {
-      console.log(`[bundle] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
+      console.log(
+        `[bundle] 🧨 reset worker context (worker${workerIdx + 1}) ${
+          reason ? `(${reason})` : ""
+        }`
+      );
+
       await closeWorkerContext(ctx).catch(() => {});
       ctx = await createWorkerContext(browser);
     }
 
     while (true) {
       const myIdx = idx++;
+
       if (myIdx >= vaList.length) break;
 
       const va = vaList[myIdx];
@@ -850,8 +985,10 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
 
         if (!page) {
           console.log(`[bundle] ❌ ${label} kon fighter niet openen na retries: VA ${va}`);
+
           fullfighterStatus = "open_fail";
           uitslagenStatus = "open_fail";
+
           continue;
         }
 
@@ -864,6 +1001,7 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
             page = null;
           }
         );
+
         fullfighterStatus = "ok";
 
         const uRes = await withTimeout(
@@ -875,14 +1013,19 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
             page = null;
           }
         );
+
         uitslagenStatus = uRes?.ok ? `ok(n=${uRes?.n ?? 0})` : `fail(${uRes?.reason ?? "unknown"})`;
       } catch (e) {
         const msg = e?.message ?? String(e);
 
         if (msg === "LOGIN_PAGE") {
-          console.log(`[bundle] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
+          console.log(
+            `[bundle] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`
+          );
+
           fullfighterStatus = "login_page";
           uitslagenStatus = "login_page";
+
           try {
             await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
             await resetWorkerContext(`login refresh VA ${va}`);
@@ -896,14 +1039,18 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           } else if (msg.includes("uitslagen")) {
             uitslagenStatus = "timeout";
           }
+
           console.log(`[bundle] ❌ ${label} fout VA ${va}:`, msg);
         } else {
           console.log(`[bundle] ❌ ${label} fout VA ${va}:`, msg);
+
           if (fullfighterStatus === "skip") fullfighterStatus = "error";
           if (uitslagenStatus === "skip") uitslagenStatus = "error";
         }
       } finally {
-        console.log(`[bundle] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`);
+        console.log(
+          `[bundle] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`
+        );
 
         try {
           if (page) {
@@ -923,6 +1070,7 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     try {
       await masterPage.close();
     } catch {}
+
     try {
       await browser.close();
     } catch {}
@@ -942,16 +1090,19 @@ if (!matchmaking_id) {
   console.error("❌ matchmaking_id ontbreekt");
   process.exit(1);
 }
+
 if (!controle_run_id) {
   console.error("❌ controle_run_id ontbreekt");
   process.exit(1);
 }
+
 if (!vaList.length) {
   console.error("❌ Geen geldige VA’s meegegeven (verwacht 3–5 cijfers).");
   process.exit(1);
 }
 
 const WORKERS = Number(process.env.WORKERS ?? "5");
+
 const workers =
   Number.isFinite(WORKERS) && WORKERS > 0 ? Math.min(10, Math.max(1, Math.floor(WORKERS))) : 5;
 

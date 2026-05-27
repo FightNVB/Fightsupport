@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
           matchmaker_id,
           bron_type,
           stadium,
+          status,
           huidige_eigenaar_type,
           huidige_eigenaar_user_id,
           vorige_eigenaar_type,
@@ -78,10 +79,14 @@ export async function POST(req: NextRequest) {
       return jsonError("Matchmaking niet gevonden.", 404);
     }
 
-    const currentStage = s((mm as any)?.stadium) || "nieuw";
+    const ownerTypeFromDb = s((mm as any)?.huidige_eigenaar_type);
+    const currentStage =
+      s((mm as any)?.stadium) ||
+      s((mm as any)?.status) ||
+      "bij_matchmaker_in_bewerking";
 
     const currentOwnerType =
-      s((mm as any)?.huidige_eigenaar_type) ||
+      ownerTypeFromDb ||
       (role === "matchmaker"
         ? "matchmaker"
         : role === "admin"
@@ -89,18 +94,25 @@ export async function POST(req: NextRequest) {
         : "bondteam");
 
     const currentOwnerUserId =
-      currentOwnerType === "matchmaker"
-        ? s((mm as any)?.huidige_eigenaar_user_id) || userId
+      currentOwnerType === "matchmaker" ||
+      currentOwnerType === "matchmaker_upload"
+        ? s((mm as any)?.huidige_eigenaar_user_id) ||
+          s((mm as any)?.matchmaker_id) ||
+          userId
         : null;
 
     const currentOwnerBondteam =
-      s((mm as any)?.huidige_eigenaar_bondteam) ||
-      s((mm as any)?.bondteam) ||
-      null;
+      currentOwnerType === "bondteam"
+        ? s((mm as any)?.huidige_eigenaar_bondteam) ||
+          s((mm as any)?.bondteam) ||
+          null
+        : null;
 
     const bronType =
       s((mm as any)?.bron_type) ||
-      (role === "matchmaker"
+      (currentOwnerType === "matchmaker_upload"
+        ? "matchmaker_upload"
+        : role === "matchmaker"
         ? "matchmaker_app"
         : role === "admin"
         ? "admin_upload"
@@ -113,7 +125,7 @@ export async function POST(req: NextRequest) {
       naam: (mm as any)?.naam ?? null,
       datum: (mm as any)?.datum ?? null,
       locatie: (mm as any)?.locatie ?? null,
-      matchmakerId: (mm as any)?.matchmaker_id ?? null,
+      matchmakerId: (mm as any)?.matchmaker_id ?? userId,
       bronType,
       stage: currentStage as any,
       ownerType: currentOwnerType as any,
@@ -127,6 +139,7 @@ export async function POST(req: NextRequest) {
       metadata: {
         route: "api/matchmaker/send-to-admin/route",
         ensured: true,
+        action: "send_to_admin",
       },
     });
 
@@ -139,6 +152,10 @@ export async function POST(req: NextRequest) {
       opmerking: "Doorgestuurd naar admin.",
       metadata: {
         route: "api/matchmaker/send-to-admin/route",
+        action: "send_to_admin",
+        previous_owner_type: currentOwnerType,
+        previous_owner_user_id: currentOwnerUserId,
+        previous_owner_bondteam: currentOwnerBondteam,
       },
     });
 
@@ -147,9 +164,15 @@ export async function POST(req: NextRequest) {
       .update({
         stadium: "ingediend_admin",
         status: "ingediend_admin",
+
+        vorige_eigenaar_type: currentOwnerType,
+        vorige_eigenaar_user_id: currentOwnerUserId,
+        vorige_eigenaar_bondteam: currentOwnerBondteam,
+
         huidige_eigenaar_type: "admin",
         huidige_eigenaar_user_id: null,
         huidige_eigenaar_bondteam: null,
+
         submitted_to_admin_at: now,
         last_updated_at: now,
         last_updated_by: userId,

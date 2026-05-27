@@ -160,7 +160,7 @@ function Header({
 }) {
   return (
     <div
-      className="relative px-6 py-5"
+      className="relative px-6 py-4"
       style={{
         background:
           "linear-gradient(180deg, #3b4149 0%, #242a31 48%, #171b20 100%)",
@@ -170,7 +170,7 @@ function Header({
       <div className="grid grid-cols-1 items-center gap-4 xl:grid-cols-[1fr_auto_1fr]">
         <div>
           <div
-            className="text-[28px] font-extrabold uppercase"
+            className="text-[24px] font-extrabold uppercase"
             style={{ color: ORANGE }}
           >
             Evenementverzoek
@@ -196,10 +196,10 @@ function Header({
           <Image
             src="/branding/fightsupport/excel-logo.png"
             alt="FightSupport"
-            width={240}
-            height={80}
+            width={320}
+            height={92}
             priority
-            style={{ width: 240, height: "auto", display: "block" }}
+            style={{ width: 320, maxWidth: "42vw", height: "auto", display: "block" }}
           />
         </div>
 
@@ -361,7 +361,7 @@ export default function PromotorEventRequestPage() {
 
     setSaving(true);
     try {
-      const res = await authedFetch("/api/promotor/event-requests/create", {
+      const res = await authedFetch("/api/promotor/event-requests", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -402,9 +402,9 @@ export default function PromotorEventRequestPage() {
         onDashboard={() => router.push("/dashboard/promotor")}
       />
 
-      <div className="px-4 py-6 md:px-6">
+      <div className="px-4 py-5 md:px-6">
         <div
-          className="rounded-[24px] p-5 md:p-6"
+          className="rounded-[24px] p-4 md:p-5"
           style={{
             background:
               "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(239,242,246,0.98) 100%)",
@@ -415,7 +415,7 @@ export default function PromotorEventRequestPage() {
         >
           <div className="text-center">
             <h1
-              className="text-4xl font-extrabold md:text-5xl"
+              className="text-3xl font-extrabold md:text-4xl"
               style={{
                 backgroundImage:
                   "linear-gradient(180deg, #ff7a1a 0%, #ff4d00 45%, #c92c00 100%)",
@@ -444,7 +444,7 @@ export default function PromotorEventRequestPage() {
             </div>
           ) : null}
 
-          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
             <SectionCard
               title="Basisgegevens"
               subtitle="Naam, datum en locatie"

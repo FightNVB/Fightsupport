@@ -413,6 +413,7 @@ async function fetchEvenementInfo(matchmaking_id: string): Promise<EvenementInfo
   );
   const event_id: string | null = toNullableStr((data as any)?.[0]?.event_id ?? null);
 
+  // 1) Upload/event-koppeling is leidend als die bestaat.
   if (event_id && (!evenement_naam || !evenement_datum)) {
     const { data: ev, error: evErr } = await supabaseAdmin
       .from("events")
@@ -424,6 +425,37 @@ async function fetchEvenementInfo(matchmaking_id: string): Promise<EvenementInfo
 
     if (!evenement_naam) evenement_naam = toNullableStr((ev as any)?.naam ?? null);
     if (!evenement_datum) evenement_datum = toIsoDateOnly((ev as any)?.datum ?? null);
+  }
+
+  // 2) Fallback voor matchmaker-app/concept matchmakings.
+  // Daar bestaat vaak geen matchmaking_uploads rij, maar matchmakings heeft wel
+  // naam + datum. Omdat dit server-side met supabaseAdmin draait, blokkeert RLS dit niet.
+  if (!evenement_naam || !evenement_datum) {
+    const { data: mm, error: mmErr } = await supabaseAdmin
+      .from("matchmakings")
+      .select("naam, datum, event_id")
+      .eq("id", matchmaking_id)
+      .maybeSingle();
+
+    if (mmErr) throw mmErr;
+
+    if (!evenement_naam) evenement_naam = toNullableStr((mm as any)?.naam ?? null);
+    if (!evenement_datum) evenement_datum = toIsoDateOnly((mm as any)?.datum ?? null);
+
+    // 3) Extra fallback: als matchmakings alleen event_id heeft, pak naam/datum uit events.
+    const mmEventId = toNullableStr((mm as any)?.event_id ?? null);
+    if (mmEventId && (!evenement_naam || !evenement_datum)) {
+      const { data: ev, error: evErr } = await supabaseAdmin
+        .from("events")
+        .select("naam, datum")
+        .eq("id", mmEventId)
+        .maybeSingle();
+
+      if (evErr) throw evErr;
+
+      if (!evenement_naam) evenement_naam = toNullableStr((ev as any)?.naam ?? null);
+      if (!evenement_datum) evenement_datum = toIsoDateOnly((ev as any)?.datum ?? null);
+    }
   }
 
   return { evenement_naam, evenement_datum, event_id };
@@ -453,15 +485,24 @@ export async function buildControleBoutContext(
   });
 
   let boutsQ = supabaseAdmin
-    .from("matchmaking_bouts_raw")
-    .select("*")
-    .eq("matchmaking_id", matchmaking_id)
-    .order("partij_nr", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: true });
+  .from("matchmaking_bouts_raw")
+  .select("*")
+  .eq("matchmaking_id", matchmaking_id)
 
-  if (scopedPartijNr != null) {
-    boutsQ = boutsQ.eq("partij_nr", scopedPartijNr);
-  }
+  // herupload: verwijderde partijen niet opnieuw controleren
+  .or("verwijderd.is.null,verwijderd.eq.false")
+
+  .order("partij_nr", {
+    ascending: true,
+    nullsFirst: false,
+  })
+  .order("created_at", {
+    ascending: true,
+  });
+
+if (scopedPartijNr != null) {
+  boutsQ = boutsQ.eq("partij_nr", scopedPartijNr);
+}
 
   const { data: bouts, error: bErr } = await boutsQ;
   if (bErr) throw bErr;
@@ -563,13 +604,30 @@ export async function buildControleBoutContext(
 
     if (delCtxErr) throw delCtxErr;
 
-    const { error: delUitsErr } = await supabaseAdmin
-      .from("controle_uitslagen")
-      .delete()
-      .eq("matchmaking_id", matchmaking_id)
-      .eq("partij_nr", scopedPartijNr);
+    // Belangrijk:
+    // controle_uitslagen_unique is NIET per controle_run_id of partij_nr, maar op:
+    // (matchmaking_id, va_nummer, datum, evenement, tegenstander).
+    // Bij een correct-bout kan een VA van partij wisselen of dezelfde uitslag al onder
+    // een oudere partij/snapshot bestaan. Alleen verwijderen op partij_nr is dan te smal
+    // en veroorzaakt 23505 duplicate key errors. Daarom verwijderen we voor de VA's
+    // die in deze scoped rebuild zitten alle oude snapshots binnen deze matchmaking.
+    if (vaList.length > 0) {
+      const { error: delUitsErr } = await supabaseAdmin
+        .from("controle_uitslagen")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id)
+        .in("va_nummer", vaList);
 
-    if (delUitsErr) throw delUitsErr;
+      if (delUitsErr) throw delUitsErr;
+    } else {
+      const { error: delUitsErr } = await supabaseAdmin
+        .from("controle_uitslagen")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("partij_nr", scopedPartijNr);
+
+      if (delUitsErr) throw delUitsErr;
+    }
   } else {
     const { error: delCtxErr } = await supabaseAdmin
       .from("controle_bout_context")
@@ -863,16 +921,54 @@ export async function buildControleBoutContext(
   }
 
   if (uitslagenToInsert.length > 0) {
-    const chunkSize = 500;
-    for (let i = 0; i < uitslagenToInsert.length; i += chunkSize) {
-      const chunk = uitslagenToInsert.slice(i, i + chunkSize);
+    // Ontdubbel exact op de UNIQUE key van controle_uitslagen:
+    // (matchmaking_id, va_nummer, datum, evenement, tegenstander)
+    // Dit voorkomt 23505 als dezelfde uitslag binnen dezelfde build meerdere keren
+    // uit rood/blauw of meerdere contextregels wordt opgebouwd.
+    const uniqueUitslagenMap = new Map<string, any>();
 
-      // We hebben de oude controle_uitslagen voor deze matchmaking/scope hierboven al verwijderd.
-      // Daarom is insert veiliger dan upsert: upsert vereist namelijk een UNIQUE/EXCLUSION
-      // constraint op exact dezelfde onConflict-kolommen. Die bestaat niet standaard.
+    for (const row of uitslagenToInsert) {
+      const key = [
+        row?.matchmaking_id ?? "",
+        row?.va_nummer ?? "",
+        row?.datum ?? "",
+        row?.evenement ?? "",
+        row?.tegenstander ?? "",
+      ]
+        .map((v) => String(v ?? "").replace(/\s+/g, " ").trim())
+        .join("||");
+
+      if (!uniqueUitslagenMap.has(key)) {
+        uniqueUitslagenMap.set(key, row);
+      }
+    }
+
+    const uniqueUitslagen = [...uniqueUitslagenMap.values()];
+    const skippedDuplicates = uitslagenToInsert.length - uniqueUitslagen.length;
+
+    if (skippedDuplicates > 0) {
+      console.warn("[buildControleBoutContext] dubbele controle_uitslagen overgeslagen", {
+        matchmaking_id,
+        controle_run_id,
+        totaal: uitslagenToInsert.length,
+        uniek: uniqueUitslagen.length,
+        dubbel: skippedDuplicates,
+      });
+    }
+
+    const chunkSize = 500;
+    for (let i = 0; i < uniqueUitslagen.length; i += chunkSize) {
+      const chunk = uniqueUitslagen.slice(i, i + chunkSize);
+
+      // Extra veilig bij hercontrole/correct-bout:
+      // mocht er toch nog een bestaande uitslag met dezelfde unique key staan
+      // (bijvoorbeeld van een andere partij of oude snapshot), dan overschrijven we
+      // die rij in plaats van een 23505 duplicate key te krijgen.
       const { error: uInsErr } = await supabaseAdmin
         .from("controle_uitslagen")
-        .insert(chunk);
+        .upsert(chunk, {
+          onConflict: "matchmaking_id,va_nummer,datum,evenement,tegenstander",
+        });
 
       if (uInsErr) throw uInsErr;
     }
@@ -1001,6 +1097,10 @@ export async function buildToernooiContext(
       updated_at: undefined,
       controle_run_id,
       matchmaking_id,
+      // Toernooi-context is per deelnemer, niet per mogelijke partij.
+      // Daarom nooit een bout_id/partij_nr uit oude pair/combinatie-rijen meenemen.
+      bout_id: null,
+      partij_nr: 0,
       toernooi_code: tCode,
       fighter_id: va,
       va_nummer: va,
@@ -1040,8 +1140,11 @@ export async function buildToernooiContext(
 
       const source = {
         hoek: c.hoek,
-        bout_id: (partij as any)?.bout_uid ?? null,
-        partij_nr: asPartijNr((partij as any)?.partij_nr),
+        // Toernooi heeft geen echte rood/blauw-bout in deze context.
+        // Zelfs als de parser oude combinatie-rijen heeft gemaakt, behandelen we
+        // iedere VA hier als losse deelnemer onder dezelfde toernooi_code.
+        bout_id: null,
+        partij_nr: 0,
         upload_id: (partij as any)?.upload_id ?? null,
         toernooi_code: tCode,
         fighter_id: c.va,
@@ -1063,8 +1166,8 @@ export async function buildToernooiContext(
         derivedByKey.set(key, {
           controle_run_id,
           matchmaking_id,
-          bout_id: source.bout_id,
-          partij_nr: source.partij_nr,
+          bout_id: null,
+          partij_nr: 0,
           upload_id: source.upload_id,
           toernooi_code: tCode,
           fighter_id: c.va,
@@ -1209,8 +1312,7 @@ export async function buildToernooiContext(
   let delUitslagen = supabaseAdmin
     .from("controle_uitslagen")
     .delete()
-    .eq("matchmaking_id", matchmaking_id)
-    .eq("controle_run_id", controle_run_id);
+    .eq("matchmaking_id", matchmaking_id);
 
   if (scopedToernooiCode) {
     delUitslagen = delUitslagen.eq("toernooi_code", scopedToernooiCode);
@@ -1242,26 +1344,13 @@ export async function buildToernooiContext(
     const fpGeboortedatum = fr?.geboortedatum ? toIsoDateOnly(fr.geboortedatum) : null;
     const fpGeslacht = normGender(fr?.geslacht);
 
-    for (const u of uitslagen) {
-      uitslagenToInsert.push({
-        matchmaking_id,
-        controle_run_id,
-        // Toernooi-uitslagen hebben geen rood/blauw-hoek.
-        // partij_nr blijft numeriek verplicht; toernooi_code is de echte toernooi-sleutel.
-        partij_nr: 0,
-        bout_id: null,
-        hoek: "toernooi",
-        toernooi_code: tCode,
-        va_nummer: va,
-        datum: u?.datum ? toIsoDateOnly(u.datum) : null,
-        discipline: u?.discipline ?? null,
-        klasse: u?.klasse ?? null,
-        uitslag: u?.uitslag ?? null,
-        evenement: u?.evenement ?? null,
-        tegenstander: u?.tegenstander ?? null,
-        evenement_datum: toIsoDateOnly(u?.evenement_datum ?? u?.datum),
-      });
-    }
+    // Toernooi-uitslagen worden NIET opnieuw naar controle_uitslagen gekopieerd.
+    // buildControleBoutContext heeft dezelfde uitslagen voor deze matchmaking al uit
+    // uitslagen_raw gesnapshot. De UNIQUE constraint op controle_uitslagen kijkt niet
+    // naar controle_run_id/partij_nr/toernooi_code, dus opnieuw inserten vanuit
+    // buildToernooiContext veroorzaakt 23505 duplicaten.
+    // Voor toernooi-records gebruiken we hieronder direct de rows uit uitslagen_raw
+    // via uitslagenByVa; uitslagen_raw blijft daarmee de waarheid.
 
     const basisKlasse =
       row?.klasse_mm ??
@@ -1321,9 +1410,10 @@ export async function buildToernooiContext(
 
     const patch: any = {
       controle_run_id,
-      bout_id: row?.bout_id ?? rawSource?.bout_id ?? null,
-      // Voor toernooi-context mag partij_nr ook de toernooi_code zijn.
-      partij_nr: asPartijNr(row?.partij_nr ?? rawSource?.partij_nr) ?? 0,
+      // Toernooi-context is altijd per deelnemer. Pairing gebeurt pas later
+      // tijdelijk in de rulesEngine voor jeugd/J/J+ checks.
+      bout_id: null,
+      partij_nr: 0,
       upload_id: row?.upload_id ?? rawSource?.upload_id ?? null,
 
       fighter_id: va,
@@ -1429,20 +1519,13 @@ export async function buildToernooiContext(
   }
 
   if (uitslagenToInsert.length > 0) {
-    const chunkSize = 500;
-
-    for (let i = 0; i < uitslagenToInsert.length; i += chunkSize) {
-      const chunk = uitslagenToInsert.slice(i, i + chunkSize);
-
-      // Oude toernooi-uitslagen voor deze run/scope zijn hierboven al verwijderd.
-      // Gebruik insert i.p.v. upsert, anders vereist Postgres een UNIQUE constraint
-      // op alle onConflict-kolommen en krijg je 42P10.
-      const { error: insErr } = await supabaseAdmin
-        .from("controle_uitslagen")
-        .insert(chunk);
-
-      if (insErr) throw insErr;
-    }
+    console.warn("[buildToernooiContext] toernooi controle_uitslagen insert overgeslagen", {
+      matchmaking_id,
+      controle_run_id,
+      toernooi_code: scopedToernooiCode,
+      fighter_id: scopedVa,
+      rows: uitslagenToInsert.length,
+    });
   }
 
   console.log("[buildToernooiContext] klaar", {

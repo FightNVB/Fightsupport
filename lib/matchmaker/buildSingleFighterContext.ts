@@ -1,6 +1,7 @@
 // lib/matchmaker/buildSingleFighterContext.ts
-// Bouwt basis-context voor één losse aanmelding.
-// Geen rood/blauw en geen partij_nr: dit is vóórdat een match gemaakt is.
+// Bouwt basis-context voor één losse vechter vóórdat een echte partij gemaakt is.
+// Werkt voor normale aanmeldingen én losse toernooi-deelnemers uit matchmaker_toernooi_fighters.
+// Geen rood/blauw en geen echte partij_nr: toernooi gebruikt toernooi_code + va_nummer als sleutel.
 
 import {
   type AnyRow,
@@ -19,6 +20,14 @@ function cleanNamePart(v: unknown): string {
   return String(v ?? "").replace(/\s+/g, " ").trim();
 }
 
+function firstFilled(...values: unknown[]): string | null {
+  for (const v of values) {
+    const s = cleanNamePart(v);
+    if (s) return s;
+  }
+  return null;
+}
+
 function aanmeldingFullName(row: AnyRow): string {
   const voornaam = cleanNamePart(row?.voornaam);
   const achternaam = cleanNamePart(row?.achternaam);
@@ -32,17 +41,83 @@ function aanmeldingFullName(row: AnyRow): string {
   return cleanNamePart(row?.naam ?? row?.naam_input ?? row?.fighter_name);
 }
 
+function classifyUitslag(raw: unknown): "win" | "loss" | "draw" | "demo" | null {
+  const txt = String(raw ?? "").trim().toLowerCase();
+  if (!txt) return null;
+  if (txt.includes("demo") || txt.includes("demonstr") || txt.includes("no contest") || txt.includes("nocontest")) return "demo";
+  if (txt.includes("gelijk") || txt.includes("draw") || txt.includes("onbeslist")) return "draw";
+  if (txt.includes("verlies") || txt.includes("verliest") || txt.includes("lost") || txt.includes("loss")) return "loss";
+  if (txt.includes("winst") || txt.includes("gewonnen") || txt.includes("wint") || txt.includes("win")) return "win";
+  return null;
+}
+
+function buildRecordFromUitslagen(rows: AnyRow[] = []) {
+  let record_w = 0;
+  let record_l = 0;
+  let record_d = 0;
+  let demo = 0;
+
+  for (const row of rows) {
+    const kind = classifyUitslag(row?.uitslag ?? row?.resultaat ?? row?.outcome);
+    if (kind === "win") record_w += 1;
+    else if (kind === "loss") record_l += 1;
+    else if (kind === "draw") record_d += 1;
+    else if (kind === "demo") demo += 1;
+  }
+
+  const totaalZonderDemo = record_w + record_l + record_d;
+  const totaalInclusiefDemo = totaalZonderDemo + demo;
+  const totaalVoorJeugd = Math.max(0, totaalZonderDemo + Math.floor(demo / 3));
+
+  return {
+    record_w,
+    record_l,
+    record_d,
+    demo,
+    totaal_wedstrijden: totaalZonderDemo,
+    totaal_uitslagen_inclusief_demo: totaalInclusiefDemo,
+    totaal_partijen_voor_regels: totaalVoorJeugd,
+    hasUitslagen: rows.length > 0,
+  };
+}
+
 export function buildSingleFighterContext(params: {
   matchmakingId: string;
   controleRunId: string;
+
+  // Normale flow: aanmelding uit aanmeldingen.
   aanmelding: AnyRow;
+
+  // Toernooi-flow vóór admin-controle: losse deelnemer uit matchmaker_toernooi_fighters.
+  // Als deze is meegegeven, is dit de matchmaker-bron voor VA/naam/sportschool/discipline/klasse/gewicht.
+  toernooiFighter?: AnyRow | null;
+
   fightersRaw?: AnyRow | null;
+  uitslagen?: AnyRow[];
   eventDate?: string | null;
 }) {
-  const { matchmakingId, controleRunId, aanmelding, fightersRaw: raw = null, eventDate = null } = params;
+  const {
+    matchmakingId,
+    controleRunId,
+    aanmelding,
+    toernooiFighter = null,
+    fightersRaw: raw = null,
+    uitslagen = [],
+    eventDate = null,
+  } = params;
+
+  const source = toernooiFighter ?? aanmelding;
+  const isToernooi = !!toernooiFighter || !!source?.toernooi_code;
+  const toernooiCode = firstFilled(source?.toernooi_code, source?.toernooi, source?.t_code)?.toUpperCase() ?? null;
+  const record = buildRecordFromUitslagen(uitslagen);
 
   const va = normalizeVa(
-    aanmelding?.va_nummer ??
+    source?.va_nummer ??
+      source?.fighter_id ??
+      source?.va ??
+      source?.va_nr ??
+      source?.vanummer ??
+      aanmelding?.va_nummer ??
       aanmelding?.va ??
       aanmelding?.va_nr ??
       aanmelding?.vanummer ??
@@ -50,13 +125,31 @@ export function buildSingleFighterContext(params: {
       raw?.fighter_id
   );
 
-  const naamInput = aanmeldingFullName(aanmelding);
+  const naamInput = toernooiFighter
+    ? cleanNamePart(
+        firstFilled(
+          toernooiFighter?.naam,
+          toernooiFighter?.naam_mm,
+          toernooiFighter?.fighter_name,
+          aanmeldingFullName(aanmelding)
+        )
+      )
+    : aanmeldingFullName(aanmelding);
+
   const naamFp = raw ? fullName(raw) : "";
-  const geboortedatum = pick(raw, ["geboortedatum", "birth_date"]) ?? pick(aanmelding, ["geboortedatum", "geboortedatum_input"]);
+
+  const geboortedatum =
+    pick(raw, ["geboortedatum", "birth_date"]) ??
+    pick(source, ["geboortedatum", "geboortedatum_input"]) ??
+    pick(aanmelding, ["geboortedatum", "geboortedatum_input"]);
+
   const gymFp = pick(raw, ["sportschool", "gym", "sportschool_naam"]);
-  const gymInput = pick(aanmelding, ["gym", "sportschool", "sportschool_naam", "gym_input"]);
+  const gymInput =
+    pick(source, ["gym", "sportschool", "sportschool_naam", "gym_input"]) ??
+    pick(aanmelding, ["gym", "sportschool", "sportschool_naam", "gym_input"]);
+
   const klasseFp = pick(raw, ["klasse", "nulmeting_klasse", "klasse_fp"]);
-  const klasseInput = pick(aanmelding, ["klasse", "klasse_mm"]);
+  const klasseInput = pick(source, ["klasse", "klasse_mm"]);
   const licentieRaw = pick(raw, ["licentie", "licentie_status", "licentie_ok", "heeft_licentie"]);
   const startverbodRaw = pick(raw, ["heeft_startverbod", "startverbod"]);
   const keurmerkRaw = pick(raw, ["heeft_keurmerk", "keurmerk", "gym_keurmerk"]);
@@ -65,10 +158,19 @@ export function buildSingleFighterContext(params: {
   return {
     matchmaking_id: matchmakingId,
     controle_run_id: controleRunId,
-    inschrijving_id: aanmelding.id ?? null,
-    aanmelding_id: aanmelding.id ?? null,
-    row_nr: aanmelding.row_nr ?? null,
-    upload_id: aanmelding.upload_id ?? null,
+
+    // Normale aanmelding-id blijft behouden. Toernooi heeft daarnaast zijn eigen rij-id.
+    inschrijving_id: aanmelding.id ?? source?.aanmelding_id ?? null,
+    aanmelding_id: aanmelding.id ?? source?.aanmelding_id ?? null,
+    matchmaker_toernooi_fighter_id: toernooiFighter?.id ?? null,
+    row_nr: source?.row_nr ?? aanmelding.row_nr ?? null,
+    upload_id: source?.upload_id ?? aanmelding.upload_id ?? null,
+
+    is_toernooi: isToernooi,
+    toernooi_code: toernooiCode,
+    partij_nr: 0,
+    bout_id: null,
+    hoek: isToernooi ? "toernooi" : null,
 
     fighter_id: va ?? raw?.fighter_id ?? null,
     va_nummer: va ?? raw?.va_nummer ?? raw?.fighter_id ?? null,
@@ -79,10 +181,10 @@ export function buildSingleFighterContext(params: {
     naam_mm: naamInput || null,
     naam_fp: naamFp || null,
     fp_naam: naamFp || null,
-    voornaam: aanmelding.voornaam ?? null,
-    achternaam: aanmelding.achternaam ?? null,
+    voornaam: source?.voornaam ?? aanmelding.voornaam ?? null,
+    achternaam: source?.achternaam ?? aanmelding.achternaam ?? null,
 
-    discipline: pick(aanmelding, ["discipline"]) ?? pick(raw, ["discipline"]),
+    discipline: pick(source, ["discipline"]) ?? pick(aanmelding, ["discipline"]) ?? pick(raw, ["discipline"]),
     klasse: klasseInput ?? klasseFp ?? null,
     klasse_mm: klasseInput ?? null,
     klasse_fp: klasseFp ?? null,
@@ -90,13 +192,13 @@ export function buildSingleFighterContext(params: {
     nulmeting_klasse: pick(raw, ["nulmeting_klasse"]) ?? klasseFp ?? null,
     nulmeting_opmerking: pick(raw, ["nulmeting_opmerking", "nulmeting"]),
 
-    geslacht: pick(raw, ["geslacht"]) ?? pick(aanmelding, ["geslacht"]),
+    geslacht: pick(raw, ["geslacht"]) ?? pick(source, ["geslacht"]) ?? pick(aanmelding, ["geslacht"]),
     geslacht_fp: pick(raw, ["geslacht"]),
     fp_geslacht: pick(raw, ["geslacht"]),
     geboortedatum,
     geboortedatum_fp: pick(raw, ["geboortedatum", "birth_date"]),
     fp_geboortedatum: pick(raw, ["geboortedatum", "birth_date"]),
-    geboortedatum_input: pick(aanmelding, ["geboortedatum", "geboortedatum_input"]),
+    geboortedatum_input: pick(source, ["geboortedatum", "geboortedatum_input"]) ?? pick(aanmelding, ["geboortedatum", "geboortedatum_input"]),
     leeftijd: calcAge(geboortedatum, eventDate),
     leeftijd_event: calcAge(geboortedatum, eventDate),
     evenement_datum: eventDate,
@@ -107,7 +209,11 @@ export function buildSingleFighterContext(params: {
     gym_input: gymInput ?? null,
     sportschool_fp: gymFp ?? null,
     fp_gym: gymFp ?? null,
-    gewicht: toNumberOrNull(pick(aanmelding, ["gewicht", "gewicht_kg"])) ?? pick(aanmelding, ["gewicht", "gewicht_kg"]),
+    gewicht:
+      toNumberOrNull(pick(source, ["gewicht", "gewicht_kg"])) ??
+      pick(source, ["gewicht", "gewicht_kg"]) ??
+      toNumberOrNull(pick(aanmelding, ["gewicht", "gewicht_kg"])) ??
+      pick(aanmelding, ["gewicht", "gewicht_kg"]),
 
     licentie: licentieRaw ?? null,
     licentie_status: licentieRaw ?? null,
@@ -117,22 +223,23 @@ export function buildSingleFighterContext(params: {
     heeft_keurmerk: keurmerkRaw ?? null,
     keurmerk: keurmerkRaw ?? null,
 
-    record_w: toNumberOrNull(pick(raw, ["record_w", "win", "wins", "gewonnen"])),
-    record_l: toNumberOrNull(pick(raw, ["record_l", "loss", "losses", "verloren"])),
-    record_d: toNumberOrNull(pick(raw, ["record_d", "draw", "draws", "onbeslist"])),
-    gewonnen: toNumberOrNull(pick(raw, ["gewonnen", "record_w", "win", "wins"])),
-    verloren: toNumberOrNull(pick(raw, ["verloren", "record_l", "loss", "losses"])),
-    draw: toNumberOrNull(pick(raw, ["draw", "record_d", "draws", "onbeslist"])),
-    demo: toNumberOrNull(pick(raw, ["demo", "demo_partijen"])),
-    totaal_wedstrijden: toNumberOrNull(pick(raw, ["totaal_wedstrijden", "record_totaal", "uitslagen_count"])),
-    uitslagen_count: toNumberOrNull(pick(raw, ["uitslagen_count", "totaal_wedstrijden", "record_totaal"])),
+    record_w: record.hasUitslagen ? record.record_w : toNumberOrNull(pick(raw, ["record_w", "win", "wins", "gewonnen"])),
+    record_l: record.hasUitslagen ? record.record_l : toNumberOrNull(pick(raw, ["record_l", "loss", "losses", "verloren"])),
+    record_d: record.hasUitslagen ? record.record_d : toNumberOrNull(pick(raw, ["record_d", "draw", "draws", "onbeslist"])),
+    gewonnen: record.hasUitslagen ? record.record_w : toNumberOrNull(pick(raw, ["gewonnen", "record_w", "win", "wins"])),
+    verloren: record.hasUitslagen ? record.record_l : toNumberOrNull(pick(raw, ["verloren", "record_l", "loss", "losses"])),
+    draw: record.hasUitslagen ? record.record_d : toNumberOrNull(pick(raw, ["draw", "record_d", "draws", "onbeslist"])),
+    demo: record.hasUitslagen ? record.demo : toNumberOrNull(pick(raw, ["demo", "demo_partijen"])),
+    totaal_wedstrijden: record.hasUitslagen ? record.totaal_wedstrijden : toNumberOrNull(pick(raw, ["totaal_wedstrijden", "record_totaal", "uitslagen_count"])),
+    totaal_partijen_voor_regels: record.hasUitslagen ? record.totaal_partijen_voor_regels : null,
+    uitslagen_count: record.hasUitslagen ? record.totaal_wedstrijden : toNumberOrNull(pick(raw, ["uitslagen_count", "totaal_wedstrijden", "record_totaal"])),
     laatste_partij_datum: pick(raw, ["laatste_partij_datum", "laatste_datum"]),
 
     naam_match: naamFp && naamInput ? naamFp.toLowerCase() === naamInput.toLowerCase() : null,
     geboortedatum_match:
-      pick(raw, ["geboortedatum", "birth_date"]) && pick(aanmelding, ["geboortedatum", "geboortedatum_input"])
+      pick(raw, ["geboortedatum", "birth_date"]) && (pick(source, ["geboortedatum", "geboortedatum_input"]) ?? pick(aanmelding, ["geboortedatum", "geboortedatum_input"]))
         ? String(pick(raw, ["geboortedatum", "birth_date"])).slice(0, 10) ===
-          String(pick(aanmelding, ["geboortedatum", "geboortedatum_input"])).slice(0, 10)
+          String(pick(source, ["geboortedatum", "geboortedatum_input"]) ?? pick(aanmelding, ["geboortedatum", "geboortedatum_input"])).slice(0, 10)
         : null,
     gym_match: gymFp && gymInput ? String(gymFp).toLowerCase() === String(gymInput).toLowerCase() : null,
 
@@ -141,9 +248,19 @@ export function buildSingleFighterContext(params: {
     scrape_status: raw ? "gecontroleerd" : "controle_mislukt",
     checked_at: now,
     scraped_at: raw ? now : null,
-    bron: "aanmeldingen",
-    raw_json: { aanmelding, fighters_raw: raw },
-    raw: { aanmelding, fighters_raw: raw },
+    bron: isToernooi ? "matchmaker_toernooi_fighters" : "aanmeldingen",
+    raw_json: {
+      aanmelding,
+      matchmaker_toernooi_fighter: toernooiFighter,
+      fighters_raw: raw,
+      matchmaker_uitslagen_raw: uitslagen,
+    },
+    raw: {
+      aanmelding,
+      matchmaker_toernooi_fighter: toernooiFighter,
+      fighters_raw: raw,
+      matchmaker_uitslagen_raw: uitslagen,
+    },
     created_at: now,
     updated_at: now,
   };

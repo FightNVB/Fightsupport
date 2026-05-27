@@ -16,7 +16,8 @@ type RoleName =
   | "matchmaker"
   | "official"
   | "hoofdofficial"
-  | "dispensatie_admin";
+  | "dispensatie_admin"
+  | "trainer";
 
 interface AuthContextType {
   user: any | null;
@@ -44,6 +45,7 @@ function asRoleName(v: any): RoleName | null {
     "official",
     "hoofdofficial",
     "dispensatie_admin",
+    "trainer",
   ]);
 
   return allowed.has(r as RoleName) ? (r as RoleName) : null;

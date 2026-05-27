@@ -112,6 +112,14 @@ function toernooiFighterKey(toernooiCode: string, naam: any, gym: any, va: any):
   return `${s(toernooiCode).toUpperCase()}::NAME::${s(naam).toLowerCase()}::${s(gym).toLowerCase()}`;
 }
 
+
+function getMinPunt(b:any): string {
+  const parts = [];
+  if (Number(b.gewicht_strafpunt_rood || 0) > 0) parts.push(`Rood -${b.gewicht_strafpunt_rood}`);
+  if (Number(b.gewicht_strafpunt_blauw || 0) > 0) parts.push(`Blauw -${b.gewicht_strafpunt_blauw}`);
+  return parts.join(" | ");
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const matchmaking_id = searchParams.get("matchmaking_id");
@@ -139,13 +147,14 @@ export async function GET(req: Request) {
   const ws = wb.addWorksheet("Jury lineup");
 
   const columns: Partial<ExcelJS.Column>[] = [
-    { header: "Partij", key: "partij_nr", width: 12 },
+    { header: "Partij", key: "partij_nr", width: 8 },
     { header: "Discipline", key: "discipline", width: 18 },
     { header: "Klasse", key: "klasse", width: 16 },
 
     { header: "Rood naam", key: "rood_naam", width: 28 },
     { header: "Rood sportschool", key: "rood_gym", width: 28 },
     { header: "Rood VA", key: "rood_va", width: 14 },
+    { header: "VS", key: "vs", width: 5 },
 
     { header: "Blauw naam", key: "blauw_naam", width: 28 },
     { header: "Blauw sportschool", key: "blauw_gym", width: 28 },
@@ -157,10 +166,24 @@ export async function GET(req: Request) {
   }
 
   columns.push({ header: "Ronde tijden", key: "rondes", width: 18 });
+  columns.push({ header: "Min punt", key: "minpunt", width: 18 });
 
   ws.columns = columns;
 
+  ws.pageSetup = {
+    orientation: "landscape",
+    paperSize: 9,
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    horizontalCentered: true,
+    margins: { left:0.25,right:0.25,top:0.4,bottom:0.4,header:0.2,footer:0.2 },
+    printTitlesRow: "1:1",
+  };
+
   ws.views = [{ state: "frozen", ySplit: 1 }];
+  ws.properties.defaultRowHeight = 20;
+
 
   const header = ws.getRow(1);
   header.height = 24;
@@ -243,8 +266,10 @@ export async function GET(req: Request) {
           blauw_naam: "",
           blauw_gym: "",
           blauw_va: "",
+          vs: "VS",
           ...(hasTitelpartij ? { titelpartij: titelpartij ? "Ja" : "" } : {}),
           rondes,
+          minpunt: getMinPunt(b),
         });
       }
 
@@ -264,8 +289,10 @@ export async function GET(req: Request) {
       blauw_gym: b.blauw_gym,
       blauw_va: b.va_blauw,
 
+      vs: "VS",
       ...(hasTitelpartij ? { titelpartij: titelpartij ? "Ja" : "" } : {}),
       rondes,
+      minpunt: getMinPunt(b),
     });
   }
 
@@ -284,7 +311,8 @@ export async function GET(req: Request) {
     });
   });
 
-  const buffer = await wb.xlsx.writeBuffer();
+  ws.pageSetup.printArea = `A1:${String.fromCharCode(64 + ws.columns.length)}${ws.rowCount}`;
+const buffer = await wb.xlsx.writeBuffer();
 
   return new NextResponse(buffer, {
     headers: {

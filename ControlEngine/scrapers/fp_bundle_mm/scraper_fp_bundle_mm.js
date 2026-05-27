@@ -5,6 +5,7 @@
 // ✅ Deze scraper schrijft NIET naar fighters_raw
 // ✅ Gebruikt echte kolommen van matchmaker_fighters_raw
 // ✅ fighter_id = interne UUID, va_nummer = extern VA-nummer
+// ✅ Geen kolomkoppen in uitslagen-export = geen uitslagen, GEEN fout
 
 import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
@@ -90,6 +91,7 @@ async function safeInsertMany(table, rows) {
     }
 
     const col = missingColumnName(error);
+
     if (col && body.some((row) => Object.prototype.hasOwnProperty.call(row, col))) {
       body = body.map((row) => {
         const next = { ...row };
@@ -118,6 +120,7 @@ async function withTimeout(promiseFactory, ms, label, onTimeout) {
           await onTimeout();
         }
       } catch {}
+
       rej(new Error(`HARD TIMEOUT ${ms}ms for ${label}`));
     }, ms);
   });
@@ -142,6 +145,7 @@ async function closeAnyModal(page) {
   for (const sel of selectors) {
     try {
       const el = await page.$(sel);
+
       if (el) {
         await el.click();
         await page.waitForTimeout(120);
@@ -163,7 +167,11 @@ async function readHeaderInfo(page) {
       const k1 = document.querySelector(".koptekst1");
       const t = (k1?.innerText || "").trim();
       const m = t.match(/\((\d{3,6})\)$/);
-      return { gotVa: m ? m[1] : null, koptekst1: t };
+
+      return {
+        gotVa: m ? m[1] : null,
+        koptekst1: t,
+      };
     });
   } catch {
     return { gotVa: null, koptekst1: "" };
@@ -219,6 +227,7 @@ async function closeWorkerContext(ctx) {
 
   try {
     const pages = await ctx.pages().catch(() => []);
+
     for (const p of pages) {
       await hardClosePage(p).catch(() => {});
     }
@@ -254,6 +263,7 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
     await wait(softWaitMs);
 
     const loginNow = await isLoginPage(p);
+
     if (loginNow) {
       await hardClosePage(p).catch(() => {});
       throw new Error("LOGIN_PAGE");
@@ -300,6 +310,7 @@ async function scrapeHeader(page) {
     const infoBlock = k2?.innerText?.trim() || "";
 
     const m = nameBlock.match(/^(.+)\((\d+)\)$/);
+
     if (m) {
       r.naam = m[1].trim();
       r.va_nummer = m[2].trim();
@@ -312,6 +323,7 @@ async function scrapeHeader(page) {
     if (age) r.leeftijd = parseInt(age[1], 10);
 
     const low = infoBlock.toLowerCase();
+
     if (low.includes("man")) r.geslacht = "man";
     if (low.includes("vrouw")) r.geslacht = "vrouw";
 
@@ -502,9 +514,7 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
     return;
   }
 
-  const { error: insertErr } = await supabase
-    .from(RAW_FIGHTERS_TABLE)
-    .insert(payload);
+  const { error: insertErr } = await supabase.from(RAW_FIGHTERS_TABLE).insert(payload);
 
   if (insertErr) {
     console.log("[fullfighter-mm] ❌ matchmaker_fighters_raw insert fout:", insertErr.message);
@@ -654,12 +664,19 @@ async function downloadExcel(page, matchmaking_id, va) {
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const client = await page.target().createCDPSession();
+
   await client.send("Page.setDownloadBehavior", {
     behavior: "allow",
     downloadPath: downloadDir,
   });
 
-  const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
+  const selectors = [
+    '[title="download als excel"]',
+    '[title*="download"][title*="excel"]',
+    'svg use[href*="#img_41"]',
+    'svg use[href*="img_41"]',
+  ];
+
   const found = await waitForAnySelectorInAnyFrame(page, selectors, 45000);
 
   if (!found) throw new Error(`Download knop niet gevonden — VA ${va}`);
@@ -667,8 +684,18 @@ async function downloadExcel(page, matchmaking_id, va) {
   const clickDownload = async () => {
     await found.frame.evaluate((sel) => {
       const el = document.querySelector(sel);
-      el?.scrollIntoView?.({ block: "center" });
-      el?.click?.();
+      if (!el) return;
+
+      const clickable =
+        el.closest?.('[title="download als excel"]') ||
+        el.closest?.('[title*="download"][title*="excel"]') ||
+        el.closest?.(".icon") ||
+        el.closest?.(".has_action") ||
+        el.closest?.("div") ||
+        el;
+
+      clickable?.scrollIntoView?.({ block: "center", inline: "center" });
+      clickable?.click?.();
     }, found.selector);
   };
 
@@ -678,7 +705,7 @@ async function downloadExcel(page, matchmaking_id, va) {
   let retried = false;
 
   while (Date.now() - start < 60000) {
-    const filesNow = fs.readdirSync(downloadDir);
+    const filesNow = fs.existsSync(downloadDir) ? fs.readdirSync(downloadDir) : [];
     const lower = filesNow.map((f) => f.toLowerCase());
 
     const xlsx = filesNow
@@ -687,27 +714,12 @@ async function downloadExcel(page, matchmaking_id, va) {
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
     if (xlsx[0]) {
-  const downloadedFile = xlsx[0];
+      const downloadedFile = xlsx[0];
 
-  // klein beetje wachten zodat excel lock weg is
-  await wait(300);
+      await wait(300);
 
-  // bestand automatisch opruimen zodra node afsluit
-  process.on("exit", () => {
-    try {
-      if (fs.existsSync(downloadedFile)) {
-        fs.unlinkSync(downloadedFile);
-      }
-
-      // map ook verwijderen als leeg
-      if (fs.existsSync(downloadDir)) {
-        fs.rmSync(downloadDir, { recursive: true, force: true });
-      }
-    } catch {}
-  });
-
-  return downloadedFile;
-}
+      return downloadedFile;
+    }
 
     const hasCr = lower.some((f) => f.endsWith(".crdownload"));
 
@@ -720,6 +732,22 @@ async function downloadExcel(page, matchmaking_id, va) {
   }
 
   return null;
+}
+
+async function cleanupDownloadedFile(filePath) {
+  if (!filePath) return;
+
+  try {
+    const dir = path.dirname(filePath);
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {}
 }
 
 async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
@@ -747,11 +775,18 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
 
   const missing = must.filter(([, idx]) => idx === -1).map(([name]) => name);
 
+  /**
+   * BELANGRIJK:
+   * Geen kolomkoppen betekent bij FightPassport meestal:
+   * "deze vechter heeft geen uitslagen".
+   * Dit is dus GEEN scraper-fout.
+   */
   if (missing.length) {
     return {
       rows: [],
       meta: {
-        ok: false,
+        ok: true,
+        emptyExport: true,
         missingHeaders: missing,
         headers: headers.filter(Boolean),
       },
@@ -815,6 +850,7 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
     rows: deduped,
     meta: {
       ok: true,
+      emptyExport: false,
       missingHeaders: [],
       headers: headers.filter(Boolean),
     },
@@ -828,10 +864,12 @@ async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, 
   const partijList = partijNrByVaMap?.get?.(vaStr) ?? [];
   const partij_nr = Array.isArray(partijList) && partijList.length ? Number(partijList[0]) : null;
 
-  await safeDelete(RAW_UITSLAGEN_TABLE, {
+  const delErr = await safeDelete(RAW_UITSLAGEN_TABLE, {
     matchmaking_id,
     va_nummer: vaStr,
   });
+
+  if (delErr) throw delErr;
 
   if (!data.length) return { saved: 0, table: RAW_UITSLAGEN_TABLE };
 
@@ -863,58 +901,86 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
   console.log(`[uitslagen-mm] ▶️ start VA ${va}`);
 
   const MAX_TRIES = Number(process.env.UITSLAGEN_TRIES ?? "1");
+  let lastMeta = null;
 
   for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
-    await openUitslagenTile(page, va);
+    let file = null;
 
-    const file = await downloadExcel(page, matchmaking_id, va);
+    try {
+      await openUitslagenTile(page, va);
 
-    if (!file) {
-      await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
-      console.log(`[uitslagen-mm] ✅ done VA ${va} (n=0) (no file)`);
-      return { ok: true, n: 0, reason: "no_file" };
+      file = await downloadExcel(page, matchmaking_id, va);
+
+      if (!file) {
+        await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(
+          () => {}
+        );
+
+        console.log(`[uitslagen-mm] ✅ done VA ${va} (n=0) (no file)`);
+        return { ok: true, n: 0, reason: "no_file" };
+      }
+
+      const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
+      lastMeta = parsed?.meta ?? null;
+
+      if (parsed?.meta?.ok) {
+        const res = await saveUitslagenSnapshot(
+          parsed.rows,
+          matchmaking_id,
+          controle_run_id,
+          va,
+          partijNrByVaMap
+        );
+
+        const n = res?.saved ?? parsed.rows.length ?? 0;
+
+        if (parsed?.meta?.emptyExport) {
+          console.log(`[uitslagen-mm] ℹ️ Geen uitslagen voor VA ${va} (lege export / geen kolomkoppen)`);
+          console.log(`[uitslagen-mm] ✅ done VA ${va} (n=0) table=${res?.table ?? "unknown"}`);
+
+          return {
+            ok: true,
+            n: 0,
+            reason: "geen_uitslagen",
+          };
+        }
+
+        console.log(`[uitslagen-mm] ✅ done VA ${va} (n=${n}) table=${res?.table ?? "unknown"}`);
+
+        return {
+          ok: true,
+          n,
+          reason: "ok",
+        };
+      }
+
+      await closeAnyModal(page).catch(() => {});
+      await wait(600 + attempt * 400);
+    } finally {
+      await cleanupDownloadedFile(file).catch(() => {});
     }
-
-    const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
-
-    if (parsed?.meta?.ok) {
-      const res = await saveUitslagenSnapshot(
-        parsed.rows,
-        matchmaking_id,
-        controle_run_id,
-        va,
-        partijNrByVaMap
-      );
-
-      const n = res?.saved ?? parsed.rows.length ?? 0;
-
-      console.log(`[uitslagen-mm] ✅ done VA ${va} (n=${n}) table=${res?.table ?? "unknown"}`);
-      return { ok: true, n, reason: "ok" };
-    }
-
-    const missing = (parsed?.meta?.missingHeaders ?? []).join(", ");
-    const hdrs = (parsed?.meta?.headers ?? []).join(" | ");
-
-    console.log(
-      `[uitslagen-mm] ❌ Kolomkoppen niet gevonden (attempt ${attempt}/${MAX_TRIES}) — VA ${va}. Missing: ${missing}`
-    );
-
-    console.log(`[uitslagen-mm] ➡️ Headers: ${hdrs}`);
-
-    await closeAnyModal(page).catch(() => {});
-    await wait(600 + attempt * 400);
   }
 
-  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
+  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(
+    () => {}
+  );
 
+  console.log(`[uitslagen-mm] ℹ️ Geen uitslagen gevonden voor VA ${va}`, lastMeta ?? "");
   console.log(`[uitslagen-mm] ✅ done VA ${va} (n=0)`);
-  return { ok: true, n: 0, reason: "no_uitslagen" };
+
+  return {
+    ok: true,
+    n: 0,
+    reason: "no_uitslagen",
+  };
 }
 
 async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
   const partijNrByVaMap = await fetchPartijNrByVa(matchmaking_id);
 
-  const { browser, page: masterPage } = await loginFightPassport();
+  const { browser, page: masterPage } = await loginFightPassport({
+    matchmakerId: process.env.FP_MATCHMAKER_ID || null,
+  });
 
   let cookies = [];
 
@@ -970,7 +1036,9 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
 
     async function resetWorkerContext(reason) {
       console.log(
-        `[bundle-mm] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`
+        `[bundle-mm] 🧨 reset worker context (worker${workerIdx + 1}) ${
+          reason ? `(${reason})` : ""
+        }`
       );
 
       await closeWorkerContext(ctx).catch(() => {});

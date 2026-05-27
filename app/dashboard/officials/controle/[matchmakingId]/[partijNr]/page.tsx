@@ -22,13 +22,17 @@ type ControleRun = {
 
 type ControleResultaatRow = {
   id: string;
-  controle_run_id: string;
+  controle_run_id: string | null;
+  matchmaking_id?: string | null;
   partij_nr: number | null;
-  rule: string;
+  rule: string | null;
   rule_code: string | null;
-  resultaat: "ok" | "actie" | "dispensatie" | "afgekeurd";
+  resultaat: "ok" | "actie" | "dispensatie" | "afgekeurd" | string;
   boodschap: string | null;
   created_at: string | null;
+  hoek?: "rood" | "blauw" | null;
+  source_table?: string | null;
+  source_id?: string | null;
 
   aantekeningen?: string | null;
 
@@ -1029,6 +1033,83 @@ function displayBoodschap(row: ControleResultaatRow): string {
   return String(row?.boodschap ?? "-") || "-";
 }
 
+function isWeegstationRow(row: Partial<ControleResultaatRow> | null | undefined): boolean {
+  const rule = String(row?.rule ?? "").trim().toLowerCase();
+  const code = String(row?.rule_code ?? "").trim().toUpperCase();
+  const source = String((row as any)?.source_table ?? "").trim().toLowerCase();
+  return rule.startsWith("weegstation_") || code.startsWith("WEEGSTATION_") || source === "weigh_in_bouts";
+}
+
+function weegstationSoort(row: ControleResultaatRow): string {
+  const rule = String(row?.rule ?? "").toLowerCase();
+  const code = String(row?.rule_code ?? "").toUpperCase();
+  const msg = String(row?.boodschap ?? "").toLowerCase();
+  const res = normResultaat(row?.resultaat);
+
+  if (rule.includes("minpunt") || code.includes("MINPUNT") || msg.includes("minpunt")) {
+    return "Minpunt";
+  }
+
+  if (
+    rule.includes("dispensatie") ||
+    code.includes("DISP") ||
+    msg.includes("dispensatie") ||
+    res === "dispensatie"
+  ) {
+    if (res === "afgekeurd" || code.includes("AFGEKEURD") || msg.includes("afgekeurd")) {
+      return "Weegdispensatie afgekeurd";
+    }
+    return "Weegdispensatie verleend";
+  }
+
+  if (
+    code.includes("AFKEUR") ||
+    res === "afgekeurd" ||
+    msg.includes("afkeur") ||
+    msg.includes("afgekeurd")
+  ) {
+    return "Afkeur op gewicht";
+  }
+
+  if (code === "OK" || res === "ok" || msg.includes("status ok")) {
+    return "Goedkeur na weging";
+  }
+
+  return "Weegstation";
+}
+
+function displayWeegstationBoodschap(row: ControleResultaatRow): string {
+  const soort = weegstationSoort(row);
+  const hoek = String(row?.hoek ?? "").trim();
+  const msg = String(row?.boodschap ?? "").trim();
+  const suffix = hoek ? ` (${hoek})` : "";
+  return `${soort}${suffix}: ${msg || "-"}`;
+}
+
+function mergeControleResultatenRows(
+  normalRows: ControleResultaatRow[],
+  weegRows: ControleResultaatRow[],
+): ControleResultaatRow[] {
+  const seen = new Set<string>();
+  const out: ControleResultaatRow[] = [];
+
+  for (const row of [...(normalRows ?? []), ...(weegRows ?? [])]) {
+    const key = String(row?.id ?? "").trim() || `${row?.rule ?? ""}-${row?.partij_nr ?? ""}-${row?.boodschap ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+
+  return out.sort((a, b) => {
+    const at = a?.created_at ? new Date(a.created_at).getTime() : 0;
+    const bt = b?.created_at ? new Date(b.created_at).getTime() : 0;
+    if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt;
+    if (isWeegstationRow(a) !== isWeegstationRow(b)) return isWeegstationRow(a) ? 1 : -1;
+    return 0;
+  });
+}
+
+
 // ✅ UitslagenTable met paging (per 6 + Verder)
 function UitslagenTable({ rows, pageSize = 6 }: { rows: UitslagRow[]; pageSize?: number }) {
   const [limit, setLimit] = useState(pageSize);
@@ -1308,15 +1389,32 @@ export default function PartijDetailPage() {
 
   async function reloadRegels() {
     if (!run?.id || !partijNr) return;
-    const { data: resRows, error: resErr } = await supabase
-      .from("controle_resultaten")
-      .select("*")
-      .eq("controle_run_id", run.id)
-      .eq("partij_nr", partijNr)
-      .order("created_at", { ascending: true });
+
+    const [{ data: resRows, error: resErr }, { data: weegRows, error: weegErr }] =
+      await Promise.all([
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("controle_run_id", run.id)
+          .eq("partij_nr", partijNr)
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("partij_nr", partijNr)
+          .like("rule", "weegstation%")
+          .order("created_at", { ascending: true }),
+      ]);
 
     if (resErr) throw resErr;
-    const rows = (resRows ?? []) as ControleResultaatRow[];
+    if (weegErr) throw weegErr;
+
+    const rows = mergeControleResultatenRows(
+      (resRows ?? []) as ControleResultaatRow[],
+      (weegRows ?? []) as ControleResultaatRow[],
+    );
+
     setRegels(rows);
     primeNoteDrafts(rows);
   }
@@ -1508,16 +1606,30 @@ export default function PartijDetailPage() {
         const row = (ctxRows?.[0] ?? null) as AnyRow | null;
         setCtx(row);
 
-        const { data: resRows, error: resErr } = await supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("controle_run_id", latestRun.id)
-          .eq("partij_nr", partijNr)
-          .order("created_at", { ascending: true });
+        const [{ data: resRows, error: resErr }, { data: weegRows, error: weegErr }] =
+          await Promise.all([
+            supabase
+              .from("controle_resultaten")
+              .select("*")
+              .eq("controle_run_id", latestRun.id)
+              .eq("partij_nr", partijNr)
+              .order("created_at", { ascending: true }),
+            supabase
+              .from("controle_resultaten")
+              .select("*")
+              .eq("matchmaking_id", matchmakingId)
+              .eq("partij_nr", partijNr)
+              .like("rule", "weegstation%")
+              .order("created_at", { ascending: true }),
+          ]);
 
         if (resErr) throw resErr;
+        if (weegErr) throw weegErr;
         {
-        const rows = (resRows ?? []) as ControleResultaatRow[];
+        const rows = mergeControleResultatenRows(
+          (resRows ?? []) as ControleResultaatRow[],
+          (weegRows ?? []) as ControleResultaatRow[],
+        );
         setRegels(rows);
         primeNoteDrafts(rows);
         }
@@ -2543,7 +2655,7 @@ export default function PartijDetailPage() {
           {/* Meldingen */}
           <div className="rounded-2xl overflow-hidden" style={{ ...plateBodyStyle(), padding: 0 }}>
             <div className="p-3">
-              <PlateHeader title="MELDINGEN — RULES" dot="orange" right={`${regels.length} meldingen`} />
+              <PlateHeader title="MELDINGEN" dot="orange" right={`${regels.length} meldingen`} />
             </div>
 
             <div className="p-4 pt-2">
@@ -2566,39 +2678,64 @@ export default function PartijDetailPage() {
                     {/* ✅ Zebra: wit (zwarte tekst) + donkergrijs (witte tekst) */}
                     <tbody className="[&>tr:nth-child(odd)]:bg-white [&>tr:nth-child(odd)]:text-zinc-900 [&>tr:nth-child(even)]:bg-zinc-700 [&>tr:nth-child(even)]:text-white">
                       {regels.map((r, idx) => {
+                        const isWeegstation = isWeegstationRow(r);
                         const disp = displayResultaat(r);
-                        const canApprove = canApproveRule(r);
+                        const canApprove = !isWeegstation && canApproveRule(r);
 
                         return (
                           <tr key={r.id}>
                             <td className="px-3 py-2 align-top">
-                              <div className="flex flex-col gap-1">
-                                <Badge text={disp.label} tone={disp.tone} invert />
-                                {!isApprovedOverride(r) && r.original_resultaat &&
-                                String(r.original_resultaat).toLowerCase() !== String(r.resultaat ?? "").toLowerCase() ? (
-                                  <span className="text-[10px] opacity-70">
-                                    Origineel: {String(r.original_resultaat).toUpperCase()}
+                              {isWeegstation ? (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[11px] font-black tracking-widest text-orange-600">
+                                    WEEGSTATION
                                   </span>
-                                ) : null}
-                                {r.review_status ? (
                                   <span className="text-[10px] opacity-70">
-                                    Review: {String(r.review_status)}
+                                    {String(r.resultaat ?? "").toUpperCase()}
                                   </span>
-                                ) : null}
-                                {r.reviewed_by || r.reviewed_at ? (
-                                  <span className="text-[10px] opacity-70">
-                                    {r.reviewed_by ? `door ${r.reviewed_by}` : ""}
-                                    {r.reviewed_at ? ` • ${fmtDateOnlyNL(r.reviewed_at)}` : ""}
-                                  </span>
-                                ) : null}
-                              </div>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col gap-1">
+                                  <Badge text={disp.label} tone={disp.tone} invert />
+                                  {!isApprovedOverride(r) && r.original_resultaat &&
+                                  String(r.original_resultaat).toLowerCase() !== String(r.resultaat ?? "").toLowerCase() ? (
+                                    <span className="text-[10px] opacity-70">
+                                      Origineel: {String(r.original_resultaat).toUpperCase()}
+                                    </span>
+                                  ) : null}
+                                  {r.review_status ? (
+                                    <span className="text-[10px] opacity-70">
+                                      Review: {String(r.review_status)}
+                                    </span>
+                                  ) : null}
+                                  {r.reviewed_by || r.reviewed_at ? (
+                                    <span className="text-[10px] opacity-70">
+                                      {r.reviewed_by ? `door ${r.reviewed_by}` : ""}
+                                      {r.reviewed_at ? ` • ${fmtDateOnlyNL(r.reviewed_at)}` : ""}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )}
                             </td>
 
-                            <td className="px-3 py-2 align-top font-mono text-xs">{r.rule_code ?? r.rule ?? "-"}</td>
-
-                            <td className="px-3 py-2 align-top">{displayBoodschap(r)}</td>
+                            <td className="px-3 py-2 align-top font-mono text-xs">
+                              {isWeegstation ? "weging" : (r.rule_code ?? r.rule ?? "-")}
+                            </td>
 
                             <td className="px-3 py-2 align-top">
+                              {isWeegstation ? (
+                                <div className="font-semibold text-zinc-900 whitespace-pre-wrap">
+                                  {displayWeegstationBoodschap(r)}
+                                </div>
+                              ) : (
+                                displayBoodschap(r)
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2 align-top">
+                              {isWeegstation ? (
+                                <span className="text-xs text-zinc-500">—</span>
+                              ) : (
                               <textarea
                                 defaultValue={(noteDraftRef.current[r.id] ?? r.aantekeningen ?? "") as any}
                                 onChange={(e) => {
@@ -2613,6 +2750,7 @@ export default function PartijDetailPage() {
                                 spellCheck={false}
                                 className="w-full min-h-[54px] px-2 py-2 rounded border border-zinc-400 bg-zinc-50 text-zinc-900 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                               />
+                              )}
                             </td>
 
                             <td className="px-3 py-2 align-top">

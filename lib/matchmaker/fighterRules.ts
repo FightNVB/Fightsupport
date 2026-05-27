@@ -43,6 +43,27 @@ export type UitslagRow = {
 };
 
 type Klasse = "R" | "N" | "C" | "B" | "A";
+type NormKlasse = Klasse | "JEUGD" | "MMA_AMATEUR" | "MMA_PRO";
+type Outcome = "WIN" | "LOSS" | "DRAW" | "OTHER";
+
+type RecordStats = {
+  wins: number;
+  losses: number;
+  draws: number;
+  other: number;
+  total: number;
+  recordLabel: string;
+};
+
+type KlasseProgress = Record<Klasse, RecordStats>;
+
+type RecordAdvice = {
+  currentClass: Klasse;
+  minimumClass: Klasse;
+  recordInCurrentClass: RecordStats;
+  totalOfficial: number;
+  totalOther: number;
+};
 
 const KLASSE_VOLGORDE: Klasse[] = ["R", "N", "C", "B", "A"];
 
@@ -73,9 +94,7 @@ function boolish(v: unknown): boolean | null {
     return true;
   }
 
-  if (
-    ["nee", "n", "no", "false", "0", "ongeldig", "niet geldig"].includes(x)
-  ) {
+  if (["nee", "n", "no", "false", "0", "ongeldig", "niet geldig"].includes(x)) {
     return false;
   }
 
@@ -84,8 +103,19 @@ function boolish(v: unknown): boolean | null {
 
 function dateOnly(v: unknown): dayjs.Dayjs | null {
   if (!v) return null;
-  const d = dayjs(s(v));
-  return d.isValid() ? d : null;
+
+  const raw = s(v);
+  const d = dayjs(raw);
+  if (d.isValid()) return d;
+
+  const m = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) {
+    const [, dd, mm, yyyy] = m;
+    const parsed = dayjs(`${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`);
+    return parsed.isValid() ? parsed : null;
+  }
+
+  return null;
 }
 
 function sameDate(a: dayjs.Dayjs | null, b: dayjs.Dayjs | null): boolean {
@@ -126,12 +156,7 @@ function levenshtein(a: string, b: string): number {
       const tmp = dp[j];
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
 
-      dp[j] = Math.min(
-        dp[j] + 1,
-        dp[j - 1] + 1,
-        prev + cost,
-      );
-
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
       prev = tmp;
     }
   }
@@ -176,62 +201,35 @@ function parseGender(v: unknown): "M" | "V" | null {
   const x = lower(v);
 
   if (!x) return null;
-
-  if (
-    x === "m" ||
-    x === "man" ||
-    x === "male" ||
-    x === "jongen" ||
-    x === "heer"
-  ) {
-    return "M";
-  }
-
-  if (
-    x === "v" ||
-    x === "vrouw" ||
-    x === "female" ||
-    x === "meisje" ||
-    x === "dame"
-  ) {
-    return "V";
-  }
+  if (["m", "man", "male", "jongen", "heer"].includes(x)) return "M";
+  if (["v", "vrouw", "female", "meisje", "dame"].includes(x)) return "V";
 
   return null;
 }
 
-function normalizeKlasse(v: unknown): Klasse | "JEUGD" | "MMA_AMATEUR" | "MMA_PRO" | null {
+function normalizeKlasse(v: unknown): NormKlasse | null {
   const x = s(v).toUpperCase();
 
   if (!x) return null;
 
-  if (
-    x.includes("JEUGD") ||
-    x.includes("YOUTH") ||
-    x === "J" ||
-    x.startsWith("J-")
-  ) {
+  if (x.includes("JEUGD") || x.includes("YOUTH") || x === "J" || x === "J+" || x.startsWith("J-")) {
     return "JEUGD";
   }
 
-  if (x.includes("MMA") && (x.includes("PRO") || x.includes("PROF"))) {
-    return "MMA_PRO";
-  }
-
-  if (x.includes("MMA") && (x.includes("AMA") || x.includes("AMATEUR"))) {
-    return "MMA_AMATEUR";
-  }
+  if (x.includes("MMA") && (x.includes("PRO") || x.includes("PROF"))) return "MMA_PRO";
+  if (x.includes("MMA") && (x.includes("AMA") || x.includes("AMATEUR"))) return "MMA_AMATEUR";
 
   if (x.includes("NIEUWELING") || x.includes("NEWCOMER")) return "N";
   if (x.includes("VETERAAN") || x.includes("VETERAN")) return "N";
 
-  const direct = x.match(/\b(R|N|C|B|A)\b/);
-  if (direct) return direct[1] as Klasse;
-
-  const klass = x.match(/\b(R|N|C|B|A)[- ]?(KLASSE|CLASS)\b/);
+  const klass = x.match(/\b(R|N|C|B|A)[- ]?(KLASSE|CLASS)?\b/);
   if (klass) return klass[1] as Klasse;
 
   return null;
+}
+
+function isAdultKlasse(k: NormKlasse | null): k is Klasse {
+  return k === "R" || k === "N" || k === "C" || k === "B" || k === "A";
 }
 
 function klasseIndex(k: Klasse | null): number {
@@ -239,46 +237,47 @@ function klasseIndex(k: Klasse | null): number {
   return KLASSE_VOLGORDE.indexOf(k);
 }
 
-function maxKlasse(a: Klasse | null, b: Klasse | null): Klasse | null {
-  if (!a) return b;
-  if (!b) return a;
-  return klasseIndex(a) >= klasseIndex(b) ? a : b;
+function isKbMtDiscipline(v: unknown): boolean {
+  const x = lower(v);
+  return x.includes("kick") || x.includes("k1") || x.includes("muay") || x.includes("thai");
 }
 
-function parseOutcome(v: unknown): "WIN" | "LOSS" | "DRAW" | "DEMO" | "OTHER" {
+function parseOutcome(v: unknown): Outcome {
   const x = lower(v);
 
   if (!x) return "OTHER";
-  if (x.includes("demo") || x.includes("demonstr")) return "DEMO";
-  if (x.includes("wint") || x.includes("win")) return "WIN";
-  if (x.includes("verliest") || x.includes("verlies") || x.includes("lost")) {
-    return "LOSS";
-  }
-  if (x.includes("draw") || x.includes("gelijk") || x.includes("onbeslist")) {
-    return "DRAW";
-  }
+  if (x.includes("demo") || x.includes("demonstr") || x.includes("no contest") || x.includes("nocontest") || x.includes("no-contest")) return "OTHER";
+  if (x.includes("onbeslist") || x.includes("gelijk") || x.includes("draw")) return "DRAW";
+  if (x.includes("verliest") || x.includes("verlies") || x.includes("lost") || x.includes("loss")) return "LOSS";
+  if (x.includes("wint") || x.includes("gewonnen") || x.includes("win")) return "WIN";
 
   return "OTHER";
 }
 
-function isKbMtDiscipline(v: unknown): boolean {
-  const x = lower(v);
-  return (
-    x.includes("kick") ||
-    x.includes("k1") ||
-    x.includes("muay") ||
-    x.includes("thai")
-  );
+function emptyRecord(): RecordStats {
+  return { wins: 0, losses: 0, draws: 0, other: 0, total: 0, recordLabel: "0-0-0" };
+}
+
+function finishRecord(r: RecordStats): RecordStats {
+  const official = r.wins + r.losses + r.draws;
+  return {
+    ...r,
+    total: official,
+    recordLabel: `${r.wins}-${r.losses}-${r.draws}${r.other > 0 ? ` (${r.other})` : ""}`,
+  };
+}
+
+function addOutcomeToRecord(r: RecordStats, outcome: Outcome) {
+  if (outcome === "WIN") r.wins += 1;
+  else if (outcome === "LOSS") r.losses += 1;
+  else if (outcome === "DRAW") r.draws += 1;
+  else r.other += 1;
 }
 
 function getNaamInput(ctx: AnyRow): string {
   const combined = [ctx.voornaam, ctx.achternaam].map(s).filter(Boolean).join(" ").trim();
   const naamInput = s(ctx.naam_input);
 
-  // De naamcheck moet de aanmeldnaam vergelijken met FightPassport.
-  // `ctx.naam` kan in de context juist de FightPassport-naam zijn, dus die gebruiken
-  // we pas als laatste fallback. Als naam_input historisch alleen de voornaam bevat,
-  // herstellen we hem hier met voornaam + achternaam.
   if (combined && (!naamInput || normName(naamInput) === normName(ctx.voornaam))) {
     return combined;
   }
@@ -298,12 +297,7 @@ function getNaamFp(ctx: AnyRow): string {
 }
 
 function getGymInput(ctx: AnyRow): string {
-  return (
-    s(ctx.gym_input) ||
-    s(ctx.sportschool_input) ||
-    s(ctx.sportschool) ||
-    s(ctx.gym)
-  );
+  return s(ctx.gym_input) || s(ctx.sportschool_input) || s(ctx.sportschool) || s(ctx.gym);
 }
 
 function getGymFp(ctx: AnyRow): string {
@@ -317,40 +311,27 @@ function getGymFp(ctx: AnyRow): string {
 }
 
 function getDobInput(ctx: AnyRow): dayjs.Dayjs | null {
-  return (
-    dateOnly(ctx.geboortedatum_input) ||
-    dateOnly(ctx.geboortedatum) ||
-    dateOnly(ctx.geboortedatum_mm)
-  );
+  return dateOnly(ctx.geboortedatum_input) || dateOnly(ctx.geboortedatum) || dateOnly(ctx.geboortedatum_mm);
 }
 
 function getDobFp(ctx: AnyRow): dayjs.Dayjs | null {
   return (
     dateOnly(ctx.fp_geboortedatum) ||
     dateOnly(ctx.geboortedatum_fp) ||
-    dateOnly(ctx.extra?.raw_scrape?.geboortedatum)
+    dateOnly(ctx.extra?.raw_scrape?.geboortedatum) ||
+    dateOnly(ctx.extra?.raw?.fighters_raw?.geboortedatum)
   );
 }
 
 function getEventDate(ctx: AnyRow): dayjs.Dayjs | null {
-  return (
-    dateOnly(ctx.evenement_datum) ||
-    dateOnly(ctx.event_datum) ||
-    dateOnly(ctx.event_date) ||
-    dateOnly(ctx.datum) ||
-    dateOnly(ctx.created_at)
-  );
+  return dateOnly(ctx.evenement_datum) || dateOnly(ctx.event_datum) || dateOnly(ctx.event_date) || dateOnly(ctx.datum);
 }
 
-function getAge(ctx: AnyRow): number | null {
-  const direct = num(ctx.leeftijd_event ?? ctx.leeftijd);
-  if (direct != null) return direct;
-
+function getAgeOnEvent(ctx: AnyRow): number | null {
   const dob = getDobFp(ctx) || getDobInput(ctx);
   const eventDate = getEventDate(ctx);
 
   if (!dob || !eventDate) return null;
-
   return eventDate.diff(dob, "year");
 }
 
@@ -363,78 +344,147 @@ function getUitslagen(ctx: AnyRow, uitslagen?: UitslagRow[]): UitslagRow[] {
   return [];
 }
 
-function highestClassFromResults(rows: UitslagRow[]): Klasse | null {
-  let best: Klasse | null = null;
+function buildKlasseProgress(rows: UitslagRow[]): KlasseProgress {
+  const progress: KlasseProgress = {
+    R: emptyRecord(),
+    N: emptyRecord(),
+    C: emptyRecord(),
+    B: emptyRecord(),
+    A: emptyRecord(),
+  };
 
   for (const row of rows) {
     if (!isKbMtDiscipline(row.discipline)) continue;
 
     const k = normalizeKlasse(row.klasse);
-    if (!k || k === "JEUGD" || k === "MMA_AMATEUR" || k === "MMA_PRO") {
+    const outcome = parseOutcome(row.uitslag);
+
+    if (isAdultKlasse(k)) {
+      addOutcomeToRecord(progress[k], outcome);
+    } else {
+      // Jeugd, onbekende klasse, demo/no-contest of andere oude data hoort niet in het huidige volwassen record.
+      // Deze wordt later als overige meegenomen bij de actuele klasse.
       continue;
     }
-
-    best = maxKlasse(best, k);
   }
 
-  return best;
+  for (const k of KLASSE_VOLGORDE) progress[k] = finishRecord(progress[k]);
+  return progress;
 }
 
-function recordInClass(rows: UitslagRow[], klasse: Klasse): { wins: number; total: number } {
+export function recordStatsFromUitslagen(rows: UitslagRow[] = [], currentClass?: Klasse | NormKlasse | null) {
+  const requested = isAdultKlasse(currentClass ?? null) ? currentClass as Klasse : null;
+  const progress = buildKlasseProgress(rows);
+
   let wins = 0;
-  let total = 0;
+  let losses = 0;
+  let draws = 0;
+  let other = 0;
 
   for (const row of rows) {
     if (!isKbMtDiscipline(row.discipline)) continue;
 
     const k = normalizeKlasse(row.klasse);
-    if (k !== klasse) continue;
-
     const outcome = parseOutcome(row.uitslag);
-    if (outcome === "DEMO") continue;
 
-    total++;
-
-    if (outcome === "WIN") {
-      wins++;
+    if (requested && k === requested) {
+      if (outcome === "WIN") wins += 1;
+      else if (outcome === "LOSS") losses += 1;
+      else if (outcome === "DRAW") draws += 1;
+      else other += 1;
+    } else if (requested) {
+      other += 1;
+    } else {
+      if (outcome === "WIN") wins += 1;
+      else if (outcome === "LOSS") losses += 1;
+      else if (outcome === "DRAW") draws += 1;
+      else other += 1;
     }
   }
 
-  return { wins, total };
+  const total = wins + losses + draws;
+  const recordLabel = `${wins}-${losses}-${draws}${other > 0 ? ` (${other})` : ""}`;
+
+  return {
+    wins,
+    losses,
+    draws,
+    demo: other,
+    other,
+    totaalInclusiefDemo: total + other,
+    totaalZonderDemo: total,
+    totaalVoorPartijverschil: total,
+    recordLabel,
+    perKlasse: progress,
+  };
 }
 
-function promotedClass(base: Klasse, wins: number, total: number): Klasse {
+function minimumAfterClass(base: Klasse, rec: RecordStats): Klasse {
   if (base === "R") {
-    if (wins >= 2 || total >= 3) return "N";
+    if (rec.wins >= 2 || rec.total >= 3) return "N";
     return "R";
   }
 
   if (base === "N") {
-    if (wins >= 3 || total >= 6) return "C";
+    if (rec.wins >= 3 || rec.total >= 6) return "C";
     return "N";
   }
 
   if (base === "C") {
-    if (wins >= 6 || total >= 8) return "B";
+    if (rec.wins >= 6 || rec.total >= 8) return "B";
     return "C";
   }
 
   if (base === "B") {
-    if (wins >= 8 || total >= 10) return "A";
+    if (rec.wins >= 8 || rec.total >= 10) return "A";
     return "B";
   }
 
   return "A";
 }
 
-function classAllowed(advice: Klasse | null, requested: Klasse | null): boolean {
-  if (!advice || !requested) return true;
-  if (klasseIndex(requested) <= klasseIndex(advice)) return true;
+function getRecordAdvice(rows: UitslagRow[], fpKlasse: NormKlasse | null): RecordAdvice {
+  const progress = buildKlasseProgress(rows);
 
-  // R naar N mag als praktische instapregel.
-  if (advice === "R" && requested === "N") return true;
+  let currentClass: Klasse | null = isAdultKlasse(fpKlasse) ? fpKlasse : null;
 
-  return false;
+  for (const k of KLASSE_VOLGORDE) {
+    if (progress[k].total > 0 || progress[k].other > 0) currentClass = k;
+  }
+
+  if (!currentClass) currentClass = "N";
+
+  let minimumClass: Klasse = "N";
+
+  // R is optioneel. Zonder partijen mag R of N, maar advies/minimum blijft R als FP/nulmeting R aangeeft.
+  if (currentClass === "R") minimumClass = minimumAfterClass("R", progress.R);
+  else minimumClass = currentClass;
+
+  // Doorloop verplichte promoties per klasse. Een vechter kan nooit lager dan de klasse die uit zijn actuele klasse/record volgt.
+  for (const k of KLASSE_VOLGORDE) {
+    if (klasseIndex(k) < klasseIndex(minimumClass)) continue;
+    const next = minimumAfterClass(k, progress[k]);
+    if (klasseIndex(next) > klasseIndex(minimumClass)) minimumClass = next;
+  }
+
+  let totalOfficial = 0;
+  let totalOther = 0;
+  for (const k of KLASSE_VOLGORDE) {
+    totalOfficial += progress[k].total;
+    totalOther += progress[k].other;
+  }
+
+  return {
+    currentClass,
+    minimumClass,
+    recordInCurrentClass: progress[currentClass],
+    totalOfficial,
+    totalOther,
+  };
+}
+
+function recordLabelForRequestedClass(rows: UitslagRow[], requested: Klasse): string {
+  return recordStatsFromUitslagen(rows, requested).recordLabel;
 }
 
 function makeAdd(ctx: AnyRow, hits: MatchmakerFighterRuleHit[]) {
@@ -447,11 +497,11 @@ function makeAdd(ctx: AnyRow, hits: MatchmakerFighterRuleHit[]) {
   ) => {
     hits.push({
       matchmaking_id: s(ctx.matchmaking_id) || null,
-      controle_run_id: s(ctx.controle_run_id) || null,
+      controle_run_id: s(ctx.controle_run_id ?? ctx.scrape_run_id) || null,
       inschrijving_id: ctx.inschrijving_id ?? ctx.aanmelding_id ?? ctx.id ?? null,
       aanmelding_id: ctx.aanmelding_id ?? ctx.inschrijving_id ?? ctx.id ?? null,
-      fighter_id: s(ctx.fighter_id ?? ctx.va_nummer) || null,
-      va_nummer: s(ctx.va_nummer) || null,
+      fighter_id: s(ctx.fighter_id) || null,
+      va_nummer: digits(ctx.va_nummer ?? ctx.va_nummer_input ?? ctx.va) || null,
       regel_type: "matchmaker_fighter",
       rule: rule || rule_code,
       rule_code,
@@ -490,281 +540,134 @@ export function runMatchmakerFighterRules(
   const dobFp = getDobFp(ctx);
 
   const genderInput = parseGender(ctx.geslacht_input ?? ctx.geslacht);
-  const genderFp = parseGender(ctx.fp_geslacht ?? ctx.geslacht_fp);
+  const genderFp = parseGender(ctx.fp_geslacht ?? ctx.geslacht_fp ?? ctx.extra?.raw_scrape?.geslacht ?? ctx.extra?.raw?.fighters_raw?.geslacht);
 
-  const leeftijd = getAge(ctx);
-  const klasseAanmelding = normalizeKlasse(
-    ctx.klasse ?? ctx.klasse_input ?? ctx.klasse_mm,
-  );
+  const leeftijd = getAgeOnEvent(ctx);
+  const eventDate = getEventDate(ctx);
 
-  const fpKlasse = normalizeKlasse(
-    ctx.fp_klasse ?? ctx.klasse_fp ?? ctx.nulmeting_klasse,
-  );
+  const klasseAanmelding = normalizeKlasse(ctx.klasse ?? ctx.klasse_input ?? ctx.klasse_mm);
+  const fpKlasse = normalizeKlasse(ctx.fp_klasse ?? ctx.klasse_fp ?? ctx.nulmeting_klasse ?? ctx.extra?.raw_scrape?.nulmeting_klasse);
 
   const discipline = ctx.discipline ?? ctx.discipline_input;
   const kbMt = isKbMtDiscipline(discipline);
 
   const uitslagen = getUitslagen(ctx, opts?.uitslagen);
+  const requested = isAdultKlasse(klasseAanmelding) ? klasseAanmelding : null;
+  const recordStats = recordStatsFromUitslagen(uitslagen, requested);
 
   if (!va) {
-    add(
-      "MATCHMAKER_GEEN_VA",
-      "ACTIE",
-      "Deze aanmelding heeft geen geldig Fightpaspoortnummer.",
-      "warning",
-      "Fightpaspoortnummer ontbreekt",
-    );
+    add("MATCHMAKER_GEEN_VA", "ACTIE", "Deze aanmelding heeft geen geldig Fightpaspoortnummer.", "warning", "Fightpaspoortnummer ontbreekt");
   }
 
   if (va && !fpNaam && !dobFp) {
-    add(
-      "MATCHMAKER_GEEN_FP_DATA",
-      "ACTIE",
-      "Geen Fightpaspoortgegevens gevonden voor deze vechter. Controleer VA-nummer of start de controle opnieuw.",
-      "warning",
-      "Geen Fightpaspoortdata",
-    );
+    add("MATCHMAKER_GEEN_FP_DATA", "ACTIE", "Geen Fightpaspoortgegevens gevonden voor deze vechter. Controleer VA-nummer of start de controle opnieuw.", "warning", "Geen Fightpaspoortdata");
   }
 
   if (!inputNaam) {
-    add(
-      "MATCHMAKER_NAAM_ONTBREEKT",
-      "ACTIE",
-      "Naam ontbreekt in de aanmelding.",
-      "warning",
-      "Naam ontbreekt",
-    );
+    add("MATCHMAKER_NAAM_ONTBREEKT", "ACTIE", "Naam ontbreekt in de aanmelding.", "warning", "Naam ontbreekt");
   } else if (fpNaam && !nameSimilar(inputNaam, fpNaam)) {
-    add(
-      "MATCHMAKER_NAAM_WIJKT_AF",
-      "ACTIE",
-      `Naam uit aanmelding ("${inputNaam}") wijkt af van Fightpaspoort ("${fpNaam}").`,
-      "warning",
-      "Naam wijkt af",
-    );
+    add("MATCHMAKER_NAAM_WIJKT_AF", "ACTIE", `Naam uit aanmelding ("${inputNaam}") wijkt af van Fightpaspoort ("${fpNaam}"). Fightpaspoort is leidend.`, "warning", "Naam wijkt af");
   }
 
   if (!dobInput) {
-    add(
-      "MATCHMAKER_GEBOORTEDATUM_ONTBREEKT",
-      "ACTIE",
-      "Geboortedatum ontbreekt in de aanmelding.",
-      "warning",
-      "Geboortedatum ontbreekt",
-    );
+    add("MATCHMAKER_GEBOORTEDATUM_ONTBREEKT", "ACTIE", "Geboortedatum ontbreekt in de aanmelding.", "warning", "Geboortedatum ontbreekt");
   } else if (dobFp && !sameDate(dobInput, dobFp)) {
-    add(
-      "MATCHMAKER_GEBOORTEDATUM_WIJKT_AF",
-      "ACTIE",
-      `Geboortedatum uit aanmelding (${dobInput.format("DD-MM-YYYY")}) wijkt af van Fightpaspoort (${dobFp.format("DD-MM-YYYY")}).`,
-      "warning",
-      "Geboortedatum wijkt af",
-    );
+    add("MATCHMAKER_GEBOORTEDATUM_WIJKT_AF", "ACTIE", `Geboortedatum uit aanmelding (${dobInput.format("DD-MM-YYYY")}) wijkt af van Fightpaspoort (${dobFp.format("DD-MM-YYYY")}). Fightpaspoort is leidend.`, "warning", "Geboortedatum wijkt af");
+  }
+
+  if (!eventDate) {
+    add("MATCHMAKER_EVENTDATUM_ONTBREEKT", "ACTIE", "Eventdatum ontbreekt. Leeftijd kan niet betrouwbaar op eventdatum worden berekend.", "warning", "Eventdatum ontbreekt");
   }
 
   if (genderInput && genderFp && genderInput !== genderFp) {
-    add(
-      "MATCHMAKER_GESLACHT_WIJKT_AF",
-      "ACTIE",
-      "Geslacht uit aanmelding wijkt af van Fightpaspoort.",
-      "warning",
-      "Geslacht wijkt af",
-    );
+    add("MATCHMAKER_GESLACHT_WIJKT_AF", "ACTIE", `Geslacht uit aanmelding (${genderInput === "M" ? "man" : "vrouw"}) wijkt af van Fightpaspoort (${genderFp === "M" ? "man" : "vrouw"}). Fightpaspoort is leidend.`, "warning", "Geslacht wijkt af");
   }
 
   if (inputGym && fpGym && !nameSimilar(inputGym, fpGym)) {
-    add(
-      "MATCHMAKER_SPORTSCHOOL_WIJKT_AF",
-      "LET_OP",
-      `Sportschool uit aanmelding ("${inputGym}") wijkt af van Fightpaspoort ("${fpGym}").`,
-      "warning",
-      "Sportschool wijkt af",
-    );
+    add("MATCHMAKER_SPORTSCHOOL_WIJKT_AF", "LET_OP", `Sportschool uit aanmelding ("${inputGym}") wijkt af van Fightpaspoort ("${fpGym}").`, "warning", "Sportschool wijkt af");
   }
 
-  const licentie = boolish(
-    ctx.licentie ??
-      ctx.fp_licentie ??
-      ctx.licentie_ok ??
-      ctx.licentie_status,
-  );
-
-  if (licentie === false || lower(ctx.licentie) === "nee") {
-    add(
-      "MATCHMAKER_GEEN_LICENTIE",
-      "AFKEUR",
-      "Deze vechter heeft geen geldige licentie.",
-      "error",
-      "Geen geldige licentie",
-    );
+  const licentie = boolish(ctx.fp_licentie ?? ctx.licentie ?? ctx.licentie_ok ?? ctx.licentie_status ?? ctx.extra?.raw_scrape?.licentie);
+  if (licentie === false) {
+    add("MATCHMAKER_GEEN_LICENTIE", "AFKEUR", "Deze vechter heeft volgens Fightpaspoort geen geldige licentie.", "error", "Geen geldige licentie");
   }
 
-  const startverbod = boolish(
-    ctx.startverbod ??
-      ctx.heeft_startverbod ??
-      ctx.fp_startverbod,
-  );
-
-  if (startverbod === true || lower(ctx.startverbod).includes("ja")) {
-    add(
-      "MATCHMAKER_STARTVERBOD",
-      "VERBOD",
-      "Deze vechter heeft een startverbod en mag niet deelnemen.",
-      "error",
-      "Startverbod",
-    );
+  const startverbod = boolish(ctx.fp_startverbod ?? ctx.heeft_startverbod ?? ctx.startverbod ?? ctx.extra?.raw_scrape?.heeft_startverbod);
+  if (startverbod === true) {
+    add("MATCHMAKER_STARTVERBOD", "VERBOD", "Deze vechter heeft volgens Fightpaspoort een startverbod en mag niet deelnemen.", "error", "Startverbod");
   }
 
-  const keurmerk = boolish(
-    ctx.keurmerk ??
-      ctx.heeft_keurmerk ??
-      ctx.keurmerk_geldig ??
-      ctx.sportschool_keurmerk,
-  );
-
+  const keurmerk = boolish(ctx.keurmerk ?? ctx.heeft_keurmerk ?? ctx.keurmerk_geldig ?? ctx.sportschool_keurmerk);
   const keurmerkStatus = lower(ctx.keurmerk_status);
-  const keurmerkReden =
-    s(ctx.keurmerk_reden) ||
-    s(ctx.sportschool_keurmerk_reden) ||
-    "Sportschool heeft geen geldig keurmerk.";
+  const keurmerkReden = s(ctx.keurmerk_reden) || s(ctx.sportschool_keurmerk_reden) || "Sportschool heeft geen geldig keurmerk.";
 
   if (keurmerkStatus === "belgie_check" || keurmerkStatus.includes("belg")) {
-    add(
-      "MATCHMAKER_BELGIE_CHECK",
-      "LET_OP",
-      keurmerkReden || "Belgische sportschool: controleer BKBMO/boksboekje handmatig.",
-      "info",
-      "België check",
-    );
+    add("MATCHMAKER_BELGIE_CHECK", "LET_OP", keurmerkReden || "Belgische sportschool: controleer BKBMO/boksboekje handmatig.", "info", "België check");
   } else if (keurmerk === false) {
-    add(
-      "MATCHMAKER_GEEN_KEURMERK",
-      "LET_OP",
-      keurmerkReden,
-      "warning",
-      "Geen geldig keurmerk",
-    );
+    add("MATCHMAKER_GEEN_KEURMERK", "LET_OP", keurmerkReden, "warning", "Geen geldig keurmerk");
   }
 
   if (leeftijd != null && leeftijd < 18) {
-    if (
-      klasseAanmelding &&
-      klasseAanmelding !== "JEUGD" &&
-      klasseAanmelding !== "MMA_AMATEUR" &&
-      klasseAanmelding !== "MMA_PRO"
-    ) {
-      add(
-        "MATCHMAKER_JEUGD_IN_VOLWASSEN_KLASSE",
-        "AFKEUR",
-        `Deze vechter is ${leeftijd} jaar op eventdatum en staat in volwassen klasse ${klasseAanmelding}.`,
-        "error",
-        "Jeugd in volwassen klasse",
-      );
+    if (klasseAanmelding && klasseAanmelding !== "JEUGD" && klasseAanmelding !== "MMA_AMATEUR" && klasseAanmelding !== "MMA_PRO") {
+      add("MATCHMAKER_JEUGD_IN_VOLWASSEN_KLASSE", "AFKEUR", `Deze vechter is ${leeftijd} jaar op eventdatum en staat in volwassen klasse ${klasseAanmelding}. Tot 18 jaar is dit altijd jeugd.`, "error", "Jeugd in volwassen klasse");
     }
 
-    if (fpKlasse && fpKlasse !== "JEUGD") {
-      add(
-        "MATCHMAKER_FP_KLASSE_JEUGD_WIJKT_AF",
-        "LET_OP",
-        `Deze vechter is jeugd op eventdatum, maar Fightpaspoort/nulmeting geeft klasse ${fpKlasse}. Controleer dit handmatig.`,
-        "warning",
-        "Jeugd klassecontrole",
-      );
+    if (fpKlasse && fpKlasse !== "JEUGD" && fpKlasse !== "MMA_AMATEUR" && fpKlasse !== "MMA_PRO") {
+      add("MATCHMAKER_FP_KLASSE_JEUGD_WIJKT_AF", "LET_OP", `Deze vechter is ${leeftijd} jaar op eventdatum en dus jeugd, maar Fightpaspoort/nulmeting geeft klasse ${fpKlasse}. Controleer dit handmatig.`, "warning", "Jeugd klassecontrole");
     }
   }
 
   if (leeftijd != null && leeftijd >= 18 && klasseAanmelding === "JEUGD") {
-    add(
-      "MATCHMAKER_VOLWASSENE_IN_JEUGD_KLASSE",
-      "AFKEUR",
-      `Deze vechter is ${leeftijd} jaar op eventdatum en mag niet als jeugd worden ingedeeld.`,
-      "error",
-      "Volwassene in jeugdklasse",
-    );
+    add("MATCHMAKER_VOLWASSENE_IN_JEUGD_KLASSE", "AFKEUR", `Deze vechter is ${leeftijd} jaar op eventdatum en mag niet als jeugd worden ingedeeld.`, "error", "Volwassene in jeugdklasse");
   }
 
   if (leeftijd != null && leeftijd >= 40) {
-    add(
-      "MATCHMAKER_SPORTMEDISCH_ADVIES_40_PLUS",
-      "ACTIE",
-      `Deze vechter is ${leeftijd} jaar op eventdatum. Controleer sportmedische keuring/advies.`,
-      "warning",
-      "Sportmedische controle 40+",
-    );
+    add("MATCHMAKER_SPORTMEDISCH_ADVIES_40_PLUS", "ACTIE", `Deze vechter is ${leeftijd} jaar op eventdatum. Controleer sportmedische keuring/advies.`, "warning", "Sportmedische controle 40+");
   }
 
   if (leeftijd != null && leeftijd >= 18 && kbMt) {
-    const requested =
-      klasseAanmelding && klasseAanmelding !== "JEUGD" &&
-      klasseAanmelding !== "MMA_AMATEUR" &&
-      klasseAanmelding !== "MMA_PRO"
-        ? klasseAanmelding
-        : null;
-
-    const historyClass = highestClassFromResults(uitslagen);
-
-    const base =
-      historyClass ??
-      (fpKlasse && fpKlasse !== "JEUGD" &&
-      fpKlasse !== "MMA_AMATEUR" &&
-      fpKlasse !== "MMA_PRO"
-        ? fpKlasse
-        : null);
-
     if (!requested) {
-      add(
-        "MATCHMAKER_KLASSE_ONDUIDELIJK",
-        "ACTIE",
-        "De opgegeven klasse kon niet duidelijk worden bepaald.",
-        "warning",
-        "Klasse onduidelijk",
-      );
+      add("MATCHMAKER_KLASSE_ONDUIDELIJK", "ACTIE", "De opgegeven klasse kon niet duidelijk worden bepaald.", "warning", "Klasse onduidelijk");
     }
 
-    if (!uitslagen.length && !base) {
-      add(
-        "MATCHMAKER_GEEN_UITSLAGEN_VOOR_KLASSECHECK",
-        "LET_OP",
-        "Geen uitslagenhistorie of nulmetingklasse gevonden. Klasse moet handmatig gecontroleerd worden.",
-        "warning",
-        "Geen uitslagenhistorie",
-      );
+    const advice = getRecordAdvice(uitslagen, fpKlasse);
+
+    if (!uitslagen.length && !isAdultKlasse(fpKlasse)) {
+      add("MATCHMAKER_GEEN_UITSLAGEN_VOOR_KLASSECHECK", "LET_OP", "Geen uitslagenhistorie of volwassen nulmetingklasse gevonden. Klasse moet handmatig gecontroleerd worden.", "warning", "Geen uitslagenhistorie");
     }
 
-    if (base && requested) {
-      const rec = recordInClass(uitslagen, base);
-      const advies = promotedClass(base, rec.wins, rec.total);
+    if (requested === "R") {
+      const rRec = buildKlasseProgress(uitslagen).R;
+      const hasNonRExperience = recordStats.other > 0;
 
-      if (!classAllowed(advies, requested)) {
-        add(
-          "MATCHMAKER_KLASSE_TE_HOOG",
-          "DISPENSATIE",
-          `Vechter is opgegeven voor klasse ${requested}, maar op basis van uitslagen/nulmeting is het advies maximaal ${advies}. Record in ${base}: ${rec.wins} winst / ${rec.total} totaal.`,
-          "warning",
-          "Klasse te hoog",
-        );
+      if (hasNonRExperience) {
+        add("MATCHMAKER_R_KLASSE_MET_WEDSTRIJDERVARING", "AFKEUR", `R-klasse is alleen bedoeld als optionele instapklasse zonder eerdere wedstrijdervaring buiten R. Huidig record in R: ${rRec.recordLabel}. Overige partijen: ${recordStats.other}.`, "error", "R-klasse met wedstrijdervaring");
+      } else if (rRec.wins >= 2 || rRec.total >= 3) {
+        add("MATCHMAKER_R_KLASSE_MAX_BEREIKT", "AFKEUR", `R-klasse maximum bereikt. Record in R: ${rRec.recordLabel}. Na 2 winst of 3 totaal moet deze vechter naar N klasse.`, "error", "R-klasse maximum bereikt");
+      }
+    }
+
+    if (requested) {
+      const requestedRecordLabel = recordLabelForRequestedClass(uitslagen, requested);
+
+      if (klasseIndex(requested) < klasseIndex(advice.minimumClass)) {
+        add("MATCHMAKER_KLASSE_TE_LAAG", "ACTIE", `Vechter is opgegeven voor klasse ${requested}, maar hoort op basis van Fightpaspoort/uitslagen minimaal in klasse ${advice.minimumClass}. Record in opgegeven klasse: ${requestedRecordLabel}.`, "warning", "Klasse te laag");
       }
 
-      if (klasseIndex(requested) < klasseIndex(advies)) {
-        add(
-          "MATCHMAKER_KLASSE_TE_LAAG",
-          "ACTIE",
-          `Vechter is opgegeven voor klasse ${requested}, maar op basis van uitslagen/nulmeting hoort deze vechter minimaal rond klasse ${advies}. Record in ${base}: ${rec.wins} winst / ${rec.total} totaal.`,
-          "warning",
-          "Klasse te laag",
-        );
+      if (klasseIndex(requested) > klasseIndex(advice.minimumClass)) {
+        // Te hoog indelen kan soms met dispensatie, behalve wanneer iemand zonder historie rechtstreeks hoger dan N wordt gezet.
+        const resultaat: MatchmakerFighterResultaat = advice.totalOfficial === 0 && requested !== "N" && requested !== "R" ? "AFKEUR" : "DISPENSATIE";
+        add("MATCHMAKER_KLASSE_TE_HOOG", resultaat, `Vechter is opgegeven voor klasse ${requested}, maar op basis van Fightpaspoort/uitslagen is het advies ${advice.minimumClass}. Record in opgegeven klasse: ${requestedRecordLabel}.`, resultaat === "AFKEUR" ? "error" : "warning", "Klasse te hoog");
+      }
+
+      if (opts?.includeOk) {
+        add("MATCHMAKER_RECORD_BEREKEND", "OK", `Record voor opgegeven klasse ${requested}: ${requestedRecordLabel}.`, "ok", "Record berekend");
       }
     }
   }
 
   if (opts?.includeOk && hits.length === 0) {
-    add(
-      "MATCHMAKER_FIGHTER_OK",
-      "OK",
-      "Geen bijzonderheden gevonden voor deze vechter.",
-      "ok",
-      "Vechtercontrole OK",
-    );
+    add("MATCHMAKER_FIGHTER_OK", "OK", "Geen bijzonderheden gevonden voor deze vechter.", "ok", "Vechtercontrole OK");
   }
 
   return hits;

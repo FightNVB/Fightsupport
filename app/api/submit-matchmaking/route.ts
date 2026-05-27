@@ -112,6 +112,40 @@ function normalizeWeightType(v: any): string | null {
   return null;
 }
 
+function inferMaxGewichtType(notatie: any, waarde: any): "up_to" | "open_above" | null {
+  const s = String(notatie ?? "").trim().toLowerCase().replace(/\s+/g, "");
+  if (/^(\+?95|95\+)kg?$/.test(s) || /^\+95kg?$/.test(s) || /^95\+kg?$/.test(s)) {
+    return "open_above";
+  }
+  if (/\d\+/.test(s) || /^\+\d/.test(s)) return "open_above";
+
+  const n = normalizeMaxGewicht(waarde ?? notatie);
+  if (n == null) return null;
+  return "up_to";
+}
+
+function normalizeMaxGewichtNotationForBout(notatie: any, waarde: any, type: any): string | null {
+  const t = normalizeWeightType(type) ?? inferMaxGewichtType(notatie, waarde);
+  const n = normalizeMaxGewicht(waarde ?? notatie);
+
+  if (t === "open_above") {
+    const base = n ?? normalizeMaxGewicht(notatie) ?? 95;
+    return `${base}+`;
+  }
+
+  if (t === "up_to") {
+    if (n == null) return null;
+    return `-${n}`;
+  }
+
+  if (n == null) return normalizeWeightNotation(notatie);
+  return `-${n}`;
+}
+
+function normalizeMaxGewichtTypeForBout(notatie: any, waarde: any, type: any): "up_to" | "open_above" | null {
+  return normalizeWeightType(type) as any ?? inferMaxGewichtType(notatie, waarde);
+}
+
 function normalizeToernooiCode(v: any): string | null {
   const s = String(v ?? "").trim().toUpperCase();
   if (!s) return null;
@@ -664,10 +698,14 @@ const lifecycleOwnerBondteam = null;
         toernooi_code,
 
         max_gewicht: normalizeMaxGewicht((b as any)?.max_gewicht),
-        max_gewicht_notatie: normalizeWeightNotation(
-          (b as any)?.max_gewicht_notatie
+        max_gewicht_notatie: normalizeMaxGewichtNotationForBout(
+          (b as any)?.max_gewicht_notatie,
+          (b as any)?.max_gewicht,
+          (b as any)?.extra?.max_gewicht_type
         ),
-        max_gewicht_type: normalizeWeightType(
+        max_gewicht_type: normalizeMaxGewichtTypeForBout(
+          (b as any)?.max_gewicht_notatie,
+          (b as any)?.max_gewicht,
           (b as any)?.extra?.max_gewicht_type
         ),
 

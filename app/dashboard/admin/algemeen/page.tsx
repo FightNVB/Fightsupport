@@ -1,20 +1,23 @@
 "use client";
 
-import React, { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft,
   Settings,
-  CalendarDays,
   Link2,
   School,
-  Cog,
   ArchiveRestore,
 } from "lucide-react";
 
-const logoSrc = "/branding/fightsupport/excel-logo.png";
+const logoSrc = "/branding/fightsupport/fightsupport1.png";
 const NVB_ORANGE = "#ff4d00";
 
 const pageBackground: CSSProperties = {
@@ -145,7 +148,11 @@ type ActionCard = {
   title: string;
   subtitle: string;
   href: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  icon: React.ComponentType<{
+    size?: number;
+    strokeWidth?: number;
+    className?: string;
+  }>;
 };
 
 export default function AlgemeenBeheerPortalPage() {
@@ -161,21 +168,16 @@ export default function AlgemeenBeheerPortalPage() {
   const actions = useMemo<ActionCard[]>(
     () => [
       {
-        title: "Beheer afmeldingen",
+        title: "Afmeldingen",
         subtitle: "Afmeldingen van vechters bekijken en beheren",
         href: "/dashboard/admin/algemeen/afmeldingen",
         icon: Settings,
       },
+
       {
-        title: "Event aanvragen",
-        subtitle: "Ontvangen aanvragen voor nieuwe events",
-        href: "/dashboard/admin/algemeen/events/evenementaanvragen",
-        icon: CalendarDays,
-      },
-      {
-        title: "Events koppelen",
-        subtitle: "Bondteam koppelen aan events",
-        href: "/dashboard/admin/algemeen/events/link",
+        title: "Archief",
+        subtitle: "Afgeronde events",
+        href: "/dashboard/admin/algemeen/archief",
         icon: Link2,
       },
       {
@@ -185,19 +187,13 @@ export default function AlgemeenBeheerPortalPage() {
         icon: School,
       },
       {
-        title: "Snapshots",
-        subtitle: "Opgeslagen matchmaking snapshots bekijken en inzien",
-        href: "/dashboard/admin/beheer/snapshots",
+        title: "Sancties & waarschuwingen",
+        subtitle: "Bekijk en beheer sancties en waarschuwingen",
+        href: "/dashboard/admin/algemeen/overtredingen",
         icon: ArchiveRestore,
       },
-      {
-        title: "Log / Audit",
-        subtitle: "Logboek van belangrijke acties en wijzigingen",
-        href: "/dashboard/admin/audit",
-        icon: Cog,
-      },
     ],
-    []
+    [],
   );
 
   if (loading) {
@@ -310,10 +306,6 @@ export default function AlgemeenBeheerPortalPage() {
           .beheer-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
-
-          .beheer-info-grid {
-            grid-template-columns: 1fr !important;
-          }
         }
 
         @media (max-width: 860px) {
@@ -336,9 +328,14 @@ export default function AlgemeenBeheerPortalPage() {
           }
         }
 
-        @media (max-width: 760px) {
+        @media (max-width: 780px) {
           .beheer-grid {
             grid-template-columns: 1fr !important;
+          }
+
+          .portal-shell {
+            padding-left: 14px !important;
+            padding-right: 14px !important;
           }
         }
       `}</style>
@@ -348,26 +345,36 @@ export default function AlgemeenBeheerPortalPage() {
       <TitleBand onDashboard={() => router.push("/dashboard/admin")} />
 
       <div
+        className="portal-shell"
         style={{
-          maxWidth: 1240,
+          maxWidth: 1120,
           margin: "0 auto",
-          padding: "22px 24px 14px",
+          padding: "14px 20px 14px",
         }}
       >
         <SteelFrame>
           <div
             style={{
               ...darkPlate,
-              padding: "20px 20px 18px",
+              minHeight: "unset",
+              padding: "16px 18px 14px",
+              display: "flex",
+              flexDirection: "column",
             }}
           >
             <OrangeHotspot left={24} top={18} width={62} />
-            <OrangeHotspot right={30} bottom={12} width={40} small variant={2} />
+            <OrangeHotspot
+              right={30}
+              bottom={12}
+              width={40}
+              small
+              variant={2}
+            />
 
             <div style={{ textAlign: "center" }}>
               <div
                 style={{
-                  fontSize: 30,
+                  fontSize: 26,
                   fontWeight: 900,
                   lineHeight: 1,
                   color: "#f1f1f1",
@@ -380,9 +387,9 @@ export default function AlgemeenBeheerPortalPage() {
 
               <div
                 style={{
-                  marginTop: 8,
+                  marginTop: 6,
                   fontSize: 11,
-                  letterSpacing: 2.1,
+                  letterSpacing: 2.4,
                   color: NVB_ORANGE,
                   textTransform: "uppercase",
                   textShadow: "0 0 8px rgba(255,106,0,0.28)",
@@ -394,7 +401,7 @@ export default function AlgemeenBeheerPortalPage() {
 
             <div
               style={{
-                marginTop: 18,
+                marginTop: 12,
                 height: 1,
                 background:
                   "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)",
@@ -404,16 +411,24 @@ export default function AlgemeenBeheerPortalPage() {
             <div
               className="beheer-grid"
               style={{
-                marginTop: 18,
+                marginTop: 14,
                 display: "grid",
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                gap: 20,
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gridTemplateRows: "repeat(2, minmax(132px, auto))",
+                gap: 14,
+                alignItems: "stretch",
+                flex: 1,
               }}
             >
               {actions.map((action, index) => (
                 <PortalCard
                   key={action.href}
-                  icon={<action.icon size={index === 0 ? 38 : 36} strokeWidth={2.5} />}
+                  icon={
+                    <action.icon
+                      size={index === 0 ? 28 : 27}
+                      strokeWidth={2.5}
+                    />
+                  }
                   title={action.title}
                   subtitle={action.subtitle}
                   buttonLabel="Openen"
@@ -423,18 +438,8 @@ export default function AlgemeenBeheerPortalPage() {
             </div>
 
             <div
-              className="beheer-info-grid"
               style={{
-                marginTop: 22,
-                display: "grid",
-                gridTemplateColumns: "1.3fr 1fr",
-                gap: 20,
-              }}
-            ></div>
-
-            <div
-              style={{
-                marginTop: 14,
+                marginTop: 10,
                 textAlign: "center",
                 fontSize: 9,
                 letterSpacing: 2,
@@ -483,7 +488,7 @@ function TopLogoBand() {
         style={{
           position: "relative",
           width: 1160,
-          height: 96,
+          height: 72,
           maxWidth: "96vw",
           filter:
             "drop-shadow(0 10px 18px rgba(0,0,0,0.70)) drop-shadow(0 0 16px rgba(255,95,0,0.12))",
@@ -509,11 +514,7 @@ function TopLogoBand() {
   );
 }
 
-function TitleBand({
-  onDashboard,
-}: {
-  onDashboard: () => void;
-}) {
+function TitleBand({ onDashboard }: { onDashboard: () => void }) {
   return (
     <div
       style={{
@@ -553,7 +554,7 @@ function TitleBand({
           maxWidth: 1400,
           margin: "0 auto",
           padding: "11px 18px 10px",
-          minHeight: 92,
+          minHeight: 62,
         }}
       >
         <div
@@ -582,7 +583,7 @@ function TitleBand({
         >
           <div
             style={{
-              fontSize: 28,
+              fontSize: 22,
               fontWeight: 900,
               letterSpacing: 1,
               lineHeight: 1,
@@ -597,7 +598,7 @@ function TitleBand({
 
           <div
             style={{
-              marginTop: 7,
+              marginTop: 5,
               fontSize: 9,
               letterSpacing: 2.5,
               color: NVB_ORANGE,
@@ -621,8 +622,14 @@ function SteelFrame({
   hover?: boolean;
 }) {
   return (
-    <div className={hover ? "fs-card-hover" : undefined}>
-      <div style={steelFrameOuter} className={hover ? "fs-card-outer" : undefined}>
+    <div
+      className={hover ? "fs-card-hover" : undefined}
+      style={{ height: "100%" }}
+    >
+      <div
+        style={{ ...steelFrameOuter, height: "100%" }}
+        className={hover ? "fs-card-outer" : undefined}
+      >
         <div
           className={hover ? "fs-card-glow" : undefined}
           style={{
@@ -651,9 +658,9 @@ function SteelFrame({
           }}
         />
 
-        <div style={steelFrameMid}>
-          <div style={steelFrameChannel}>
-            <div style={steelFrameInner}>{children}</div>
+        <div style={{ ...steelFrameMid, height: "100%" }}>
+          <div style={{ ...steelFrameChannel, height: "100%" }}>
+            <div style={{ ...steelFrameInner, height: "100%" }}>{children}</div>
           </div>
         </div>
       </div>
@@ -679,8 +686,12 @@ function PortalCard({
       <div
         style={{
           ...darkPlate,
-          minHeight: 154,
-          padding: "14px 14px 12px",
+          minHeight: 132,
+          height: "100%",
+          padding: "12px 12px 10px",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
         }}
       >
         <OrangeHotspot left={16} bottom={8} width={58} />
@@ -690,7 +701,7 @@ function PortalCard({
         <div
           style={{
             display: "flex",
-            gap: 14,
+            gap: 12,
             alignItems: "flex-start",
           }}
         >
@@ -699,7 +710,7 @@ function PortalCard({
           <div style={{ minWidth: 0, flex: 1, paddingTop: 1 }}>
             <div
               style={{
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: 900,
                 lineHeight: 1,
                 color: "#f1f1f1",
@@ -713,7 +724,7 @@ function PortalCard({
               style={{
                 width: "100%",
                 height: 1,
-                marginTop: 9,
+                marginTop: 6,
                 background:
                   "linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08), transparent)",
               }}
@@ -721,10 +732,10 @@ function PortalCard({
 
             <div
               style={{
-                marginTop: 9,
-                fontSize: 12.5,
+                marginTop: 7,
+                fontSize: 12,
                 color: "#d7d7d7",
-                lineHeight: 1.2,
+                lineHeight: 1.15,
               }}
             >
               {subtitle}
@@ -732,78 +743,8 @@ function PortalCard({
           </div>
         </div>
 
-        <div style={{ marginTop: 14, padding: "0 4px" }}>
+        <div style={{ marginTop: 10, padding: "0 2px" }}> 
           <SteelButton label={buttonLabel} onClick={onClick} />
-        </div>
-      </div>
-    </SteelFrame>
-  );
-}
-
-function InfoPanel({
-  title,
-  items,
-}: {
-  title: string;
-  items: string[];
-}) {
-  return (
-    <SteelFrame>
-      <div
-        style={{
-          ...darkPlate,
-          minHeight: 168,
-          padding: "16px 16px 14px",
-        }}
-      >
-        <OrangeHotspot left={18} top={10} width={38} small variant={2} />
-
-        <div
-          style={{
-            fontSize: 18,
-            fontWeight: 900,
-            color: "#f1f1f1",
-            textShadow: "0 2px 5px rgba(0,0,0,0.8)",
-          }}
-        >
-          {title}
-        </div>
-
-        <div
-          style={{
-            width: "100%",
-            height: 1,
-            marginTop: 10,
-            background:
-              "linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08), transparent)",
-          }}
-        />
-
-        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {items.map((item) => (
-            <div
-              key={item}
-              style={{
-                display: "flex",
-                gap: 10,
-                alignItems: "flex-start",
-                color: "#d7d7d7",
-                fontSize: 13,
-                lineHeight: 1.35,
-              }}
-            >
-              <span
-                style={{
-                  color: NVB_ORANGE,
-                  fontWeight: 900,
-                  lineHeight: 1.1,
-                }}
-              >
-                •
-              </span>
-              <span>{item}</span>
-            </div>
-          ))}
         </div>
       </div>
     </SteelFrame>
@@ -814,8 +755,8 @@ function IconPlate({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        width: 92,
-        height: 72,
+        width: 78,
+        height: 56,
         flexShrink: 0,
         display: "flex",
         alignItems: "center",
@@ -847,7 +788,7 @@ function SteelButton({
       className="fs-metal-button"
       style={{
         width: "100%",
-        height: 40,
+        height: 34,
         border: "1px solid #8f8f8f",
         background: `
           linear-gradient(180deg,
@@ -859,7 +800,7 @@ function SteelButton({
             #f0f0f0 100%)
         `,
         color: "#131313",
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: 900,
         boxShadow: `
           inset 0 2px 1px rgba(255,255,255,1),
@@ -890,8 +831,8 @@ function HeaderSilverButton({
       onClick={onClick}
       className="fs-metal-button"
       style={{
-        minWidth: 162,
-        height: 42,
+        minWidth: 142,
+        height: 36,
         border: "1px solid rgba(185,185,185,0.95)",
         background: `
           linear-gradient(180deg,
@@ -903,7 +844,7 @@ function HeaderSilverButton({
             #efefef 100%)
         `,
         color: "#121212",
-        fontSize: 15,
+        fontSize: 13,
         fontWeight: 900,
         boxShadow: `
           inset 0 1px 0 rgba(255,255,255,1),
@@ -916,7 +857,7 @@ function HeaderSilverButton({
         alignItems: "center",
         justifyContent: "center",
         gap: 8,
-        padding: "0 18px",
+        padding: "0 14px",
         whiteSpace: "nowrap",
       }}
     >
@@ -943,8 +884,7 @@ function OrangeHotspot({
   small?: boolean;
   variant?: 1 | 2 | 3;
 }) {
-  const extraClass =
-    variant === 2 ? "fs-hotspot fs-hotspot-2" : "fs-hotspot";
+  const extraClass = variant === 2 ? "fs-hotspot fs-hotspot-2" : "fs-hotspot";
 
   return (
     <div

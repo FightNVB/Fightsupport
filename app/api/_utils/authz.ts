@@ -14,6 +14,7 @@ export type RoleName =
   | "official"
   | "hoofdofficial"
   | "dispensatie_admin"
+  | "trainer"
   | "unknown";
 
 function getBearerToken(req: Request): string | null {
@@ -24,7 +25,7 @@ function getBearerToken(req: Request): string | null {
 
 function normalizeRole(v: any): RoleName {
   const r = String(v ?? "").trim().toLowerCase();
-  if (["superadmin","admin","matchmaker","official","hoofdofficial","dispensatie_admin"].includes(r)) return r as RoleName;
+  if (["superadmin","admin","matchmaker","official","hoofdofficial","dispensatie_admin","trainer"].includes(r)) return r as RoleName;
   return "unknown";
 }
 

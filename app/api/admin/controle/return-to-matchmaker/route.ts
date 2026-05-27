@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
 
     const moved = await transferLifecycle({
       matchmakingId,
-      newStage: "retour_naar_eigenaar",
+      newStage: "concept_matchmaking",
       newOwnerType: "matchmaker",
       newOwnerUserId: targetMatchmakerId,
       actorUserId: userId,
@@ -142,8 +142,8 @@ export async function POST(req: NextRequest) {
     const { error: mmUpdateErr } = await supabaseAdmin
       .from("matchmakings")
       .update({
-        stadium: "retour_naar_eigenaar",
-        status: "retour_naar_eigenaar",
+        stadium: "concept_matchmaking",
+        status: "retour_naar_matchmaker",
         huidige_eigenaar_type: "matchmaker",
         huidige_eigenaar_user_id: targetMatchmakerId,
         huidige_eigenaar_bondteam: null,
@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
       matchmaker_id: targetMatchmakerId,
       lifecycle: moved,
       message:
-        "Matchmaking is teruggestuurd naar matchmaker en staat nu op retour_naar_eigenaar.",
+        "Matchmaking is teruggestuurd naar matchmaker.",
     });
   } catch (err: any) {
     return jsonError(err?.message ?? "Onbekende fout.", 500);

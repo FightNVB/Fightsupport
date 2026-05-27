@@ -312,7 +312,23 @@ function parseWeightNumber(v: any): number | null {
 }
 
 function parseAgreedWeightMeta(v: any): ParsedWeightMeta | null {
-  return extractWeightMeta(v, { allowClassNotation: true });
+  const meta = extractWeightMeta(v, { allowClassNotation: true });
+  if (!meta) return null;
+
+  // Afgesproken partijgewicht is altijd een MAX gewicht:
+  // - 62 / 62 kg / KG 62  => -62 (up_to)
+  // - -62 / -62 kg        => -62 (up_to)
+  // - 95+ / +95 / 95+ kg => 95+ (open_above / zwaar gewicht)
+  // Let op: plain 95 betekent dus -95. Alleen 95+ betekent zwaar gewicht.
+  if (meta.type === "exact") {
+    return {
+      value: meta.value,
+      label: `-${formatWeightNumber(meta.value)}`,
+      type: "up_to",
+    };
+  }
+
+  return meta;
 }
 
 function extractRecord(raw: any) {

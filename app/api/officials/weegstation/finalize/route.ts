@@ -75,6 +75,26 @@ async function getRolesForUser(userId: string): Promise<string[]> {
   );
 }
 
+async function getControleRunIdForWeighRow(row: any, matchmakingId: string): Promise<string | null> {
+  const fromWeigh = s(row?.controle_run_id);
+  if (fromWeigh) return fromWeigh;
+
+  const partijNr = Number(row?.partij_nr);
+  if (!Number.isFinite(partijNr)) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("controle_bout_context")
+    .select("controle_run_id")
+    .eq("matchmaking_id", matchmakingId)
+    .eq("partij_nr", partijNr)
+    .not("controle_run_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return s((data as any)?.controle_run_id) || null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { user, error: authErr } = await getUserFromBearer(req);
@@ -124,10 +144,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const firstWeighRowBondteam = s((weighRows as any[])?.[0]?.bondteam);
+
+    const { data: mmOwnerRow, error: mmOwnerErr } = await supabaseAdmin
+      .from("matchmakings")
+      .select("bondteam, huidige_eigenaar_bondteam")
+      .eq("id", matchmakingId)
+      .maybeSingle();
+
+    if (mmOwnerErr) throw mmOwnerErr;
+
+    const targetBondteam =
+      s((mmOwnerRow as any)?.huidige_eigenaar_bondteam) ||
+      s((mmOwnerRow as any)?.bondteam) ||
+      firstWeighRowBondteam ||
+      null;
+
+    if (!targetBondteam) {
+      return NextResponse.json(
+        { error: "Bondteam ontbreekt. Kan matchmaking niet zichtbaar houden in het official overzicht." },
+        { status: 400 }
+      );
+    }
+
     for (const row of weighRows as any[]) {
       const roodGewogen = toNum(row.rood_gewogen_gewicht);
       const blauwGewogen = toNum(row.blauw_gewogen_gewicht);
       const sourceId = s(row.id) || null;
+      const controleRunId = await getControleRunIdForWeighRow(row, matchmakingId);
 
       let eindstatus = absentStatus;
       let praktijkStatus = absentStatus;
@@ -202,6 +246,7 @@ export async function POST(req: NextRequest) {
         .from("controle_bout_context")
         .update({
           ...rawUpdate,
+          ...(controleRunId ? { controle_run_id: controleRunId } : {}),
           admin_sanctie_nodig: adminSanctieNodig,
           admin_sanctie_reason: adminSanctieReason,
           updated_at: nowIso,
@@ -220,7 +265,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const { error: delErr } = await supabaseAdmin
+      let delQuery = supabaseAdmin
         .from("controle_resultaten")
         .delete()
         .eq("matchmaking_id", matchmakingId)
@@ -231,11 +276,22 @@ export async function POST(req: NextRequest) {
           "weegstation_minpunt",
         ]);
 
+      // Ruim de oude null-regels ook op. Nieuwe regels krijgen hieronder altijd
+      // dezelfde controle_run_id als de oorspronkelijke controle_bout_context.
+      if (controleRunId) {
+        delQuery = delQuery.or(`controle_run_id.eq.${controleRunId},controle_run_id.is.null`);
+      } else {
+        delQuery = delQuery.is("controle_run_id", null);
+      }
+
+      const { error: delErr } = await delQuery;
+
       if (delErr) throw delErr;
 
       const insertRows: any[] = [
         {
           matchmaking_id: matchmakingId,
+          controle_run_id: controleRunId,
           partij_nr: row.partij_nr,
           hoek: null,
           resultaat:
@@ -257,6 +313,7 @@ export async function POST(req: NextRequest) {
       if (toPenalty(row.gewicht_strafpunt_rood) === 1) {
         insertRows.push({
           matchmaking_id: matchmakingId,
+          controle_run_id: controleRunId,
           partij_nr: row.partij_nr,
           hoek: "rood",
           resultaat: "actie",
@@ -273,6 +330,7 @@ export async function POST(req: NextRequest) {
       if (toPenalty(row.gewicht_strafpunt_blauw) === 1) {
         insertRows.push({
           matchmaking_id: matchmakingId,
+          controle_run_id: controleRunId,
           partij_nr: row.partij_nr,
           hoek: "blauw",
           resultaat: "actie",
@@ -289,6 +347,7 @@ export async function POST(req: NextRequest) {
       if (dispensatieNodig || row.dispensatie_verleend) {
         insertRows.push({
           matchmaking_id: matchmakingId,
+          controle_run_id: controleRunId,
           partij_nr: row.partij_nr,
           hoek: null,
           resultaat: row.dispensatie_verleend ? "ok" : "dispensatie",
@@ -314,6 +373,7 @@ export async function POST(req: NextRequest) {
         .from("weigh_in_bouts")
         .update({
           ...rawUpdate,
+          ...(controleRunId ? { controle_run_id: controleRunId } : {}),
           admin_sanctie_nodig: adminSanctieNodig,
           admin_sanctie_reason: adminSanctieReason,
           laatste_bewerking_op: nowIso,
@@ -340,6 +400,11 @@ export async function POST(req: NextRequest) {
       .from("matchmakings")
       .update({
         stadium: "weegstation_verwerkt",
+        status: "klaar_voor_definitieve_lineup",
+        huidige_eigenaar_type: "bondteam",
+        huidige_eigenaar_user_id: null,
+        huidige_eigenaar_bondteam: targetBondteam,
+        ready_for_results_at: nowIso,
         weegstation_processed_at: nowIso,
         last_updated_at: nowIso,
         last_updated_by: user.id,
@@ -354,7 +419,7 @@ export async function POST(req: NextRequest) {
       updated_bouts: weighRows.length,
       stadium: "weegstation_verwerkt",
       message:
-        "Weging definitief afgesloten. Resultaten zijn teruggezet naar matchmaking_bouts_raw, controle_bout_context en controle_resultaten.",
+        "Weging definitief afgesloten. Eigenaar blijft bondteam en weegstation-statussen zijn als aparte controle_resultaten teruggezet voor de definitieve lineup.",
       open_url: `/dashboard/officials/controle/${matchmakingId}`,
     });
   } catch (err: any) {

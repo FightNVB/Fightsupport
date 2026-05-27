@@ -176,6 +176,48 @@ async function assertCanAccessMatchmakerMatchmaking(opts: {
   }
 }
 
+
+async function getFightPassportSessionForUser(matchmakerId: string) {
+  const { data, error } = await supabase
+    .from("fightpassport_sessions")
+    .select("id, matchmaker_id, status, updated_at")
+    .eq("matchmaker_id", matchmakerId)
+    .maybeSingle();
+
+  if (error) {
+    const msg = String(error?.message ?? error);
+    // Backwards compatible: als de tabel nog niet bestaat, laten we oude master-flow toe.
+    if (msg.toLowerCase().includes("schema cache") || msg.toLowerCase().includes("could not find") || msg.toLowerCase().includes("relation")) {
+      return null;
+    }
+    throw error;
+  }
+
+  return data;
+}
+
+async function getMatchmakingFightPassportOwner(matchmakingId: string, fallbackUserId: string) {
+  const { data, error } = await supabase
+    .from("matchmakings")
+    .select("id, datum, matchmaker_id, maker_user_id, uploaded_by, huidige_eigenaar_user_id")
+    .eq("id", matchmakingId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const fpMatchmakerId =
+    toUuidOrNull((data as any)?.matchmaker_id) ??
+    toUuidOrNull((data as any)?.maker_user_id) ??
+    toUuidOrNull((data as any)?.uploaded_by) ??
+    toUuidOrNull((data as any)?.huidige_eigenaar_user_id) ??
+    toUuidOrNull(fallbackUserId);
+
+  return {
+    row: data,
+    fpMatchmakerId,
+  };
+}
+
 async function safeUpdateByIds(
   table: string,
   patch: Record<string, any>,
@@ -780,10 +822,44 @@ export async function POST(req: Request) {
 
     dlog("[matchmaker/scrape/start] fpBundleMMPath =", fpBundleMMPath);
 
+    const { row: mmOwnerRow, fpMatchmakerId } = await getMatchmakingFightPassportOwner(
+      matchmaking_id,
+      userId
+    );
+
+    if (!fpMatchmakerId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          needs_fightpassport_connect: true,
+          error: "Geen matchmaker gekoppeld aan deze matchmaking. Daardoor kan geen FightPassport matchmaker-sessie worden gekozen.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const fpSession = await getFightPassportSessionForUser(fpMatchmakerId);
+
+    if (!fpSession) {
+      return NextResponse.json(
+        {
+          ok: false,
+          needs_fightpassport_connect: true,
+          fp_matchmaker_id: fpMatchmakerId,
+          error: "Koppel eerst de FightPassport sessie van de matchmaker die bij deze matchmaking hoort.",
+        },
+        { status: 409 }
+      );
+    }
+
     const scrapeResult = await runNodeScript(
       fpBundleMMPath,
       [matchmaking_id, scrape_run_id, ...va_nummers],
       {
+        // Matchmaker scraper gebruikt ALTIJD de sessie van de matchmaker die aan deze matchmaking hangt.
+        // Dus niet beslissen op role, want een superadmin kan ook matchmaker zijn.
+        FP_MATCHMAKER_ID: fpMatchmakerId,
+        FP_SESSION_MODE: "matchmaker",
         WORKERS: String(workers),
         STAGGER_MS: String(stagger_ms),
         TAB_ATTEMPTS: String(tab_attempts),
@@ -811,11 +887,7 @@ export async function POST(req: Request) {
       vaNummers: va_nummers,
     });
 
-    const { data: mmRow } = await supabase
-      .from("matchmakings")
-      .select("datum")
-      .eq("id", matchmaking_id)
-      .maybeSingle();
+    const mmRow = mmOwnerRow;
 
     const safeAanmeldingen = rows.map((row: any) => ({
       ...row,

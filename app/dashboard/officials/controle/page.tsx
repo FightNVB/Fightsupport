@@ -9,6 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { supabase } from "@/lib/supabaseClient";
 
 import NvbLightButton from "@/components/NvbLightButton";
 import NvbDarkButton from "@/components/NvbDarkButton";
@@ -18,6 +19,8 @@ const NVB_ORANGE = "#ff4d00";
 const API_OVERVIEW = "/api/officials/matchmakings-overzicht";
 const API_START_CONTROLE = "/api/officials/start";
 const API_DELETE_MATCHMAKING = "/api/control-engine/delete-matchmaking";
+const API_NAAR_UITSLAGEN = "/api/matchmaking/naar-uitslagen";
+const API_VERPLAATS_NAAR_ADMIN_ARCHIEF = "/api/admin/archief/verplaats";
 
 const silverBackplate: CSSProperties = {
   background:
@@ -33,7 +36,7 @@ interface ControleRun {
   run_type: string | null;
 }
 
-type ActiveTab = "received" | "uploaded";
+type ActiveTab = "received" | "lineup" | "results" | "archive" | "uploaded";
 
 interface MatchmakingRow {
   id: string;
@@ -72,6 +75,12 @@ interface MatchmakingRow {
 
   tab: ActiveTab;
   laatste_run: ControleRun | null;
+
+  // Uitslagen-run wordt client-side bijgehaald, omdat het official overzicht
+  // vaak alleen controle-runs teruggeeft. Zonder deze velden ziet de Archief-tab
+  // matchmakings met afgeronde uitslagen soms niet.
+  uitslagen_run_id?: string | null;
+  uitslagen_run_status?: string | null;
 }
 
 function formatDate(v: string | null | undefined) {
@@ -147,6 +156,15 @@ function formatStatusLabel(status: string | null | undefined) {
   if (s === "running") return "Bezig";
   if (s === "klaar") return "Klaar";
   if (s === "failed") return "Mislukt";
+  if (s === "klaar_voor_weegstation") return "Klaar voor weegstation";
+  if (s === "in_weegstation") return "In weegstation";
+  if (s === "weegstation_verwerkt") return "Weging verwerkt";
+  if (s === "klaar_voor_definitieve_lineup") return "Klaar voor definitieve lineup";
+  if (s === "definitieve_lineup") return "Definitieve lineup";
+  if (s === "klaar_voor_uitslagen") return "Klaar voor uitslagen";
+  if (s === "uitslagen_in_bewerking") return "In uitslagen";
+  if (s === "uitslagen_definitief") return "Uitslagen definitief";
+  if (s === "afgerond") return "Afgerond";
 
   return raw;
 }
@@ -173,10 +191,80 @@ function formatOwnerLabel(row: MatchmakingRow) {
     return ownerBondteam ? `Official · ${ownerBondteam}` : "Official";
   }
 
+  if (type === "bondteam") {
+    return ownerBondteam ? `Bondteam · ${ownerBondteam}` : "Bondteam";
+  }
+
   if (type === "admin") return "Admin";
   if (type === "matchmaker") return "Matchmaker";
 
   return "Onbekend";
+}
+
+function normalizedStadium(row: Pick<MatchmakingRow, "stadium" | "status">) {
+  return String(row.stadium ?? row.status ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function getOfficialOverviewTab(row: MatchmakingRow): ActiveTab {
+  const stadium = normalizedStadium(row);
+  const status = String(row.status ?? "")
+    .trim()
+    .toLowerCase();
+  const finalStatus = String(row.final_status ?? "")
+    .trim()
+    .toLowerCase();
+  const runStatus = String(row.laatste_run?.status ?? "")
+    .trim()
+    .toLowerCase();
+  const uitslagenRunStatus = String(row.uitslagen_run_status ?? "")
+    .trim()
+    .toLowerCase();
+
+  // Zodra uitslagen naar admin zijn gestuurd/gefinaliseerd, is de matchmaking klaar.
+  // Die hoort niet meer bij In uitslagen, maar in Archief.
+  if (
+    stadium === "uitslagen_definitief" ||
+    status === "uitslagen_definitief" ||
+    finalStatus === "uitslagen_definitief" ||
+    runStatus === "afgerond" ||
+    uitslagenRunStatus === "afgerond" ||
+    status === "afgerond" ||
+    stadium === "afgerond" ||
+    row.is_archived === true ||
+    !!row.results_finalized_at
+  ) {
+    return "archive";
+  }
+
+  // Zodra de matchmaking naar uitslagen is gezet, hoort hij niet meer tussen
+  // Ontvangen of Definitieve lineup, maar in de aparte tab In uitslagen.
+  if (
+    stadium === "klaar_voor_uitslagen" ||
+    stadium === "uitslagen_in_bewerking" ||
+    status === "klaar_voor_uitslagen" ||
+    status === "uitslagen_in_bewerking" ||
+    uitslagenRunStatus === "open" ||
+    uitslagenRunStatus === "concept" ||
+    uitslagenRunStatus === "in_bewerking"
+  ) {
+    return "results";
+  }
+
+  // Weegstation zelf heeft een eigen pagina/flow.
+  // Alleen nadat finalize de weging heeft verwerkt, komt de matchmaking hier terug
+  // onder Definitieve lineup.
+  if (
+    stadium === "weegstation_verwerkt" ||
+    stadium === "weging_afgesloten" ||
+    status === "klaar_voor_definitieve_lineup" ||
+    status === "definitieve_lineup"
+  ) {
+    return "lineup";
+  }
+
+  return row.tab === "uploaded" ? "uploaded" : "received";
 }
 
 function TabButton({
@@ -261,7 +349,44 @@ export default function OfficialsOverzichtPage() {
       }
 
       const nextRows = Array.isArray(json?.rows) ? json.rows : [];
-      setRows(nextRows);
+
+      // Haal uitslagen_runs apart op. Het endpoint /api/officials/matchmakings-overzicht
+      // geeft bij laatste_run meestal de controle-run terug, niet de uitslagen-run.
+      // Daardoor verdwenen afgeronde uitslagen soms uit Archief.
+      const matchmakingIds = Array.from(
+        new Set(
+          nextRows
+            .map((r: any) => String(r?.id ?? "").trim())
+            .filter(Boolean)
+        )
+      );
+
+      let rowsWithUitslagen = nextRows;
+      if (matchmakingIds.length > 0) {
+        const { data: uitslagenRuns, error: uitslagenRunError } = await supabase
+          .from("uitslagen_runs")
+          .select("id, matchmaking_id, status")
+          .in("matchmaking_id", matchmakingIds);
+
+        if (!uitslagenRunError) {
+          const runByMatchmakingId = new Map(
+            (uitslagenRuns ?? []).map((run: any) => [String(run.matchmaking_id), run])
+          );
+
+          rowsWithUitslagen = nextRows.map((row: any) => {
+            const uitslagenRun: any = runByMatchmakingId.get(String(row.id));
+            return {
+              ...row,
+              uitslagen_run_id: uitslagenRun?.id ?? null,
+              uitslagen_run_status: uitslagenRun?.status ?? null,
+            };
+          });
+        } else {
+          console.warn("Uitslagen-runs laden mislukt:", uitslagenRunError.message);
+        }
+      }
+
+      setRows(rowsWithUitslagen);
       setBondteam(String(json?.bondteam ?? "").trim());
     } catch (e: any) {
       console.error("Fout bij laden official overzicht:", e);
@@ -341,6 +466,47 @@ export default function OfficialsOverzichtPage() {
     }
   }
 
+  async function naarUitslagen(matchmakingId: string) {
+    const ok = window.confirm(
+      "Wil je deze definitieve lineup omzetten naar uitslagen? Alleen partijen met eindstatus OK worden meegenomen."
+    );
+    if (!ok) return;
+
+    try {
+      setIsBusy(true);
+      setBusyId(matchmakingId);
+      setOverlayTitle("Naar uitslagen");
+      setOverlayMessage("Definitieve lineup wordt omgezet naar uitslagen...");
+      setOverlaySubMessage("Alleen partijen met eindstatus OK worden meegenomen.");
+      setOverlayOpen(true);
+
+      const res = await authedFetch(API_NAAR_UITSLAGEN, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        alert(json?.error ?? "Omzetten naar uitslagen mislukt.");
+        return;
+      }
+
+      setOverlayMessage("Uitslagen zijn aangemaakt. Pagina wordt geopend...");
+      window.location.href = `/dashboard/officials/uitslagen/${matchmakingId}`;
+    } finally {
+      setBusyId(null);
+      setIsBusy(false);
+      setOverlayOpen(false);
+      setOverlayMessage("");
+      setOverlayTitle("Even wachten");
+      setOverlaySubMessage(
+        "Sluit deze pagina niet af totdat de resultaten zijn geladen."
+      );
+    }
+  }
+
   async function deleteMatchmaking(row: MatchmakingRow) {
     const ok = window.confirm(
       `Weet je zeker dat je deze matchmaking + alle controle data wilt verwijderen?\n\n${row.naam ?? "Onbekend evenement"}`
@@ -382,6 +548,47 @@ export default function OfficialsOverzichtPage() {
     }
   }
 
+
+  async function verplaatsNaarAdminArchief(row: MatchmakingRow) {
+    const ok = window.confirm(
+      `Deze afgeronde matchmaking wordt uit het officials-archief gehaald en naar Admin Archief verplaatst.\n\n${row.naam ?? "Onbekend evenement"}`
+    );
+    if (!ok) return;
+
+    try {
+      setIsBusy(true);
+      setBusyId(row.id);
+      setOverlayTitle("Naar admin archief");
+      setOverlayMessage("Matchmaking wordt naar Admin Archief verplaatst...");
+      setOverlaySubMessage("De matchmaking blijft bewaard en wordt niet definitief verwijderd.");
+      setOverlayOpen(true);
+
+      const res = await authedFetch(API_VERPLAATS_NAAR_ADMIN_ARCHIEF, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmaking_id: row.id }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(json?.error ?? "Verplaatsen naar admin archief mislukt.");
+        return;
+      }
+
+      setOverlayMessage("Overzicht wordt bijgewerkt...");
+      await load();
+    } finally {
+      setBusyId(null);
+      setIsBusy(false);
+      setOverlayOpen(false);
+      setOverlayMessage("");
+      setOverlayTitle("Even wachten");
+      setOverlaySubMessage(
+        "Sluit deze pagina niet af totdat de resultaten zijn geladen."
+      );
+    }
+  }
+
   const monthOptions = useMemo(() => {
     return Array.from(
       new Set(rows.map((r) => getMonthKey(r.datum)).filter(Boolean))
@@ -393,7 +600,7 @@ export default function OfficialsOverzichtPage() {
       new Set(
         rows.map((r) =>
           normalizeStatus(
-            r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
+            r.uitslagen_run_status ?? r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
           )
         )
       )
@@ -401,17 +608,32 @@ export default function OfficialsOverzichtPage() {
   }, [rows]);
 
   const uploadedCount = useMemo(
-    () => rows.filter((r) => r.tab === "uploaded").length,
+    () => rows.filter((r) => getOfficialOverviewTab(r) === "uploaded").length,
     [rows]
   );
 
   const receivedCount = useMemo(
-    () => rows.filter((r) => r.tab === "received").length,
+    () => rows.filter((r) => getOfficialOverviewTab(r) === "received").length,
+    [rows]
+  );
+
+  const lineupCount = useMemo(
+    () => rows.filter((r) => getOfficialOverviewTab(r) === "lineup").length,
+    [rows]
+  );
+
+  const resultsCount = useMemo(
+    () => rows.filter((r) => getOfficialOverviewTab(r) === "results").length,
+    [rows]
+  );
+
+  const archiveCount = useMemo(
+    () => rows.filter((r) => getOfficialOverviewTab(r) === "archive").length,
     [rows]
   );
 
   const tabRows = useMemo(() => {
-    return rows.filter((r) => r.tab === activeTab);
+    return rows.filter((r) => getOfficialOverviewTab(r) === activeTab);
   }, [rows, activeTab]);
 
   const filteredRows = useMemo(() => {
@@ -421,7 +643,7 @@ export default function OfficialsOverzichtPage() {
       const rowMonth = getMonthKey(r.datum);
       const rowEvent = (r.naam ?? "").trim().toLowerCase();
       const rowStatus = normalizeStatus(
-        r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
+        r.uitslagen_run_status ?? r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
       );
 
       if (filterMonth && rowMonth !== filterMonth) return false;
@@ -487,7 +709,7 @@ export default function OfficialsOverzichtPage() {
                       Overzicht op basis van tabel <strong>matchmakings</strong>
                     </div>
                     <div className="mt-1 text-sm text-white/70">
-                      Alleen huidige eigenaar official · bondteam{" "}
+                      Alleen huidige eigenaar bondteam/official · bondteam{" "}
                       <strong>{bondteam || "-"}</strong>
                     </div>
                   </div>
@@ -569,6 +791,24 @@ export default function OfficialsOverzichtPage() {
                       onClick={() => setActiveTab("received")}
                     />
                     <TabButton
+                      active={activeTab === "lineup"}
+                      label="Definitieve lineup"
+                      count={lineupCount}
+                      onClick={() => setActiveTab("lineup")}
+                    />
+                    <TabButton
+                      active={activeTab === "results"}
+                      label="In uitslagen"
+                      count={resultsCount}
+                      onClick={() => setActiveTab("results")}
+                    />
+                    <TabButton
+                      active={activeTab === "archive"}
+                      label="Archief"
+                      count={archiveCount}
+                      onClick={() => setActiveTab("archive")}
+                    />
+                    <TabButton
                       active={activeTab === "uploaded"}
                       label="Eigen uploads"
                       count={uploadedCount}
@@ -608,6 +848,12 @@ export default function OfficialsOverzichtPage() {
                           <div className="mt-1 text-xs text-zinc-500">
                             {activeTab === "received"
                               ? "Ontvangen matchmakings die nu bij dit bondteam in beheer zijn"
+                              : activeTab === "lineup"
+                              ? "Weging verwerkt: klaar voor definitieve lineup en daarna uitslagen"
+                              : activeTab === "results"
+                              ? "Matchmakings waarvan de uitslagen nog ingevoerd of gecorrigeerd worden"
+                              : activeTab === "archive"
+                              ? "Afgeronde matchmakings waarvan de uitslagen naar admin zijn gestuurd"
                               : "Eigen official uploads die nu bij dit bondteam in beheer zijn"}
                           </div>
                         </div>
@@ -750,6 +996,12 @@ export default function OfficialsOverzichtPage() {
                                 >
                                   {activeTab === "received"
                                     ? "Geen ontvangen matchmakings gevonden."
+                                    : activeTab === "lineup"
+                                    ? "Geen matchmakings klaar voor definitieve lineup gevonden."
+                                    : activeTab === "results"
+                                    ? "Geen matchmakings in uitslagen gevonden."
+                                    : activeTab === "archive"
+                                    ? "Geen afgeronde matchmakings in archief gevonden."
                                     : "Geen eigen official uploads gevonden."}
                                 </td>
                               </tr>
@@ -758,6 +1010,7 @@ export default function OfficialsOverzichtPage() {
                                 const zebra = i % 2 === 0;
                                 const rowBusy = busyId === r.id;
                                 const rowStatus =
+                                  r.uitslagen_run_status ??
                                   r.laatste_run?.status ??
                                   r.stadium ??
                                   r.status ??
@@ -816,27 +1069,71 @@ export default function OfficialsOverzichtPage() {
                                           Matchmaking
                                         </Link>
 
-                                        <button
-                                          onClick={() => startControle(r.id)}
-                                          disabled={rowBusy || isBusy}
-                                          className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
-                                          title="Start volledige controle"
-                                        >
-                                          {rowBusy && isBusy
-                                            ? "Bezig…"
-                                            : isRunningStatus(rowStatus)
-                                            ? "Controle loopt…"
-                                            : "Start controle"}
-                                        </button>
+                                        {activeTab === "uploaded" ? (
+                                          <button
+                                            onClick={() => startControle(r.id)}
+                                            disabled={rowBusy || isBusy}
+                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
+                                            title="Start volledige controle"
+                                          >
+                                            {rowBusy && isBusy
+                                              ? "Bezig…"
+                                              : isRunningStatus(rowStatus)
+                                              ? "Controle loopt…"
+                                              : "Start controle"}
+                                          </button>
+                                        ) : null}
 
-                                        <button
-                                          onClick={() => deleteMatchmaking(r)}
-                                          disabled={rowBusy || isBusy}
-                                          className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
-                                          title="Verwijdert deze matchmaking met gekoppelde controledata"
-                                        >
-                                          {rowBusy && isBusy ? "Bezig…" : "Verwijderen"}
-                                        </button>
+                                        {activeTab === "lineup" ? (
+                                          <button
+                                            onClick={() => naarUitslagen(r.id)}
+                                            disabled={rowBusy || isBusy}
+                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
+                                            title="Zet definitieve lineup om naar uitslagen"
+                                          >
+                                            {rowBusy && isBusy ? "Bezig…" : "Naar uitslagen"}
+                                          </button>
+                                        ) : null}
+
+                                        {activeTab === "results" ? (
+                                          <Link
+                                            href={`/dashboard/officials/uitslagen/${r.id}`}
+                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                          >
+                                            Uitslagen openen
+                                          </Link>
+                                        ) : null}
+
+                                        {activeTab === "archive" ? (
+                                          <>
+                                            <Link
+                                              href={`/dashboard/officials/uitslagen/inzien/${r.id}`}
+                                              className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                            >
+                                              Uitslagen inzien
+                                            </Link>
+
+                                            <button
+                                              onClick={() => verplaatsNaarAdminArchief(r)}
+                                              disabled={rowBusy || isBusy}
+                                              className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
+                                              title="Verplaatst deze afgeronde matchmaking naar Admin Archief"
+                                            >
+                                              {rowBusy && isBusy ? "Bezig…" : "Verwijderen"}
+                                            </button>
+                                          </>
+                                        ) : null}
+
+                                        {activeTab !== "archive" ? (
+                                          <button
+                                            onClick={() => deleteMatchmaking(r)}
+                                            disabled={rowBusy || isBusy}
+                                            className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
+                                            title="Verwijdert deze matchmaking met gekoppelde controledata"
+                                          >
+                                            {rowBusy && isBusy ? "Bezig…" : "Verwijderen"}
+                                          </button>
+                                        ) : null}
                                       </div>
                                     </td>
                                   </tr>

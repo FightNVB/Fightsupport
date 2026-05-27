@@ -174,7 +174,37 @@ function normalizeNullableNumber(v: unknown) {
   return Number.isFinite(n) ? n : null;
 }
 
-function buildDuplicateKey(row: {
+function onlyDigits(v: unknown) {
+  return String(v ?? "").replace(/\D+/g, "").replace(/^0+/, "").trim();
+}
+
+function normName(v: unknown) {
+  return norm(v)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normDate(v: unknown) {
+  const x = s(v);
+  if (!x) return "";
+
+  const iso = x.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  }
+
+  const nl = x.match(/^(\d{1,2})[\-/ .](\d{1,2})[\-/ .](\d{4})$/);
+  if (nl) {
+    return `${nl[3]}-${nl[2].padStart(2, "0")}-${nl[1].padStart(2, "0")}`;
+  }
+
+  return norm(x);
+}
+
+function buildDuplicateKeys(row: {
   naam?: string | null;
   voornaam?: string | null;
   achternaam?: string | null;
@@ -183,21 +213,43 @@ function buildDuplicateKey(row: {
   gym?: string | null;
   gewicht?: number | null;
 }) {
-  const va = norm(row.va_nummer);
-  if (va) return `va:${va}`;
+  const keys: string[] = [];
 
-  const naam =
-    norm(row.naam) || `${norm(row.voornaam)}|${norm(row.achternaam)}`;
+  const directName = normName(row.naam);
+  const combinedName = [normName(row.voornaam), normName(row.achternaam)]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const naam = directName || combinedName;
 
-  const dob = norm(row.geboortedatum);
-  const gym = norm(row.gym);
+  // Belangrijk voor dubbele Matchmaking Nederland uploads:
+  // NIET alleen op VA-nummer dedupen, want een verkeerd VA-nummer mag niet
+  // per ongeluk een andere vechter overslaan. Alleen dezelfde naam + hetzelfde
+  // genormaliseerde VA-nummer wordt als dezelfde aanmelding gezien.
+  const va = onlyDigits(row.va_nummer);
+  if (naam && va) keys.push(`name-va:${naam}|${va}`);
 
-  const gewicht =
-    row.gewicht == null || !Number.isFinite(Number(row.gewicht))
-      ? ""
-      : String(Number(row.gewicht));
+  const dob = normDate(row.geboortedatum);
+  const gym = normName(row.gym);
 
-  return `name:${naam}|dob:${dob}|gym:${gym}|gewicht:${gewicht}`;
+  // Fallback voor templates/rijen zonder VA-nummer. Gewicht telt bewust niet mee:
+  // gewicht kan per upload wisselen en mag geen dubbele rij veroorzaken.
+  if (!va && naam && dob) keys.push(`name-dob:${naam}|${dob}`);
+  if (!va && naam && dob && gym) keys.push(`name-dob-gym:${naam}|${dob}|${gym}`);
+
+  // Laatste fallback voor rijen zonder VA en zonder geboortedatum.
+  // Bewust niet alleen op naam, om onterechte matches te voorkomen.
+  if (!va && !dob && naam && gym) keys.push(`name-gym:${naam}|${gym}`);
+
+  return Array.from(new Set(keys));
+}
+
+function hasDuplicateKey(row: Parameters<typeof buildDuplicateKeys>[0], keys: Set<string>) {
+  return buildDuplicateKeys(row).some((key) => keys.has(key));
+}
+
+function addDuplicateKeys(row: Parameters<typeof buildDuplicateKeys>[0], keys: Set<string>) {
+  for (const key of buildDuplicateKeys(row)) keys.add(key);
 }
 
 async function getUserFromBearer(req: Request) {
@@ -595,6 +647,8 @@ export async function POST(req: Request) {
     await syncUploadedByOnParents(matchmaking_id, uploaded_by);
 
     const raw_filename = safeFileName(file.name || "aanmeldingen.xlsx");
+    const requestedSourceType = s(fd.get("source_type"));
+    const uploadSourceType = requestedSourceType || "excel_upload";
     const filePath = `aanmeldingen/${matchmaking_id}/${Date.now()}_${raw_filename}`;
     uploadedStoragePath = filePath;
 
@@ -627,7 +681,7 @@ export async function POST(req: Request) {
       filename: raw_filename,
       original_filename: raw_filename,
       storage_path: uploadedStoragePath || null,
-      source_type: "excel_upload",
+      source_type: uploadSourceType,
       uploaded_by,
       status: "geupload",
       created_at: new Date().toISOString(),
@@ -667,7 +721,7 @@ export async function POST(req: Request) {
         event_id: null,
         upload_batch_id: uploadId,
         raw_filename,
-        source_type: "excel_upload",
+        source_type: uploadSourceType,
         uploaded_by,
         bondteam: null,
 
@@ -702,6 +756,7 @@ export async function POST(req: Request) {
           ...(typeof f.raw === "object" && f.raw ? f.raw : {}),
           parser_source: "parseExcelToFighters",
           template_supported: true,
+          source_type: uploadSourceType,
           upload_batch_id: uploadId,
           upload_id: uploadId,
           upload_filename: raw_filename,
@@ -745,8 +800,8 @@ export async function POST(req: Request) {
     const existingKeys = new Set<string>();
 
     for (const row of existingRows ?? []) {
-      existingKeys.add(
-        buildDuplicateKey({
+      addDuplicateKeys(
+        {
           naam: row.naam,
           voornaam: row.voornaam,
           achternaam: row.achternaam,
@@ -754,7 +809,8 @@ export async function POST(req: Request) {
           geboortedatum: row.geboortedatum,
           gym: row.gym,
           gewicht: row.gewicht,
-        }),
+        },
+        existingKeys,
       );
     }
 
@@ -764,20 +820,21 @@ export async function POST(req: Request) {
     let duplicatesInFile = 0;
 
     for (const row of validRows) {
-      const key = buildDuplicateKey(row);
-
-      if (existingKeys.has(key)) {
+      if (hasDuplicateKey(row, existingKeys)) {
         duplicatesExisting++;
         continue;
       }
 
-      if (uploadKeys.has(key)) {
+      if (hasDuplicateKey(row, uploadKeys)) {
         duplicatesInFile++;
         continue;
       }
 
-      uploadKeys.add(key);
-      dedupedRows.push(row);
+      addDuplicateKeys(row, uploadKeys);
+      dedupedRows.push({
+        ...row,
+        duplicate_key: buildDuplicateKeys(row)[0] ?? null,
+      });
     }
 
     if (dedupedRows.length > 0) {
@@ -814,13 +871,16 @@ export async function POST(req: Request) {
       duplicates_existing: duplicatesExisting,
       duplicates_in_file: duplicatesInFile,
       uploaded_by,
+      source_type: uploadSourceType,
+      skipped_existing: duplicatesExisting,
+      skipped_in_file: duplicatesInFile,
       scraper_started: false,
       scraper_error: null,
       scraper_response: null,
       message:
         dedupedRows.length > 0
-          ? "Upload gelukt. Nieuwe aanmeldingen zijn toegevoegd aan deze matchmaking."
-          : "Upload gelukt, maar alles was al bekend of dubbel in het bestand.",
+          ? `Upload gelukt. ${dedupedRows.length} nieuwe aanmelding(en) toegevoegd. ${duplicatesExisting + duplicatesInFile} dubbele aanmelding(en) overgeslagen.`
+          : `Upload gelukt, maar er zijn geen nieuwe aanmeldingen toegevoegd. ${duplicatesExisting + duplicatesInFile} dubbele aanmelding(en) overgeslagen.`,
     });
   } catch (err: any) {
     console.error("[matchmaker/submit-aanmeldingen] error", err);

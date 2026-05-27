@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { supabase } from "@/lib/supabaseClient";
 import {
   ArrowLeft,
   Ban,
@@ -28,6 +29,7 @@ const ORANGE = "#ff4d00";
 const LOGO = "/branding/fightsupport/excel-logo.png";
 
 type Fighter = Record<string, any>;
+type ResultRow = Record<string, any>;
 type FilterKey = "all" | "no_license" | "no_keurmerk" | "gematcht" | "afgemeld";
 
 function s(v: unknown) {
@@ -228,6 +230,190 @@ function leeftijdSortValue(f: Fighter) {
   );
   return Number.isFinite(age) && age >= 0 ? age : Number.POSITIVE_INFINITY;
 }
+
+function normVa(v: unknown) {
+  return s(v).replace(/[^0-9]/g, "");
+}
+
+function rowMatchesFighter(row: ResultRow, f?: Fighter | null) {
+  if (!f) return false;
+  const va = normVa(pickFirst(f.va_nummer, f.va, f.fighter_id));
+  const inschrijvingId = s(pickFirst(f.inschrijving_id, f.aanmelding_id, f.id));
+  return (
+    (!!va && normVa(row.va_nummer) === va) ||
+    (!!inschrijvingId && s(pickFirst(row.inschrijving_id, row.aanmelding_id)) === inschrijvingId) ||
+    (!!s(row.naam) && lower(row.naam) === lower(name(f)))
+  );
+}
+
+function getResultKind(v: unknown): "win" | "loss" | "draw" | "other" {
+  const x = lower(v)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // matchmaker_uitslagen_raw.uitslag is leidend.
+  // Exacte betekenis:
+  // - alles met "wint" = winst
+  // - alles met "verliest" of "verlies" = verlies
+  // - onbeslist/gelijk/draw = onbeslist
+  // - demo/no contest = overige
+  if (!x) return "other";
+  if (x.includes("demo") || x.includes("no contest") || x.includes("nocontest") || x === "nc") return "other";
+  if (x.includes("onbeslist") || x.includes("gelijk") || x.includes("draw")) return "draw";
+  if (x.includes("verliest") || x.includes("verlies") || x.includes("verloren") || x.includes("loss") || x === "l") return "loss";
+  if (x.includes("wint") || x.includes("winst") || x.includes("gewonnen") || x === "win" || x === "w") return "win";
+
+  return "other";
+}
+
+function normalizeClassToken(v: unknown) {
+  const x = lower(v)
+    .replace(/klasse/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!x || x === "-") return "";
+  if (x === "j" || x.includes("jeugd") || x.includes("youth")) return "j";
+  if (x === "r" || x.includes("recreant")) return "r";
+  if (x === "n" || x.includes("nieuweling")) return "n";
+  if (x === "c") return "c";
+  if (x === "b") return "b";
+  if (x === "a" || x.includes("elite")) return "a";
+  if (x.includes("amateur") || x.includes("ama")) return "amateur";
+  if (x.includes("pro")) return "pro";
+
+  return x.replace(/[^a-z0-9+]/g, "");
+}
+
+function classRank(token: string) {
+  // Volgorde voor stand-up record: J -> R optioneel -> N -> C -> B -> A.
+  // Het record wordt altijd getoond in de hoogste klasse waarin een echte uitslag staat.
+  const order: Record<string, number> = {
+    j: 1,
+    r: 2,
+    n: 3,
+    c: 4,
+    b: 5,
+    a: 6,
+    amateur: 3,
+    pro: 6,
+  };
+  return order[token] ?? 0;
+}
+
+function getRowClass(row: ResultRow) {
+  return normalizeClassToken(
+    pickFirst(
+      row?.klasse,
+      row?.class,
+      row?.wedstrijdklasse,
+      row?.niveau,
+      row?.fight_class,
+    ),
+  );
+}
+
+function highestRecordClassFromRows(rows: ResultRow[]) {
+  let highest = "";
+  let highestRank = 0;
+
+  for (const row of rows) {
+    const kind = getResultKind(pickFirst(row?.uitslag, row?.resultaat, row?.outcome));
+    if (kind === "other") continue; // demo/no contest bepaalt nooit hoogste recordklasse
+
+    const token = getRowClass(row);
+    const rank = classRank(token);
+    if (rank > highestRank) {
+      highest = token;
+      highestRank = rank;
+    }
+  }
+
+  return highest;
+}
+
+function getUitslagenRows(f?: Fighter | null, allRows: ResultRow[] = []) {
+  const inline = [
+    f?.uitslagen,
+    f?.uitslagen_raw,
+    f?.matchmaker_uitslagen_raw,
+    f?.raw?.uitslagen,
+    f?.raw?.matchmaker_uitslagen_raw,
+    f?.raw_json?.uitslagen,
+    f?.raw_json?.matchmaker_uitslagen_raw,
+    f?.extra?.uitslagen,
+    f?.extra?.matchmaker_uitslagen_raw,
+    f?.extra?.raw?.uitslagen,
+    f?.extra?.raw?.matchmaker_uitslagen_raw,
+  ];
+
+  const rows: ResultRow[] = [];
+  for (const list of inline) {
+    if (Array.isArray(list)) rows.push(...list);
+  }
+
+  if (Array.isArray(allRows) && allRows.length) {
+    rows.push(...allRows.filter((r) => rowMatchesFighter(r, f)));
+  }
+
+  // Voorkom dubbeltelling wanneer dezelfde uitslag zowel inline als uit matchmaker_uitslagen_raw komt.
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = s(
+      pickFirst(
+        row?.id,
+        [row?.va_nummer, row?.datum, row?.evenement, row?.tegenstander, row?.uitslag, row?.klasse]
+          .map((x) => s(x).toLowerCase())
+          .join("|"),
+      ),
+    );
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function recordStatsFromUitslagen(rows: ResultRow[]) {
+  let w = 0;
+  let l = 0;
+  let d = 0;
+  let other = 0;
+  const highestClass = highestRecordClassFromRows(rows);
+
+  for (const row of rows) {
+    const kind = getResultKind(pickFirst(row?.uitslag, row?.resultaat, row?.outcome));
+
+    // Demo, no contest en onbekende uitslagen vallen altijd onder overige.
+    if (kind === "other") {
+      other += 1;
+      continue;
+    }
+
+    // Alleen de hoogste klasse telt in W-L-D. Alle lagere/vorige klassen zijn overige.
+    const rowClass = getRowClass(row);
+    if (highestClass && rowClass && rowClass !== highestClass) {
+      other += 1;
+      continue;
+    }
+
+    if (kind === "win") w += 1;
+    else if (kind === "loss") l += 1;
+    else if (kind === "draw") d += 1;
+  }
+
+  return { w, l, d, other, highestClass, hasRows: rows.length > 0 };
+}
+
+function demoToPartijEquivalent(demo: number) {
+  return Math.floor(Math.max(0, demo) / 3);
+}
+
+function effectiveTotalWithDemo(totalInclDemo: number, demo: number) {
+  return Math.max(0, totalInclDemo - demo + demoToPartijEquivalent(demo));
+}
+
 function totaalPartijenSortValue(f: Fighter) {
   const direct = pickFirst(
     f.totaal_wedstrijden,
@@ -274,32 +460,57 @@ function sortFightersInTab(a: Fighter, b: Fighter) {
   if (partijenDiff !== 0) return partijenDiff;
   return name(a).localeCompare(name(b), "nl");
 }
-function recordOf(f: Fighter) {
-  const built = pickFirst(
-    f.record_with_class,
-    f.record_met_klasse,
-    f.huidig_record,
-    f.huidig_record_met_klasse,
-    f.record_ervaring,
-    f.record,
-  );
-  if (s(built)) return s(built);
+function recordOf(f: Fighter, allRows: ResultRow[] = []) {
+  const rows = getUitslagenRows(f, allRows);
+  const fromRows = recordStatsFromUitslagen(rows);
 
-  const w = pickFirst(f.win, f.wins, f.winst, f.record_w);
-  const l = pickFirst(f.loss, f.losses, f.verlies, f.record_l);
-  const d = pickFirst(f.draw, f.draws, f.onbeslist, f.record_d);
-  if (w !== "" || l !== "" || d !== "")
-    return `${Number(w || 0)}-${Number(l || 0)}-${Number(d || 0)}`;
+  if (fromRows.hasRows) {
+    return `${fromRows.w}-${fromRows.l}-${fromRows.d} (${fromRows.other})`;
+  }
 
-  const totaal = pickFirst(
-    f.totaal_wedstrijden,
-    f.totaal_partijen,
-    f.aantal_partijen,
-    f.total_fights,
-    f.fights_total,
-    f.uitslagen_count,
+  const w = Number(
+    String(pickFirst(f.win, f.wins, f.winst, f.record_w) || 0).replace(/[^\d.-]/g, ""),
   );
-  return s(totaal) || "-";
+  const l = Number(
+    String(pickFirst(f.loss, f.losses, f.verlies, f.record_l) || 0).replace(/[^\d.-]/g, ""),
+  );
+  const d = Number(
+    String(pickFirst(f.draw, f.draws, f.onbeslist, f.record_d) || 0).replace(/[^\d.-]/g, ""),
+  );
+  const total = Number(
+    String(
+      pickFirst(
+        f.totaal_wedstrijden,
+        f.totaal_partijen,
+        f.aantal_partijen,
+        f.total_fights,
+        f.fights_total,
+        f.uitslagen_count,
+      ) || 0,
+    ).replace(/[^\d.-]/g, ""),
+  );
+  const explicitOther = Number(
+    String(
+      pickFirst(
+        f.overige,
+        f.overige_partijen,
+        f.demo,
+        f.demo_totaal,
+        f.nulmeting_demo,
+        f.demo_partijen,
+        f.no_contest,
+        f.no_contest_totaal,
+      ) || 0,
+    ).replace(/[^\d.-]/g, ""),
+  );
+
+  const safeW = Number.isFinite(w) ? w : 0;
+  const safeL = Number.isFinite(l) ? l : 0;
+  const safeD = Number.isFinite(d) ? d : 0;
+  const fromTotal = Number.isFinite(total) ? Math.max(0, total - safeW - safeL - safeD) : 0;
+  const other = Math.max(Number.isFinite(explicitOther) ? explicitOther : 0, fromTotal);
+
+  return `${safeW}-${safeL}-${safeD} (${other})`;
 }
 function statusLic(f: Fighter) {
   const x = lower(
@@ -562,14 +773,40 @@ function collectMatchedKeys(json: any) {
     json?.matches,
     json?.matchmaking_bouts_raw,
     json?.raw_bouts,
+    json?.controle_toernooi_context,
+    json?.toernooien,
+    json?.tournaments,
   ].filter(Array.isArray);
+
+  function addId(v: any) {
+    const id = s(v);
+    if (id) ids.add(id);
+  }
+
+  function addVa(v: any) {
+    const va = onlyDigits(v);
+    if (va) vas.add(va);
+  }
 
   for (const list of sourceLists) {
     for (const b of list || []) {
       const status = lower(
         pickFirst(b?.status, b?.partij_status, b?.bout_status),
       );
-      if (status.includes("verwijderd") || status.includes("deleted")) continue;
+      const verwijderd =
+        b?.verwijderd === true ||
+        String(b?.verwijderd ?? "").trim() === "1" ||
+        lower(b?.verwijderd) === "true";
+      if (verwijderd || status.includes("verwijderd") || status.includes("deleted"))
+        continue;
+
+      const raw = obj(b?.raw_json) || {};
+      const deelnemer = obj(raw?.deelnemer) || {};
+      const rawAanmelding =
+        obj(deelnemer?.aanmelding) ||
+        obj(deelnemer?.extra?.raw?.aanmelding) ||
+        obj(deelnemer?.raw?.aanmelding) ||
+        {};
 
       [
         b?.rood_inschrijving_id,
@@ -580,15 +817,34 @@ function collectMatchedKeys(json: any) {
         b?.blauw_aanmelding_id,
         b?.red_aanmelding_id,
         b?.blue_aanmelding_id,
-      ]
-        .map(s)
-        .filter(Boolean)
-        .forEach((id) => ids.add(id));
+        b?.inschrijving_id,
+        b?.aanmelding_id,
+        deelnemer?.inschrijving_id,
+        deelnemer?.aanmelding_id,
+        deelnemer?.id,
+        rawAanmelding?.inschrijving_id,
+        rawAanmelding?.aanmelding_id,
+        rawAanmelding?.id,
+      ].forEach(addId);
 
-      [b?.va_rood, b?.va_blauw, b?.rood_va, b?.blauw_va, b?.red_va, b?.blue_va]
-        .map(onlyDigits)
-        .filter(Boolean)
-        .forEach((va) => vas.add(va));
+      [
+        b?.va_rood,
+        b?.va_blauw,
+        b?.rood_va,
+        b?.blauw_va,
+        b?.red_va,
+        b?.blue_va,
+        b?.va_nummer,
+        b?.fighter_id,
+        b?.rood_fighter_id,
+        b?.blauw_fighter_id,
+        deelnemer?.va_nummer,
+        deelnemer?.va,
+        deelnemer?.fighter_id,
+        rawAanmelding?.va_nummer,
+        rawAanmelding?.va,
+        rawAanmelding?.fightpaspoort_nummer,
+      ].forEach(addVa);
     }
   }
 
@@ -622,11 +878,54 @@ function scraperBusyOf(f: Fighter) {
 function nextTournamentCode(existing: any[]) {
   let max = 0;
   for (const t of existing || []) {
-    const code = s(pickFirst(t.toernooicode, t.tournament_code, t.code));
+    const code = s(pickFirst(t.toernooi_code, t.toernooicode, t.code));
     const m = code.match(/^T(\d+)$/i);
     if (m) max = Math.max(max, Number(m[1]));
   }
   return `T${max + 1}`;
+}
+
+async function fetchMatchmakingLock(matchmakingId: string) {
+  if (!matchmakingId) return false;
+
+  const { data, error } = await supabase
+    .from("matchmakings")
+    .select("locked_for_editing")
+    .eq("id", matchmakingId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Matchmaking lock laden mislukt", error.message);
+    return false;
+  }
+
+  return data?.locked_for_editing === true;
+}
+
+async function fetchMatchmakingTournamentBouts(matchmakingId: string) {
+  if (!matchmakingId) return [] as any[];
+
+  const columns =
+    "id, matchmaking_id, upload_id, partij_nr, is_toernooi, toernooi_code, raw_json, va_rood, va_blauw, fighter_id, rood_naam, blauw_naam, rood_gym, blauw_gym, discipline, klasse, max_gewicht, verwijderd, source_type";
+
+  const base = supabase
+    .from("matchmaking_bouts_raw")
+    .select(columns)
+    .eq("matchmaking_id", matchmakingId);
+
+  const { data, error } = await base.or(
+    "is_toernooi.eq.true,toernooi_code.not.is.null",
+  );
+
+  if (error) {
+    console.warn("Toernooi bouts laden mislukt", error.message);
+    return [] as any[];
+  }
+
+  return (data || []).filter((row: any) => {
+    const code = s(row?.toernooi_code);
+    return row?.is_toernooi === true || /^T\d+$/i.test(code);
+  });
 }
 
 export default function FightersPage() {
@@ -640,7 +939,9 @@ export default function FightersPage() {
   );
 
   const [fighters, setFighters] = useState<Fighter[]>([]);
+  const [uitslagenRows, setUitslagenRows] = useState<ResultRow[]>([]);
   const [allScraperBusyCount, setAllScraperBusyCount] = useState(0);
+  const [matchmakingLocked, setMatchmakingLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [busyText, setBusyText] = useState("");
@@ -658,13 +959,39 @@ export default function FightersPage() {
   const [tournamentWeight, setTournamentWeight] = useState("");
   const [existingTournaments, setExistingTournaments] = useState<any[]>([]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setMsg("");
     try {
       const res = await authedFetch(`/api/matchmaker/${matchmakingId}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Laden mislukt");
+
+      const mmFromApi = json?.matchmaking ?? json?.matchmaking_row ?? json?.matchmakingData ?? json?.mm ?? json?.data?.matchmaking ?? null;
+      const lockedFromApi =
+        json?.locked_for_editing === true ||
+        json?.control_engine_busy === true ||
+        json?.controle_bezig === true ||
+        mmFromApi?.locked_for_editing === true ||
+        mmFromApi?.control_engine_busy === true ||
+        mmFromApi?.controle_bezig === true;
+      const lockedFromDb = await fetchMatchmakingLock(matchmakingId);
+      setMatchmakingLocked(lockedFromApi || lockedFromDb);
+
+      const toernooiBoutsFromDb = await fetchMatchmakingTournamentBouts(matchmakingId);
+      const jsonWithDbBouts = {
+        ...json,
+        matchmaking_bouts_raw: [
+          ...(Array.isArray(json?.matchmaking_bouts_raw)
+            ? json.matchmaking_bouts_raw
+            : []),
+          ...toernooiBoutsFromDb,
+        ],
+        bouts: [
+          ...(Array.isArray(json?.bouts) ? json.bouts : []),
+          ...toernooiBoutsFromDb,
+        ],
+      };
 
       const rawFighters = Array.isArray(json?.fighters) ? json.fighters : [];
       const aanmeldingen = Array.isArray(json?.aanmeldingen)
@@ -676,17 +1003,63 @@ export default function FightersPage() {
       );
       const loadedFighters = markMatchedFromBouts(
         fightersWithAanmeldingStatus,
-        json,
+        jsonWithDbBouts,
       );
       const controlledFighters = loadedFighters.filter(isControlledFighter);
-      const loadedTournaments = Array.isArray(json?.toernooien)
-        ? json.toernooien
-        : Array.isArray(json?.tournaments)
-          ? json.tournaments
-          : [];
+      const loadedTournaments = Array.isArray(jsonWithDbBouts?.toernooien)
+        ? jsonWithDbBouts.toernooien
+        : Array.isArray(jsonWithDbBouts?.tournaments)
+          ? jsonWithDbBouts.tournaments
+          : Array.isArray(jsonWithDbBouts?.controle_toernooi_context) &&
+              jsonWithDbBouts.controle_toernooi_context.length
+            ? jsonWithDbBouts.controle_toernooi_context
+            : Array.isArray(jsonWithDbBouts?.bouts)
+              ? jsonWithDbBouts.bouts.filter((b: any) =>
+                  s(pickFirst(b?.toernooi_code, b?.toernooicode, b?.tournament_code)),
+                )
+              : [];
 
       setAllScraperBusyCount(loadedFighters.filter(scraperBusyOf).length);
       setFighters(controlledFighters);
+      const inlineUitslagen =
+        json?.uitslagen ??
+        json?.matchmaker_uitslagen_raw ??
+        json?.uitslagen_raw ??
+        json?.fighter_uitslagen ??
+        [];
+
+      if (Array.isArray(inlineUitslagen) && inlineUitslagen.length) {
+        setUitslagenRows(inlineUitslagen);
+      } else {
+        let loadedUitslagen: ResultRow[] = [];
+        try {
+          const ur = await authedFetch(`/api/matchmaker/${matchmakingId}/uitslagen`);
+          const uj = await ur.json().catch(() => ({}));
+          loadedUitslagen = ur.ok
+            ? uj?.uitslagen ??
+                uj?.matchmaker_uitslagen_raw ??
+                uj?.uitslagen_raw ??
+                uj?.results ??
+                []
+            : [];
+        } catch {
+          loadedUitslagen = [];
+        }
+
+        // Fallback: page55 moet dezelfde bron kunnen lezen als de detailpagina.
+        // Dit voorkomt een leeg/verkeerd record als de /uitslagen API niets teruggeeft.
+        if (!loadedUitslagen.length) {
+          const { data, error } = await supabase
+            .from("matchmaker_uitslagen_raw")
+            .select("id,matchmaking_id,controle_run_id,fighter_id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,partij_nr")
+            .eq("matchmaking_id", matchmakingId)
+            .order("datum", { ascending: false });
+
+          if (!error) loadedUitslagen = (data ?? []) as ResultRow[];
+        }
+
+        setUitslagenRows(loadedUitslagen);
+      }
       setExistingTournaments(loadedTournaments);
       setTournamentCode(nextTournamentCode(loadedTournaments));
       setSelected((cur) =>
@@ -717,13 +1090,23 @@ export default function FightersPage() {
       setAllScraperBusyCount(0);
       setMsg(e?.message || "Laden mislukt");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [matchmakingId]);
 
   useEffect(() => {
     if (matchmakingId) load();
   }, [matchmakingId, load]);
+
+  useEffect(() => {
+    if (!matchmakingId || (!matchmakingLocked && allScraperBusyCount <= 0)) return undefined;
+
+    const timer = window.setInterval(() => {
+      load(true);
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [matchmakingId, matchmakingLocked, allScraperBusyCount, load]);
 
   const tabs = useMemo(() => {
     const map = new Map<string, number>();
@@ -785,7 +1168,7 @@ export default function FightersPage() {
     };
   }, [fighters, allScraperBusyCount]);
 
-  const scraperRunning = allScraperBusyCount > 0 || !!busyId;
+  const scraperRunning = matchmakingLocked || allScraperBusyCount > 0 || !!busyId;
 
   const visible = useMemo(() => {
     const needle = q.toLowerCase().trim();
@@ -798,7 +1181,7 @@ export default function FightersPage() {
           klasseOf(f),
           disciplineOf(f),
           geslachtOf(f),
-          recordOf(f),
+          recordOf(f, uitslagenRows),
         ]
           .map(s)
           .join(" ")
@@ -815,7 +1198,7 @@ export default function FightersPage() {
         return true;
       })
       .sort(sortFightersInTab);
-  }, [fighters, q, filter, activeTab]);
+  }, [fighters, q, filter, activeTab, uitslagenRows]);
 
   const visibleIds = useMemo(
     () => visible.map(rowKeyOf).filter(Boolean),
@@ -869,8 +1252,8 @@ export default function FightersPage() {
       setMsg("Vul discipline, klasse en max gewicht in voor het toernooi.");
       return;
     }
-    if (tournamentIds.length < 2) {
-      setMsg("Selecteer minimaal 2 deelnemers voor een toernooi.");
+    if (![4, 8].includes(tournamentIds.length)) {
+      setMsg("Selecteer precies 4 of 8 deelnemers voor een toernooi.");
       return;
     }
 
@@ -878,18 +1261,54 @@ export default function FightersPage() {
     setBusyText(`${tournamentCode} aanmaken...`);
     setMsg("");
     try {
+      const deelnemers = fighters
+        .filter((f) => tournamentIds.includes(inschrijvingIdOf(f)))
+        .map((f) => ({
+          inschrijving_id: inschrijvingIdOf(f),
+          id: inschrijvingIdOf(f),
+          fighter_id: pickFirst(f.fighter_id, f.va_nummer, f.va),
+          va_nummer: vaOf(f),
+          va: vaOf(f),
+          naam: name(f),
+          voornaam: pickFirst(f.voornaam, f.first_name),
+          achternaam: pickFirst(f.achternaam, f.last_name),
+          sportschool: gymOf(f),
+          gym: gymOf(f),
+          upload_id: pickFirst(f.upload_id, f.upload_batch_id),
+          geboortedatum: pickFirst(
+            f.geboortedatum,
+            f.fp_geboortedatum,
+            f.geboortedatum_fp,
+            f.dob,
+          ),
+          geslacht: geslachtOf(f),
+          gewicht: pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht),
+          discipline: disciplineOf(f),
+          klasse: klasseOf(f),
+          licentie: pickFirst(f.licentie, f.licentie_status),
+          heeft_startverbod: pickFirst(f.heeft_startverbod, f.startverbod),
+          heeft_keurmerk: pickFirst(f.heeft_keurmerk, f.keurmerk),
+          keurmerk_reason: pickFirst(f.keurmerk_reason, f.keurmerk_reden),
+          record_w: pickFirst(f.record_w, f.win, f.wins),
+          record_l: pickFirst(f.record_l, f.loss, f.losses),
+          record_d: pickFirst(f.record_d, f.draw, f.draws),
+          totaal_wedstrijden: pickFirst(f.totaal_wedstrijden, f.uitslagen_count),
+          leeftijd_event: leeftijdOf(f),
+        }));
+
       const payload = {
         matchmaking_id: matchmakingId,
+        toernooi_code: tournamentCode,
         toernooicode: tournamentCode,
-        tournament_code: tournamentCode,
         discipline: tournamentDiscipline.trim(),
         klasse: tournamentClass.trim(),
         max_gewicht: tournamentWeight.trim(),
         deelnemer_inschrijving_ids: tournamentIds,
         participant_inschrijving_ids: tournamentIds,
+        deelnemers,
       };
       const res = await authedFetch(
-        `/api/matchmaker/${matchmakingId}/toernooien/start`,
+        `/api/matchmaker/${matchmakingId}/create-toernooi`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -898,8 +1317,38 @@ export default function FightersPage() {
       );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Toernooi aanmaken mislukt");
+
+      const va_nummers = Array.from(new Set(deelnemers.map((d) => s(d.va_nummer)).filter(Boolean)));
+      const aanmelding_ids = Array.from(new Set(deelnemers.map((d) => s(d.inschrijving_id)).filter(Boolean)));
+
+      if (va_nummers.length || aanmelding_ids.length) {
+        setBusyText(`${tournamentCode} deelnemers controleren...`);
+        const scrapeRes = await authedFetch(
+          `/api/matchmaker/${matchmakingId}/fighters/herscrape`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: "selected",
+              scope: "toernooi",
+              toernooi_code: tournamentCode,
+              toernooicode: tournamentCode,
+              herscrape: true,
+              force: true,
+              va_nummers,
+              vaNummers: va_nummers,
+              aanmelding_ids,
+              aanmeldingIds: aanmelding_ids,
+            }),
+          },
+        );
+        const scrapeJson = await scrapeRes.json().catch(() => ({}));
+        if (!scrapeRes.ok)
+          throw new Error(scrapeJson?.error || "Toernooi aangemaakt, maar Fightpaspoort controle starten mislukt");
+      }
+
       setMsg(
-        `${tournamentCode} is aangemaakt met ${tournamentIds.length} deelnemer(s).`,
+        `${tournamentCode} is aangemaakt met ${tournamentIds.length} deelnemer(s) en alleen deze toernooi-deelnemers zijn naar de Fightpaspoort controle gestuurd.`,
       );
       setTournamentMode(false);
       setTournamentIds([]);
@@ -1027,7 +1476,7 @@ export default function FightersPage() {
     }
   }
 
-  const showWait = loading || !!busyId;
+  const showWait = loading;
 
   return (
     <main style={pageBg}>
@@ -1068,9 +1517,10 @@ export default function FightersPage() {
               <button
                 className="fs-dark-btn fs-locked"
                 disabled
-                title="Wacht tot de Fightpaspoort check klaar is"
+                title="Deze matchmaking kan open zodra de Fightpaspoort check klaar is"
               >
-                Matchmaking bezet
+                <span className="fs-mini-spinner" />
+                Matchmaking controle bezig
               </button>
             ) : (
               <Link
@@ -1190,7 +1640,7 @@ export default function FightersPage() {
               <button
                 className="fs-tournament-btn"
                 onClick={startTournament}
-                disabled={!!busyId || tournamentIds.length < 2}
+                disabled={!!busyId || ![4, 8].includes(tournamentIds.length)}
               >
                 <Trophy size={16} />
                 Maak {tournamentCode} aan ({tournamentIds.length})
@@ -1199,7 +1649,7 @@ export default function FightersPage() {
 
             <div style={tournamentHint}>
               Klik in de tabel op de naam van deelnemers die in {tournamentCode}{" "}
-              horen.
+              horen. Een toernooi wordt aangemaakt met precies 4 of 8 deelnemers.
             </div>
           </section>
         )}
@@ -1378,7 +1828,7 @@ export default function FightersPage() {
                         <td style={td}>
                           <Badge kind={keur} />
                         </td>
-                        <td style={td}>{recordOf(f)}</td>
+                        <td style={td}>{recordOf(f, uitslagenRows)}</td>
                         <td style={td}>{leeftijdOf(f)}</td>
                         <td style={td}>{gewichtOf(f)}</td>
                         <td style={td}>{displayStatusOf(f)}</td>
@@ -1855,5 +2305,6 @@ const spinner: CSSProperties = {
 
 const globalCss = `
 @keyframes fs-spin { to { transform: rotate(360deg); } }
+.fs-mini-spinner{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#ff4d00;animation:fs-spin .75s linear infinite;display:inline-block;flex:0 0 auto}
 .fs-back-btn,.fs-dark-btn,.fs-orange-btn,.fs-filter,.fs-tab,.fs-icon-btn,.fs-clear-btn,.fs-tournament-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;text-decoration:none;font-weight:950;cursor:pointer;transition:.15s ease;border:1px solid rgba(255,255,255,.22);white-space:nowrap}.fs-back-btn{justify-self:end;color:#101114;padding:9px 13px;max-width:max-content;background:linear-gradient(180deg,#ffffff,#c5c8ce 55%,#f2f3f5);border-color:rgba(255,255,255,.85);box-shadow:inset 0 1px 0 #fff,0 7px 18px rgba(0,0,0,.35)}.fs-dark-btn{color:#fff;padding:10px 14px;background:linear-gradient(180deg,#2c2e35,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 8px 16px rgba(0,0,0,.24)}.fs-strong-btn{border-color:rgba(255,77,0,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 0 0 1px rgba(255,77,0,.22),0 10px 22px rgba(255,77,0,.18)}.fs-locked{color:#f9c7b7;border-color:rgba(255,77,0,.55);background:linear-gradient(180deg,#3a1d14,#151515)}.fs-orange-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.85);background:linear-gradient(180deg,#ff5c15,#a22b00);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 22px rgba(255,77,0,.28)}.fs-tournament-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff6a21,#822100);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 24px rgba(255,77,0,.32)}.fs-icon-btn{width:34px;height:34px;padding:0;color:#fff;border-radius:9px;background:linear-gradient(180deg,#2b2d34,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.16);margin-right:5px}.fs-icon-btn.orange{background:linear-gradient(180deg,#ff5c15,#a22b00);border-color:rgba(255,77,0,.8)}.fs-icon-btn.red{background:linear-gradient(180deg,#ef4444,#991b1b);border-color:rgba(220,38,38,.9)}.fs-icon-btn.blue{background:linear-gradient(180deg,#3b82f6,#1d4ed8);border-color:rgba(37,99,235,.9)}.fs-clear-btn{margin-left:12px;padding:6px 10px;color:#111;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter{color:#111;padding:10px 13px;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter.active{color:#fff;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff5c15,#b32f00)}.fs-tab{color:#fff;padding:9px 12px;background:linear-gradient(180deg,#ff6a21,#b43300);border-color:rgba(255,77,0,.95);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 18px rgba(255,77,0,.16)}.fs-tab span{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;padding:0 7px;border-radius:999px;color:#111;background:linear-gradient(180deg,#ffffff,#d8dbe0);font-size:12px}.fs-tab.active{color:#fff;background:linear-gradient(180deg,#ff4d00,#7f2200);border-color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 2px rgba(255,77,0,.38),0 0 26px rgba(255,77,0,.34)}.fs-tab:disabled{opacity:.45;cursor:not-allowed}.fs-name-select{border:0;padding:0;margin:0;background:transparent;color:#ff4d00;font-size:15px;font-weight:950;cursor:default;text-align:left}.fs-name-select:not(:disabled){cursor:pointer;text-decoration:underline;text-underline-offset:3px}.fs-name-select.active{display:inline-flex;padding:6px 9px;border-radius:999px;color:#fff;background:linear-gradient(180deg,#ff5c15,#9a2800);box-shadow:0 0 0 1px rgba(255,77,0,.75),0 0 18px rgba(255,77,0,.24)}.fs-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 8px;background:#eef0f3;border:1px solid #c9ccd1;color:#111;font-weight:950;font-size:11px}.fs-badge.ok{background:#dcfce7;border-color:#16a34a;color:#166534}.fs-badge.bad{background:#fee2e2;border-color:#dc2626;color:#991b1b}button:disabled{opacity:.55;cursor:not-allowed}@media (max-width: 900px){.fs-back-btn{justify-self:start}}
 `;

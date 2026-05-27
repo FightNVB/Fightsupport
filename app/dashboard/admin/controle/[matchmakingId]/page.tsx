@@ -2410,7 +2410,6 @@ export default function ControleMatchmakingPage() {
         const rr = resByPn[pn] ?? [];
 
         let status = statusFromResultatenOrOk(rr, ctx);
-        if (dispMap[pn]) status = "dispensatie";
 
         const allForPn = allRes.filter((res) => Number(res.partij_nr) === pn);
         const licentieRows = allForPn.filter(isLicentieRow);
@@ -2480,6 +2479,32 @@ export default function ControleMatchmakingPage() {
     return m;
   }, [rows, approvedLicentieByPartij]);
 
+  const hasAfkeurByPartij = useMemo(() => {
+    const m: Record<number, boolean> = {};
+    for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
+      const pn = Number(pnStr);
+      if (!Number.isFinite(pn)) continue;
+      if (rr.some((r) => !isBelgischeGymInfoRow(r) && normResultaatRow(r) === "afgekeurd")) {
+        m[pn] = true;
+      }
+    }
+    for (const pnStr of Object.keys(missingLicentieByPartij)) {
+      const pn = Number(pnStr);
+      if (Number.isFinite(pn) && missingLicentieByPartij[pn]) m[pn] = true;
+    }
+    return m;
+  }, [resultatenByPartij, missingLicentieByPartij]);
+
+  const hasActieByPartij = useMemo(() => {
+    const m: Record<number, boolean> = {};
+    for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
+      const pn = Number(pnStr);
+      if (!Number.isFinite(pn)) continue;
+      if (rr.some((r) => normResultaatRow(r) === "actie")) m[pn] = true;
+    }
+    return m;
+  }, [resultatenByPartij]);
+
   const toernooiGroepen = useMemo(() => {
     return buildToernooiGroepen(
       rows,
@@ -2536,13 +2561,13 @@ export default function ControleMatchmakingPage() {
       const s = statusByPartij[pn] ?? "geen_info";
 
       if (s === "verbod") verbod++;
-      else if (s === "afgekeurd") afk++;
-      else if (s === "actie") actie++;
       else if (s === "ok") ok++;
-      else if (s === "dispensatie") disp++;
-      else geen++;
+      else if (s === "geen_info") geen++;
 
       if (verbodByPartij[pn] && s !== "verbod") verbod++;
+      if (hasAfkeurByPartij[pn]) afk++;
+      if (hasActieByPartij[pn]) actie++;
+      if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
 
       const cnt = countByPartij[pn] ?? 0;
@@ -2568,6 +2593,10 @@ export default function ControleMatchmakingPage() {
     verbodByPartij,
     countByPartij,
     missingLicentieByPartij,
+    hasAfkeurByPartij,
+    hasActieByPartij,
+    hasDispByPartij,
+    dispRequestByPartij,
     toernooiGeenLicentieTotaal,
   ]);
 
@@ -2586,13 +2615,13 @@ export default function ControleMatchmakingPage() {
       const s = statusByPartij[pn] ?? "geen_info";
 
       if (s === "verbod") verbod++;
-      else if (s === "afgekeurd") afk++;
-      else if (s === "actie") actie++;
       else if (s === "ok") ok++;
-      else if (s === "dispensatie") disp++;
-      else geen++;
+      else if (s === "geen_info") geen++;
 
       if (verbodByPartij[pn] && s !== "verbod") verbod++;
+      if (hasAfkeurByPartij[pn]) afk++;
+      if (hasActieByPartij[pn]) actie++;
+      if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
     }
 
@@ -2606,7 +2635,16 @@ export default function ControleMatchmakingPage() {
       geen_info: geen,
       geen_licentie,
     };
-  }, [gewoneRows, statusByPartij, verbodByPartij, missingLicentieByPartij]);
+  }, [
+    gewoneRows,
+    statusByPartij,
+    verbodByPartij,
+    missingLicentieByPartij,
+    hasAfkeurByPartij,
+    hasActieByPartij,
+    hasDispByPartij,
+    dispRequestByPartij,
+  ]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -2622,6 +2660,8 @@ export default function ControleMatchmakingPage() {
         );
       if (filter === "verbod") return !!verbodByPartij[pn];
       if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
+      if (filter === "afgekeurd") return !!hasAfkeurByPartij[pn];
+      if (filter === "actie") return !!hasActieByPartij[pn];
       if (filter !== "all") {
         const s = statusByPartij[pn] ?? "geen_info";
         if (s !== filter) return false;
@@ -2659,6 +2699,8 @@ export default function ControleMatchmakingPage() {
     rowsByPartijNr,
     filter,
     statusByPartij,
+    hasAfkeurByPartij,
+    hasActieByPartij,
     hasDispByPartij,
     dispRequestByPartij,
     verbodByPartij,
@@ -3743,7 +3785,7 @@ export default function ControleMatchmakingPage() {
 
                         const originalPn = Number(r.partij_nr);
                         const visualPn = getVisualPartijNr(r, i);
-                        const status = Number.isFinite(originalPn)
+                        let status = Number.isFinite(originalPn)
                           ? (statusByPartij[originalPn] ?? "geen_info")
                           : "geen_info";
 
@@ -3756,6 +3798,15 @@ export default function ControleMatchmakingPage() {
                           : "border-t border-zinc-300";
                         const heeftVerbod = Number.isFinite(originalPn)
                           ? !!verbodByPartij[originalPn]
+                          : false;
+                        const heeftAfkeur = Number.isFinite(originalPn)
+                          ? !!hasAfkeurByPartij[originalPn]
+                          : false;
+                        const heeftDispensatie = Number.isFinite(originalPn)
+                          ? !!hasDispByPartij[originalPn] || !!dispRequestByPartij[originalPn]
+                          : false;
+                        const heeftActie = Number.isFinite(originalPn)
+                          ? !!hasActieByPartij[originalPn]
                           : false;
                         const geenTegenstander = isGeenTegenstander(r);
                         const busy = Number.isFinite(originalPn)
@@ -3854,6 +3905,15 @@ export default function ControleMatchmakingPage() {
                                   {Number.isFinite(originalPn) &&
                                   missingLicentieByPartij[originalPn] ? (
                                     <Chip label="GEEN LICENTIE" tone="blue" />
+                                  ) : null}
+                                  {heeftAfkeur && status !== "afgekeurd" ? (
+                                    <Chip label="AFKEUR" tone="red" />
+                                  ) : null}
+                                  {heeftDispensatie ? (
+                                    <Chip label="DISPENSATIE" tone="orange" />
+                                  ) : null}
+                                  {heeftActie && status !== "actie" ? (
+                                    <Chip label="ACTIE" tone="yellow" />
                                   ) : null}
                                 </div>
 

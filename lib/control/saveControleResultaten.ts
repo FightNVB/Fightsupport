@@ -21,6 +21,7 @@ export type RuleHit = {
   // toernooi context
   toernooi_code?: string | null;
   fighter_id?: string | null;
+  va_nummer?: string | null;
   toernooi_va_nummer?: string | null;
 };
 
@@ -70,6 +71,7 @@ function reviewKey(row: {
   hoek: any;
   toernooi_code?: any;
   fighter_id?: any;
+  va_nummer?: any;
   toernooi_va_nummer?: any;
 }) {
   const partij = asInt(row.partij_nr) ?? -1;
@@ -78,7 +80,8 @@ function reviewKey(row: {
   const hoek = String(row.hoek ?? "").trim().toLowerCase();
   const toernooi = String(row.toernooi_code ?? "").trim().toUpperCase();
   const fighter = String(row.fighter_id ?? "").trim();
-  const toernooiVa = String(row.toernooi_va_nummer ?? "").trim();
+  const va = String(row.va_nummer ?? "").trim();
+  const toernooiVa = String(row.toernooi_va_nummer ?? "").trim() || va;
   return `${partij}|${bout}|${code}|${hoek}|${toernooi}|${fighter}|${toernooiVa}`;
 }
 
@@ -95,6 +98,7 @@ function makePlaceholderKey(opts: {
   bout_id?: string | null;
   toernooi_code?: string | null;
   fighter_id?: string | null;
+  va_nummer?: string | null;
   toernooi_va_nummer?: string | null;
 }) {
   return reviewKey({
@@ -104,7 +108,8 @@ function makePlaceholderKey(opts: {
     hoek: null,
     toernooi_code: opts.toernooi_code ?? null,
     fighter_id: opts.fighter_id ?? null,
-    toernooi_va_nummer: opts.toernooi_va_nummer ?? null,
+    va_nummer: opts.va_nummer ?? null,
+    toernooi_va_nummer: opts.toernooi_va_nummer ?? opts.va_nummer ?? null,
   });
 }
 
@@ -195,13 +200,23 @@ export async function saveControleResultaten(opts: {
   const rowsToInsert: any[] = [];
 
   for (const hit of hitsIn) {
-    const partij_nr = asInt(hit?.partij_nr) ?? scopedPartijNr ?? null;
+    const hitToernooiCode = normStr(hit?.toernooi_code)?.toUpperCase() ?? null;
+    const partij_nr = asInt(hit?.partij_nr) ?? scopedPartijNr ?? (hitToernooiCode ? 0 : null);
     const hitBoutId = asUuid(hit?.bout_id);
     const bout_id = hitBoutId ?? scopedBoutId ?? null;
     const mmId = asUuid(hit?.matchmaking_id) ?? matchmaking_id;
     const toernooi_code = normStr(hit?.toernooi_code)?.toUpperCase() ?? null;
-    const fighter_id = normStr(hit?.fighter_id);
-    const toernooi_va_nummer = normStr(hit?.toernooi_va_nummer);
+    const isToernooiHit = !!toernooi_code;
+    const hitVa =
+      normStr(hit?.toernooi_va_nummer) ??
+      normStr((hit as any)?.va_nummer) ??
+      normStr(hit?.fighter_id);
+
+    // controle_resultaten heeft géén kolom va_nummer.
+    // Gewone partij-vechters gaan in fighter_id.
+    // Toernooi-vechters gaan in toernooi_va_nummer.
+    const fighter_id = isToernooiHit ? null : hitVa;
+    const toernooi_va_nummer = isToernooiHit ? hitVa : null;
 
     // safety:
     // - scoped op bout: alleen skippen als hit expliciet een andere bout_id heeft
@@ -285,8 +300,15 @@ export async function saveControleResultaten(opts: {
         partij_nr: scopedPartijNr ?? null,
         bout_id: scopedBoutId ?? null,
         toernooi_code: normStr((placeholderFromHit as any)?.toernooi_code)?.toUpperCase() ?? null,
-        fighter_id: normStr((placeholderFromHit as any)?.fighter_id),
-        toernooi_va_nummer: normStr((placeholderFromHit as any)?.toernooi_va_nummer),
+        fighter_id: normStr((placeholderFromHit as any)?.toernooi_code)
+          ? null
+          : normStr((placeholderFromHit as any)?.fighter_id) ??
+            normStr((placeholderFromHit as any)?.va_nummer),
+        toernooi_va_nummer: normStr((placeholderFromHit as any)?.toernooi_code)
+          ? normStr((placeholderFromHit as any)?.toernooi_va_nummer) ??
+            normStr((placeholderFromHit as any)?.va_nummer) ??
+            normStr((placeholderFromHit as any)?.fighter_id)
+          : null,
       });
 
       const prev = reviewMap.get(key);
@@ -300,8 +322,15 @@ export async function saveControleResultaten(opts: {
         bout_id: scopedBoutId ?? null,
         toernooi_code:
           normStr((placeholderFromHit as any)?.toernooi_code)?.toUpperCase() ?? null,
-        fighter_id: normStr((placeholderFromHit as any)?.fighter_id),
-        toernooi_va_nummer: normStr((placeholderFromHit as any)?.toernooi_va_nummer),
+        fighter_id: normStr((placeholderFromHit as any)?.toernooi_code)
+          ? null
+          : normStr((placeholderFromHit as any)?.fighter_id) ??
+            normStr((placeholderFromHit as any)?.va_nummer),
+        toernooi_va_nummer: normStr((placeholderFromHit as any)?.toernooi_code)
+          ? normStr((placeholderFromHit as any)?.toernooi_va_nummer) ??
+            normStr((placeholderFromHit as any)?.va_nummer) ??
+            normStr((placeholderFromHit as any)?.fighter_id)
+          : null,
 
         rule_code: "__NO_RULES__",
         rule: "NO_RULES",

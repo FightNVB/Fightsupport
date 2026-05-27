@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
+  { auth: { persistSession: false } },
 );
 
 function s(v: unknown) {
@@ -36,47 +36,62 @@ function n(v: unknown): number | null {
   return Number.isFinite(x) ? x : null;
 }
 
-function normalizeFighterFromContext(r: any, toernooi_code: string) {
-  const va = first(r?.toernooi_va_nummer, r?.va_nummer, r?.fighter_id, r?.va, r?.fightpaspoort_nummer);
-  const fighterId = first(r?.fighter_id, va) ?? "";
-
-  return {
-    id: r?.id ?? fighterId,
-    fighter_id: fighterId,
-    va_nummer: va,
-    toernooi_code: upper(r?.toernooi_code) || toernooi_code,
-    naam: first(r?.naam, r?.naam_mm, r?.naam_fp, r?.fp_naam, r?.volledige_naam),
-    naam_fp: first(r?.naam_fp, r?.fp_naam),
-    sportschool: first(r?.sportschool, r?.gym, r?.sportschool_mm, r?.gym_mm),
-    sportschool_fp: first(r?.sportschool_fp, r?.gym_fp),
-    gewicht: n(r?.gewicht ?? r?.gewicht_mm ?? r?.gewicht_fp),
-    leeftijd: n(r?.leeftijd_event ?? r?.leeftijd ?? r?.leeftijd_mm),
-    geslacht: first(r?.geslacht, r?.gender),
-    licentie: r?.licentie ?? r?.licentie_ok ?? r?.licentie_geldig ?? null,
-    heeft_startverbod: r?.heeft_startverbod ?? r?.startverbod_actief ?? null,
-    keurmerk: r?.keurmerk ?? r?.sportschool_keurmerk ?? null,
-  };
+function raw(row: any) {
+  const r = row?.raw_json;
+  if (!r) return {};
+  if (typeof r === "object") return r;
+  try {
+    return JSON.parse(String(r));
+  } catch {
+    return {};
+  }
 }
 
-function normalizeFighterFromResult(r: any, toernooi_code: string) {
-  const va = first(r?.toernooi_va_nummer, r?.fighter_id);
-  const fighterId = first(r?.fighter_id, va) ?? "";
+function nameFrom(row: any, hoek: "rood" | "blauw") {
+  const r = raw(row);
+  const voor = first(row?.[`${hoek}_voornaam`], r?.[`${hoek}_voornaam`], r?.[hoek]?.voornaam);
+  const achter = first(row?.[`${hoek}_achternaam`], r?.[`${hoek}_achternaam`], r?.[hoek]?.achternaam);
+  const full = [voor, achter].filter(Boolean).join(" ").trim();
+  return first(row?.[`${hoek}_naam`], r?.[`${hoek}_naam`], r?.[hoek]?.naam, full);
+}
+
+function fighterFromBout(row: any, hoek: "rood" | "blauw", toernooi_code: string) {
+  const r = raw(row);
+  const va = first(
+    row?.[`${hoek}_va`],
+    row?.[`${hoek}_va_nummer`],
+    row?.[`${hoek}_fighter_id`],
+    r?.[`${hoek}_va`],
+    r?.[`${hoek}_va_nummer`],
+    r?.[hoek]?.va,
+    r?.[hoek]?.va_nummer,
+    r?.[hoek]?.fighter_id,
+  );
+  const naam = nameFrom(row, hoek);
+  if (!va && !naam) return null;
 
   return {
-    id: fighterId,
-    fighter_id: fighterId,
+    id: first(row?.id, row?.bout_uid, `${hoek}-${va ?? naam}`),
+    fighter_id: va ?? `${hoek}-${naam}`,
     va_nummer: va,
     toernooi_code,
-    naam: null as string | null,
-    naam_fp: null as string | null,
-    sportschool: null as string | null,
-    sportschool_fp: null as string | null,
-    gewicht: null as number | null,
-    leeftijd: null as number | null,
-    geslacht: null as string | null,
-    licentie: null as string | boolean | null,
-    heeft_startverbod: null as boolean | null,
-    keurmerk: null as string | boolean | null,
+    naam,
+    naam_fp: first(r?.[hoek]?.naam_fp, r?.[`${hoek}_naam_fp`], r?.[hoek]?.fp_naam),
+    sportschool: first(
+      row?.[`${hoek}_gym`],
+      row?.[`${hoek}_sportschool`],
+      r?.[`${hoek}_gym`],
+      r?.[`${hoek}_sportschool`],
+      r?.[hoek]?.gym,
+      r?.[hoek]?.sportschool,
+    ),
+    sportschool_fp: first(r?.[hoek]?.sportschool_fp, r?.[hoek]?.gym_fp),
+    gewicht: n(first(row?.[`${hoek}_gewicht`], r?.[`${hoek}_gewicht`], r?.[hoek]?.gewicht, row?.max_gewicht)),
+    leeftijd: n(first(row?.[`${hoek}_leeftijd`], r?.[`${hoek}_leeftijd`], r?.[hoek]?.leeftijd, r?.[hoek]?.leeftijd_event)),
+    geslacht: first(row?.[`${hoek}_geslacht`], r?.[`${hoek}_geslacht`], r?.[hoek]?.geslacht, r?.[hoek]?.gender),
+    licentie: r?.[hoek]?.licentie ?? r?.[`${hoek}_licentie`] ?? null,
+    heeft_startverbod: r?.[hoek]?.heeft_startverbod ?? r?.[`${hoek}_heeft_startverbod`] ?? null,
+    keurmerk: r?.[hoek]?.keurmerk ?? r?.[`${hoek}_keurmerk`] ?? null,
   };
 }
 
@@ -96,155 +111,119 @@ function mergeFighter(base: any, extra: any) {
   };
 }
 
+async function trySelect(table: string, matchmaking_id: string) {
+  const { data, error } = await supabase
+    .from(table)
+    .select("*")
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (error) {
+    console.warn(`[toernooi-fighter/get] ${table} niet bruikbaar`, error);
+    return [] as any[];
+  }
+  return data ?? [];
+}
+
 export async function GET(req: Request) {
   try {
     const { userId, role } = await requireUserWithRole(req);
-
     const url = new URL(req.url);
     const matchmaking_id = s(url.searchParams.get("matchmaking_id"));
     const toernooi_code = upper(url.searchParams.get("toernooi_code"));
 
-    if (!matchmaking_id) {
-      return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
-    }
-    if (!toernooi_code) {
-      return NextResponse.json({ error: "toernooi_code ontbreekt" }, { status: 400 });
-    }
+    if (!matchmaking_id) return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
+    if (!toernooi_code) return NextResponse.json({ error: "toernooi_code ontbreekt" }, { status: 400 });
 
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
-    // 1) Meldingen zijn leidend voor deze overzichtspagina.
-    // Daarom eerst controle_resultaten lezen, zodat de pagina ook werkt als
-    // controle_toernooi_context nog leeg/niet goed gevuld is.
-    const { data: rawMeldingen, error: meldErr } = await supabase
-      .from("controle_resultaten")
-      .select("*")
-      .eq("matchmaking_id", matchmaking_id)
-      .order("created_at", { ascending: false });
-
-    if (meldErr) throw meldErr;
-
-    const meldingen = (rawMeldingen ?? []).filter(
-      (r: any) => upper(r?.toernooi_code) === toernooi_code
-    );
-
-    // 2) Eerst proberen deelnemers uit controle_toernooi_context te halen.
-    // Dit is de mooiste bron wanneer build/enrich goed gevuld heeft.
-    let contextRows: any[] = [];
-    const { data: rawContext, error: contextErr } = await supabase
-      .from("controle_toernooi_context")
-      .select("*")
-      .eq("matchmaking_id", matchmaking_id);
-
-    // Als tabel/kolommen ooit tijdelijk verschillen, mag de overzichtspagina niet stuk gaan.
-    if (!contextErr) {
-      contextRows = (rawContext ?? []).filter(
-        (r: any) => upper(r?.toernooi_code) === toernooi_code
-      );
-    } else {
-      console.warn("[toernooi-fighter/get] controle_toernooi_context niet bruikbaar", contextErr);
-    }
+    // Bron van waarheid voor deelnemers: matchmaking_bouts_raw.toernooi_code.
+    const boutRowsAll = await trySelect("matchmaking_bouts_raw", matchmaking_id);
+    const boutRows = boutRowsAll.filter((r) => upper(r?.toernooi_code) === toernooi_code);
 
     const fighterMap = new Map<string, any>();
-
-    for (const row of contextRows) {
-      const f = normalizeFighterFromContext(row, toernooi_code);
-      const key = first(f.fighter_id, f.va_nummer);
-      if (!key) continue;
-      fighterMap.set(key, f);
+    for (const row of boutRows) {
+      for (const hoek of ["rood", "blauw"] as const) {
+        const f = fighterFromBout(row, hoek, toernooi_code);
+        if (!f) continue;
+        const key = first(f.va_nummer, f.fighter_id, f.naam);
+        if (!key) continue;
+        fighterMap.set(key, fighterMap.has(key) ? mergeFighter(fighterMap.get(key), f) : f);
+      }
     }
 
-    // 3) Fallback: als context leeg is of deelnemers mist, deelnemers afleiden uit controle_resultaten.
+    // Meldingen horen door de rulesEngine met deze toernooi_code terug te komen.
+    // controle_resultaten blijft leidend; matchmaker_fighter_resultaten is fallback voor oudere checks.
+    const controleResultaten = await trySelect("controle_resultaten", matchmaking_id);
+    const matchmakerResultaten = await trySelect("matchmaker_fighter_resultaten", matchmaking_id);
+    const allMeldingen = [...controleResultaten, ...matchmakerResultaten];
+    const meldingen = allMeldingen.filter((r: any) => {
+      const tc = upper(r?.toernooi_code);
+      if (tc) return tc === toernooi_code;
+      const va = first(r?.toernooi_va_nummer, r?.va_nummer, r?.fighter_id, r?.inschrijving_id);
+      return va ? fighterMap.has(va) : false;
+    });
+
+    // Als er een melding is voor een VA die nog niet uit bouts kwam, toch tonen.
     for (const m of meldingen) {
-      const f = normalizeFighterFromResult(m, toernooi_code);
-      const key = first(f.fighter_id, f.va_nummer);
-      if (!key) continue;
-      if (!fighterMap.has(key)) fighterMap.set(key, f);
+      const va = first(m?.toernooi_va_nummer, m?.va_nummer, m?.fighter_id);
+      if (!va || fighterMap.has(va)) continue;
+      fighterMap.set(va, {
+        id: va,
+        fighter_id: va,
+        va_nummer: va,
+        toernooi_code,
+        naam: first(m?.naam, m?.fighter_naam, m?.fp_naam),
+        naam_fp: first(m?.naam_fp, m?.fp_naam),
+        sportschool: first(m?.sportschool, m?.gym),
+        sportschool_fp: first(m?.sportschool_fp, m?.gym_fp),
+        gewicht: n(m?.gewicht),
+        leeftijd: n(m?.leeftijd_event ?? m?.leeftijd),
+        geslacht: first(m?.geslacht, m?.gender),
+        licentie: null,
+        heeft_startverbod: null,
+        keurmerk: null,
+      });
     }
 
     let fighters = [...fighterMap.values()];
 
-    // 4) Extra verrijken uit fighters_raw waar mogelijk.
-    // We gebruiken select('*') zodat dit niet breekt op kolomnamen die per versie verschillen.
-    const vaList = fighters
-      .flatMap((f) => [s(f?.fighter_id), s(f?.va_nummer)])
-      .filter(Boolean);
-
-    if (vaList.length > 0) {
-      const uniqueVa = [...new Set(vaList)];
-      const { data: rawFighters, error: fightersRawErr } = await supabase
-        .from("fighters_raw")
-        .select("*")
-        .eq("matchmaking_id", matchmaking_id);
-
-      if (!fightersRawErr) {
-        const rawByVa = new Map<string, any>();
-        for (const r of rawFighters ?? []) {
-          const keys = [
-            first(r?.va_nummer, r?.fighter_id, r?.va, r?.fightpaspoort_nummer),
-            first(r?.id),
-          ].filter(Boolean) as string[];
-          for (const key of keys) rawByVa.set(key, r);
-        }
-
-        fighters = fighters.map((f) => {
-          const raw = rawByVa.get(s(f?.fighter_id)) ?? rawByVa.get(s(f?.va_nummer));
-          return raw ? mergeFighter(f, raw) : f;
-        });
-      } else {
-        console.warn("[toernooi-fighter/get] fighters_raw niet bruikbaar", fightersRawErr);
+    // Verrijking met matchmaker_fighters_raw/fighters_raw, zonder afhankelijk te zijn van context.
+    const vaList = [...new Set(fighters.flatMap((f) => [s(f?.fighter_id), s(f?.va_nummer)]).filter(Boolean))];
+    if (vaList.length) {
+      const rawSources = [
+        ...(await trySelect("matchmaker_fighters_raw", matchmaking_id)),
+        ...(await trySelect("fighters_raw", matchmaking_id)),
+      ];
+      const byVa = new Map<string, any>();
+      for (const r of rawSources) {
+        const keys = [
+          first(r?.va_nummer, r?.fighter_id, r?.va, r?.fightpaspoort_nummer),
+          first(r?.id),
+        ].filter(Boolean) as string[];
+        for (const key of keys) byVa.set(key, r);
       }
-
-      // 5) Uitslagen ophalen op VA/fighter id. Niet op toernooi_context vertrouwen.
-      const { data: rawUitslagen, error: uitsErr } = await supabase
-        .from("controle_uitslagen")
-        .select("*")
-        .eq("matchmaking_id", matchmaking_id)
-        .in("va_nummer", uniqueVa)
-        .order("datum", { ascending: false });
-
-      if (uitsErr) throw uitsErr;
-
-      const uitslagen = (rawUitslagen ?? []).filter((r: any) => {
-        const tc = upper(r?.toernooi_code);
-        return !tc || tc === toernooi_code;
-      });
-
-      return NextResponse.json({
-        ok: true,
-        matchmaking_id,
-        toernooi_code,
-        source: {
-          fighters_from_context: contextRows.length,
-          fighters_from_resultaten: fighters.length,
-          meldingen: meldingen.length,
-          uitslagen: uitslagen.length,
-        },
-        fighters,
-        meldingen,
-        uitslagen,
+      fighters = fighters.map((f) => {
+        const extra = byVa.get(s(f?.va_nummer)) ?? byVa.get(s(f?.fighter_id));
+        return extra ? mergeFighter(f, extra) : f;
       });
     }
+
+    fighters.sort((a, b) => s(a?.naam ?? a?.naam_fp).localeCompare(s(b?.naam ?? b?.naam_fp), "nl"));
 
     return NextResponse.json({
       ok: true,
       matchmaking_id,
       toernooi_code,
       source: {
-        fighters_from_context: contextRows.length,
-        fighters_from_resultaten: fighters.length,
+        fighters_from_matchmaking_bouts_raw: boutRows.length,
         meldingen: meldingen.length,
-        uitslagen: 0,
       },
       fighters,
       meldingen,
-      uitslagen: [],
+      matchmaking_bouts_raw: boutRows,
     });
   } catch (e: any) {
     console.error("[toernooi-fighter/get]", e);
-    return NextResponse.json(
-      { error: e?.message ?? "Onbekende fout" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message ?? "Onbekende fout" }, { status: 500 });
   }
 }

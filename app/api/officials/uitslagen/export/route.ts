@@ -1,185 +1,248 @@
 import { NextRequest, NextResponse } from "next/server";
-import ExcelJS from "exceljs";
-import { requireUserFromAuthHeader } from "@/lib/api/requireRole";
 import { createClient } from "@supabase/supabase-js";
+import ExcelJS from "exceljs";
+import fs from "fs";
+import path from "path";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// Fixed uitslag options for FightPassport export – always from rood perspective
-const UITSLAG_OPTIONS = [
-  "Wint op punten",
-  "Verliest op punten",
-  "Onbeslist",
-  "Wint op KO",
-  "Verliest op KO",
-  "Wint op Technisch KO",
-  "Verliest op Technisch KO",
-  "Wint d.m.v. medische interventie",
-  "Verliest d.m.v. medische interventie",
-  "Wint d.m.v. opgave",
-  "Verliest d.m.v. opgave",
-  "No contest",
-  "Wint d.m.v. submission",
-  "Verliest d.m.v. submission",
-  "Wint d.m.v. diskwalificatie",
-  "Verliest d.m.v. diskwalificatie",
-  "Wint d.m.v. RSC",
-  "Verliest d.m.v. RSC",
-  "Demo",
-];
+type AnyRow = Record<string, any>;
 
-export async function POST(req: NextRequest) {
+function clean(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+function pick(...vals: unknown[]) {
+  for (const v of vals) {
+    const s = clean(v);
+    if (s) return v;
+  }
+  return null;
+}
+
+function normalizeVa(v: unknown) {
+  const raw = clean(v).replace(/^VA/i, "");
+  const digits = raw.replace(/\D/g, "").replace(/^0+/, "");
+  return digits || raw;
+}
+
+function mapDiscipline(v: unknown) {
+  const raw = clean(v);
+  const s = raw.toLowerCase();
+  if (s.includes("kick")) return "Kickboksen/Kickboxing";
+  if (s.includes("thai") || s.includes("muay")) return "Thaiboksen/Muay Thai";
+  if (s.includes("mma")) return "MMA/MMA";
+  if (s === "boksen" || s === "boxing" || s.includes("boxing")) return "Boksen/Boxing";
+  return raw || "Kickboksen/Kickboxing";
+}
+
+function mapKlasse(v: unknown) {
+  const raw = clean(v);
+  const s = raw.toLowerCase();
+  if (s.includes("jeugd") || s.includes("youth") || s === "j" || s === "j+") return "Jeugd/Youth";
+  if (s.includes("nieuw") || s.includes("newcomer") || s === "n") return "Nieuweling/Newcomer";
+  if (s.includes("mma amateur") || s === "ama" || s === "amateur") return "MMA Amateur";
+  if (s.includes("mma professional") || s === "pro" || s === "professional") return "MMA Professional";
+  if (s.includes("veteraan") || s.includes("veteran")) return "Veteraan/Veteran";
+  if (s === "r" || s.includes("r-klasse") || s.includes("r-class")) return "R-Klasse/R-Class";
+  if (s === "c" || s.includes("c-klasse") || s.includes("c-class")) return "C-Klasse/C-Class";
+  if (s === "b" || s.includes("b-klasse") || s.includes("b-class")) return "B-Klasse/B-Class";
+  if (s === "a" || s.includes("a-klasse") || s.includes("a-class")) return "A-Klasse/A-Class";
+  return raw || "Nieuweling/Newcomer";
+}
+
+function toRedPerspective(winnerCorner: unknown, method: unknown) {
+  const hoek = clean(winnerCorner).toLowerCase();
+  const m = clean(method);
+  const ml = m.toLowerCase();
+
+  if (hoek === "onbeslist" || ml === "onbeslist") return "Onbeslist";
+  if (hoek === "no_contest" || hoek === "no contest" || ml === "no contest") return "No contest";
+  if (hoek === "demo" || ml === "demo") return "Demo";
+
+  if (hoek === "rood" || hoek === "red") {
+    if (ml.startsWith("wint")) return m;
+    if (ml.startsWith("verliest")) return m.replace(/^verliest/i, "Wint");
+    return `Wint ${m}`.replace(/\s+/g, " ");
+  }
+
+  if (hoek === "blauw" || hoek === "blue") {
+    if (ml.startsWith("wint")) return m.replace(/^wint/i, "Verliest");
+    if (ml.startsWith("verliest")) return m;
+    return `Verliest ${m}`.replace(/\s+/g, " ");
+  }
+
+  return m;
+}
+
+function supabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Supabase env mist: NEXT_PUBLIC_SUPABASE_URL of SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+async function getMatchmakingId(req: NextRequest) {
+  const fromQuery = clean(req.nextUrl.searchParams.get("matchmaking_id"));
+  if (fromQuery) return fromQuery;
+  const body = await req.json().catch(() => ({}));
+  return clean(body?.matchmaking_id);
+}
+
+async function getEventMeta(supabase: ReturnType<typeof supabaseAdmin>, matchmakingId: string) {
+  const { data: upload } = await supabase
+    .from("matchmaking_uploads")
+    .select("evenement_naam, evenement_datum, bondteam")
+    .eq("matchmaking_id", matchmakingId)
+    .maybeSingle();
+
+  if (upload) return upload as AnyRow;
+
+  const { data: mm } = await supabase
+    .from("matchmakings")
+    .select("naam, datum, huidige_eigenaar_bondteam")
+    .eq("id", matchmakingId)
+    .maybeSingle();
+
+  return {
+    evenement_naam: (mm as AnyRow | null)?.naam ?? null,
+    evenement_datum: (mm as AnyRow | null)?.datum ?? null,
+    bondteam: (mm as AnyRow | null)?.huidige_eigenaar_bondteam ?? null,
+  };
+}
+
+async function handleExport(req: NextRequest) {
   try {
-    const { userId } = await requireUserFromAuthHeader(req);
-
-    const body = await req.json().catch(() => ({}));
-    const matchmakingId = String(body?.matchmaking_id ?? "").trim();
+    const matchmakingId = await getMatchmakingId(req);
     if (!matchmakingId) {
-      return NextResponse.json({ error: "matchmaking_id is verplicht" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "matchmaking_id ontbreekt" }, { status: 400 });
     }
 
-    // Fetch bouts from definitive_matchmaking_bouts (status OK)
-    const { data: bouts, error: boutsErr } = await supabaseAdmin
-      .from("definitive_matchmaking_bouts")
-      .select("*")
-      .eq("matchmaking_id", matchmakingId)
-      .in("eindstatus", ["OK", "GOEDGEKEURD_MET_DISPENSATIE"])
-      .order("sort_order", { ascending: true })
-      .order("partij_nr", { ascending: true });
+    const templatePath = path.join(
+      process.cwd(),
+      "public",
+      "templates",
+      "FormatImportMatchmakingInclUitslagen (updated).xlsx"
+    );
 
-    if (boutsErr) {
-      return NextResponse.json({ error: boutsErr.message }, { status: 500 });
+    if (!fs.existsSync(templatePath)) {
+      return NextResponse.json({ ok: false, error: `Template niet gevonden: ${templatePath}` }, { status: 500 });
     }
 
-    if (!bouts || bouts.length === 0) {
-      return NextResponse.json({ error: "Geen OK partijen gevonden voor export." }, { status: 400 });
-    }
+    const supabase = supabaseAdmin();
 
-    // Fetch uitslagen for these bouts
-    const { data: uitslagen } = await supabaseAdmin
-      .from("uitslagen_officieel")
-      .select("partij_nr, uitslag")
-      .eq("matchmaking_id", matchmakingId);
-
-    const uitslagenMap = new Map<number, string>();
-    for (const u of uitslagen ?? []) {
-      if (u.partij_nr != null) uitslagenMap.set(Number(u.partij_nr), String(u.uitslag ?? ""));
-    }
-
-    // Build Excel workbook
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet("Uitslagen");
-
-    // Column widths
-    sheet.columns = [
-      { key: "nr",       width: 8 },
-      { key: "disc",     width: 22 },
-      { key: "klasse",   width: 22 },
-      { key: "va_rood",  width: 18 },
-      { key: "naam_rood",width: 28 },
-      { key: "uitslag",  width: 45 },
-      { key: "va_blauw", width: 18 },
-      { key: "naam_blauw", width: 28 },
-    ];
-
-    // Header row
-    const headerRow = sheet.addRow([
-      "Nr.",
-      "Discipline*",
-      "Klasse*",
-      "VANr. (Rood)*",
-      "Naam (Rood)",
-      "Uitslag (uitkomst van rood hoek)",
-      "VANr. (Blauw)*",
-      "Naam (Blauw)",
+    const [{ data: bouts, error: boutsErr }, { data: results, error: resultsErr }] = await Promise.all([
+      supabase
+        .from("uitslagen_bouts")
+        .select("*")
+        .eq("matchmaking_id", matchmakingId)
+        .order("partij_nr", { ascending: true }),
+      supabase
+        .from("uitslagen_resultaten")
+        .select("*")
+        .eq("matchmaking_id", matchmakingId),
     ]);
 
-    headerRow.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF2A2A2E" },
-      };
-      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-      cell.border = {
-        top:    { style: "thin" },
-        left:   { style: "thin" },
-        bottom: { style: "thin" },
-        right:  { style: "thin" },
-      };
-    });
-    sheet.getRow(1).height = 30;
+    if (boutsErr) throw boutsErr;
+    if (resultsErr) throw resultsErr;
 
-    // Data rows
-    for (const bout of bouts) {
-      const partijNr = Number(bout.partij_nr ?? 0);
-      const uitslag = uitslagenMap.get(partijNr) ?? "";
+    const resultByBoutId = new Map<string, AnyRow>();
+    const resultByPartij = new Map<string, AnyRow>();
 
-      const row = sheet.addRow([
-        partijNr,
-        String(bout.discipline ?? ""),
-        String(bout.klasse_mm ?? ""),
-        String(bout.rood_va ?? ""),
-        String(bout.rood_naam ?? ""),
-        uitslag,
-        String(bout.blauw_va ?? ""),
-        String(bout.blauw_naam ?? ""),
-      ]);
-
-      const rowIndex = row.number;
-      const isEven = (rowIndex % 2) === 0;
-
-      row.eachCell((cell) => {
-        cell.alignment = { vertical: "middle", wrapText: true };
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: isEven ? "FFF5F5F5" : "FFFFFFFF" },
-        };
-        cell.border = {
-          top:    { style: "thin", color: { argb: "FFE0E0E0" } },
-          left:   { style: "thin", color: { argb: "FFE0E0E0" } },
-          bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
-          right:  { style: "thin", color: { argb: "FFE0E0E0" } },
-        };
-      });
+    for (const r of (results ?? []) as AnyRow[]) {
+      const boutId = clean(pick(r.uitslagen_bout_id, r.bout_id));
+      if (boutId) resultByBoutId.set(boutId, r);
+      const partij = clean(r.partij_nr);
+      if (partij) resultByPartij.set(partij, r);
     }
 
-    // Add dropdown validation for the uitslag column
-    const lastDataRow = 1 + bouts.length;
-    sheet.getCell(`F2`).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: [`"${UITSLAG_OPTIONS.join(",")}"`],
-    };
+    const exportRows = ((bouts ?? []) as AnyRow[])
+      .map((b, index) => {
+        const result = resultByBoutId.get(clean(b.id)) ?? resultByPartij.get(clean(b.partij_nr));
+        if (!result) return null;
+        if (clean(result.uitslag_status).toLowerCase() === "concept") return null;
 
-    // Freeze header row
-    sheet.views = [{ state: "frozen", ySplit: 1 }];
+        return {
+          partij_nr: Number(b.partij_nr ?? result.partij_nr ?? index + 1),
+          discipline: mapDiscipline(pick(b.discipline, result.discipline)),
+          klasse: mapKlasse(pick(b.klasse, result.klasse)),
+          rood_va: normalizeVa(pick(b.rood_va, b.rood_va_nummer, b.va_rood, b.rood_va_mm)),
+          rood_naam: clean(pick(b.rood_naam, b.rood_volledige_naam, b.rood_fighter_naam)),
+          uitslag_rood: toRedPerspective(result.winnaar_hoek, result.methode),
+          blauw_va: normalizeVa(pick(b.blauw_va, b.blauw_va_nummer, b.va_blauw, b.blauw_va_mm)),
+          blauw_naam: clean(pick(b.blauw_naam, b.blauw_volledige_naam, b.blauw_fighter_naam)),
+        };
+      })
+      .filter(Boolean) as AnyRow[];
 
-    // Log the export
-    await supabaseAdmin.from("uitslagen_export_log").insert({
-      matchmaking_id: matchmakingId,
-      geexporteerd_door: userId,
-      bestand_naam: `uitslagen_${matchmakingId}.xlsx`,
+    if (exportRows.length === 0) {
+      return NextResponse.json({ ok: false, error: "Geen definitieve uitslagen gevonden voor deze matchmaking." }, { status: 404 });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(templatePath);
+
+    const sheet = workbook.getWorksheet("Excelformat") ?? workbook.worksheets[0];
+    if (!sheet) throw new Error("Werkblad Excelformat niet gevonden in template.");
+
+    const lastRow = Math.max(sheet.rowCount, 300);
+    for (let r = 2; r <= lastRow; r += 1) {
+      const row = sheet.getRow(r);
+      for (let c = 1; c <= 8; c += 1) row.getCell(c).value = null;
+      row.commit();
+    }
+
+    exportRows.forEach((item, index) => {
+      const row = sheet.getRow(index + 2);
+      row.getCell(1).value = item.partij_nr || index + 1;
+      row.getCell(2).value = item.discipline;
+      row.getCell(3).value = item.klasse;
+      row.getCell(4).value = item.rood_va;
+      row.getCell(5).value = item.rood_naam;
+      row.getCell(6).value = item.uitslag_rood;
+      row.getCell(7).value = item.blauw_va;
+      row.getCell(8).value = item.blauw_naam;
+      row.commit();
     });
 
-    // Generate buffer
+    sheet.getColumn(1).width = 8;
+    sheet.getColumn(2).width = 26;
+    sheet.getColumn(3).width = 24;
+    sheet.getColumn(4).width = 14;
+    sheet.getColumn(5).width = 28;
+    sheet.getColumn(6).width = 36;
+    sheet.getColumn(7).width = 14;
+    sheet.getColumn(8).width = 28;
+
+    const meta = await getEventMeta(supabase, matchmakingId);
+    const eventName = clean(meta.evenement_naam) || "uitslagen";
+    const eventDate = clean(meta.evenement_datum);
+    const safeName = `${eventDate ? `${eventDate}_` : ""}${eventName}`
+      .replace(/[^a-zA-Z0-9-_]+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 90);
+
     const buffer = await workbook.xlsx.writeBuffer();
 
-    const filename = `uitslagen_${matchmakingId}.xlsx`;
-    return new NextResponse(buffer as ArrayBuffer, {
+    return new NextResponse(buffer, {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${safeName}_FightPassport_uitslagen.xlsx"`,
+        "Cache-Control": "no-store",
       },
     });
   } catch (e: any) {
-    console.error("[uitslagen/export]", e);
-    return NextResponse.json({ error: e?.message ?? "Export mislukt" }, { status: 500 });
+    console.error("[officials/uitslagen/export]", e);
+    return NextResponse.json({ ok: false, error: e?.message ?? "Export mislukt" }, { status: 500 });
   }
+}
+
+export async function GET(req: NextRequest) {
+  return handleExport(req);
+}
+
+export async function POST(req: NextRequest) {
+  return handleExport(req);
 }

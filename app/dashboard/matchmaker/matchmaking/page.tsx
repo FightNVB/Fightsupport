@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 
@@ -27,7 +27,7 @@ const BONDTEAM_OPTIONS = [
   "WPKL",
 ] as const;
 
-type ViewTab = "alle" | "gemaakt" | "upload";
+type ViewTab = "zelf" | "uploads" | "controle" | "retour";
 
 const silverBackplate: CSSProperties = {
   background:
@@ -62,6 +62,10 @@ interface MatchmakingRow {
   bron_type: string | null;
   created_at: string | null;
   last_updated_at: string | null;
+  submitted_to_admin_at?: string | null;
+  entered_control_at?: string | null;
+  sent_to_officials_at?: string | null;
+  final_status?: string | null;
   laatste_run: ControleRun | null;
 }
 
@@ -70,6 +74,8 @@ interface Profile {
   full_name?: string | null;
   bondteam?: string | null;
 }
+
+type MatchmakingDbRow = Omit<MatchmakingRow, "laatste_run">;
 
 function formatDate(v: string | null) {
   if (!v) return "-";
@@ -107,6 +113,7 @@ function formatStatusLabel(status: string | null | undefined) {
   if (s === "niet gecontroleerd") return "Niet gecontroleerd";
   if (s === "ingediend_admin") return "Ingediend admin";
   if (s === "in_controle_admin") return "In controle";
+  if (s === "retour_naar_matchmaker") return "Retour naar matchmaker";
   if (s === "retour_naar_eigenaar") return "Retour";
   if (s === "klaar_voor_weegstation") return "Klaar voor weegstation";
   if (s === "in_weegstation") return "In weegstation";
@@ -121,6 +128,16 @@ function formatStatusLabel(status: string | null | undefined) {
 }
 
 function effectiveStatus(row: MatchmakingRow) {
+  const status = normalizeStatus(row.status);
+  const stadium = normalizeStatus(row.stadium);
+  const runStatus = normalizeStatus(row.laatste_run?.status);
+
+  if (status.includes("retour")) return row.status ?? "retour_naar_matchmaker";
+  if (stadium.includes("retour"))
+    return row.stadium ?? "retour_naar_matchmaker";
+  if (runStatus.includes("retour"))
+    return row.laatste_run?.status ?? "retour_naar_matchmaker";
+
   return (
     row.laatste_run?.status ??
     row.stadium ??
@@ -154,11 +171,13 @@ function Small({
 }
 
 function isOwnMatchmaking(row: MatchmakingRow, userId: string) {
+  const id = norm(userId);
+
   return (
-    row.matchmaker_id === userId ||
-    row.maker_user_id === userId ||
-    row.uploaded_by === userId ||
-    row.huidige_eigenaar_user_id === userId
+    norm(row.huidige_eigenaar_user_id) === id ||
+    norm(row.matchmaker_id) === id ||
+    norm(row.maker_user_id) === id ||
+    norm(row.uploaded_by) === id
   );
 }
 
@@ -180,16 +199,140 @@ function getMatchmakingType(row: MatchmakingRow): "gemaakt" | "upload" {
 }
 
 function formatTypeLabel(row: MatchmakingRow) {
-  return getMatchmakingType(row) === "upload" ? "Upload MM" : "Gemaakt in app";
+  if (isRetourVanNvb(row)) return "Retour NVB";
+  if (isAangebodenAanNvb(row)) return "Aangeboden aan NVB";
+  return getMatchmakingType(row) === "upload"
+    ? "Upload controle"
+    : "Gemaakt in app";
+}
+
+function isRetourVanNvb(row: MatchmakingRow) {
+  const status = normalizeStatus(row.status);
+  const stadium = normalizeStatus(row.stadium);
+  const runStatus = normalizeStatus(row.laatste_run?.status);
+  const ownerType = norm(row.huidige_eigenaar_type).toLowerCase();
+
+  return (
+    status === "retour_naar_matchmaker" ||
+    status === "retour_naar_eigenaar" ||
+    status.includes("retour") ||
+    stadium === "retour_naar_matchmaker" ||
+    stadium === "retour_naar_eigenaar" ||
+    stadium.includes("retour") ||
+    runStatus.includes("retour") ||
+    (ownerType === "matchmaker" && status.includes("retour"))
+  );
+}
+
+function isAangebodenAanNvb(row: MatchmakingRow) {
+  if (isRetourVanNvb(row)) return false;
+
+  const status = normalizeStatus(row.status);
+  const stadium = normalizeStatus(row.stadium);
+  const finalStatus = normalizeStatus(row.final_status);
+  const runStatus = normalizeStatus(row.laatste_run?.status);
+  const ownerType = norm(row.huidige_eigenaar_type).toLowerCase();
+
+  return (
+    status === "ingediend_admin" ||
+    status === "in_controle_admin" ||
+    status === "definitieve_matchmaking_ingediend" ||
+    stadium === "ingediend_admin" ||
+    stadium === "in_controle_admin" ||
+    stadium === "definitieve_matchmaking_ingediend" ||
+    finalStatus === "ingediend_admin" ||
+    finalStatus === "in_controle_admin" ||
+    finalStatus === "definitieve_matchmaking_ingediend" ||
+    runStatus === "ingediend_admin" ||
+    runStatus === "in_controle_admin" ||
+    runStatus === "definitieve_matchmaking_ingediend" ||
+    ownerType === "admin" ||
+    ownerType === "nvb" ||
+    ownerType === "bondteam"
+  );
+}
+
+function isVisibleForMatchmakerOverview(row: MatchmakingRow, userId: string) {
+  if (!isOwnMatchmaking(row, userId)) return false;
+
+  // Matchmakers moeten ook uploads kunnen zien die al naar NVB/admin zijn gestuurd.
+  // Die komen in een aparte controle-tab zonder link naar de matchmaking.
+  return true;
+}
+
+function getTabType(row: MatchmakingRow): ViewTab {
+  if (isRetourVanNvb(row)) return "retour";
+  if (isAangebodenAanNvb(row)) return "controle";
+  if (getMatchmakingType(row) === "upload") return "uploads";
+  return "zelf";
+}
+
+function getLogDate(row: MatchmakingRow) {
+  if (isAangebodenAanNvb(row)) {
+    return (
+      row.submitted_to_admin_at ??
+      row.entered_control_at ??
+      row.sent_to_officials_at ??
+      row.last_updated_at ??
+      row.laatste_run?.gestart_op ??
+      row.laatste_run?.afgerond_op ??
+      row.created_at ??
+      null
+    );
+  }
+
+  return row.created_at ?? row.last_updated_at ?? null;
+}
+
+function getLogText(row: MatchmakingRow) {
+  const name = row.naam || "Deze matchmaking";
+
+  if (isAangebodenAanNvb(row)) {
+    return `${name} is op ${formatDateTime(getLogDate(row))} naar NVB controle gestuurd.`;
+  }
+
+  if (getMatchmakingType(row) === "upload") {
+    return `${name} is op ${formatDateTime(getLogDate(row))} succesvol geüpload.`;
+  }
+
+  return `${name} is op ${formatDateTime(getLogDate(row))} gemaakt in de app.`;
+}
+
+function toMatchmakingRow(row: MatchmakingDbRow): MatchmakingRow {
+  return {
+    ...row,
+    laatste_run: null,
+  };
+}
+
+function mergeRows(apiRows: MatchmakingRow[], ownDbRows: MatchmakingDbRow[]) {
+  const map = new Map<string, MatchmakingRow>();
+
+  for (const row of apiRows) {
+    if (row?.id) map.set(row.id, row);
+  }
+
+  for (const row of ownDbRows) {
+    if (!row?.id) continue;
+    if (!map.has(row.id)) map.set(row.id, toMatchmakingRow(row));
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    const ad = new Date(a.datum ?? a.created_at ?? 0).getTime();
+    const bd = new Date(b.datum ?? b.created_at ?? 0).getTime();
+    return bd - ad;
+  });
 }
 
 export default function MatchmakingOverzichtPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState("");
 
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -197,7 +340,6 @@ export default function MatchmakingOverzichtPage() {
 
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [controlLoading, setControlLoading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
@@ -213,7 +355,7 @@ export default function MatchmakingOverzichtPage() {
   const [uploadPromotor, setUploadPromotor] = useState("");
   const [uploadBondteam, setUploadBondteam] = useState("");
 
-  const [viewTab, setViewTab] = useState<ViewTab>("alle");
+  const [viewTab, setViewTab] = useState<ViewTab>("zelf");
   const [filterMonth, setFilterMonth] = useState("");
   const [filterName, setFilterName] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
@@ -222,6 +364,23 @@ export default function MatchmakingOverzichtPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    const sentToNvb =
+      searchParams.get("sentToNvb") === "1" ||
+      searchParams.get("naarNvb") === "1" ||
+      searchParams.get("submitted") === "1";
+
+    if (!sentToNvb) return;
+
+    setSuccessMsg(
+      "✅ Matchmaking is succesvol verwerkt. Als hij aan NVB/admin is aangeboden, verdwijnt hij uit dit overzicht tot hij retour komt.",
+    );
+    setViewTab("zelf");
+
+    const timer = window.setTimeout(() => setSuccessMsg(""), 9000);
+    return () => window.clearTimeout(timer);
+  }, [searchParams]);
 
   function resetCreateForm(profileData?: Profile | null) {
     setNaam("");
@@ -240,7 +399,6 @@ export default function MatchmakingOverzichtPage() {
     setUploadBondteam(normalizeBondteam(profileData?.bondteam ?? ""));
     setUploadFile(null);
     setUploadMsg("");
-    setControlLoading(false);
   }
 
   async function load() {
@@ -275,20 +433,88 @@ export default function MatchmakingOverzichtPage() {
 
     setProfile(normalizedProfile);
 
-    const res = await authedFetch("/api/matchmaker/matchmakings-overzicht", {
-      method: "GET",
-    });
+    const directOwnQuery = supabase
+      .from("matchmakings")
+      .select(
+        [
+          "id",
+          "naam",
+          "datum",
+          "locatie",
+          "promotor",
+          "bondteam",
+          "matchmaker_id",
+          "matchmaker_naam",
+          "status",
+          "stadium",
+          "huidige_eigenaar_type",
+          "huidige_eigenaar_user_id",
+          "huidige_eigenaar_bondteam",
+          "maker_type",
+          "maker_user_id",
+          "uploaded_by",
+          "bron_type",
+          "created_at",
+          "last_updated_at",
+          "submitted_to_admin_at",
+          "entered_control_at",
+          "sent_to_officials_at",
+          "final_status",
+        ].join(","),
+      )
+      .eq("is_archived", false)
+      .or(
+        [
+          `huidige_eigenaar_user_id.eq.${user.id}`,
+          `matchmaker_id.eq.${user.id}`,
+          `maker_user_id.eq.${user.id}`,
+          `uploaded_by.eq.${user.id}`,
+        ].join(","),
+      )
+      .order("datum", { ascending: false });
 
-    const payload = await res.json().catch(() => null);
+    const [apiResult, directResult] = await Promise.allSettled([
+      authedFetch("/api/matchmaker/matchmakings-overzicht", { method: "GET" }),
+      directOwnQuery,
+    ]);
 
-    if (!res.ok || !payload?.ok) {
-      console.error("Fout bij laden matchmakings:", res.status, payload);
-      setRows([]);
-      setLoading(false);
-      return;
+    let apiRows: MatchmakingRow[] = [];
+
+    if (apiResult.status === "fulfilled") {
+      const payload = await apiResult.value.json().catch(() => null);
+
+      if (!apiResult.value.ok || !payload?.ok) {
+        console.error(
+          "Fout bij laden matchmakings via API:",
+          apiResult.value.status,
+          payload,
+        );
+      } else {
+        apiRows = (payload.rows ?? []) as MatchmakingRow[];
+      }
+    } else {
+      console.error("Fout bij laden matchmakings via API:", apiResult.reason);
     }
 
-    setRows((payload.rows ?? []) as MatchmakingRow[]);
+    let ownDbRows: MatchmakingDbRow[] = [];
+
+    if (directResult.status === "fulfilled") {
+      if (directResult.value.error) {
+        console.error(
+          "Fout bij directe eigen matchmakings fallback:",
+          directResult.value.error,
+        );
+      } else {
+        ownDbRows = (directResult.value.data ?? []) as MatchmakingDbRow[];
+      }
+    } else {
+      console.error(
+        "Fout bij directe eigen matchmakings fallback:",
+        directResult.reason,
+      );
+    }
+
+    setRows(mergeRows(apiRows, ownDbRows));
     setLoading(false);
   }
 
@@ -361,7 +587,6 @@ export default function MatchmakingOverzichtPage() {
       if (!uploadFile) return setUploadMsg("⚠️ Kies eerst een Excel-bestand.");
 
       setUploading(true);
-      setControlLoading(true);
       setUploadMsg("Bestand uploaden...");
 
       const filePath = `matchmakings/${user.id}/${Date.now()}_${uploadFile.name}`;
@@ -376,28 +601,28 @@ export default function MatchmakingOverzichtPage() {
         return;
       }
 
-      setUploadMsg("Complete matchmaking verwerken...");
+      setUploadMsg("Complete matchmaking uploaden...");
 
-      const res = await authedFetch(
-        "/api/matchmaker/submit_matchmaking/start",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            file_path: filePath,
-            raw_filename: uploadFile.name,
-            evenement_naam: norm(uploadNaam),
-            evenement_datum: norm(uploadDatum),
-            locatie: norm(uploadLocatie) || null,
-            bondteam: normalizeBondteam(uploadBondteam),
-            matchmaker: profile?.full_name?.trim() || null,
-            promotor: norm(uploadPromotor) || null,
-            hoofdofficial: null,
-            force_new: true,
-            bron_type: "matchmaker_upload",
-          }),
-        },
-      );
+      const res = await authedFetch("/api/submit-matchmaking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          file_path: filePath,
+          raw_filename: uploadFile.name,
+          evenement_naam: norm(uploadNaam),
+          evenement_datum: norm(uploadDatum),
+          locatie: norm(uploadLocatie) || null,
+          bondteam: normalizeBondteam(uploadBondteam),
+          matchmaker: profile?.full_name?.trim() || null,
+          promotor: norm(uploadPromotor) || null,
+          hoofdofficial: null,
+          force_new: true,
+          bron_type: "matchmaker_upload",
+          lifecycle_mode: "submitted_to_admin",
+          keep_owner: "admin",
+          start_control: false,
+        }),
+      });
       const payload = await res.json().catch(() => null);
 
       if (!res.ok) {
@@ -416,16 +641,17 @@ export default function MatchmakingOverzichtPage() {
 
       setShowUpload(false);
       resetUploadForm(profile);
+      setSuccessMsg(
+        "✅ Upload is gelukt en naar NVB/admin controle gestuurd. Je blijft op deze pagina. De matchmaking is pas weer te openen zodra admin hem retour stuurt.",
+      );
+      setViewTab("controle");
       await load();
-
-      router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}`);
     } catch (e) {
       console.error(e);
       setUploadMsg("❌ Onverwachte fout bij upload.");
     } finally {
       setUploading(false);
-      setControlLoading(false);
-    }
+      }
   }
 
   async function deleteMM(matchmakingId: string) {
@@ -458,22 +684,28 @@ export default function MatchmakingOverzichtPage() {
 
   const ownRows = useMemo(() => {
     if (!profile?.id) return [];
-    return rows.filter((r) => isOwnMatchmaking(r, profile.id));
+    return rows.filter((r) => isVisibleForMatchmakerOverview(r, profile.id));
   }, [rows, profile?.id]);
 
   const tabCounts = useMemo(() => {
-    const upload = ownRows.filter(
-      (r) => getMatchmakingType(r) === "upload",
-    ).length;
-    const gemaakt = ownRows.filter(
-      (r) => getMatchmakingType(r) === "gemaakt",
-    ).length;
-
     return {
-      alle: ownRows.length,
-      gemaakt,
-      upload,
+      zelf: ownRows.filter((r) => getTabType(r) === "zelf").length,
+      uploads: ownRows.filter((r) => getTabType(r) === "uploads").length,
+      controle: ownRows.filter((r) => getTabType(r) === "controle").length,
+      retour: ownRows.filter((r) => getTabType(r) === "retour").length,
     };
+  }, [ownRows]);
+
+  const logRows = useMemo(() => {
+    return ownRows
+      .filter((r) => !isRetourVanNvb(r))
+      .filter((r) => getMatchmakingType(r) === "upload")
+      .sort(
+        (a, b) =>
+          new Date(getLogDate(b) ?? 0).getTime() -
+          new Date(getLogDate(a) ?? 0).getTime(),
+      )
+      .slice(0, 5);
   }, [ownRows]);
 
   const monthOptions = useMemo(() => {
@@ -492,14 +724,14 @@ export default function MatchmakingOverzichtPage() {
     const nameNeedle = filterName.trim().toLowerCase();
 
     return ownRows.filter((r) => {
-      const rowType = getMatchmakingType(r);
+      const rowType = getTabType(r);
       const rowMonth = getMonthKey(r.datum);
       const rowStatus = normalizeStatus(effectiveStatus(r));
       const rowNaam = (r.naam ?? "").trim().toLowerCase();
       const rowLocatie = (r.locatie ?? "").trim().toLowerCase();
       const rowPromotor = (r.promotor ?? "").trim().toLowerCase();
 
-      if (viewTab !== "alle" && rowType !== viewTab) return false;
+      if (rowType !== viewTab) return false;
       if (filterMonth && rowMonth !== filterMonth) return false;
       if (filterStatus && rowStatus !== filterStatus) return false;
 
@@ -524,73 +756,24 @@ export default function MatchmakingOverzichtPage() {
     setFilterStatus("");
   }
 
+  function mmBasePath(matchmakingId: string) {
+    return `/dashboard/matchmaker/matchmaking/${encodeURIComponent(matchmakingId)}`;
+  }
+
+  function goToMatchmaking(matchmakingId: string) {
+    router.push(mmBasePath(matchmakingId));
+  }
+
+  function goToAanmeldingen(matchmakingId: string) {
+    router.push(`${mmBasePath(matchmakingId)}/aanmeldingen`);
+  }
+
+  function goToMatchen(matchmakingId: string) {
+    router.push(`${mmBasePath(matchmakingId)}/match`);
+  }
+
   return (
     <>
-      {controlLoading && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 px-4 backdrop-blur-md">
-          <div
-            className="w-full max-w-[460px] rounded-[30px] border p-7 shadow-2xl"
-            style={{
-              background:
-                "linear-gradient(180deg, rgba(20,20,22,0.98) 0%, rgba(8,8,8,0.98) 100%)",
-              borderColor: "rgba(255,77,0,0.95)",
-              boxShadow:
-                "0 0 70px rgba(255,77,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08)",
-            }}
-          >
-            <div className="flex justify-center">
-              <img
-                src="/branding/fightsupport/logo-dark.png"
-                alt="FightSupport"
-                className="h-[86px] object-contain"
-              />
-            </div>
-
-            <div className="mt-6 text-center">
-              <h2
-                className="text-[28px] font-black uppercase tracking-[0.08em]"
-                style={{
-                  color: "#ffffff",
-                  textShadow: "0 0 18px rgba(255,77,0,0.45)",
-                }}
-              >
-                Matchmaking verwerken
-              </h2>
-
-              <p className="mt-4 text-sm leading-6 text-zinc-300">
-                FightSupport bouwt de matchmaking op en voert alle controles
-                uit.
-              </p>
-            </div>
-
-            <div className="mt-9 flex justify-center">
-              <div
-                className="h-[72px] w-[72px] animate-spin rounded-full border-[6px]"
-                style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  borderTopColor: NVB_ORANGE,
-                }}
-              />
-            </div>
-
-            <div className="mt-9 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-[7px] animate-pulse rounded-full"
-                style={{
-                  width: "100%",
-                  background:
-                    "linear-gradient(90deg, #ff4d00 0%, #ff8a3d 100%)",
-                }}
-              />
-            </div>
-
-            <div className="mt-5 text-center text-xs uppercase tracking-[0.18em] text-zinc-500">
-              Even geduld...
-            </div>
-          </div>
-        </div>
-      )}
-
       <main
         className="min-h-screen px-4 py-6"
         style={{ background: "#eef0f3" }}
@@ -636,7 +819,7 @@ export default function MatchmakingOverzichtPage() {
                         Mijn matchmakings
                       </div>
                       <div className="mt-1 text-xs text-white/85">
-                        Maak een matchmaking of upload een complete matchmaking.
+                        Bekijk je eigen matchmakings en retouren van NVB.
                       </div>
                       <div className="mt-1 text-[11px] text-white/70">
                         Ingelogd als: {profile?.full_name || "-"}
@@ -705,6 +888,19 @@ export default function MatchmakingOverzichtPage() {
                   style={silverBackplate}
                 >
                   <div className="px-2 py-2 md:px-3">
+                    {successMsg ? (
+                      <div
+                        className="mb-5 rounded-[22px] border px-4 py-3 text-sm font-semibold"
+                        style={{
+                          background: "rgba(20, 120, 60, 0.10)",
+                          borderColor: "rgba(20, 120, 60, 0.35)",
+                          color: "#14532d",
+                        }}
+                      >
+                        {successMsg}
+                      </div>
+                    ) : null}
+
                     {showCreate && (
                       <div className="mb-5 rounded-[24px] border p-4 md:p-5">
                         <div className="mb-3">
@@ -789,8 +985,9 @@ export default function MatchmakingOverzichtPage() {
                             Complete matchmaking uploaden
                           </div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            Deze upload gebruikt{" "}
-                            <b>/api/submit_matchmaking/start</b>.
+                            Na uploaden wordt de matchmaking als aangeboden
+                            voor NVB/admin controle geregistreerd. Je blijft op
+                            deze pagina en kunt hem niet openen tot hij retour komt.
                           </div>
                         </div>
 
@@ -843,7 +1040,7 @@ export default function MatchmakingOverzichtPage() {
                             className="orange-input h-10 w-full pt-2"
                           />
                           <a
-                            href="/templates/fightsupport_upload.xlsx"
+                            href="/templates/fightsupport-upload.xlsx"
                             target="_blank"
                             rel="noreferrer"
                             className="flex h-10 items-center rounded border border-zinc-300 bg-[#2f2f33] px-4 text-sm text-white hover:bg-white hover:text-black"
@@ -885,19 +1082,56 @@ export default function MatchmakingOverzichtPage() {
                       </div>
                     )}
 
+                    {!loading && logRows.length > 0 && (
+                      <div
+                        className="mb-5 rounded-[24px] border p-4 md:p-5"
+                        style={{
+                          background:
+                            "linear-gradient(180deg, rgba(47,47,51,0.98) 0%, rgba(22,22,24,0.98) 100%)",
+                          borderColor: "rgba(255,77,0,0.45)",
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        <div className="text-sm font-black uppercase tracking-[0.18em] text-white">
+                          Meldingen / log
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-300">
+                          Succesvolle uploads en inzendingen. Matchmakings die
+                          aan NVB/admin zijn aangeboden staan in de tab
+                          “Geüpload voor controle” zonder open-link.
+                        </div>
+                        <div className="mt-4 space-y-2">
+                          {logRows.map((r) => (
+                            <div
+                              key={`log-${r.id}`}
+                              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm"
+                              style={{
+                                borderColor: "rgba(255,255,255,0.12)",
+                                background: "rgba(255,255,255,0.06)",
+                                color: "#fff",
+                              }}
+                            >
+                              <span>{getLogText(r)}</span>
+                              <span className="rounded-full border border-orange-400/50 px-3 py-1 text-xs uppercase tracking-[0.1em] text-orange-200">
+                                Upload
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {!loading && (
                       <div className="mb-5 rounded-[24px] border p-4 md:p-4">
                         <div className="mb-4 flex flex-wrap items-center gap-2">
                           {[
-                            ["alle", `Alle (${tabCounts.alle})`],
+                            ["zelf", `Zelf gemaakte MM (${tabCounts.zelf})`],
+                            ["uploads", `Uploads (${tabCounts.uploads})`],
                             [
-                              "gemaakt",
-                              `Gemaakt in app (${tabCounts.gemaakt})`,
+                              "controle",
+                              `Geüpload voor controle (${tabCounts.controle})`,
                             ],
-                            [
-                              "upload",
-                              `Upload matchmaking (${tabCounts.upload})`,
-                            ],
+                            ["retour", `Retour van NVB (${tabCounts.retour})`],
                           ].map(([key, label]) => {
                             const active = viewTab === key;
 
@@ -940,7 +1174,7 @@ export default function MatchmakingOverzichtPage() {
                             </div>
                           </div>
                           <div className="text-sm text-zinc-600">
-                            {filteredRows.length} van {ownRows.length} zichtbaar
+                            {filteredRows.length} zichtbaar
                           </div>
                         </button>
 
@@ -1010,22 +1244,22 @@ export default function MatchmakingOverzichtPage() {
                               }}
                             >
                               <tr>
-                                <th className="px-4 py-3 text-left">Datum</th>
-                                <th className="px-4 py-3 text-left">Naam</th>
+                                <th className="px-4 py-3 text-left">Datum evenement</th>
+                                <th className="px-4 py-3 text-left">Naam evenement</th>
                                 <th className="px-4 py-3 text-left">Type</th>
                                 <th className="px-4 py-3 text-left">Locatie</th>
                                 <th className="px-4 py-3 text-left">
                                   Promotor
                                 </th>
                                 <th className="px-4 py-3 text-left">
-                                  Bondteam
+                                  Bond
                                 </th>
                                 <th className="px-4 py-3 text-left">Status</th>
                                 <th className="px-4 py-3 text-left">
                                   Laatste run
                                 </th>
                                 <th className="px-4 py-3 text-left">
-                                  Aangemaakt
+                                  Datum indienen
                                 </th>
                                 <th className="px-4 py-3 text-left">Acties</th>
                               </tr>
@@ -1038,14 +1272,15 @@ export default function MatchmakingOverzichtPage() {
                                     colSpan={10}
                                     className="bg-white px-4 py-8 text-center text-sm text-zinc-600"
                                   >
-                                    Geen eigen matchmakings gevonden.
+                                    Geen matchmakings gevonden binnen deze tab.
                                   </td>
                                 </tr>
                               ) : (
                                 filteredRows.map((r, i) => {
                                   const zebra = i % 2 === 0;
                                   const rowBusy = busyId === r.id;
-                                  const rowType = getMatchmakingType(r);
+                                  const rowType = getTabType(r);
+                                  const mmType = getMatchmakingType(r);
 
                                   return (
                                     <tr
@@ -1068,11 +1303,11 @@ export default function MatchmakingOverzichtPage() {
                                           className="inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.08em]"
                                           style={{
                                             borderColor:
-                                              rowType === "upload"
+                                              mmType === "upload"
                                                 ? "rgba(255,77,0,0.75)"
                                                 : "rgba(113,113,122,0.45)",
                                             background:
-                                              rowType === "upload"
+                                              mmType === "upload"
                                                 ? "rgba(255,77,0,0.16)"
                                                 : "rgba(113,113,122,0.14)",
                                             color: zebra ? "#111" : "#fff",
@@ -1099,55 +1334,59 @@ export default function MatchmakingOverzichtPage() {
                                         {formatStatusLabel(effectiveStatus(r))}
                                       </td>
                                       <td className="px-4 py-3 text-sm">
-                                        {formatDateTime(r.created_at)}
+                                        {formatDateTime(getLogDate(r))}
                                       </td>
                                       <td className="px-4 py-3">
-                                        <div className="flex flex-wrap items-center gap-3">
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              router.push(
-                                                `/dashboard/matchmaker/matchmaking/${r.id}`,
-                                              )
-                                            }
-                                            className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black"
+                                        {isAangebodenAanNvb(r) ? (
+                                          <span
+                                            className="inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.08em]"
+                                            style={{
+                                              borderColor:
+                                                "rgba(255,77,0,0.65)",
+                                              background: "rgba(255,77,0,0.14)",
+                                              color: zebra ? "#111" : "#fff",
+                                            }}
                                           >
-                                            Matchmaking
-                                          </button>
+                                            Ter controle bij NVB
+                                          </span>
+                                        ) : (
+                                          <div className="flex flex-wrap items-center gap-3">
+                                            <button
+                                              type="button"
+                                              onClick={() => goToMatchmaking(r.id)}
+                                              className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black"
+                                            >
+                                              Matchmaking
+                                            </button>
 
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              router.push(
-                                                `/dashboard/matchmaker/matchmaking/${r.id}/aanmeldingen`,
-                                              )
-                                            }
-                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
-                                          >
-                                            Aanmeldingen
-                                          </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => goToAanmeldingen(r.id)}
+                                              className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                            >
+                                              Aanmeldingen
+                                            </button>
 
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              router.push(
-                                                `/dashboard/matchmaker/matchmaking/${r.id}/match`,
-                                              )
-                                            }
-                                            className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black"
-                                          >
-                                            Gecontroleerde vechters
-                                          </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => goToMatchen(r.id)}
+                                              className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black"
+                                            >
+                                              Ga naar matchen
+                                            </button>
 
-                                          <button
-                                            type="button"
-                                            onClick={() => deleteMM(r.id)}
-                                            disabled={rowBusy}
-                                            className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
-                                          >
-                                            {rowBusy ? "Bezig…" : "Verwijderen"}
-                                          </button>
-                                        </div>
+                                            <button
+                                              type="button"
+                                              onClick={() => deleteMM(r.id)}
+                                              disabled={rowBusy}
+                                              className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
+                                            >
+                                              {rowBusy
+                                                ? "Bezig…"
+                                                : "Verwijderen"}
+                                            </button>
+                                          </div>
+                                        )}
                                       </td>
                                     </tr>
                                   );

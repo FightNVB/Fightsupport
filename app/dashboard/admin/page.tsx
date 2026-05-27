@@ -183,10 +183,10 @@ export default function AdminDashboardPage() {
 
   const actions: MenuAction[] = [
     {
-      label: "Beheer",
-      subtitle: "Gebruikers, rollen en eventbeheer",
-      href: "/dashboard/admin/beheer",
-      icon: ClipboardList,
+      label: "Algemeen",
+      subtitle: "Dispensatie aanvragen",
+      href: "/dashboard/admin/algemeen",
+      icon: History,
     },
     {
       label: "Controle",
@@ -195,11 +195,12 @@ export default function AdminDashboardPage() {
       icon: Scale,
     },
     {
-      label: "Algemeen",
-      subtitle: "Dispensatie aanvragen",
-      href: "/dashboard/admin/algemeen",
-      icon: History,
+      label: "Beheer",
+      subtitle: "Gebruikers, rollen en eventbeheer",
+      href: "/dashboard/admin/beheer",
+      icon: ClipboardList,
     },
+    
     {
       label: "Uitslagen verwerken",
       subtitle: "Uitslagen beheren en uploadn naar FP",

@@ -1,9 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import {
-  MatchmakingOwnerType,
+  MatchmakingOwnerType as BaseMatchmakingOwnerType,
   MatchmakingStage,
   getOwnerTypeForStage,
 } from "@/lib/matchmakingLifecycleConfig";
+
+export type MatchmakingOwnerType = BaseMatchmakingOwnerType | "matchmaker_upload";
 
 export const supabaseAdminLifecycle = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,7 +20,7 @@ export type EnsureLifecycleInput = {
   locatie?: string | null;
   promotorId?: string | null;
   matchmakerId?: string | null;
-  makerType?: "matchmaker" | null;
+  makerType?: "matchmaker" | "matchmaker_upload" | null;
   makerUserId?: string | null;
   bondteam?: string | null;
   eventId?: string | null;
@@ -57,7 +59,10 @@ function ownerFieldsForStage(input: {
   const adminUserId = s(input.ownerUserId);
 
   let huidige_eigenaar_user_id: string | null = null;
-  if (resolvedOwnerType === "matchmaker") {
+  if (
+    resolvedOwnerType === "matchmaker" ||
+    resolvedOwnerType === "matchmaker_upload"
+  ) {
     huidige_eigenaar_user_id = matchmakerUserId;
   } else if (resolvedOwnerType === "admin") {
     huidige_eigenaar_user_id = adminUserId;
@@ -126,7 +131,7 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
   if (existingRes.error) throw existingRes.error;
 
   const nowIso = new Date().toISOString();
-  const stage = input.stage ?? "nieuw";
+  const stage = input.stage ?? "concept_matchmaking";
   const resolvedMatchmakerId = s(input.matchmakerId ?? input.makerUserId);
 
   const ownerPatch = ownerFieldsForStage({
@@ -155,6 +160,7 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
     vorige_eigenaar_type: s(input.previousOwnerType),
     vorige_eigenaar_user_id:
       input.previousOwnerType === "matchmaker" ||
+      input.previousOwnerType === "matchmaker_upload" ||
       input.previousOwnerType === "admin"
         ? s(input.previousOwnerUserId)
         : null,
@@ -237,8 +243,13 @@ export async function transferLifecycle(input: {
     stage: input.newStage,
     ownerType: resolvedOwnerType,
     ownerUserId:
-      resolvedOwnerType === "matchmaker"
-        ? s(current.maker_user_id ?? current.matchmaker_id ?? input.newOwnerUserId)
+      resolvedOwnerType === "matchmaker" ||
+      resolvedOwnerType === "matchmaker_upload"
+        ? s(
+            current.maker_user_id ??
+              current.matchmaker_id ??
+              input.newOwnerUserId,
+          )
         : resolvedOwnerType === "admin"
         ? s(input.newOwnerUserId ?? input.actorUserId)
         : s(input.newOwnerUserId),
@@ -277,9 +288,12 @@ export async function transferLifecycle(input: {
     patch.locked_for_editing = false;
   }
 
-  if (input.newStage === "klaar_voor_weegstation") {
+  if (input.newStage === "klaar_voor_weegstation" || String(input.newStage) === "naar-weegstation") {
+    patch.stadium = "naar-weegstation";
+    patch.status = "naar-weegstation";
     patch.sent_at = nowIso;
     patch.sent_by = s(input.actorUserId);
+    patch.sent_to_officials_at = nowIso;
   }
 
   if (input.newStage === "in_officials") {

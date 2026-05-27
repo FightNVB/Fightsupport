@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { supabase } from "@/lib/supabaseClient";
 import {
   ArrowLeft,
   BarChart3,
@@ -90,6 +91,14 @@ function idOf(f?: Fighter | null) {
 
 function val(v: unknown) {
   return s(v) || "-";
+}
+
+function firstFilled(...vals: unknown[]) {
+  for (const v of vals) {
+    const out = s(v);
+    if (out) return out;
+  }
+  return "";
 }
 
 function parseDate(v: unknown) {
@@ -231,6 +240,28 @@ function weight(f?: Fighter | null) {
   );
 }
 
+function normalizeGymName(v: unknown) {
+  return lower(v)
+    .replace(/&/g, " en ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(sportschool|sportsschool|gym|team|fight|fighting|club|academy)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sameGymInfo(rood?: Fighter | null, blauw?: Fighter | null) {
+  const roodGym = gym(rood);
+  const blauwGym = gym(blauw);
+  const roodNorm = normalizeGymName(roodGym);
+  const blauwNorm = normalizeGymName(blauwGym);
+
+  return {
+    roodGym,
+    blauwGym,
+    same: !!roodGym && !!blauwGym && !!roodNorm && roodNorm === blauwNorm,
+  };
+}
+
 function isYouthValue(v: unknown) {
   const x = lower(v);
   return (
@@ -299,6 +330,189 @@ function isYouthMatch(
   );
 }
 
+
+function getResultKind(v: unknown): "win" | "loss" | "draw" | "other" {
+  const x = lower(v)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // matchmaker_uitslagen_raw.uitslag is leidend.
+  if (!x) return "other";
+  if (x.includes("demo") || x.includes("no contest") || x.includes("nocontest") || x === "nc") return "other";
+  if (x.includes("onbeslist") || x.includes("gelijk") || x.includes("draw")) return "draw";
+  if (x.includes("verliest") || x.includes("verlies") || x.includes("verloren") || x.includes("loss") || x === "l") return "loss";
+  if (x.includes("wint") || x.includes("winst") || x.includes("gewonnen") || x === "win" || x === "w") return "win";
+  return "other";
+}
+
+function normalizeClassToken(v: unknown) {
+  const x = lower(v)
+    .replace(/klasse/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!x || x === "-") return "";
+  if (x === "j" || x.includes("jeugd") || x.includes("youth")) return "j";
+  if (x === "r" || x.includes("recreant")) return "r";
+  if (x === "n" || x.includes("nieuweling")) return "n";
+  if (x === "c") return "c";
+  if (x === "b") return "b";
+  if (x === "a" || x.includes("elite")) return "a";
+  if (x.includes("amateur") || x.includes("ama")) return "amateur";
+  if (x.includes("pro")) return "pro";
+
+  return x.replace(/[^a-z0-9+]/g, "");
+}
+
+function classRank(token: string) {
+  const order: Record<string, number> = {
+    j: 1,
+    r: 2,
+    n: 3,
+    c: 4,
+    b: 5,
+    a: 6,
+    amateur: 3,
+    pro: 6,
+  };
+  return order[token] ?? 0;
+}
+
+function getRowClass(row: ResultRow) {
+  return normalizeClassToken(
+    firstFilled(
+      row?.klasse,
+      row?.class,
+      row?.wedstrijdklasse,
+      row?.niveau,
+      row?.fight_class,
+    ),
+  );
+}
+
+function highestRecordClassFromRows(rows: ResultRow[]) {
+  let highest = "";
+  let highestRank = 0;
+
+  for (const row of rows) {
+    const token = getRowClass(row);
+    const rank = classRank(token);
+    if (rank > highestRank) {
+      highest = token;
+      highestRank = rank;
+    }
+  }
+
+  return highest;
+}
+
+function getUitslagenRows(f?: Fighter | null, allRows: ResultRow[] = []) {
+  const d = deep(f);
+  const inline = [
+    f?.uitslagen,
+    f?.uitslagen_raw,
+    f?.matchmaker_uitslagen_raw,
+    d.extra?.uitslagen,
+    d.extra?.matchmaker_uitslagen_raw,
+    d.extra?.raw?.uitslagen,
+    d.extra?.raw?.matchmaker_uitslagen_raw,
+    d.fightersRaw?.uitslagen,
+    d.fightersRaw?.uitslagen_raw,
+  ];
+
+  const rows: ResultRow[] = [];
+  for (const list of inline) {
+    if (Array.isArray(list)) rows.push(...list);
+  }
+
+  if (Array.isArray(allRows) && allRows.length) {
+    // allRows is op deze matchpagina soms al gefilterd per vechter.
+    // Als ze allemaal bij deze vechter passen, voeg ze direct toe.
+    rows.push(...allRows.filter((r) => rowMatchesFighter(r, f)));
+  }
+
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = s(
+      firstFilled(
+        row?.id,
+        [row?.va_nummer, row?.datum, row?.evenement, row?.tegenstander, row?.uitslag, row?.klasse]
+          .map((x) => s(x).toLowerCase())
+          .join("|"),
+      ),
+    );
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function recordFromUitslagen(rows: ResultRow[]) {
+  const highestClass = highestRecordClassFromRows(rows);
+  let w = 0;
+  let l = 0;
+  let draw = 0;
+  let other = 0;
+  let previousClassOfficial = 0;
+  let demoNoContest = 0;
+
+  for (const row of rows) {
+    const kind = getResultKind(firstFilled(row?.uitslag, row?.resultaat, row?.outcome));
+    const rowClass = getRowClass(row);
+
+    if (kind === "other") {
+      other += 1;
+      demoNoContest += 1;
+      continue;
+    }
+
+    if (highestClass && rowClass && rowClass !== highestClass) {
+      other += 1;
+      previousClassOfficial += 1;
+      continue;
+    }
+
+    if (kind === "win") w += 1;
+    else if (kind === "loss") l += 1;
+    else if (kind === "draw") draw += 1;
+  }
+
+  const currentOfficial = w + l + draw;
+  const official = currentOfficial + previousClassOfficial;
+  const inclusive = official + demoNoContest;
+
+  return {
+    w,
+    l,
+    draw,
+    other,
+    demo: demoNoContest,
+    previousClassOfficial,
+    currentOfficial,
+    official,
+    inclusive,
+    highestClass,
+    hasRows: rows.length > 0,
+  };
+}
+
+function demoToPartijEquivalent(demo: number) {
+  return Math.floor(Math.max(0, demo) / 3);
+}
+
+function effectiveYouthPartijen(total: number | null | undefined, demo: number | null | undefined) {
+  if (total == null || !Number.isFinite(total)) return null;
+  const safeDemo = demo == null || !Number.isFinite(demo) ? 0 : demo;
+  return Math.max(0, total - safeDemo + demoToPartijEquivalent(safeDemo));
+}
+
+function currentTotalsAll(v: unknown) {
+  const obj = parseJson(v);
+  return obj?.current?._all ?? null;
+}
+
 function readYesNo(...values: unknown[]) {
   const found = values.find((v) => s(v) !== "");
   const x = lower(found);
@@ -336,88 +550,115 @@ function startverbodStatus(f?: Fighter | null) {
   );
 }
 
-function fightStats(f?: Fighter | null) {
+function fightStats(f?: Fighter | null, uitslagenRows: ResultRow[] = []) {
   const d = deep(f);
+  const rows = getUitslagenRows(f, uitslagenRows);
+  const fromRows = recordFromUitslagen(rows);
 
-  const fpTotal =
-    n(f?.totaal_wedstrijden) ??
-    n(d.fightersRaw?.totaal_wedstrijden) ??
-    n(f?.uitslagen_count);
+  const totalsAll = currentTotalsAll(
+    f?.uitslagen_per_discipline ??
+      f?.fp_uitslagen_per_discipline ??
+      d.fightersRaw?.uitslagen_per_discipline,
+  );
 
-  const w =
+  const fallbackW =
     n(f?.record_w) ??
     n(f?.gewonnen) ??
     n(d.fightersRaw?.gewonnen) ??
-    n(d.aanmelding?.win);
+    n(totalsAll?.wins) ??
+    n(totalsAll?.win) ??
+    n(d.aanmelding?.win) ??
+    0;
 
-  const l =
+  const fallbackL =
     n(f?.record_l) ??
     n(f?.verloren) ??
     n(d.fightersRaw?.verloren) ??
-    n(d.aanmelding?.loss);
+    n(totalsAll?.losses) ??
+    n(totalsAll?.loss) ??
+    n(d.aanmelding?.loss) ??
+    0;
 
-  const draw =
+  const fallbackDraw =
     n(f?.record_d) ??
     n(f?.draw) ??
     n(f?.gelijk) ??
     n(d.fightersRaw?.gelijk) ??
-    n(d.aanmelding?.draw);
+    n(totalsAll?.draws) ??
+    n(totalsAll?.draw) ??
+    n(d.aanmelding?.draw) ??
+    0;
 
-  const demo =
-    n(f?.demo) ??
-    n(f?.demo_count) ??
-    n(d.fightersRaw?.demo) ??
-    n(d.aanmelding?.demo);
+  const fallbackTotal =
+    n(f?.totaal_wedstrijden) ??
+    n(f?.nulmeting_totaal) ??
+    n(d.fightersRaw?.totaal_wedstrijden) ??
+    n(d.fightersRaw?.nulmeting_totaal) ??
+    n(totalsAll?.total) ??
+    n(f?.uitslagen_count);
 
-  const computedOfficial = [w, l, draw].some((x) => x != null)
-    ? (w ?? 0) + (l ?? 0) + (draw ?? 0)
-    : null;
+  const fallbackOther = Math.max(
+    0,
+    (fallbackTotal ?? fallbackW + fallbackL + fallbackDraw) - fallbackW - fallbackL - fallbackDraw,
+  );
 
-  const official = fpTotal ?? computedOfficial ?? 0;
+  const w = fromRows.hasRows ? fromRows.w : fallbackW;
+  const l = fromRows.hasRows ? fromRows.l : fallbackL;
+  const draw = fromRows.hasRows ? fromRows.draw : fallbackDraw;
+  const other = fromRows.hasRows ? fromRows.other : fallbackOther;
+  const demo = fromRows.hasRows ? fromRows.demo : fallbackOther;
+
+  const official = fromRows.hasRows ? fromRows.official : w + l + draw + other;
+  const effectiveYouth = official + demoToPartijEquivalent(demo);
 
   return {
     official,
-    demo: demo ?? 0,
-    w: w ?? null,
-    l: l ?? null,
-    draw: draw ?? null,
+    effectiveYouth,
+    demo,
+    other,
+    demoEquivalent: demoToPartijEquivalent(demo),
+    w,
+    l,
+    draw,
   };
 }
 
-function recordLabel(f?: Fighter | null) {
-  const stats = fightStats(f);
-  const hasRecord = stats.w != null || stats.l != null || stats.draw != null;
-
-  if (hasRecord) {
-    return `${stats.w ?? 0}-${stats.l ?? 0}-${stats.draw ?? 0} (${stats.official})`;
-  }
-
-  return `${stats.official}`;
+function recordLabel(f?: Fighter | null, uitslagenRows: ResultRow[] = []) {
+  const stats = fightStats(f, uitslagenRows);
+  return `${stats.w}-${stats.l}-${stats.draw} (${stats.other})`;
 }
 
 function partyDifferenceInfo(
   rood?: Fighter | null,
   blauw?: Fighter | null,
   youth = false,
+  roodUitslagen: ResultRow[] = [],
+  blauwUitslagen: ResultRow[] = [],
 ) {
-  const r = fightStats(rood);
-  const b = fightStats(blauw);
-  const diff = Math.abs((r.official ?? 0) - (b.official ?? 0));
+  const r = fightStats(rood, roodUitslagen);
+  const b = fightStats(blauw, blauwUitslagen);
+  const roodPartijen = youth ? r.effectiveYouth : r.official;
+  const blauwPartijen = youth ? b.effectiveYouth : b.official;
+  const diff = Math.abs((roodPartijen ?? 0) - (blauwPartijen ?? 0));
   const demoDiff = Math.abs((r.demo ?? 0) - (b.demo ?? 0));
 
   let severity: Severity = "OK";
-  let detail = `Officiële partijen: rood ${r.official}, blauw ${b.official}. Demo wordt apart gelezen en niet bij officiële partijen opgeteld.`;
+  let detail = youth
+    ? `Jeugdpartij: rood ${roodPartijen}, blauw ${blauwPartijen}. Demo telt als 1 partij per 3 demo's: rood ${r.demo} demo (${r.demoEquivalent} meegeteld), blauw ${b.demo} demo (${b.demoEquivalent} meegeteld).`
+    : `Officiële partijen: rood ${roodPartijen}, blauw ${blauwPartijen}. Demo wordt apart gelezen en niet bij officiële partijen opgeteld.`;
 
-  const minOfficial = Math.min(r.official ?? 0, b.official ?? 0);
+  const minOfficial = Math.min(roodPartijen ?? 0, blauwPartijen ?? 0);
 
   if (youth && minOfficial < 15 && diff > 4) {
     severity = "DISPENSATIE";
-    detail = `Jeugdpartij met ${diff} officiële partijen verschil. Rood ${r.official}, blauw ${b.official}. Zolang één van beide minder dan 15 partijen heeft, is bij meer dan 4 partijen verschil DISPENSATIE nodig. Demo rood ${r.demo}, demo blauw ${b.demo}.`;
+    detail = `Jeugdpartij met ${diff} partijen verschil. Rood ${roodPartijen}, blauw ${blauwPartijen}. Demo wordt omgerekend: totaal - demo + floor(demo/3). Zolang één van beide minder dan 15 partijen heeft, is bij meer dan 4 partijen verschil DISPENSATIE nodig.`;
   } else if (!youth && diff >= 6) {
     severity = "LET OP";
-    detail = `Volwassen partij met groot partijenverschil. Rood ${r.official}, blauw ${b.official}. Demo rood ${r.demo}, demo blauw ${b.demo}.`;
+    detail = `Volwassen partij met groot partijenverschil. Rood ${roodPartijen}, blauw ${blauwPartijen}. Demo rood ${r.demo}, demo blauw ${b.demo}.`;
   } else if (demoDiff > 0) {
-    detail = `Officiële partijen zijn binnen marge. Demo verschil: ${demoDiff}. Demo rood ${r.demo}, demo blauw ${b.demo}.`;
+    detail = youth
+      ? `Partijverschil is binnen marge. Demo is omgerekend: rood ${r.demo} demo (${r.demoEquivalent} meegeteld), blauw ${b.demo} demo (${b.demoEquivalent} meegeteld).`
+      : `Officiële partijen zijn binnen marge. Demo verschil: ${demoDiff}. Demo rood ${r.demo}, demo blauw ${b.demo}.`;
   }
 
   return {
@@ -532,21 +773,24 @@ function normVa(v: unknown) {
 
 function rowMatchesFighter(row: ResultRow, f?: Fighter | null) {
   if (!f) return false;
-  const va = normVa(f.va_nummer);
-  const inschrijvingId = s(f.inschrijving_id);
+  const d = deep(f);
+  const va = normVa(firstFilled(f.va_nummer, f.va, d.fightersRaw?.va_nummer, d.aanmelding?.va_nummer));
+  const inschrijvingId = s(firstFilled(f.inschrijving_id, f.aanmelding_id, f.id, d.aanmelding?.id));
+  const fighterId = s(firstFilled(f.fighter_id, d.fightersRaw?.fighter_id));
+
   return (
     (!!va && normVa(row.va_nummer) === va) ||
-    (!!inschrijvingId && s(row.inschrijving_id) === inschrijvingId) ||
+    (!!inschrijvingId && s(firstFilled(row.inschrijving_id, row.aanmelding_id)) === inschrijvingId) ||
+    (!!fighterId && s(row.fighter_id) === fighterId) ||
     (!!s(row.naam) && lower(row.naam) === lower(name(f)))
   );
 }
-
 const page: CSSProperties = {
   minHeight: "100vh",
-  padding: "14px 18px 28px",
+  padding: "10px 14px 24px",
   color: "#f4f4f5",
   background:
-    "radial-gradient(circle at top, rgba(255,77,0,.12), transparent 28%), linear-gradient(135deg,#050505,#18181b 52%,#050505)",
+    "radial-gradient(circle at top, rgba(255,77,0,.10), transparent 30%), linear-gradient(135deg,#101114,#28292d 52%,#111214)",
 };
 
 export default function NieuweMatchPage() {
@@ -560,6 +804,7 @@ export default function NieuweMatchPage() {
 
   const [fighters, setFighters] = useState<Fighter[]>([]);
   const [results, setResults] = useState<ResultRow[]>([]);
+  const [uitslagenRows, setUitslagenRows] = useState<ResultRow[]>([]);
   const [mm, setMm] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -576,6 +821,61 @@ export default function NieuweMatchPage() {
 
       setFighters(json?.fighters ?? json?.gecontroleerde_fighters ?? []);
       setMm(json?.matchmaking ?? null);
+
+      const inlineUitslagen =
+        json?.uitslagen ??
+        json?.matchmaker_uitslagen_raw ??
+        json?.uitslagen_raw ??
+        json?.fighter_uitslagen ??
+        [];
+
+      // Zelfde bron als de correcte detailpagina: matchmaker_uitslagen_raw.
+      // De API kan leeg/ouder zijn; daarom halen we de ruwe uitslagen hier direct op.
+      try {
+        const { data, error } = await supabase
+          .from("matchmaker_uitslagen_raw")
+          .select("id,matchmaking_id,controle_run_id,fighter_id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,partij_nr,scraped_at,created_at,updated_at")
+          .eq("matchmaking_id", matchmakingId)
+          .order("datum", { ascending: false });
+
+        if (!error && Array.isArray(data) && data.length) {
+          setUitslagenRows(data as ResultRow[]);
+        } else if (Array.isArray(inlineUitslagen) && inlineUitslagen.length) {
+          setUitslagenRows(inlineUitslagen);
+        } else {
+          const ur = await authedFetch(`/api/matchmaker/${matchmakingId}/uitslagen`);
+          const uj = await ur.json().catch(() => ({}));
+          setUitslagenRows(
+            ur.ok
+              ? uj?.uitslagen ??
+                  uj?.matchmaker_uitslagen_raw ??
+                  uj?.uitslagen_raw ??
+                  uj?.results ??
+                  []
+              : [],
+          );
+        }
+      } catch {
+        if (Array.isArray(inlineUitslagen) && inlineUitslagen.length) {
+          setUitslagenRows(inlineUitslagen);
+        } else {
+          try {
+            const ur = await authedFetch(`/api/matchmaker/${matchmakingId}/uitslagen`);
+            const uj = await ur.json().catch(() => ({}));
+            setUitslagenRows(
+              ur.ok
+                ? uj?.uitslagen ??
+                    uj?.matchmaker_uitslagen_raw ??
+                    uj?.uitslagen_raw ??
+                    uj?.results ??
+                    []
+                : [],
+            );
+          } catch {
+            setUitslagenRows([]);
+          }
+        }
+      }
 
       const inlineResults =
         json?.resultaten ??
@@ -641,6 +941,15 @@ export default function NieuweMatchPage() {
     [results, blauw],
   );
 
+  const roodUitslagen = useMemo(
+    () => getUitslagenRows(rood, uitslagenRows),
+    [rood, uitslagenRows],
+  );
+  const blauwUitslagen = useMemo(
+    () => getUitslagenRows(blauw, uitslagenRows),
+    [blauw, uitslagenRows],
+  );
+
   const eventDate = s(
     mm?.datum ??
       mm?.event_datum ??
@@ -663,12 +972,15 @@ export default function NieuweMatchPage() {
     const youth = isYouthMatch(rood, blauw, eventDate);
     const maxWeightSuggestion = suggestedMaxWeight(rood, blauw, youth);
     const allowedWeightDiff = youth ? 2 : null;
-    const partyDiff = partyDifferenceInfo(rood, blauw, youth);
+    const partyDiff = partyDifferenceInfo(rood, blauw, youth, roodUitslagen, blauwUitslagen);
 
     const roodLic = licenseStatus(rood);
     const blauwLic = licenseStatus(blauw);
     const roodStart = startverbodStatus(rood);
     const blauwStart = startverbodStatus(blauw);
+    const roodKeur = keurmerkInfo(rood);
+    const blauwKeur = keurmerkInfo(blauw);
+    const sameGym = sameGymInfo(rood, blauw);
 
     const items: {
       title: string;
@@ -685,6 +997,16 @@ export default function NieuweMatchPage() {
         icon: <BarChart3 size={16} />,
       },
     ];
+
+    if (sameGym.same) {
+      items.push({
+        title: "Zelfde sportschool",
+        value: "LET OP",
+        severity: "LET OP",
+        detail: `Beide vechters komen uit ${sameGym.roodGym}. Controleer bewust of deze partij zo gematcht mag worden.`,
+        icon: <ShieldAlert size={16} />,
+      });
+    }
 
     if (
       youth &&
@@ -774,8 +1096,8 @@ export default function NieuweMatchPage() {
       items.push({
         title: "Licentie rood",
         value: roodLic,
-        severity: "AFKEUR",
-        detail: "Licentie moet JA zijn.",
+        severity: "VERBOD",
+        detail: "Licentie moet JA zijn. Zonder geldige licentie mag deze vechter niet gematcht worden.",
         icon: <ShieldAlert size={16} />,
       });
     }
@@ -784,8 +1106,28 @@ export default function NieuweMatchPage() {
       items.push({
         title: "Licentie blauw",
         value: blauwLic,
-        severity: "AFKEUR",
-        detail: "Licentie moet JA zijn.",
+        severity: "VERBOD",
+        detail: "Licentie moet JA zijn. Zonder geldige licentie mag deze vechter niet gematcht worden.",
+        icon: <ShieldAlert size={16} />,
+      });
+    }
+
+    if (roodKeur.ok !== true) {
+      items.push({
+        title: "Keurmerk rood",
+        value: roodKeur.label,
+        severity: "VERBOD",
+        detail: roodKeur.reason || "Keurmerk moet geldig zijn. Zonder geldig keurmerk mag deze vechter niet gematcht worden.",
+        icon: <ShieldAlert size={16} />,
+      });
+    }
+
+    if (blauwKeur.ok !== true) {
+      items.push({
+        title: "Keurmerk blauw",
+        value: blauwKeur.label,
+        severity: "VERBOD",
+        detail: blauwKeur.reason || "Keurmerk moet geldig zijn. Zonder geldig keurmerk mag deze vechter niet gematcht worden.",
         icon: <ShieldAlert size={16} />,
       });
     }
@@ -832,12 +1174,12 @@ export default function NieuweMatchPage() {
       maxWeightSuggestion,
       enteredMaxWeight,
       partyDiff,
-      roodKeur: keurmerkInfo(rood),
-      blauwKeur: keurmerkInfo(blauw),
+      roodKeur,
+      blauwKeur,
       items: allItems,
       worst: worst(allItems),
     };
-  }, [rood, blauw, eventDate, roodResults, blauwResults, maxWeightInput]);
+  }, [rood, blauw, eventDate, roodResults, blauwResults, roodUitslagen, blauwUitslagen, maxWeightInput]);
 
   useEffect(() => {
     if (!rood || !blauw || maxWeightInput) return;
@@ -967,6 +1309,7 @@ export default function NieuweMatchPage() {
             f={rood}
             age={analysis.roodAge}
             keur={analysis.roodKeur}
+            uitslagenRows={roodUitslagen}
           />
 
           <div className="fs-center">
@@ -1032,6 +1375,28 @@ export default function NieuweMatchPage() {
               />
             </div>
 
+            {analysis.items.filter((item) => item.severity !== "OK").length > 0 && (
+              <div className="fs-center-alerts">
+                {analysis.items
+                  .filter((item) => item.severity !== "OK")
+                  .slice(0, 3)
+                  .map((item, idx) => (
+                    <div
+                      className={`fs-center-alert ${severityRank(item.severity) >= 3 ? "danger" : "warning"}`}
+                      key={`${item.title}-${idx}`}
+                    >
+                      <div className="fs-alert-icon">!</div>
+                      <div className="fs-alert-text">
+                        <div className="fs-alert-title">
+                          {item.severity === "LET OP" ? "LET OP" : item.severity}: {item.title}
+                        </div>
+                        <div className="fs-alert-detail">{item.detail}</div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+
             <button
               className="fs-save"
               disabled={busy || !rood || !blauw}
@@ -1049,6 +1414,7 @@ export default function NieuweMatchPage() {
             f={blauw}
             age={analysis.blauwAge}
             keur={analysis.blauwKeur}
+            uitslagenRows={blauwUitslagen}
           />
         </section>
       </div>
@@ -1278,7 +1644,7 @@ export default function NieuweMatchPage() {
         .fs-head-title b {
           display: block;
           color: ${ORANGE};
-          font-size: 30px;
+          font-size: 24px;
           line-height: 1;
           margin-top: 2px;
           text-transform: uppercase;
@@ -1292,7 +1658,7 @@ export default function NieuweMatchPage() {
         }
 
         .fs-message {
-          margin-top: 14px;
+          margin-top: 10px;
           border-radius: 16px;
           padding: 12px 14px;
           color: #ffd1bf;
@@ -1302,32 +1668,26 @@ export default function NieuweMatchPage() {
         }
 
         .fs-matchplate {
-          margin-top: 18px;
-          border-radius: 30px;
-          padding: 22px;
-          border: 1px solid rgba(255, 255, 255, 0.28);
+          margin-top: 16px;
+          border-radius: 26px;
+          padding: 14px;
+          border: 1px solid rgba(220, 220, 225, 0.42);
           background:
-            radial-gradient(
-              circle at center,
-              rgba(255, 255, 255, 0.75),
-              rgba(180, 180, 185, 0.42) 22%,
-              rgba(70, 70, 74, 0.34) 58%,
-              rgba(8, 8, 10, 0.95) 100%
-            ),
-            linear-gradient(180deg, #f4f4f5, #6b6b70 45%, #171719);
+            radial-gradient(circle at center, rgba(140, 140, 146, 0.36), rgba(45, 46, 50, 0.58) 42%, rgba(13, 13, 15, 0.98) 100%),
+            linear-gradient(180deg, #3f4044, #242529 45%, #111214);
           box-shadow:
-            inset 0 3px 0 rgba(255, 255, 255, 0.6),
-            inset 0 -2px 0 rgba(0, 0, 0, 0.75),
-            0 26px 80px rgba(0, 0, 0, 0.55);
+            inset 0 2px 0 rgba(255, 255, 255, 0.42),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.78),
+            0 22px 70px rgba(0, 0, 0, 0.56);
           display: grid;
-          grid-template-columns: minmax(390px, 1fr) 260px minmax(390px, 1fr);
-          gap: 12px;
+          grid-template-columns: minmax(300px, 0.76fr) minmax(520px, 1.32fr) minmax(300px, 0.76fr);
+          gap: 20px;
           align-items: start;
         }
 
         .fs-fighter {
-          min-height: 410px;
-          border-radius: 22px;
+          min-height: 350px;
+          border-radius: 18px;
           overflow: hidden;
           border: 1px solid rgba(255, 255, 255, 0.2);
           background:
@@ -1343,11 +1703,11 @@ export default function NieuweMatchPage() {
         }
 
         .fs-fighter-title {
-          height: 58px;
+          height: 46px;
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 0 18px;
+          padding: 0 14px;
           color: white;
           font-weight: 1000;
           letter-spacing: 0.08em;
@@ -1366,13 +1726,13 @@ export default function NieuweMatchPage() {
         }
 
         .fs-fighter-body {
-          padding: 18px;
+          padding: 13px;
         }
 
         .fs-fighter-name {
           margin: 0;
           color: ${ORANGE};
-          font-size: 30px;
+          font-size: 24px;
           line-height: 0.98;
           letter-spacing: -0.03em;
           text-transform: uppercase;
@@ -1388,8 +1748,8 @@ export default function NieuweMatchPage() {
         .fs-badges {
           display: flex;
           flex-wrap: wrap;
-          gap: 9px;
-          margin: 14px 0;
+          gap: 7px;
+          margin: 10px 0;
         }
 
         .mini-badge {
@@ -1397,8 +1757,8 @@ export default function NieuweMatchPage() {
           gap: 7px;
           align-items: center;
           border-radius: 8px;
-          padding: 7px 10px;
-          font-size: 12px;
+          padding: 6px 8px;
+          font-size: 11px;
           font-weight: 1000;
           border: 1px solid rgba(255, 255, 255, 0.13);
           background: rgba(255, 255, 255, 0.07);
@@ -1420,17 +1780,17 @@ export default function NieuweMatchPage() {
         .fs-info-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 8px 18px;
+          gap: 5px 12px;
         }
 
         .fs-info-line {
           display: flex;
           justify-content: space-between;
           gap: 12px;
-          padding: 8px 0;
+          padding: 6px 0;
           border-bottom: 1px solid rgba(255, 255, 255, 0.08);
           color: #e4e4e7;
-          font-size: 14px;
+          font-size: 13px;
         }
 
         .fs-info-line span {
@@ -1456,7 +1816,7 @@ export default function NieuweMatchPage() {
         }
 
         .fs-keur {
-          margin-top: 14px;
+          margin-top: 10px;
           border-radius: 14px;
           overflow: hidden;
           border: 1px solid rgba(255, 255, 255, 0.13);
@@ -1474,7 +1834,7 @@ export default function NieuweMatchPage() {
           gap: 10px;
           padding: 9px 12px;
           color: white;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 1000;
           letter-spacing: 0.08em;
           background: linear-gradient(180deg, #292a2d, #070708);
@@ -1482,12 +1842,12 @@ export default function NieuweMatchPage() {
         }
 
         .fs-whitebox {
-          padding: 12px;
+          padding: 9px;
           background: white;
           color: #18181b;
           white-space: pre-wrap;
           font-weight: 750;
-          font-size: 13px;
+          font-size: 12px;
         }
 
         .fs-center {
@@ -1501,26 +1861,21 @@ export default function NieuweMatchPage() {
 
         .fs-logo-box {
           position: relative;
-          height: 148px;
-          margin: 0 auto 12px;
-          width: calc(100% - 12px);
-          border-radius: 28px;
+          height: 90px;
+          margin: 0 auto 10px;
+          width: calc(100% - 18px);
+          border-radius: 26px;
           display: grid;
           place-items: center;
           overflow: hidden;
           background:
-            radial-gradient(
-              circle at center,
-              rgba(255, 160, 60, 0.18) 0%,
-              rgba(255, 120, 0, 0.08) 28%,
-              rgba(10, 10, 12, 0.96) 72%
-            ),
-            linear-gradient(180deg, #3b3b3d 0%, #111112 12%, #050506 100%);
-          border: 1px solid rgba(255, 255, 255, 0.16);
+            radial-gradient(circle at center, rgba(255, 130, 32, 0.14) 0%, rgba(18, 18, 20, 0.94) 52%, rgba(4, 4, 5, 0.98) 100%),
+            linear-gradient(180deg, #292a2e 0%, #101113 45%, #050506 100%);
+          border: 1px solid rgba(225, 225, 230, 0.22);
           box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.16),
-            inset 0 -2px 0 rgba(0, 0, 0, 0.55),
-            0 12px 24px rgba(0, 0, 0, 0.42);
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.65),
+            0 12px 28px rgba(0, 0, 0, 0.45);
         }
 
         .fs-logo-box::before {
@@ -1539,33 +1894,32 @@ export default function NieuweMatchPage() {
         }
 
         .fs-logo {
-          width: min(380px, 100%);
+          width: min(260px, 82%);
           height: auto;
           object-fit: contain;
-          transform: scale(0.96);
-          filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.68)) contrast(1.04);
+          transform: scale(0.92);
+          filter: drop-shadow(0 7px 15px rgba(0, 0, 0, 0.7)) contrast(1.06);
         }
 
         .fs-details {
-          border-radius: 16px;
+          border-radius: 18px;
           overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.18);
-          background: linear-gradient(
-            180deg,
-            rgba(32, 33, 36, 0.98),
-            rgba(8, 8, 10, 0.98)
-          );
+          border: 1px solid rgba(225, 225, 230, 0.28);
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.025)),
+            linear-gradient(135deg, #2c2d31, #131416 58%, #070708);
           color: #fff;
           box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.18),
-            0 16px 35px rgba(0, 0, 0, 0.34);
+            inset 0 1px 0 rgba(255, 255, 255, 0.20),
+            inset 0 -2px 0 rgba(255, 77, 0, 0.34),
+            0 14px 34px rgba(0, 0, 0, 0.42);
         }
 
         .fs-details-head,
         .fs-block-head {
           display: flex;
           align-items: center;
-          gap: 9px;
+          gap: 7px;
           padding: 11px 14px;
           color: #fff;
           font-weight: 1000;
@@ -1589,7 +1943,7 @@ export default function NieuweMatchPage() {
         .fs-weight-confirm-field label {
           display: block;
           color: #fff;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 1000;
           letter-spacing: 0.08em;
           text-transform: uppercase;
@@ -1633,30 +1987,103 @@ export default function NieuweMatchPage() {
           display: block;
           margin-top: 8px;
           color: #e4e4e7;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 800;
           line-height: 1.35;
+        }
+
+        .fs-center-alerts {
+          display: grid;
+          gap: 10px;
+        }
+
+        .fs-center-alert {
+          min-height: 108px;
+          border-radius: 16px;
+          padding: 18px 22px;
+          display: grid;
+          grid-template-columns: 96px 1fr;
+          align-items: center;
+          gap: 20px;
+          border: 1px solid rgba(255, 97, 13, 0.88);
+          background:
+            radial-gradient(circle at left, rgba(255, 77, 0, 0.20), transparent 38%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.025)),
+            linear-gradient(135deg, #28292d, #111214 58%, #070708);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            inset 0 -2px 0 rgba(255, 77, 0, 0.42),
+            0 14px 32px rgba(0, 0, 0, 0.42);
+        }
+
+        .fs-center-alert.danger {
+          border-color: rgba(220, 38, 38, 0.90);
+        }
+
+        .fs-alert-icon {
+          width: 74px;
+          height: 64px;
+          margin: 0 auto;
+          display: grid;
+          place-items: center;
+          color: #0b0b0c;
+          font-size: 42px;
+          line-height: 1;
+          font-weight: 1000;
+          clip-path: polygon(50% 0, 100% 100%, 0 100%);
+          padding-top: 10px;
+          background: linear-gradient(180deg, #ff8a1c, #ff4d00 60%, #a83200);
+          text-shadow: 0 1px 0 rgba(255,255,255,.25);
+          box-shadow: 0 10px 22px rgba(255, 77, 0, 0.22);
+        }
+
+        .fs-alert-text {
+          display: flex;
+          min-width: 0;
+          flex-direction: column;
+          justify-content: center;
+        }
+
+        .fs-alert-title {
+          color: ${ORANGE};
+          font-size: 18px;
+          line-height: 1.1;
+          font-weight: 1000;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+        }
+
+        .fs-alert-detail {
+          margin-top: 7px;
+          color: #ffffff;
+          font-size: 17px;
+          line-height: 1.36;
+          font-weight: 950;
         }
 
         .fs-save {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          border: 1px solid rgba(255, 255, 255, 0.25);
-          border-radius: 12px;
-          padding: 12px 14px;
-          color: white;
+          gap: 10px;
+          width: min(560px, 100%);
+          margin: 0 auto;
+          border: 1px solid rgba(255, 255, 255, 0.48);
+          border-radius: 14px;
+          padding: 14px 16px;
+          color: #ffffff;
+          text-transform: uppercase;
+          letter-spacing: 0.02em;
           font-weight: 1000;
           cursor: pointer;
-          background: linear-gradient(
-            180deg,
-            rgba(255, 77, 0, 1),
-            rgba(136, 30, 0, 1)
-          );
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.32), rgba(255,255,255,0.08) 18%, rgba(38,39,42,0.98) 52%, rgba(12,12,14,0.98)),
+            repeating-linear-gradient(135deg, rgba(255,255,255,.08) 0 2px, transparent 2px 8px);
           box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.35),
-            0 12px 25px rgba(0, 0, 0, 0.35);
+            inset 0 2px 0 rgba(255, 255, 255, 0.42),
+            inset 0 -2px 0 rgba(255, 77, 0, 0.46),
+            0 0 0 4px rgba(255,255,255,0.06),
+            0 14px 28px rgba(0, 0, 0, 0.42);
         }
 
         .fs-save:disabled {
@@ -1665,19 +2092,20 @@ export default function NieuweMatchPage() {
         }
 
         .fs-checks {
-          margin-top: 18px;
-          border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.22);
+          margin-top: 16px;
+          border-radius: 20px;
+          border: 1px solid rgba(210, 210, 215, 0.34);
           background:
             linear-gradient(
               180deg,
-              rgba(255, 255, 255, 0.1),
-              rgba(255, 255, 255, 0.035)
-            ),
-            linear-gradient(135deg, #18191c, #070708);
+              rgba(90, 90, 96, 0.92),
+              rgba(34, 34, 38, 0.98) 42%,
+              rgba(10, 10, 12, 0.98)
+            );
           box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.14),
-            0 20px 55px rgba(0, 0, 0, 0.45);
+            inset 0 2px 0 rgba(255, 255, 255, 0.24),
+            inset 0 -2px 0 rgba(255, 77, 0, 0.42),
+            0 18px 45px rgba(0, 0, 0, 0.42);
           overflow: hidden;
         }
 
@@ -1689,55 +2117,81 @@ export default function NieuweMatchPage() {
         }
 
         .fs-check-grid {
-          padding: 16px;
+          padding: 18px;
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(285px, 1fr));
+          gap: 14px;
         }
 
         .fs-check-card {
-          border-radius: 16px;
-          padding: 13px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          background: rgba(255, 255, 255, 0.055);
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+          min-height: 118px;
+          border-radius: 18px;
+          padding: 16px 17px;
+          border: 1px solid rgba(225, 225, 230, 0.22);
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025)),
+            linear-gradient(135deg, #2a2a2f, #111113 72%, #070708);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            inset 0 -1px 0 rgba(255, 77, 0, 0.25),
+            0 12px 26px rgba(0, 0, 0, 0.32);
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          text-align: center;
         }
 
         .fs-check-card.top {
-          border-color: rgba(220, 38, 38, 0.65);
-          background: rgba(220, 38, 38, 0.13);
+          border-color: rgba(255, 77, 0, 0.68);
+          background:
+            linear-gradient(180deg, rgba(255, 77, 0, 0.18), rgba(255, 255, 255, 0.03)),
+            linear-gradient(135deg, #332522, #151515 72%, #080808);
         }
 
         .fs-check-card.mid {
-          border-color: rgba(255, 77, 0, 0.55);
-          background: rgba(255, 77, 0, 0.1);
+          border-color: rgba(255, 77, 0, 0.58);
+          background:
+            linear-gradient(180deg, rgba(255, 77, 0, 0.14), rgba(255, 255, 255, 0.035)),
+            linear-gradient(135deg, #353438, #171719 72%, #09090a);
         }
 
         .fs-check-title {
           display: flex;
-          justify-content: space-between;
+          justify-content: center;
           align-items: center;
-          gap: 10px;
-          margin-bottom: 8px;
+          gap: 12px;
+          margin-bottom: 9px;
+          flex-wrap: wrap;
         }
 
         .fs-check-title b {
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 8px;
+          color: #ffffff;
+          font-size: 15px;
+          font-weight: 1000;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
         }
 
         .fs-check-value {
-          font-size: 22px;
+          font-size: 24px;
+          line-height: 1;
           font-weight: 1000;
-          color: #fff;
+          color: ${ORANGE};
+          text-transform: uppercase;
+          margin: 2px 0 8px;
         }
 
         .fs-check-detail {
-          margin-top: 4px;
-          color: #c9c9d1;
-          font-size: 13px;
-          font-weight: 750;
+          margin: 0 auto;
+          color: #f4f4f5;
+          font-size: 15px;
+          line-height: 1.38;
+          font-weight: 900;
+          max-width: 92%;
         }
 
         .status-pill {
@@ -1745,8 +2199,8 @@ export default function NieuweMatchPage() {
           align-items: center;
           gap: 7px;
           border-radius: 8px;
-          padding: 7px 10px;
-          font-size: 12px;
+          padding: 6px 8px;
+          font-size: 11px;
           font-weight: 1000;
           border: 1px solid rgba(255, 255, 255, 0.18);
           color: #fff;
@@ -1889,7 +2343,7 @@ export default function NieuweMatchPage() {
           display: block;
           margin-top: 8px;
           color: #fff;
-          font-size: 30px;
+          font-size: 24px;
           line-height: 1;
         }
 
@@ -1939,12 +2393,12 @@ export default function NieuweMatchPage() {
 
         .fs-modal-badge {
           width: 58px;
-          height: 58px;
+          height: 46px;
           border-radius: 18px;
           display: grid;
           place-items: center;
           color: #fff;
-          font-size: 30px;
+          font-size: 24px;
           font-weight: 1000;
           background: linear-gradient(180deg, #ff8a00, #ff4d00);
           box-shadow:
@@ -2079,7 +2533,7 @@ export default function NieuweMatchPage() {
           display: block;
           margin-top: 8px;
           color: #fff;
-          font-size: 30px;
+          font-size: 24px;
           line-height: 1;
         }
 
@@ -2109,7 +2563,7 @@ export default function NieuweMatchPage() {
           width: 72px;
           height: 72px;
           flex: 0 0 auto;
-          border-radius: 22px;
+          border-radius: 18px;
           display: grid;
           place-items: center;
           color: #fff;
@@ -2161,6 +2615,17 @@ export default function NieuweMatchPage() {
           .fs-center {
             order: -1;
           }
+
+          .fs-center-alert {
+            grid-template-columns: 70px 1fr;
+            padding: 14px;
+          }
+
+          .fs-alert-icon {
+            width: 58px;
+            height: 52px;
+            font-size: 32px;
+          }
         }
 
         @media (max-width: 680px) {
@@ -2197,6 +2662,7 @@ function FighterPanel({
   f,
   age,
   keur,
+  uitslagenRows = [],
 }: {
   corner: "red" | "blue";
   title: string;
@@ -2209,6 +2675,7 @@ function FighterPanel({
     tone: "ok" | "bad" | "warn";
     reason: string;
   };
+  uitslagenRows?: ResultRow[];
 }) {
   const licentie = licenseStatus(f);
   const startverbod = startverbodStatus(f);
@@ -2265,7 +2732,7 @@ function FighterPanel({
             label="Gewicht"
             value={weight(f) == null ? "-" : `${weight(f)?.toFixed(1)} kg`}
           />
-          <InfoLine label="Record" value={recordLabel(f)} />
+          <InfoLine label="Record" value={recordLabel(f, getUitslagenRows(f, uitslagenRows))} />
         </div>
 
         <div className="fs-keur">

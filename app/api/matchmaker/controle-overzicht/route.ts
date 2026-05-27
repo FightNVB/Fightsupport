@@ -39,13 +39,26 @@ function s(v: unknown): string | null {
 
 function inferTab(row: any): TabKey {
   const stadium = String(row?.stadium ?? "").trim().toLowerCase();
+  const status = String(row?.status ?? "").trim().toLowerCase();
   const bron = String(row?.bron_type ?? "").trim().toLowerCase();
 
-  if (stadium === "retour_naar_eigenaar") {
+  if (
+    status === "retour_naar_matchmaker" ||
+    status === "retour_naar_eigenaar" ||
+    status.includes("retour") ||
+    stadium === "retour_naar_matchmaker" ||
+    stadium === "retour_naar_eigenaar" ||
+    stadium.includes("retour")
+  ) {
     return "retour_ontvangen";
   }
 
-  if (bron === "matchmaker_upload") {
+  if (
+    bron === "matchmaker_upload" ||
+    bron === "admin_upload" ||
+    bron === "upload" ||
+    bron.includes("upload")
+  ) {
     return "ontvangen";
   }
 
@@ -83,14 +96,18 @@ export async function GET(req: Request) {
       );
     }
 
-    const role = String(profile?.role ?? "").trim().toLowerCase();
-    if (role !== "matchmaker" && role !== "admin" && role !== "superadmin") {
-      return NextResponse.json(
-        { ok: false, error: "Gebruiker is geen matchmaker." },
-        { status: 403 }
-      );
-    }
+    const role = String(profile?.role ?? auth?.role ?? "").trim().toLowerCase();
 
+    /*
+      Belangrijk:
+      Dit overzicht filtert bewust primair op user-id/eigenaarschap.
+      Sommige gebruikers hebben meerdere rollen of testen als superadmin.
+      De lifecycle bepaalt zichtbaarheid:
+      - huidige_eigenaar_type = matchmaker
+      - huidige_eigenaar_user_id = ingelogde user id
+
+      Rol wordt alleen gebruikt voor toegang via requireUserWithRole hierboven.
+    */
     const { data: matchmakings, error } = await supabaseAdmin
       .from("matchmakings")
       .select(
@@ -121,6 +138,8 @@ export async function GET(req: Request) {
         locked_for_editing,
         is_archived,
         matchmaker_id,
+        uploaded_by,
+        maker_user_id,
         hoofdofficial_id
       `
       )
@@ -178,7 +197,13 @@ export async function GET(req: Request) {
     const profileIds = Array.from(
       new Set(
         (matchmakings ?? [])
-          .flatMap((r: any) => [r.last_updated_by, r.huidige_eigenaar_user_id])
+          .flatMap((r: any) => [
+            r.last_updated_by,
+            r.huidige_eigenaar_user_id,
+            r.matchmaker_id,
+            r.uploaded_by,
+            r.maker_user_id,
+          ])
           .map((v) => String(v ?? "").trim())
           .filter(Boolean)
       )
@@ -212,6 +237,9 @@ export async function GET(req: Request) {
     const rows = (matchmakings ?? []).map((r: any) => {
       const ownerId = s(r.huidige_eigenaar_user_id);
       const lastUpdatedBy = s(r.last_updated_by);
+      const matchmakerId = s(r.matchmaker_id);
+      const uploadedBy = s(r.uploaded_by);
+      const makerUserId = s(r.maker_user_id);
 
       return {
         id: String(r.id),
@@ -249,7 +277,12 @@ export async function GET(req: Request) {
         locked_for_editing: r.locked_for_editing ?? false,
         is_archived: r.is_archived ?? false,
 
-        matchmaker_id: r.matchmaker_id ?? null,
+        matchmaker_id: matchmakerId,
+        matchmaker_name: matchmakerId ? profileNameMap.get(matchmakerId) ?? null : null,
+        uploaded_by: uploadedBy,
+        uploaded_by_name: uploadedBy ? profileNameMap.get(uploadedBy) ?? null : null,
+        maker_user_id: makerUserId,
+        maker_user_name: makerUserId ? profileNameMap.get(makerUserId) ?? null : null,
         hoofdofficial_id: r.hoofdofficial_id ?? null,
 
         tab: inferTab(r),

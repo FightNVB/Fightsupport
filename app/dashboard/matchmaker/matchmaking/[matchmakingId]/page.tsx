@@ -176,23 +176,152 @@ function calcAgeYearsOnDate(eventDate: Date, birthDate: Date): number | null {
   return years;
 }
 
-function ageAtEvent(ctx: AnyRow, side: "rood" | "blauw"): string {
-  const event = parseISODateOnly(ctx?.evenement_datum);
-  const birth = parseISODateOnly(
-    ctx?.[`${side}_geboortedatum_fp`] ?? ctx?.[`${side}_geboortedatum_mm`],
+function normalizeVaForLookup(v: any): string {
+  return String(v ?? "")
+    .replace(/[^0-9]/g, "")
+    .trim();
+}
+
+function getBirthDateFromRow(ctx: AnyRow, side: "rood" | "blauw"): any {
+  const rawJson = parseRawJsonSafe(ctx?.raw_json);
+  const deelnemer = rawJson?.deelnemer ?? {};
+
+  return (
+    ctx?.[`${side}_geboortedatum_fp`] ??
+    ctx?.[`${side}_geboortedatum_mm`] ??
+    ctx?.[`${side}_geboortedatum`] ??
+    ctx?.[`${side}_dob`] ??
+    (side === "rood"
+      ? (ctx?.geboortedatum ?? ctx?.fighter_geboortedatum)
+      : null) ??
+    (side === "rood"
+      ? (deelnemer?.fp_geboortedatum ??
+        deelnemer?.geboortedatum ??
+        deelnemer?.geboortedatum_input ??
+        deelnemer?.dob)
+      : null)
   );
-  if (!event || !birth) return "-";
-  const years = calcAgeYearsOnDate(event, birth);
-  return years == null ? "-" : String(years);
+}
+
+function getEventDateFromRow(ctx: AnyRow): any {
+  const rawJson = parseRawJsonSafe(ctx?.raw_json);
+  const deelnemer = rawJson?.deelnemer ?? {};
+
+  return (
+    ctx?.evenement_datum ??
+    ctx?.event_datum ??
+    ctx?.matchmaking_datum ??
+    deelnemer?.evenement_datum ??
+    deelnemer?.event_datum ??
+    deelnemer?.matchmaking_datum
+  );
 }
 
 function ageAtEventNumber(ctx: AnyRow, side: "rood" | "blauw"): number | null {
-  const event = parseISODateOnly(ctx?.evenement_datum);
-  const birth = parseISODateOnly(
-    ctx?.[`${side}_geboortedatum_fp`] ?? ctx?.[`${side}_geboortedatum_mm`],
+  const direct = Number(
+    ctx?.[`${side}_leeftijd_event`] ??
+      ctx?.[`${side}_leeftijd_op_event`] ??
+      ctx?.[`${side}_age_event`] ??
+      ctx?.[`${side}_age`],
   );
+  if (Number.isFinite(direct) && direct >= 0) return Math.trunc(direct);
+
+  const event = parseISODateOnly(getEventDateFromRow(ctx));
+  const birth = parseISODateOnly(getBirthDateFromRow(ctx, side));
   if (!event || !birth) return null;
   return calcAgeYearsOnDate(event, birth);
+}
+
+function ageAtEvent(ctx: AnyRow, side: "rood" | "blauw"): string {
+  const years = ageAtEventNumber(ctx, side);
+  return years == null ? "-" : String(years);
+}
+
+async function loadFighterBirthdatesByVa(
+  matchmakingId: string,
+  controleRunId?: string | null,
+) {
+  const out = new Map<string, string>();
+
+  function addRows(rows: any[] | null | undefined, preferOverwrite = false) {
+    for (const row of rows ?? []) {
+      const key = normalizeVaForLookup((row as any)?.va_nummer);
+      const birth = String((row as any)?.geboortedatum ?? "").trim();
+      if (!key || !birth) continue;
+      if (preferOverwrite || !out.has(key)) out.set(key, birth);
+    }
+  }
+
+  async function readTable(table: "fighters_raw" | "matchmaker_fighters_raw") {
+    try {
+      // Belangrijk: leeftijd op deze lineup-page moet ook werken als de laatste
+      // controle_run_id anders is dan de run waarin fighters_raw gevuld is.
+      // Daarom laden we altijd alle geboortedata voor deze matchmaking en geven
+      // daarna de huidige controle_run_id alleen voorrang als die er is.
+      const fallback = await supabase
+        .from(table)
+        .select("va_nummer, geboortedatum, controle_run_id")
+        .eq("matchmaking_id", matchmakingId);
+
+      if (fallback.error) {
+        console.warn(
+          `${table} geboortedata laden mislukt`,
+          fallback.error.message,
+        );
+        return;
+      }
+
+      addRows(fallback.data, false);
+
+      if (controleRunId) {
+        addRows(
+          (fallback.data ?? []).filter(
+            (row: any) =>
+              String(row?.controle_run_id ?? "") === String(controleRunId),
+          ),
+          true,
+        );
+      }
+    } catch (e: any) {
+      console.warn(`${table} geboortedata laden mislukt`, e?.message ?? e);
+    }
+  }
+
+  await readTable("fighters_raw");
+  await readTable("matchmaker_fighters_raw");
+
+  return out;
+}
+
+function enrichRowsWithBirthdates(
+  rows: AnyRow[],
+  birthdatesByVa: Map<string, string>,
+  fallbackEventDate?: string | null,
+): AnyRow[] {
+  return (rows ?? []).map((row) => {
+    const next = { ...row };
+    if (!next.evenement_datum && fallbackEventDate) {
+      next.evenement_datum = fallbackEventDate;
+    }
+
+    for (const side of ["rood", "blauw"] as const) {
+      const va = normalizeVaForLookup(
+        next?.[`${side}_va_mm`] ??
+          next?.[side === "rood" ? "va_rood" : "va_blauw"] ??
+          next?.[`${side}_fighter_id`] ??
+          (side === "rood" ? next?.fighter_id : null),
+      );
+
+      const existingBirth = getBirthDateFromRow(next, side);
+      const birthFromRaw = va ? birthdatesByVa.get(va) : null;
+
+      if (!existingBirth && birthFromRaw) {
+        next[`${side}_geboortedatum_fp`] = birthFromRaw;
+      }
+    }
+
+    return next;
+  });
 }
 
 function minAgeAtEvent(ctx: AnyRow): number {
@@ -1387,6 +1516,124 @@ function parseRawJsonSafe(v: any): any | null {
   }
 }
 
+function normalizeToernooiBoutRows(rows: AnyRow[]): AnyRow[] {
+  return (rows ?? []).map((row, index) => {
+    const rawJson = parseRawJsonSafe(row?.raw_json);
+    const deelnemer = rawJson?.deelnemer ?? {};
+
+    const toernooiCode = String(
+      row?.toernooi_code ?? rawJson?.toernooi_code ?? "TOERNOOI",
+    )
+      .trim()
+      .toUpperCase();
+
+    // Toernooi-deelnemers staan in matchmaking_bouts_raw meestal als losse
+    // deelnemer-regels met partij_nr 0. Voor de UI geven we ze een visueel
+    // volgnummer, maar de echte koppeling blijft toernooi_code + id/VA.
+    const partijNrRaw = Number(row?.partij_nr);
+    const partijNr =
+      Number.isFinite(partijNrRaw) && partijNrRaw > 0 ? partijNrRaw : index + 1;
+
+    const naam = safeText(
+      row?.rood_naam ??
+        row?.rood_naam_mm ??
+        row?.rood_naam_fp ??
+        deelnemer?.fp_naam ??
+        deelnemer?.naam_fp ??
+        deelnemer?.naam ??
+        deelnemer?.naam_input,
+      "-",
+    );
+    const gym = safeText(
+      row?.rood_gym ??
+        row?.rood_gym_mm ??
+        row?.rood_gym_fp ??
+        deelnemer?.sportschool ??
+        deelnemer?.gym ??
+        deelnemer?.gym_input,
+      "-",
+    );
+    const va = safeText(
+      row?.va_rood ??
+        row?.rood_va_mm ??
+        deelnemer?.va_nummer ??
+        deelnemer?.va ??
+        deelnemer?.fighter_id,
+      "-",
+    );
+    const klasse = safeText(
+      row?.klasse ??
+        row?.klasse_mm ??
+        deelnemer?.klasse ??
+        deelnemer?.fp_klasse,
+      "-",
+    );
+    const discipline = safeText(row?.discipline ?? deelnemer?.discipline, "-");
+    const gewicht =
+      row?.rood_gewicht ?? deelnemer?.gewicht ?? row?.max_gewicht ?? null;
+    const geboortedatum =
+      row?.rood_geboortedatum ??
+      deelnemer?.fp_geboortedatum ??
+      deelnemer?.geboortedatum ??
+      deelnemer?.geboortedatum_input ??
+      null;
+
+    return {
+      ...row,
+      id: row?.id
+        ? `toernooi-bout-${row.id}`
+        : `toernooi-bout-${toernooiCode}-${index}`,
+      __source_table: "matchmaking_bouts_raw",
+      __is_toernooi_context: false,
+      __is_toernooi_bout: true,
+      is_toernooi: true,
+      toernooi: true,
+      toernooi_code: toernooiCode,
+      partij_nr: partijNr,
+      discipline,
+      klasse,
+      klasse_mm: klasse,
+      max_gewicht: row?.max_gewicht ?? gewicht ?? null,
+      evenement_naam: row?.evenement_naam ?? deelnemer?.evenement_naam ?? null,
+      evenement_datum:
+        row?.evenement_datum ?? deelnemer?.evenement_datum ?? null,
+      locatie: row?.locatie ?? deelnemer?.locatie ?? null,
+      fighter_id: row?.fighter_id ?? deelnemer?.fighter_id ?? va,
+      va_rood: va,
+      rood_va_mm: va,
+      rood_naam: naam,
+      rood_naam_mm: naam,
+      rood_naam_fp:
+        deelnemer?.fp_naam ?? deelnemer?.naam_fp ?? row?.rood_naam ?? naam,
+      rood_gym: gym,
+      rood_gym_mm: gym,
+      rood_gym_fp: deelnemer?.fp_gym ?? row?.rood_gym ?? gym,
+      rood_geboortedatum_mm: geboortedatum,
+      rood_geboortedatum_fp: deelnemer?.fp_geboortedatum ?? geboortedatum,
+      rood_geslacht:
+        row?.geslacht ?? deelnemer?.fp_geslacht ?? deelnemer?.geslacht ?? null,
+      rood_gewicht: gewicht,
+      rood_licentie: deelnemer?.licentie ?? deelnemer?.licentie_status ?? null,
+      rood_nulmeting_klasse:
+        deelnemer?.nulmeting_klasse ?? deelnemer?.fp_klasse ?? null,
+      rood_totaal_wedstrijden:
+        deelnemer?.totaal_wedstrijden ??
+        deelnemer?.uitslagen_count ??
+        deelnemer?.nulmeting_totaal ??
+        null,
+      rood_gewonnen: deelnemer?.gewonnen ?? deelnemer?.record_w ?? null,
+      rood_verloren: deelnemer?.verloren ?? deelnemer?.record_l ?? null,
+      rood_draw: deelnemer?.draw ?? deelnemer?.record_d ?? null,
+      raw_json: rawJson ??
+        row?.raw_json ?? {
+          type: "matchmaking_bouts_raw_toernooi",
+          toernooi_code: toernooiCode,
+          deelnemer: row,
+        },
+    };
+  });
+}
+
 function getToernooiKey(row: AnyRow): string | null {
   const direct = String(
     row?.toernooi_code ??
@@ -1778,9 +2025,9 @@ export default function ControleMatchmakingPage() {
   }
 
   function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
-    const sorted = [...nextRows].sort(
-      (a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0),
-    );
+    const sorted = nextRows
+      .filter((row) => !isToernooiRow(row))
+      .sort((a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0));
     setOrderedRows(sorted);
   }
 
@@ -1814,7 +2061,8 @@ export default function ControleMatchmakingPage() {
   }
 
   function hasOrderChanges() {
-    if (orderedRows.length !== rows.length) return false;
+    const reorderableRows = rows.filter((row) => !isToernooiRow(row));
+    if (orderedRows.length !== reorderableRows.length) return false;
 
     for (let i = 0; i < orderedRows.length; i += 1) {
       const visualNr = i + 1;
@@ -2117,9 +2365,7 @@ export default function ControleMatchmakingPage() {
       if (!resp.ok)
         throw new Error(json?.error ?? "Sturen naar admin mislukt.");
 
-      setMsg(
-        json?.message ?? "✅ Matchmaking is doorgestuurd naar admin.",
-      );
+      setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar admin.");
       router.replace("/dashboard/matchmaker/matchmaking");
     });
   }
@@ -2130,6 +2376,8 @@ export default function ControleMatchmakingPage() {
     setMsg("");
 
     try {
+      let fallbackEvenementDatum: string | null = null;
+
       if (!matchmakingId) {
         setRows([]);
         setOrderedRows([]);
@@ -2187,6 +2435,7 @@ export default function ControleMatchmakingPage() {
           if (!datum) datum = String(up?.evenement_datum ?? "").trim() || null;
         }
 
+        fallbackEvenementDatum = datum;
         setEvenementNaam(naam);
         setEvenementDatum(datum);
       } catch {
@@ -2263,7 +2512,52 @@ export default function ControleMatchmakingPage() {
         ctxRows = fallbackCtx.data ?? [];
       }
 
-      const ctxList = (ctxRows ?? []) as AnyRow[];
+      const { data: fetchedToernooiBoutRows, error: toernooiBoutErr } =
+        await supabase
+          .from("matchmaking_bouts_raw")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("is_toernooi", true)
+          .order("toernooi_code", { ascending: true })
+          .order("created_at", { ascending: true });
+
+      if (toernooiBoutErr) throw toernooiBoutErr;
+
+      const toernooiBoutRows = normalizeToernooiBoutRows(
+        ((fetchedToernooiBoutRows ?? []) as AnyRow[]).filter((row) =>
+          isToernooiRow(row),
+        ),
+      );
+
+      const rawCtxList = [
+        ...((ctxRows ?? []) as AnyRow[]),
+        ...toernooiBoutRows,
+      ];
+
+      const ctxEventRow = rawCtxList.find(
+        (r) => r?.evenement_naam || r?.evenement_datum,
+      );
+      const ctxEvenementNaam =
+        String(ctxEventRow?.evenement_naam ?? "").trim() || null;
+      const ctxEvenementDatum =
+        String(ctxEventRow?.evenement_datum ?? "").trim() || null;
+
+      if (!evenementNaam && ctxEvenementNaam)
+        setEvenementNaam(ctxEvenementNaam);
+      if (!fallbackEvenementDatum && ctxEvenementDatum) {
+        fallbackEvenementDatum = ctxEvenementDatum;
+        setEvenementDatum(ctxEvenementDatum);
+      }
+
+      const birthdatesByVa = await loadFighterBirthdatesByVa(
+        String(matchmakingId),
+        latestControleRunId,
+      );
+      const ctxList = enrichRowsWithBirthdates(
+        rawCtxList,
+        birthdatesByVa,
+        fallbackEvenementDatum,
+      );
       setRows(ctxList);
       syncOrderedRowsFromRows(ctxList);
 
@@ -2656,7 +2950,9 @@ export default function ControleMatchmakingPage() {
               <div className="flex items-center justify-center xl:justify-end">
                 <button
                   type="button"
-                  onClick={() => router.push("/dashboard/matchmaker/matchmaking")}
+                  onClick={() =>
+                    router.push("/dashboard/matchmaker/matchmaking")
+                  }
                   className="inline-flex items-center justify-center px-3 py-2 text-xs font-extrabold transition hover:-translate-y-[1px]"
                   style={{
                     minWidth: 168,
@@ -2749,7 +3045,9 @@ export default function ControleMatchmakingPage() {
                     Acties
                   </span>
                   <DarkActionButton
-                    label={headerBusy === "admin" ? "Bezig..." : "Stuur naar admin"}
+                    label={
+                      headerBusy === "admin" ? "Bezig..." : "Stuur naar admin"
+                    }
                     tone="purple"
                     icon={<RotateCcw className="h-3.5 w-3.5" />}
                     onClick={stuurUploadNaarAdmin}
@@ -2761,7 +3059,9 @@ export default function ControleMatchmakingPage() {
                     }
                   />
                   <DarkActionButton
-                    label={headerBusy === "bond" ? "Bezig..." : "Stuur naar bond"}
+                    label={
+                      headerBusy === "bond" ? "Bezig..." : "Stuur naar bond"
+                    }
                     tone="blue"
                     icon={<Send className="h-3.5 w-3.5" />}
                     onClick={handleSendToBond}

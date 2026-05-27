@@ -110,6 +110,14 @@ export async function POST(req: Request) {
 
     {
       const { error } = await supabaseAdmin
+        .from("controle_toernooi_context")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id);
+      if (error) throw error;
+    }
+
+    {
+      const { error } = await supabaseAdmin
         .from("dispensatie_requests")
         .delete()
         .eq("matchmaking_id", matchmaking_id);

@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
+  { auth: { persistSession: false } },
 );
 
 type ControleRun = {
@@ -26,7 +26,7 @@ function getUserIdFromAuth(auth: any) {
       auth?.profile?.id ??
       auth?.id ??
       auth?.userId ??
-      ""
+      "",
   ).trim();
 }
 
@@ -38,61 +38,101 @@ function lower(v: unknown) {
   return norm(v).toLowerCase();
 }
 
-function inferTab(row: any): "app" | "upload" | "retour" {
+function inferTab(row: any): "app" | "uploads" | "retour" {
   const stadium = lower(row?.stadium);
+  const status = lower(row?.status);
   const bron = lower(row?.bron_type);
+  const eigenaarType = lower(row?.huidige_eigenaar_type);
 
-  if (stadium === "retour_naar_eigenaar") return "retour";
-  if (bron === "matchmaker_upload") return "upload";
+  const isRetour =
+    stadium === "retour_naar_eigenaar" ||
+    stadium === "retour_naar_matchmaker" ||
+    stadium.includes("retour") ||
+    status === "retour_naar_eigenaar" ||
+    status === "retour_naar_matchmaker" ||
+    status.includes("retour");
+
+  if (isRetour) return "retour";
+
+  if (
+    bron === "matchmaker_upload" ||
+    eigenaarType === "matchmaker_upload" ||
+    bron === "admin_upload" ||
+    bron === "upload" ||
+    bron.includes("upload")
+  ) {
+    return "uploads";
+  }
 
   return "app";
 }
 
-function isMatchmakerVisibleRow(row: any, userId: string) {
-  const bronType = lower(row?.bron_type);
-  const eigenaarType = lower(row?.huidige_eigenaar_type);
-  const eigenaarUserId = norm(row?.huidige_eigenaar_user_id);
+function isRetourRow(row: any) {
+  return inferTab(row) === "retour";
+}
+
+function isAangebodenAanNvbRow(row: any) {
+  if (isRetourRow(row)) return false;
+
   const stadium = lower(row?.stadium);
   const status = lower(row?.status);
   const finalStatus = lower(row?.final_status);
-  const isArchived = row?.is_archived === true;
-
-  const isAdminUpload = bronType === "admin_upload";
-
-  const ligtBijDezeMatchmaker =
-    eigenaarType === "matchmaker" && eigenaarUserId === userId;
-
-  const ligtBijAdmin =
-    eigenaarType === "admin" ||
-    stadium === "ingediend_admin" ||
-    stadium === "in_controle_admin" ||
-    status === "ingediend_admin" ||
-    status === "in_controle_admin" ||
-    finalStatus === "ingediend_admin" ||
-    finalStatus === "in_controle_admin";
-
-  const ligtVerderInLifecycle =
-    eigenaarType === "bondteam" ||
-    eigenaarType === "official" ||
-    eigenaarType === "hoofdofficial" ||
-    stadium === "klaar_voor_weegstation" ||
-    stadium === "in_officials" ||
-    stadium === "in_weegstation" ||
-    stadium === "weegstation_verwerkt" ||
-    stadium === "definitieve_lineup" ||
-    stadium === "klaar_voor_uitslagen" ||
-    stadium === "uitslagen_in_bewerking" ||
-    stadium === "uitslagen_definitief" ||
-    stadium === "gearchiveerd" ||
-    finalStatus === "gearchiveerd";
+  const eigenaarType = lower(row?.huidige_eigenaar_type);
 
   return (
-    !isArchived &&
-    !isAdminUpload &&
-    ligtBijDezeMatchmaker &&
-    !ligtBijAdmin &&
-    !ligtVerderInLifecycle
+    status === "ingediend_admin" ||
+    status === "in_controle_admin" ||
+    status === "definitieve_matchmaking_ingediend" ||
+    stadium === "ingediend_admin" ||
+    stadium === "in_controle_admin" ||
+    stadium === "definitieve_matchmaking_ingediend" ||
+    finalStatus === "ingediend_admin" ||
+    finalStatus === "in_controle_admin" ||
+    finalStatus === "definitieve_matchmaking_ingediend" ||
+    eigenaarType === "admin" ||
+    eigenaarType === "nvb" ||
+    eigenaarType === "bondteam"
   );
+}
+
+function isMatchmakerVisibleRow(row: any, userId: string) {
+  const bronType = lower(row?.bron_type);
+  const isArchived = row?.is_archived === true;
+
+  const eigenaarUserId = norm(row?.huidige_eigenaar_user_id);
+  const matchmakerId = norm(row?.matchmaker_id);
+  const makerUserId = norm(row?.maker_user_id);
+  const uploadedBy = norm(row?.uploaded_by);
+
+  const isRetour = isRetourRow(row);
+  const eigenaarType = lower(row?.huidige_eigenaar_type);
+  const isAdminUpload = bronType === "admin_upload" && eigenaarType !== "matchmaker_upload";
+  const isMatchmakerUpload = bronType === "matchmaker_upload" || eigenaarType === "matchmaker_upload";
+  const isAangebodenAanNvb = isAangebodenAanNvbRow(row);
+
+  // Hard filter op gebruiker-id. Rollen kunnen dubbel zijn; de id bepaalt of de
+  // matchmaking bij deze matchmaker hoort.
+  const hoortBijDezeGebruiker =
+    eigenaarUserId === userId ||
+    matchmakerId === userId ||
+    makerUserId === userId ||
+    uploadedBy === userId;
+
+  if (isArchived || !hoortBijDezeGebruiker) return false;
+
+  // Zodra de matchmaking is aangeboden en admin/NVB eigenaar is, verdwijnt hij
+  // uit het matchmaker-overzicht. Hij komt pas terug als NVB hem retour zet.
+  if (isAangebodenAanNvb && !isRetour) return false;
+
+  // Matchmaker-upload blijft eerst bij de matchmaker, zodat hij de MM kan controleren
+  // en pas daarna met "Stuur naar admin" naar NVB controle kan sturen.
+  if (isMatchmakerUpload) return true;
+
+  // Admin uploads blijven normaal uit het matchmaker-overzicht, behalve als NVB hem
+  // expliciet retour heeft gezet naar deze matchmaker.
+  if (isAdminUpload && !isRetour) return false;
+
+  return true;
 }
 
 export async function GET(req: Request) {
@@ -104,7 +144,7 @@ export async function GET(req: Request) {
     if (!userId) {
       return NextResponse.json(
         { ok: false, error: "Geen geldige gebruiker gevonden." },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -117,11 +157,11 @@ export async function GET(req: Request) {
     if (profileError) {
       console.error(
         "[matchmaker/matchmakings-overzicht] profile error:",
-        profileError
+        profileError,
       );
       return NextResponse.json(
         { ok: false, error: profileError.message },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -130,13 +170,14 @@ export async function GET(req: Request) {
     if (role !== "matchmaker" && role !== "admin" && role !== "superadmin") {
       return NextResponse.json(
         { ok: false, error: "Gebruiker is geen matchmaker." },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
     const { data: matchmakingsRaw, error } = await supabaseAdmin
       .from("matchmakings")
-      .select(`
+      .select(
+        `
         id,
         naam,
         datum,
@@ -168,7 +209,8 @@ export async function GET(req: Request) {
         matchmaker_naam,
         uploaded_by,
         hoofdofficial_id
-      `)
+      `,
+      )
       .eq("is_archived", false)
       .order("datum", { ascending: false })
       .order("created_at", { ascending: false });
@@ -176,16 +218,16 @@ export async function GET(req: Request) {
     if (error) {
       console.error(
         "[matchmaker/matchmakings-overzicht] matchmakings error:",
-        error
+        error,
       );
       return NextResponse.json(
         { ok: false, error: error.message },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     const matchmakings = (matchmakingsRaw ?? []).filter((row: any) =>
-      isMatchmakerVisibleRow(row, userId)
+      isMatchmakerVisibleRow(row, userId),
     );
 
     const matchmakingIds = matchmakings
@@ -195,14 +237,16 @@ export async function GET(req: Request) {
     const { data: runs, error: runsError } = matchmakingIds.length
       ? await supabaseAdmin
           .from("controle_runs")
-          .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type")
+          .select(
+            "id, matchmaking_id, status, gestart_op, afgerond_op, run_type",
+          )
           .in("matchmaking_id", matchmakingIds)
       : { data: [] as any[], error: null as any };
 
     if (runsError) {
       console.error(
         "[matchmaker/matchmakings-overzicht] controle_runs error:",
-        runsError
+        runsError,
       );
     }
 
@@ -281,7 +325,7 @@ export async function GET(req: Request) {
     console.error("[matchmaker/matchmakings-overzicht] unexpected:", e);
     return NextResponse.json(
       { ok: false, error: e?.message ?? "Onverwachte fout" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

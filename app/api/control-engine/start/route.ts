@@ -73,6 +73,48 @@ function resolveScriptPath(...parts: string[]) {
   throw new Error(`Script niet gevonden:\n- ${candidates.join("\n- ")}`);
 }
 
+
+function resolveScraperLockPath() {
+  const root = process.cwd();
+  const candidates = [
+    path.join(root, "ControlEngine", "scrapers"),
+    path.join(root, "ControlEngine", "ControlEngine", "scrapers"),
+    path.join(root, "scrapers"),
+  ];
+  const dir = candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, ".fightpassport-scraper.lock");
+}
+
+async function withScraperLock<T>(fn: () => Promise<T>): Promise<T> {
+  const lockPath = resolveScraperLockPath();
+  const started = Date.now();
+
+  while (true) {
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+      fs.closeSync(fd);
+      break;
+    } catch {
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > 1000 * 60 * 90) fs.unlinkSync(lockPath);
+      } catch {}
+      if (Date.now() - started > 1000 * 60 * 120) {
+        throw new Error("FightPassport scraper-lock timeout. Er draait mogelijk nog een andere scraper.");
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch {}
+  }
+}
+
 function clampInt(n: any, def: number, min: number, max: number): number {
   const num = Number(n);
   if (!Number.isFinite(num)) return def;
@@ -200,7 +242,7 @@ function runNodeScript(
   envExtra?: Record<string, string>,
   logPrefix?: string
 ): Promise<{ stdout: string; stderr: string; ms: number }> {
-  return new Promise((resolve, reject) => {
+  return withScraperLock(() => new Promise((resolve, reject) => {
     const t0 = Date.now();
 
     const proc = spawn("node", [scriptPath, ...args], {
@@ -249,7 +291,7 @@ function runNodeScript(
         );
       }
     });
-  });
+  }));
 }
 
 function uniqueBy<T>(arr: T[], getKey: (row: T) => string): T[] {
@@ -341,8 +383,10 @@ export async function POST(req: Request) {
     const cleanupTargets = [
       "fighters_raw",
       "uitslagen_raw",
+      "controle_uitslagen",
       "controle_resultaten",
       "controle_bout_context",
+      "controle_toernooi_context",
     ] as const;
 
     for (const table of cleanupTargets) {
@@ -452,6 +496,10 @@ export async function POST(req: Request) {
           fpBundlePath,
           [matchmaking_id!, controle_run_id!, ...va_nummers],
           {
+            // Control-engine/admin start gebruikt ALTIJD de master-login.
+            // Belangrijk: process.env.FP_MATCHMAKER_ID kan globaal bestaan, maar mag hier niet doorlekken.
+            FP_MATCHMAKER_ID: "",
+            FP_SESSION_MODE: "master",
             WORKERS: String(workers),
             STAGGER_MS: String(stagger_ms),
             TAB_ATTEMPTS: String(tab_attempts),

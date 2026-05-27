@@ -202,9 +202,9 @@ export default function OfficialsDashboardPage() {
       icon: Scale,
     },
     {
-      label: "Events",
-      subtitle: "Aangevraagde events beheren",
-      href: "/dashboard/officials/verzoeken",
+      label: "Overtredingen",
+      subtitle: "Overtredingen beheren en verwerken",
+      href: "/dashboard/officials/overtreding-melden",
       icon: Users,
     },
     {

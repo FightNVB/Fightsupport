@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -28,6 +29,13 @@ interface ControleRun {
   gestart_op: string | null;
   afgerond_op: string | null;
   run_type: string | null;
+}
+
+interface FpSessionStatus {
+  status?: string | null;
+  message?: string | null;
+  updated_at?: string | null;
+  last_error?: string | null;
 }
 
 type TabKey = "eigen" | "matchmaker" | "official";
@@ -289,11 +297,24 @@ function ActionSquare({
   );
 }
 
+function isFightPassportUnlockStatus(status: string | null | undefined) {
+  const s = String(status ?? "").trim().toLowerCase();
+  return (
+    s === "waiting_for_unlock" ||
+    s === "waiting_for_unlock_code" ||
+    s === "unlock_required" ||
+    s === "code_required" ||
+    s.includes("unlock") ||
+    s.includes("pincode")
+  );
+}
+
 const ACTION_COLORS = {
   matchmaking: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
   controle: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
   opslaan: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
   annuleren: "linear-gradient(180deg, #8b8b8b 0%, #4b4b4b 100%)",
+  herupload: "linear-gradient(180deg, #ff8a1f 0%, #d94700 100%)",
   verwijderen: "linear-gradient(180deg, #c53636 0%, #7a1717 100%)",
 };
 
@@ -314,6 +335,7 @@ export default function ControleOverzichtPage() {
 
   const [savingEditId, setSavingEditId] = useState<string | null>(null);
   const [snapshotSavingId, setSnapshotSavingId] = useState<string | null>(null);
+  const [heruploadBusyId, setHeruploadBusyId] = useState<string | null>(null);
   const [rowMsgById, setRowMsgById] = useState<Record<string, string>>({});
 
   const [filterMonth, setFilterMonth] = useState<string>("");
@@ -335,15 +357,33 @@ export default function ControleOverzichtPage() {
     "Sluit deze pagina niet af terwijl de autocheck loopt."
   );
 
+  const [fpSession, setFpSession] = useState<FpSessionStatus | null>(null);
+  const [fpSessionLoading, setFpSessionLoading] = useState(false);
+  const heruploadInputRef = useRef<HTMLInputElement | null>(null);
+  const heruploadRowRef = useRef<MatchmakingRow | null>(null);
+
   useEffect(() => {
     void load();
   }, []);
+
+
+  useEffect(() => {
+    if (!scrapeOverlayOpen) return;
+
+    void checkFightPassportSession();
+    const timer = window.setInterval(() => {
+      void checkFightPassportSession();
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [scrapeOverlayOpen]);
 
   function openScrapeOverlay(options?: {
     title?: string;
     message?: string;
     sub?: string;
   }) {
+    setFpSession(null);
     setScrapeOverlayTitle(options?.title ?? "Even wachten");
     setScrapeOverlayMessage(
       options?.message ?? "Autocheck loopt. Wacht op resultaten..."
@@ -356,6 +396,47 @@ export default function ControleOverzichtPage() {
 
   function closeScrapeOverlay() {
     setScrapeOverlayOpen(false);
+  }
+
+
+  async function checkFightPassportSession() {
+    try {
+      setFpSessionLoading(true);
+
+      const res = await authedFetch("/api/fightpassport/session", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!res.ok) return null;
+
+      const json = await res.json().catch(() => null);
+      const session: FpSessionStatus = {
+        status: json?.status ?? json?.session?.status ?? null,
+        message: json?.message ?? json?.session?.message ?? null,
+        updated_at: json?.updated_at ?? json?.session?.updated_at ?? null,
+        last_error: json?.last_error ?? json?.session?.last_error ?? null,
+      };
+
+      setFpSession(session);
+
+      if (isFightPassportUnlockStatus(session.status)) {
+        setScrapeOverlayTitle("FightPassport unlockcode nodig");
+        setScrapeOverlayMessage(
+          "FightPassport wacht op de 7-cijferige code uit je e-mail."
+        );
+        setScrapeOverlaySub(
+          "De scraper blijft wachten en probeert niet opnieuw in te loggen. Open de sessiepagina, vul de code in en zet vertrouwd apparaat aan."
+        );
+      }
+
+      return session;
+    } catch (e) {
+      console.warn("FightPassport sessiestatus niet bereikbaar:", e);
+      return null;
+    } finally {
+      setFpSessionLoading(false);
+    }
   }
 
   function setRowMessage(rowId: string, message: string) {
@@ -556,6 +637,12 @@ export default function ControleOverzichtPage() {
       if (!res.ok) {
         const t = await res.text();
         console.error("Start controle failed:", res.status, t);
+
+        const session = await checkFightPassportSession();
+        if (isFightPassportUnlockStatus(session?.status)) {
+          return;
+        }
+
         closeScrapeOverlay();
         alert("Start controle mislukt. Check console/logs.");
         return;
@@ -701,6 +788,68 @@ export default function ControleOverzichtPage() {
     }
   }
 
+  function openHerupload(row: MatchmakingRow) {
+    heruploadRowRef.current = row;
+    setRowMessage(row.id, "");
+    heruploadInputRef.current?.click();
+  }
+
+  async function handleHeruploadFile(file: File | null) {
+    const row = heruploadRowRef.current;
+    if (!row || !file) return;
+
+    const ok = window.confirm(
+      `Herupload matchmaking "${row.naam ?? row.id}"?\n\nBestaande VA-combinaties worden bijgewerkt, nieuwe partijen worden toegevoegd en partijen die niet meer in Excel staan worden verborgen.`
+    );
+    if (!ok) return;
+
+    try {
+      setHeruploadBusyId(row.id);
+      setRowMessage(row.id, "Herupload verwerken…");
+
+      const form = new FormData();
+      form.append("file", file);
+      form.append("matchmaking_id", row.id);
+      form.append("force_new", "false");
+      form.append("evenement_naam", row.naam ?? "Herupload matchmaking");
+      form.append("evenement_datum", row.datum ?? new Date().toISOString().slice(0, 10));
+      form.append("locatie", row.locatie ?? "");
+      form.append("bondteam", row.bondteam ?? "");
+      form.append("promotor", row.promotor ?? "");
+      form.append("matchmaker", row.matchmaker_id ?? row.promotor ?? "herupload");
+
+      const res = await authedFetch("/api/submit-matchmaking/herupload", {
+        method: "POST",
+        body: form,
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        console.error("Herupload failed:", res.status, json);
+        setRowMessage(
+          row.id,
+          json?.error ? `❌ ${json.error}` : "❌ Herupload mislukt."
+        );
+        return;
+      }
+
+      const stats = json?.stats ?? {};
+      setRowMessage(
+        row.id,
+        `✅ Herupload klaar: ${stats.updated ?? 0} aangepast · ${stats.inserted ?? stats.created ?? 0} nieuw · ${stats.removed ?? 0} verwijderd`
+      );
+      await load();
+    } catch (e) {
+      console.error(e);
+      setRowMessage(row.id, "❌ Onverwachte fout bij herupload.");
+    } finally {
+      setHeruploadBusyId(null);
+      heruploadRowRef.current = null;
+      if (heruploadInputRef.current) heruploadInputRef.current.value = "";
+    }
+  }
+
   function getOwnerLabel(row: MatchmakingRow) {
     const typeLabel = formatOwnerTypeLabel(row.huidige_eigenaar_type);
     const ownerId = String(row.huidige_eigenaar_user_id ?? "").trim();
@@ -792,6 +941,15 @@ export default function ControleOverzichtPage() {
 
   return (
     <main className="min-h-screen px-4 py-6" style={{ background: "#eef0f3" }}>
+      <input
+        ref={heruploadInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={(e) => {
+          void handleHeruploadFile(e.target.files?.[0] ?? null);
+        }}
+      />
       <div className="mx-auto w-full max-w-[1650px]">
         <div
           className="rounded-[32px] p-[6px]"
@@ -1165,6 +1323,7 @@ export default function ControleOverzichtPage() {
                                 const rowBusy = busyId === r.id;
                                 const rowEditBusy = savingEditId === r.id;
                                 const rowSnapshotBusy = snapshotSavingId === r.id;
+                                const rowHeruploadBusy = heruploadBusyId === r.id;
                                 const rowMsg = rowMsgById[r.id] ?? "";
 
                                 return (
@@ -1247,7 +1406,8 @@ export default function ControleOverzichtPage() {
                                             rowBusy ||
                                             isBusy ||
                                             rowEditBusy ||
-                                            rowSnapshotBusy
+                                            rowSnapshotBusy ||
+                                            rowHeruploadBusy
                                           }
                                           title="Start volledige controle: scrape + build + enrich + rules"
                                           color={ACTION_COLORS.controle}
@@ -1261,12 +1421,28 @@ export default function ControleOverzichtPage() {
                                             rowBusy ||
                                             isBusy ||
                                             rowEditBusy ||
-                                            rowSnapshotBusy
+                                            rowSnapshotBusy ||
+                                            rowHeruploadBusy
                                           }
                                           title="Opslaan in beheer-database"
                                           color={ACTION_COLORS.opslaan}
                                         >
                                           💾
+                                        </ActionSquare>
+
+                                        <ActionSquare
+                                          onClick={() => openHerupload(r)}
+                                          disabled={
+                                            rowBusy ||
+                                            isBusy ||
+                                            rowEditBusy ||
+                                            rowSnapshotBusy ||
+                                            rowHeruploadBusy
+                                          }
+                                          title="Herupload aangepaste Excel voor deze matchmaking"
+                                          color={ACTION_COLORS.herupload}
+                                        >
+                                          ⬆
                                         </ActionSquare>
 
                                         {isEditing && (
@@ -1296,7 +1472,8 @@ export default function ControleOverzichtPage() {
                                             rowBusy ||
                                             isBusy ||
                                             rowEditBusy ||
-                                            rowSnapshotBusy
+                                            rowSnapshotBusy ||
+                                            rowHeruploadBusy
                                           }
                                           title="Verwijdert deze matchmaking met gekoppelde controledata"
                                           color={ACTION_COLORS.verwijderen}
@@ -1435,6 +1612,54 @@ export default function ControleOverzichtPage() {
                 >
                   {scrapeOverlaySub}
                 </div>
+                {isFightPassportUnlockStatus(fpSession?.status) ? (
+                  <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.open(
+                          "/dashboard/admin/fightpassport-sessie",
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }
+                      style={{
+                        borderRadius: 0,
+                        padding: "12px 18px",
+                        background:
+                          "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
+                        color: "#fff",
+                        border: "1px solid rgba(255,255,255,0.22)",
+                        boxShadow:
+                          "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 24px rgba(255,77,0,0.24)",
+                        fontSize: 14,
+                        fontWeight: 900,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      Unlockcode invullen
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void checkFightPassportSession()}
+                      disabled={fpSessionLoading}
+                      style={{
+                        borderRadius: 0,
+                        padding: "12px 18px",
+                        background: "linear-gradient(180deg, #3b3b40 0%, #202025 100%)",
+                        color: "#fff",
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        fontSize: 14,
+                        fontWeight: 800,
+                        opacity: fpSessionLoading ? 0.65 : 1,
+                      }}
+                    >
+                      Status opnieuw checken
+                    </button>
+                  </div>
+                ) : null}
 
                 <div
                   style={{
@@ -1460,7 +1685,9 @@ export default function ControleOverzichtPage() {
                       boxShadow: "0 0 18px rgba(255,77,0,0.75)",
                     }}
                   />
-                  Controle bezig
+                  {isFightPassportUnlockStatus(fpSession?.status)
+                    ? "Wacht op unlockcode"
+                    : "Controle bezig"}
                 </div>
               </div>
             </div>

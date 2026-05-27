@@ -25,6 +25,7 @@ process.on("unhandledRejection", (err) => {
   console.error("❌ UNHANDLED REJECTION:", err?.stack ?? err);
   process.exitCode = 1;
 });
+
 process.on("uncaughtException", (err) => {
   console.error("❌ UNCAUGHT EXCEPTION:", err?.stack ?? err);
   process.exitCode = 1;
@@ -125,10 +126,12 @@ async function isLoginPage(page) {
     const loginEl = await page.$("input.gebruikersnaam").catch(() => null);
     if (loginEl) return true;
   } catch {}
+
   try {
     const u = (page.url() || "").toLowerCase();
     if (u.includes("login") || u.includes("#login") || u.includes("aanmeld")) return true;
   } catch {}
+
   return false;
 }
 
@@ -137,11 +140,13 @@ async function isLoginPage(page) {
  */
 async function hardClosePage(page) {
   if (!page) return;
+
   try {
     const client = await page.target().createCDPSession();
     await client.send("Page.stopLoading").catch(() => {});
     await client.detach().catch(() => {});
   } catch {}
+
   try {
     await page.close({ runBeforeUnload: true }).catch(() => {});
   } catch {}
@@ -157,20 +162,24 @@ async function createWorkerContext(browser) {
   if (browser && typeof browser.createBrowserContext === "function") {
     return await browser.createBrowserContext();
   }
+
   if (browser && typeof browser.createIncognitoBrowserContext === "function") {
     return await browser.createIncognitoBrowserContext();
   }
+
   return null;
 }
 
 async function closeWorkerContext(ctx) {
   if (!ctx) return;
+
   try {
     const pages = await ctx.pages().catch(() => []);
     for (const p of pages) {
       await hardClosePage(p).catch(() => {});
     }
   } catch {}
+
   try {
     await ctx.close().catch(() => {});
   } catch {}
@@ -276,16 +285,20 @@ async function scrapeHeader(page) {
 async function openTile(page, va, title) {
   await closeAnyModal(page);
 
-  await page.evaluate((va, title) => {
-    const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
-    if (!tab) return;
+  await page.evaluate(
+    (va, title) => {
+      const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
+      if (!tab) return;
 
-    const head = [...tab.querySelectorAll(".tileHeader.enabled")].find(
-      (h) => (h.innerText || "").trim().toUpperCase() === title.toUpperCase()
-    );
+      const head = [...tab.querySelectorAll(".tileHeader.enabled")].find(
+        (h) => (h.innerText || "").trim().toUpperCase() === title.toUpperCase()
+      );
 
-    head?.closest(".tile")?.click();
-  }, va, title);
+      head?.closest(".tile")?.click();
+    },
+    va,
+    title
+  );
 
   await wait(650);
 }
@@ -313,14 +326,17 @@ async function scrapeDetails(page, va) {
         const parts = raw.split(":");
         licentie = (parts[1] ?? "").trim() || null;
       }
+
       if (txt.startsWith("wedstrijden")) {
         const m = raw.match(/\d+/);
         totaal = m ? parseInt(m[0], 10) : null;
       }
+
       if (txt.startsWith("gewonnen")) {
         const m = raw.match(/\d+/);
         gewonnen = m ? parseInt(m[0], 10) : null;
       }
+
       if (txt.includes("startverbod")) {
         if (txt.includes("nee") || txt.includes("geen")) {
           heeft_startverbod = false;
@@ -436,6 +452,7 @@ async function doFullfighter(page, va, matchmaking_id, controle_run_id) {
 ------------------------------------------------------- */
 function parseNlDate(v) {
   if (!v) return null;
+
   const s = String(v).trim();
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -443,8 +460,8 @@ function parseNlDate(v) {
   const m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (!m) return null;
 
-  let dd = m[1].padStart(2, "0");
-  let mm = m[2].padStart(2, "0");
+  const dd = m[1].padStart(2, "0");
+  const mm = m[2].padStart(2, "0");
   let yy = m[3];
 
   if (yy.length === 2) yy = Number(yy) < 30 ? `20${yy}` : `19${yy}`;
@@ -467,8 +484,11 @@ async function fetchPartijNrByVa(matchmaking_id) {
   if (error) throw error;
 
   const normVa = (v) => {
-    const s = String(v ?? "").trim().replace(/\D+/g, "");
+    const s = String(v ?? "")
+      .trim()
+      .replace(/\D+/g, "");
     if (!s) return null;
+
     const noZeros = s.replace(/^0+/, "");
     return noZeros ? noZeros : null;
   };
@@ -486,6 +506,7 @@ async function fetchPartijNrByVa(matchmaking_id) {
       if (!tmp.has(vaR)) tmp.set(vaR, new Set());
       tmp.get(vaR).add(nr);
     }
+
     if (vaB) {
       if (!tmp.has(vaB)) tmp.set(vaB, new Set());
       tmp.get(vaB).add(nr);
@@ -493,9 +514,14 @@ async function fetchPartijNrByVa(matchmaking_id) {
   }
 
   const out = new Map();
+
   for (const [va, set] of tmp.entries()) {
-    out.set(va, Array.from(set).sort((a, b) => a - b));
+    out.set(
+      va,
+      Array.from(set).sort((a, b) => Number(a) - Number(b))
+    );
   }
+
   return out;
 }
 
@@ -516,8 +542,10 @@ async function openUitslagenTile(page, va) {
 
 async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) {
   const start = Date.now();
+
   while (Date.now() - start < timeoutMs) {
     const frames = page.frames();
+
     for (const fr of frames) {
       for (const sel of selectors) {
         try {
@@ -526,8 +554,10 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
         } catch {}
       }
     }
+
     await wait(250);
   }
+
   return null;
 }
 
@@ -540,10 +570,14 @@ async function downloadExcel(page, matchmaking_id, va) {
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const client = await page.target().createCDPSession();
-  await client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloadDir });
+  await client.send("Page.setDownloadBehavior", {
+    behavior: "allow",
+    downloadPath: downloadDir,
+  });
 
   const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
   const found = await waitForAnySelectorInAnyFrame(page, selectors, 45000);
+
   if (!found) throw new Error(`Download knop niet gevonden — VA ${va}`);
 
   const clickDownload = async () => {
@@ -569,27 +603,26 @@ async function downloadExcel(page, matchmaking_id, va) {
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
     if (xlsx[0]) {
-  const downloadedFile = xlsx[0];
+      const downloadedFile = xlsx[0];
 
-  // klein beetje wachten zodat excel lock weg is
-  await wait(300);
+      // Klein beetje wachten zodat excel lock weg is.
+      await wait(300);
 
-  // bestand automatisch opruimen zodra node afsluit
-  process.on("exit", () => {
-    try {
-      if (fs.existsSync(downloadedFile)) {
-        fs.unlinkSync(downloadedFile);
-      }
+      // Bestand automatisch opruimen zodra node afsluit.
+      process.on("exit", () => {
+        try {
+          if (fs.existsSync(downloadedFile)) {
+            fs.unlinkSync(downloadedFile);
+          }
 
-      // map ook verwijderen als leeg
-      if (fs.existsSync(downloadDir)) {
-        fs.rmSync(downloadDir, { recursive: true, force: true });
-      }
-    } catch {}
-  });
+          if (fs.existsSync(downloadDir)) {
+            fs.rmSync(downloadDir, { recursive: true, force: true });
+          }
+        } catch {}
+      });
 
-  return downloadedFile;
-}
+      return downloadedFile;
+    }
 
     const hasCr = lower.some((f) => f.endsWith(".crdownload"));
 
@@ -626,16 +659,23 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
     ["Discipline", idxDiscipline],
     ["Uitslag", idxUitslag],
   ];
+
   const missing = must.filter(([, idx]) => idx === -1).map(([name]) => name);
 
   if (missing.length) {
     return {
       rows: [],
-      meta: { ok: false, missingHeaders: missing, headers: headers.filter(Boolean) },
+      meta: {
+        ok: false,
+        emptyExport: true,
+        missingHeaders: missing,
+        headers: headers.filter(Boolean),
+      },
     };
   }
 
   const out = [];
+
   for (let r = 5; r < rows.length; r++) {
     const row = rows[r];
     if (!row) continue;
@@ -655,16 +695,17 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
       evenement: toStr(row[idxEvenement]) ?? null,
       tegenstander: toStr(row[idxTegenstander]) ?? null,
 
-      sportschool: idxSportschool !== -1 ? (toStr(row[idxSportschool]) ?? null) : null,
+      sportschool: idxSportschool !== -1 ? toStr(row[idxSportschool]) ?? null : null,
       discipline: toStr(row[idxDiscipline]) ?? null,
-      klasse: idxKlasse !== -1 ? (toStr(row[idxKlasse]) ?? null) : null,
-      gewicht: idxGewicht !== -1 ? (toStr(row[idxGewicht]) ?? null) : null,
+      klasse: idxKlasse !== -1 ? toStr(row[idxKlasse]) ?? null : null,
+      gewicht: idxGewicht !== -1 ? toStr(row[idxGewicht]) ?? null : null,
       uitslag: toStr(row[idxUitslag]) ?? null,
     });
   }
 
   const seen = new Set();
   const deduped = [];
+
   for (const r of out) {
     const k = [
       r.matchmaking_id,
@@ -677,17 +718,27 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
       r.discipline,
       r.klasse,
     ]
-      .map((x) => String(x ?? "").replace(/\s+/g, " ").trim())
+      .map((x) =>
+        String(x ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+      )
       .join("||");
 
     if (seen.has(k)) continue;
+
     seen.add(k);
     deduped.push(r);
   }
 
   return {
     rows: deduped,
-    meta: { ok: true, missingHeaders: [], headers: headers.filter(Boolean) },
+    meta: {
+      ok: true,
+      emptyExport: false,
+      missingHeaders: [],
+      headers: headers.filter(Boolean),
+    },
   };
 }
 
@@ -706,6 +757,7 @@ async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, 
     .eq("va_nummer", vaStr);
 
   if (delErr) throw delErr;
+
   if (!data.length) return { saved: 0 };
 
   const normalized = data.map((row) => ({
@@ -736,6 +788,7 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
     await openUitslagenTile(page, va);
 
     const file = await downloadExcel(page, matchmaking_id, va);
+
     if (!file) {
       await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
       console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
@@ -746,25 +799,42 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
     lastMeta = parsed?.meta ?? null;
 
     if (parsed?.meta?.ok) {
-      const res = await saveUitslagenSnapshot(parsed.rows, matchmaking_id, controle_run_id, va, partijNrByVaMap);
+      const res = await saveUitslagenSnapshot(
+        parsed.rows,
+        matchmaking_id,
+        controle_run_id,
+        va,
+        partijNrByVaMap
+      );
+
       const n = res?.saved ?? parsed.rows.length ?? 0;
+
       console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
       return { ok: true, n, reason: "ok" };
     }
 
-    const missing = (parsed?.meta?.missingHeaders ?? []).join(", ");
-    const hdrs = (parsed?.meta?.headers ?? []).join(" | ");
-    console.log(
-      `[uitslagen] ❌ Kolomkoppen niet gevonden (attempt ${attempt}/${MAX_TRIES}) — VA ${va}. Missing: ${missing}`
-    );
-    console.log(`[uitslagen] ➡️ Headers: ${hdrs}`);
+    const missing = lastMeta?.missingHeaders ?? [];
+    const headers = lastMeta?.headers ?? [];
 
-    await closeAnyModal(page).catch(() => {});
-    await wait(600 + attempt * 400);
+    console.log(`[uitslagen] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`, {
+      attempt,
+      missingHeaders: missing,
+      headers,
+    });
+
+    await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
+
+    return {
+      ok: true,
+      n: 0,
+      reason: "geen_uitslagen",
+      missingHeaders: missing,
+    };
   }
 
   await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
   console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
+
   return { ok: true, n: 0, reason: "no_uitslagen" };
 }
 
@@ -777,6 +847,7 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
   const { browser, page: masterPage } = await loginFightPassport();
 
   let cookies = [];
+
   try {
     cookies = await masterPage.cookies();
   } catch {}
@@ -790,15 +861,18 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
       try {
         await masterRefreshPromise;
       } catch {}
+
       return cookies;
     }
 
     masterRefreshPromise = (async () => {
       console.log(`[bundle] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
       await ensureLoggedIn(masterPage, { force: true });
+
       try {
         cookies = await masterPage.cookies();
       } catch {}
+
       console.log("[bundle] ✅ master refreshed (cookies updated)");
       return cookies;
     })();
@@ -864,6 +938,7 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
             page = null;
           }
         );
+
         fullfighterStatus = "ok";
 
         const uRes = await withTimeout(
@@ -875,14 +950,19 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
             page = null;
           }
         );
+
         uitslagenStatus = uRes?.ok ? `ok(n=${uRes?.n ?? 0})` : `fail(${uRes?.reason ?? "unknown"})`;
       } catch (e) {
         const msg = e?.message ?? String(e);
 
         if (msg === "LOGIN_PAGE") {
-          console.log(`[bundle] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
+          console.log(
+            `[bundle] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`
+          );
+
           fullfighterStatus = "login_page";
           uitslagenStatus = "login_page";
+
           try {
             await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
             await resetWorkerContext(`login refresh VA ${va}`);
@@ -896,14 +976,18 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
           } else if (msg.includes("uitslagen")) {
             uitslagenStatus = "timeout";
           }
+
           console.log(`[bundle] ❌ ${label} fout VA ${va}:`, msg);
         } else {
           console.log(`[bundle] ❌ ${label} fout VA ${va}:`, msg);
+
           if (fullfighterStatus === "skip") fullfighterStatus = "error";
           if (uitslagenStatus === "skip") uitslagenStatus = "error";
         }
       } finally {
-        console.log(`[bundle] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`);
+        console.log(
+          `[bundle] ✅ END ${label} VA ${va} | fullfighter=${fullfighterStatus} | uitslagen=${uitslagenStatus}`
+        );
 
         try {
           if (page) {
@@ -923,6 +1007,7 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     try {
       await masterPage.close();
     } catch {}
+
     try {
       await browser.close();
     } catch {}
@@ -942,16 +1027,19 @@ if (!matchmaking_id) {
   console.error("❌ matchmaking_id ontbreekt");
   process.exit(1);
 }
+
 if (!controle_run_id) {
   console.error("❌ controle_run_id ontbreekt");
   process.exit(1);
 }
+
 if (!vaList.length) {
   console.error("❌ Geen geldige VA’s meegegeven (verwacht 3–5 cijfers).");
   process.exit(1);
 }
 
 const WORKERS = Number(process.env.WORKERS ?? "5");
+
 const workers =
   Number.isFinite(WORKERS) && WORKERS > 0 ? Math.min(10, Math.max(1, Math.floor(WORKERS))) : 5;
 

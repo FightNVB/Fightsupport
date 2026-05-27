@@ -52,6 +52,90 @@ function uuidOrNull(v: any): string | null {
     : null;
 }
 
+function toernooiCodeOrNull(v: any): string | null {
+  const x = s(v).toUpperCase();
+  return x ? x : null;
+}
+
+function isToernooiContext(ctx: AnyRow): boolean {
+  if (toernooiCodeOrNull(pick(ctx, ["toernooi_code", "toernooicode", "tournament_code"]))) return true;
+  const raw = pick(ctx, ["is_toernooi", "toernooi"]);
+  if (raw === true) return true;
+  const x = s(raw).toLowerCase();
+  return ["true", "1", "ja", "yes"].includes(x);
+}
+
+function missingColumn(message: string): string {
+  return (
+    message.match(/'([^']+)' column/)?.[1] ||
+    message.match(/column "([^"]+)"/)?.[1] ||
+    message.match(/Could not find the ([^\s]+) column/)?.[1] ||
+    ""
+  );
+}
+
+async function safeInsertRows(params: {
+  supabase: SupabaseLike;
+  table: string;
+  rows: Record<string, any>[];
+}) {
+  const { supabase, table } = params;
+  let rows = params.rows.map((r) => ({ ...r }));
+  const dropped: string[] = [];
+
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const { data, error } = await supabase.from(table).insert(rows).select("*");
+    if (!error) return { data: data ?? [], error: null, dropped };
+
+    const col = missingColumn(error.message || "");
+    if ((error.code === "PGRST204" || error.code === "42703") && col) {
+      rows = rows.map((r) => {
+        if (!(col in r)) return r;
+        const next = { ...r };
+        delete next[col];
+        return next;
+      });
+      dropped.push(col);
+      continue;
+    }
+
+    return { data: [], error, dropped };
+  }
+
+  return {
+    data: [],
+    error: new Error(`Insert ${table} mislukt: te veel onbekende kolommen.`),
+    dropped,
+  };
+}
+
+async function tryDeleteToernooiContexts(params: {
+  supabase: SupabaseLike;
+  matchmakingId: string;
+  toernooiCode: string;
+  vaNummers: string[];
+}) {
+  const { supabase, matchmakingId, toernooiCode, vaNummers } = params;
+  if (!vaNummers.length) return false;
+
+  const { error } = await supabase
+    .from("matchmaker_fighter_context")
+    .delete()
+    .eq("matchmaking_id", matchmakingId)
+    .eq("toernooi_code", toernooiCode)
+    .in("va_nummer", vaNummers);
+
+  if (!error) return true;
+
+  // Als de kolom toernooi_code nog niet bestaat in matchmaker_fighter_context,
+  // kan deze tabel de toernooi-context niet apart bewaren. Dan vallen we terug
+  // op de oude VA-delete zodat inserts niet dubbel worden.
+  if (error.code === "PGRST204" || error.code === "42703") return false;
+
+  throw error;
+}
+
+
 function pick(row: AnyRow, keys: string[]) {
   for (const key of keys) {
     const value = row?.[key];
@@ -66,14 +150,28 @@ function toContextRow(ctx: AnyRow) {
   );
 
   const now = new Date().toISOString();
+  const toernooi_code = toernooiCodeOrNull(
+    pick(ctx, ["toernooi_code", "toernooicode", "tournament_code"])
+  );
+  const is_toernooi = isToernooiContext(ctx);
 
   return {
     updated_at: now,
 
+    toernooi_code,
+    is_toernooi,
+    partij_nr: is_toernooi ? 0 : i(pick(ctx, ["partij_nr", "partijNr"])),
+    bout_id: is_toernooi ? null : uuidOrNull(pick(ctx, ["bout_id", "bout_uid", "boutId"])),
+    matchmaker_toernooi_fighter_id: uuidOrNull(
+      pick(ctx, ["matchmaker_toernooi_fighter_id", "toernooi_fighter_id", "toernooi_deelnemer_id"])
+    ),
+
     inschrijving_id: i(pick(ctx, ["inschrijving_id", "aanmelding_id", "id_aanmelding"])),
     matchmaking_id: uuidOrNull(pick(ctx, ["matchmaking_id", "matchmakingId"])),
     controle_run_id: uuidOrNull(pick(ctx, ["controle_run_id", "controleRunId", "scrape_run_id"])),
-    fighter_id: uuidOrNull(pick(ctx, ["fighter_id", "fighterId"])),
+    fighter_id: is_toernooi
+      ? ((va ?? s(pick(ctx, ["fighter_id", "fighterId"]))) || null)
+      : uuidOrNull(pick(ctx, ["fighter_id", "fighterId"])),
     event_id: uuidOrNull(pick(ctx, ["event_id", "eventId"])),
 
     row_nr: i(pick(ctx, ["row_nr", "rowNr", "rij", "regel"])),
@@ -128,7 +226,12 @@ function toContextRow(ctx: AnyRow) {
 
     extra: {
       scrape_status: pick(ctx, ["scrape_status", "controle_status"]),
-      bron: pick(ctx, ["bron", "source"]),
+      bron: pick(ctx, ["bron", "source"]) ?? (is_toernooi ? "matchmaker_toernooi_fighters" : null),
+      toernooi_code,
+      is_toernooi,
+      matchmaker_toernooi_fighter_id: uuidOrNull(
+        pick(ctx, ["matchmaker_toernooi_fighter_id", "toernooi_fighter_id", "toernooi_deelnemer_id"])
+      ),
       raw: pick(ctx, ["raw"]),
     },
   };
@@ -141,7 +244,35 @@ async function deleteOldContexts(params: {
 }) {
   const { supabase, matchmakingId, rows } = params;
 
-  const inschrijvingIds = rows
+  const toernooiRows = rows.filter((r) => toernooiCodeOrNull(pick(r, ["toernooi_code"])));
+  const normalRows = rows.filter((r) => !toernooiCodeOrNull(pick(r, ["toernooi_code"])));
+
+  // Toernooi-context mag normale fighter-context niet opruimen.
+  // Daarom eerst proberen te deleten op matchmaking_id + toernooi_code + va_nummer.
+  const fallbackVaDeletes: string[] = [];
+
+  const byToernooi = new Map<string, string[]>();
+  for (const row of toernooiRows) {
+    const code = toernooiCodeOrNull(pick(row, ["toernooi_code"]));
+    const va = normalizeVa(pick(row, ["va_nummer", "va"]));
+    if (!code || !va) continue;
+    if (!byToernooi.has(code)) byToernooi.set(code, []);
+    byToernooi.get(code)!.push(va);
+  }
+
+  for (const [code, vasRaw] of byToernooi.entries()) {
+    const vas = Array.from(new Set(vasRaw));
+    const deletedWithScope = await tryDeleteToernooiContexts({
+      supabase,
+      matchmakingId,
+      toernooiCode: code,
+      vaNummers: vas,
+    });
+
+    if (!deletedWithScope) fallbackVaDeletes.push(...vas);
+  }
+
+  const inschrijvingIds = normalRows
     .map((r) => i(pick(r, ["inschrijving_id"])))
     .filter((x): x is number => x !== null);
 
@@ -153,9 +284,11 @@ async function deleteOldContexts(params: {
       .in("inschrijving_id", inschrijvingIds);
   }
 
-  const vaNummers = rows
+  const normalVaNummers = normalRows
     .map((r) => normalizeVa(pick(r, ["va_nummer", "va"])))
     .filter(Boolean);
+
+  const vaNummers = Array.from(new Set([...normalVaNummers, ...fallbackVaDeletes]));
 
   if (vaNummers.length) {
     await supabase
@@ -181,10 +314,11 @@ export async function saveSingleFighterContexts(params: {
 
   await deleteOldContexts({ supabase, matchmakingId, rows });
 
-  const { data, error } = await supabase
-    .from("matchmaker_fighter_context")
-    .insert(rows)
-    .select("*");
+  const { data, error } = await safeInsertRows({
+    supabase,
+    table: "matchmaker_fighter_context",
+    rows,
+  });
 
   return { data: data ?? [], error };
 }
@@ -207,12 +341,22 @@ export async function saveSingleFighterRules(params: {
     .eq("matchmaking_id", matchmakingId)
     .eq("controle_run_id", controleRunId);
 
-  const rows = hits.map((hit) => ({
+  const rows = hits.map((hit) => {
+  const toernooi_code = toernooiCodeOrNull(
+    pick(hit, ["toernooi_code", "toernooicode", "tournament_code"])
+  );
+  const va = normalizeVa(pick(hit, ["va_nummer", "va", "toernooi_va_nummer", "fighter_id"]));
+
+  return {
   matchmaking_id: matchmakingId,
   controle_run_id: controleRunId,
   inschrijving_id: i(hit.inschrijving_id),
-  fighter_id: uuidOrNull(hit.fighter_id),
-  va_nummer: normalizeVa(hit.va_nummer),
+  fighter_id: toernooi_code ? ((va ?? s(hit.fighter_id)) || null) : uuidOrNull(hit.fighter_id),
+  va_nummer: va,
+  toernooi_code,
+  is_toernooi: !!toernooi_code,
+  partij_nr: toernooi_code ? 0 : i(hit.partij_nr),
+  bout_id: toernooi_code ? null : uuidOrNull(hit.bout_id),
 
   rule: hit.rule ?? null,
   rule_code: hit.rule_code ?? null,
@@ -222,9 +366,9 @@ export async function saveSingleFighterRules(params: {
 
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
-}));
+};});
 
-  const { data, error } = await supabase.from(table).insert(rows).select("*");
+  const { data, error } = await safeInsertRows({ supabase, table, rows });
 
   return { data: data ?? [], error };
 }

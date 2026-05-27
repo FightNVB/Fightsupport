@@ -44,10 +44,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // Ensure matchmaking is in LINEUP state
-    const stateCheck = await assertMatchmakingInState(supabaseAdmin, matchmaking_id, "lineup");
-    if (!stateCheck.ok) {
-      return NextResponse.json({ error: stateCheck.error }, { status: 422 });
+    // Uitslagen kunnen worden ingevoerd zodra de matchmaking in lineup of
+    // uitslagenfase staat. Oudere flows gebruiken "lineup", nieuwe flows
+    // gebruiken "klaar_voor_uitslagen" / "uitslagen_in_bewerking".
+    const allowedStateChecks = await Promise.all([
+      assertMatchmakingInState(supabaseAdmin, matchmaking_id, "lineup"),
+      assertMatchmakingInState(supabaseAdmin, matchmaking_id, "klaar_voor_uitslagen"),
+      assertMatchmakingInState(supabaseAdmin, matchmaking_id, "uitslagen_in_bewerking"),
+    ]);
+
+    if (!allowedStateChecks.some((check) => check.ok)) {
+      return NextResponse.json(
+        { error: allowedStateChecks[0]?.error ?? "Matchmaking staat niet in uitslagenfase." },
+        { status: 422 }
+      );
     }
 
     // Ensure the user can access this matchmaking (bondteam check for officials)
@@ -87,6 +97,22 @@ export async function POST(req: Request) {
       uitslag_rood: String(uitslag_rood).trim(),
       winnaar: String(winnaar).trim().toLowerCase(),
     });
+
+    const { error: mmStatusErr } = await supabaseAdmin
+      .from("matchmakings")
+      .update({
+        stadium: "uitslagen_in_bewerking",
+        status: "uitslagen_in_bewerking",
+        locked_for_editing: true,
+        last_updated_at: nowIso,
+        last_updated_by: userId,
+      })
+      .eq("id", matchmaking_id)
+      .in("stadium", ["lineup", "klaar_voor_uitslagen", "uitslagen_in_bewerking"]);
+
+    if (mmStatusErr) {
+      console.warn("[officials/uitslagen/submit] matchmaking status update mislukt:", mmStatusErr.message);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {

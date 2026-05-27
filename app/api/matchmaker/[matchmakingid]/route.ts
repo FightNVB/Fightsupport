@@ -69,6 +69,110 @@ function buildUploadBatches(rows: AnyRow[]) {
   return Array.from(map.values());
 }
 
+function parseRawJson(v: unknown): AnyRow {
+  if (!v) return {};
+  if (typeof v === "object") return v as AnyRow;
+  try {
+    const parsed = JSON.parse(String(v));
+    return parsed && typeof parsed === "object" ? (parsed as AnyRow) : {};
+  } catch {
+    return {};
+  }
+}
+
+function isRemovedBout(row: AnyRow) {
+  return (
+    row?.verwijderd === true ||
+    String(row?.verwijderd ?? "").trim().toLowerCase() === "true" ||
+    String(row?.verwijderd ?? "").trim() === "1"
+  );
+}
+
+function isToernooiBout(row: AnyRow) {
+  const code = s(row?.toernooi_code).toUpperCase();
+  return (
+    !!code ||
+    row?.is_toernooi === true ||
+    String(row?.is_toernooi ?? "").trim().toLowerCase() === "true" ||
+    String(row?.is_toernooi ?? "").trim() === "1"
+  );
+}
+
+function collectMatchedFromBouts(rows: AnyRow[]) {
+  const ids = new Set<string>();
+  const vas = new Set<string>();
+
+  for (const row of rows ?? []) {
+    if (!row || isRemovedBout(row)) continue;
+
+    const raw = parseRawJson(row?.raw_json);
+    const deelnemer = parseRawJson(raw?.deelnemer);
+
+    [
+      row?.rood_inschrijving_id,
+      row?.blauw_inschrijving_id,
+      row?.red_inschrijving_id,
+      row?.blue_inschrijving_id,
+      row?.rood_aanmelding_id,
+      row?.blauw_aanmelding_id,
+      row?.red_aanmelding_id,
+      row?.blue_aanmelding_id,
+      row?.inschrijving_id,
+      row?.aanmelding_id,
+      deelnemer?.inschrijving_id,
+      deelnemer?.aanmelding_id,
+      deelnemer?.id,
+      raw?.inschrijving_id,
+      raw?.aanmelding_id,
+    ]
+      .map(s)
+      .filter(Boolean)
+      .forEach((id) => ids.add(id));
+
+    [
+      row?.va_rood,
+      row?.va_blauw,
+      row?.rood_va,
+      row?.blauw_va,
+      row?.red_va,
+      row?.blue_va,
+      row?.va_nummer,
+      row?.fighter_id,
+      row?.rood_fighter_id,
+      row?.blauw_fighter_id,
+      deelnemer?.va_nummer,
+      deelnemer?.va,
+      deelnemer?.fighter_id,
+      raw?.va_nummer,
+      raw?.va,
+      raw?.fighter_id,
+    ]
+      .map(va)
+      .filter((x): x is string => !!x)
+      .forEach((nummer) => vas.add(nummer));
+  }
+
+  return { ids, vas };
+}
+
+function markFighterMatched(fighter: AnyRow, matched: { ids: Set<string>; vas: Set<string> }) {
+  const inschrijvingId = s(fighter?.inschrijving_id ?? fighter?.id ?? fighter?.aanmelding_id);
+  const cleanVa = va(fighter?.va_nummer ?? fighter?.va ?? fighter?.fighter_id);
+  const isMatched =
+    (!!inschrijvingId && matched.ids.has(inschrijvingId)) ||
+    (!!cleanVa && matched.vas.has(cleanVa));
+
+  if (!isMatched) return fighter;
+
+  return {
+    ...fighter,
+    __fs_gematcht: true,
+    __fs_status: "gematcht",
+    status: "gematcht",
+    aanmelding_status: "gematcht",
+  };
+}
+
 function mergeFighter(context: AnyRow | null, aanmelding: AnyRow | null, raw: AnyRow | null) {
   const extra = parseObj(context?.extra);
 
@@ -250,17 +354,36 @@ export async function GET(
       );
     }
 
+    const matches = matchesRes.error ? [] : matchesRes.data ?? [];
+    const toernooien = matches.filter(isToernooiBout);
+    const matchedKeys = collectMatchedFromBouts(matches);
+    const fightersWithMatchStatus = fighters.map((fighter) =>
+      markFighterMatched(fighter, matchedKeys),
+    );
+    const aanmeldingenWithMatchStatus = aanmeldingen.map((row) =>
+      markFighterMatched(row, matchedKeys),
+    );
+
     return NextResponse.json({
       ok: true,
       matchmaking: mmRes.data,
       uploads: buildUploadBatches(aanmeldingen),
-      aanmeldingen,
-      fighters,
-      matches: matchesRes.data ?? [],
+      aanmeldingen: aanmeldingenWithMatchStatus,
+      fighters: fightersWithMatchStatus,
+
+      // Belangrijk: de match-page zoekt op meerdere namen. Daarom dezelfde rows
+      // bewust onder alle gangbare sleutels teruggeven.
+      matches,
+      bouts: matches,
+      matchmaking_bouts_raw: matches,
+      toernooien,
+      tournaments: toernooien,
+
       scrape_runs: runsRes.error ? [] : runsRes.data ?? [],
       warnings: {
         context: contextRes.error?.message ?? null,
         raw: rawRes.error?.message ?? null,
+        matches: matchesRes.error?.message ?? null,
         runs: runsRes.error?.message ?? null,
       },
     });

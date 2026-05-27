@@ -35,6 +35,9 @@ type MatchmakingRow = {
   bondteam: string | null;
   locatie: string | null;
   stadium?: string | null;
+  status?: string | null;
+  huidige_eigenaar_type?: string | null;
+  huidige_eigenaar_bondteam?: string | null;
   created_at?: string | null;
   huidige_eigenaar_user_id?: string | null;
 };
@@ -71,7 +74,8 @@ function metalInnerStyle(): CSSProperties {
 
 function darkPanelStyle(): CSSProperties {
   return {
-    background: "linear-gradient(180deg, rgba(47,50,58,0.98) 0%, rgba(30,32,37,0.98) 100%)",
+    background:
+      "linear-gradient(180deg, rgba(47,50,58,0.98) 0%, rgba(30,32,37,0.98) 100%)",
     border: "1px solid rgba(255,255,255,0.08)",
     boxShadow:
       "inset 0 1px 0 rgba(255,255,255,0.07), 0 14px 28px rgba(0,0,0,0.24)",
@@ -91,7 +95,9 @@ function silverCardStyle(): CSSProperties {
 }
 
 function normalizeRoleName(v: unknown): RoleName | "" {
-  return String(v ?? "").trim().toLowerCase() as RoleName | "";
+  return String(v ?? "")
+    .trim()
+    .toLowerCase() as RoleName | "";
 }
 
 function safeText(v: unknown, fallback = "-") {
@@ -101,7 +107,9 @@ function safeText(v: unknown, fallback = "-") {
 
 function formatDate(v: string | null) {
   if (!v) return "-";
-  return new Date(v.length === 10 ? `${v}T00:00:00` : v).toLocaleDateString("nl-NL");
+  return new Date(v.length === 10 ? `${v}T00:00:00` : v).toLocaleDateString(
+    "nl-NL",
+  );
 }
 
 function normalizeSearchText(value: unknown) {
@@ -132,22 +140,22 @@ function ActionButton({
           color: "#111",
         }
       : tone === "silver"
-      ? {
-          background: "linear-gradient(180deg, #d7dde5 0%, #aab3bf 100%)",
-          border: "1px solid #7d8794",
-          color: "#111827",
-        }
-      : tone === "danger"
-      ? {
-          background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
-          border: "1px solid #7f1d1d",
-          color: "#fff",
-        }
-      : {
-          background: "linear-gradient(180deg, #3d434d 0%, #22262d 100%)",
-          border: "1px solid rgba(0,0,0,0.45)",
-          color: "#fff",
-        };
+        ? {
+            background: "linear-gradient(180deg, #d7dde5 0%, #aab3bf 100%)",
+            border: "1px solid #7d8794",
+            color: "#111827",
+          }
+        : tone === "danger"
+          ? {
+              background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+              border: "1px solid #7f1d1d",
+              color: "#fff",
+            }
+          : {
+              background: "linear-gradient(180deg, #3d434d 0%, #22262d 100%)",
+              border: "1px solid rgba(0,0,0,0.45)",
+              color: "#fff",
+            };
 
   return (
     <button
@@ -168,9 +176,11 @@ function ActionButton({
 
 function getBondteamBadgeStyle(
   bondteam: string | null | undefined,
-  darkRow: boolean
+  darkRow: boolean,
 ): CSSProperties {
-  const key = String(bondteam ?? "").trim().toUpperCase();
+  const key = String(bondteam ?? "")
+    .trim()
+    .toUpperCase();
 
   const map: Record<string, { bg: string; color: string; border: string }> = {
     IRO: { bg: "#dbeafe", color: "#1d4ed8", border: "#93c5fd" },
@@ -207,18 +217,44 @@ function getBondteamBadgeStyle(
       };
 }
 
-function isWeegstationFlow(stadium: unknown) {
-  const s = String(stadium ?? "").trim().toLowerCase();
+function normalizeStageKey(v: unknown) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+}
 
-  return [
-    "klaar_voor_weegstation",
-    "in_weegstation",
-    "weegstation_verwerkt",
-    "definitieve_matchmaking_ingediend",
-    "klaar_voor_uitslagen",
-    "uitslagen_in_bewerking",
-    "uitslagen_definitief",
-  ].includes(s);
+function normalizeBondteam(v: unknown) {
+  return String(v ?? "").trim().toUpperCase();
+}
+
+function isWeegstationFlow(stadium: unknown, status?: unknown, ownerType?: unknown) {
+  const values = [stadium, status].map(normalizeStageKey);
+  const owner = String(ownerType ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (owner === "bondteam" && values.some((v) => v === "naar-weegstation" || v === "klaar-voor-weegstation")) {
+    return true;
+  }
+
+  return values.some((s) =>
+    [
+      "naar-weegstation",
+      "klaar-voor-weegstation",
+      "in-weegstation",
+      "weegstation-verwerkt",
+      "definitieve-matchmaking-ingediend",
+      "definitieve-lineup",
+      "klaar-voor-uitslagen",
+      "uitslagen-in-bewerking",
+      "uitslagen-definitief",
+    ].includes(s),
+  );
+}
+
+function displayStage(row: MatchmakingRow) {
+  return safeText(row.stadium ?? row.status);
 }
 
 function HeaderLogo() {
@@ -235,7 +271,10 @@ function HeaderLogo() {
       >
         <div
           className="text-center text-[28px] font-black uppercase tracking-[0.14em]"
-          style={{ color: "#f3f4f6", textShadow: "0 0 14px rgba(255,77,0,0.22)" }}
+          style={{
+            color: "#f3f4f6",
+            textShadow: "0 0 14px rgba(255,77,0,0.22)",
+          }}
         >
           FIGHTSUPPORT
         </div>
@@ -272,11 +311,21 @@ export default function WeegstationOverzichtPage() {
   const [roleNames, setRoleNames] = useState<RoleName[]>([]);
   const [myBondteam, setMyBondteam] = useState("");
 
+  const canSeeAllBondteams = useMemo(() => {
+    return roleNames.includes("superadmin") && normalizeBondteam(myBondteam) === "NVB";
+  }, [roleNames, myBondteam]);
+
   useEffect(() => {
     if (!user?.id) return;
     void loadRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!canSeeAllBondteams && myBondteam && bondteamFilter !== myBondteam) {
+      setBondteamFilter(myBondteam);
+    }
+  }, [canSeeAllBondteams, myBondteam, bondteamFilter]);
 
   async function loadRows() {
     if (!user?.id) return;
@@ -285,103 +334,42 @@ export default function WeegstationOverzichtPage() {
     setMelding(null);
 
     try {
-      const uid = user.id;
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
 
-      const { data: profile, error: profileErr } = await supabase
-        .from("user_profiles")
-        .select("id, bondteam")
-        .eq("id", uid)
-        .single();
+      if (sessionErr) throw sessionErr;
 
-      if (profileErr) throw profileErr;
-
-      const normalizedMyBondteam = String(profile?.bondteam ?? "").trim();
-      setMyBondteam(normalizedMyBondteam);
-
-      const { data: userRoles, error: urErr } = await supabase
-        .from("user_roles")
-        .select("role_id")
-        .eq("user_id", uid);
-
-      if (urErr) throw urErr;
-
-      const roleIds = (userRoles ?? []).map((r: any) => r.role_id).filter(Boolean);
-
-      let names: RoleName[] = [];
-      if (roleIds.length > 0) {
-        const { data: rolesRows, error: rolesErr } = await supabase
-          .from("roles")
-          .select("id, name")
-          .in("id", roleIds);
-
-        if (rolesErr) throw rolesErr;
-
-        names = (rolesRows ?? [])
-          .map((r: any) => normalizeRoleName(r?.name))
-          .filter(Boolean) as RoleName[];
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        throw new Error("Niet ingelogd of sessie verlopen.");
       }
 
-      setRoleNames(names);
-
-      const canAccess = names.some((r) =>
-        ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin"].includes(r)
-      );
-
-      if (!canAccess) {
-        throw new Error("Je hebt geen toegang tot het weegstation.");
-      }
-
-      const { data, error } = await supabase
-        .from("matchmakings")
-        .select(
-          `
-            id,
-            naam,
-            datum,
-            bondteam,
-            locatie,
-            stadium,
-            created_at,
-            huidige_eigenaar_user_id
-          `
-        )
-        .order("datum", { ascending: false })
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      const isSuper =
-        names.includes("superadmin") ||
-        names.includes("admin") ||
-        names.includes("dispensatie_admin");
-
-      const isOfficial =
-        names.includes("official") || names.includes("hoofdofficial");
-
-      const normalizedBondteam = normalizedMyBondteam.toLowerCase();
-
-      const filtered = (data ?? []).filter((raw: any) => {
-        const row = raw as MatchmakingRow;
-        const id = String(row?.id ?? "").trim();
-        if (!id) return false;
-
-        if (!isWeegstationFlow(row?.stadium)) return false;
-
-        if (isSuper) return true;
-
-        if (isOfficial) {
-          return String(row?.bondteam ?? "").trim().toLowerCase() === normalizedBondteam;
-        }
-
-        return false;
+      const res = await fetch("/api/officials/weegstation/list", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Fout bij laden van matchmakings.");
+      }
+
+      const names = Array.isArray(json?.roles)
+        ? (json.roles.map(normalizeRoleName).filter(Boolean) as RoleName[])
+        : [];
+
+      setRoleNames(names);
+      setMyBondteam(String(json?.bondteam ?? "").trim());
+
       const deduped = new Map<string, MatchmakingRow>();
-      for (const row of filtered) {
-        const id = String(row?.id ?? "").trim();
+      for (const raw of (json?.rows ?? []) as MatchmakingRow[]) {
+        const id = String(raw?.id ?? "").trim();
         if (!id) continue;
         if (!deduped.has(id)) {
-          deduped.set(id, { ...row, matchmaking_id: id });
+          deduped.set(id, { ...raw, matchmaking_id: id });
         }
       }
 
@@ -397,30 +385,44 @@ export default function WeegstationOverzichtPage() {
   async function handleDelete(matchmakingId: string) {
     if (!matchmakingId) return;
 
-    const ok = window.confirm("Weet je zeker dat je deze matchmaking wilt verwijderen?");
+    const ok = window.confirm(
+      "Weet je zeker dat je eerdere weegdata voor deze matchmaking wilt verwijderen? De matchmaking zelf blijft bestaan.",
+    );
     if (!ok) return;
 
     setDeletingId(matchmakingId);
     setMelding(null);
 
     try {
-      const res = await fetch("/api/control-engine/delete-matchmaking", {
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
+
+      if (sessionErr) throw sessionErr;
+
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        throw new Error("Niet ingelogd of sessie verlopen.");
+      }
+
+      const res = await fetch("/api/officials/weegstation/reset", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+        body: JSON.stringify({ matchmakingId }),
       });
 
-      const text = await res.text();
+      const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(text || "Verwijderen mislukt.");
+        throw new Error(json?.error || "Weegdata verwijderen mislukt.");
       }
 
-      setRows((prev) => prev.filter((r) => String(r.id) !== matchmakingId));
+      setMelding("Eerdere weegdata verwijderd. De matchmaking staat nog steeds klaar voor weegstation.");
+      await loadRows();
     } catch (e: any) {
-      setMelding(e?.message ?? "Verwijderen mislukt.");
+      setMelding(e?.message ?? "Weegdata verwijderen mislukt.");
     } finally {
       setDeletingId(null);
     }
@@ -428,42 +430,55 @@ export default function WeegstationOverzichtPage() {
 
   const bondteamOptions = useMemo(() => {
     const unique = Array.from(
-      new Set(rows.map((row) => String(row.bondteam ?? "").trim()).filter(Boolean))
+      new Set<string>(
+        rows.map((row) => String(row.bondteam ?? "").trim()).filter(Boolean),
+      ),
     ).sort((a, b) => a.localeCompare(b, "nl"));
 
-    if (roleNames.includes("official") || roleNames.includes("hoofdofficial")) {
-      return myBondteam ? [myBondteam] : [];
+    if (canSeeAllBondteams) {
+      return ["ALLE", ...unique];
     }
 
-    return ["ALLE", ...unique];
-  }, [rows, roleNames, myBondteam]);
+    return myBondteam ? [myBondteam] : [];
+  }, [rows, canSeeAllBondteams, myBondteam]);
 
   const filteredRows = useMemo(() => {
     const q = normalizeSearchText(search);
-    const isOfficialRole =
-      roleNames.includes("official") || roleNames.includes("hoofdofficial");
+    const ownBondteam = normalizeBondteam(myBondteam);
 
     return rows.filter((row) => {
-      if (isOfficialRole) {
-        const rowBondteam = String(row.bondteam ?? "").trim().toLowerCase();
-        const ownBondteam = String(myBondteam ?? "").trim().toLowerCase();
-        if (!ownBondteam || rowBondteam !== ownBondteam) return false;
-      } else if (
-        bondteamFilter !== "ALLE" &&
-        safeText(row.bondteam, "") !== bondteamFilter
-      ) {
+      const rowBondteam = normalizeBondteam(row.bondteam);
+
+      if (canSeeAllBondteams) {
+        if (
+          bondteamFilter !== "ALLE" &&
+          normalizeBondteam(row.bondteam) !== normalizeBondteam(bondteamFilter)
+        ) {
+          return false;
+        }
+      } else if (!ownBondteam || rowBondteam !== ownBondteam) {
         return false;
       }
 
       if (!q) return true;
 
       const haystack = normalizeSearchText(
-        [row.naam, row.datum, row.bondteam, row.locatie, row.id, row.stadium].join(" ")
+        [
+          row.naam,
+          row.datum,
+          row.bondteam,
+          row.locatie,
+          row.id,
+          row.stadium,
+          row.status,
+          row.huidige_eigenaar_type,
+          row.huidige_eigenaar_bondteam,
+        ].join(" "),
       );
 
       return haystack.includes(q);
     });
-  }, [rows, search, bondteamFilter, roleNames, myBondteam]);
+  }, [rows, search, bondteamFilter, canSeeAllBondteams, myBondteam]);
 
   const roleLabel = useMemo(() => {
     if (roleNames.includes("superadmin")) return "SUPERADMIN";
@@ -476,7 +491,10 @@ export default function WeegstationOverzichtPage() {
   }, [roleNames]);
 
   return (
-    <main className="min-h-screen px-3 py-4 md:px-5 md:py-5" style={pageBgStyle()}>
+    <main
+      className="min-h-screen px-3 py-4 md:px-5 md:py-5"
+      style={pageBgStyle()}
+    >
       <div className="mx-auto max-w-[1480px]" style={metalFrameStyle()}>
         <div className="p-3 md:p-4" style={metalInnerStyle()}>
           <div
@@ -498,7 +516,9 @@ export default function WeegstationOverzichtPage() {
                 </div>
 
                 <div className="mt-2 text-[13px] font-semibold text-white/75">
-                  Alleen matchmakings die naar weegstation zijn gestuurd
+                  {canSeeAllBondteams
+                    ? "Alle matchmakings die naar weegstation zijn gestuurd"
+                    : "Alleen matchmakings van jouw bond die naar weegstation zijn gestuurd"}
                 </div>
               </div>
 
@@ -516,7 +536,9 @@ export default function WeegstationOverzichtPage() {
                   >
                     Toegang
                   </div>
-                  <div className="mt-1 text-sm font-black text-white">{roleLabel}</div>
+                  <div className="mt-1 text-sm font-black text-white">
+                    {roleLabel}
+                  </div>
                   <div className="mt-1 text-xs font-semibold text-white/65">
                     Bondteam: {safeText(myBondteam)}
                   </div>
@@ -540,7 +562,9 @@ export default function WeegstationOverzichtPage() {
                   Kies matchmaking voor wegen
                 </div>
                 <div className="text-sm font-semibold text-zinc-600">
-                  Alleen lifecycle-items vanaf weegstation / send to bond
+                  {canSeeAllBondteams
+                    ? "Superadmin NVB ziet alle bondteams"
+                    : "Gefilterd op jouw bondteam"}
                 </div>
               </div>
 
@@ -556,7 +580,7 @@ export default function WeegstationOverzichtPage() {
                   />
                 </label>
 
-                {!(roleNames.includes("official") || roleNames.includes("hoofdofficial")) ? (
+                {canSeeAllBondteams ? (
                   <div className="relative min-w-[180px]">
                     <select
                       value={bondteamFilter}
@@ -593,8 +617,10 @@ export default function WeegstationOverzichtPage() {
               <div
                 className="grid items-center gap-3 px-4 py-3 text-[11px] font-black uppercase tracking-[0.08em]"
                 style={{
-                  gridTemplateColumns: "minmax(260px,2fr) 130px 160px 180px 260px",
-                  background: "linear-gradient(180deg, #2f323a 0%, #1e2025 100%)",
+                  gridTemplateColumns:
+                    "minmax(260px,2fr) 130px 160px 180px 260px",
+                  background:
+                    "linear-gradient(180deg, #2f323a 0%, #1e2025 100%)",
                   color: "#fff",
                 }}
               >
@@ -623,7 +649,8 @@ export default function WeegstationOverzichtPage() {
                       key={matchmakingId}
                       className="grid items-center gap-3 px-4 py-3"
                       style={{
-                        gridTemplateColumns: "minmax(260px,2fr) 130px 160px 180px 260px",
+                        gridTemplateColumns:
+                          "minmax(260px,2fr) 130px 160px 180px 260px",
                         background: darkRow
                           ? "linear-gradient(180deg, #3a3f48 0%, #2d3138 100%)"
                           : "linear-gradient(180deg, #ffffff 0%, #eef2f6 100%)",
@@ -638,7 +665,11 @@ export default function WeegstationOverzichtPage() {
 
                         <div
                           className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-bold"
-                          style={{ color: darkRow ? "rgba(255,255,255,0.72)" : "#6b7280" }}
+                          style={{
+                            color: darkRow
+                              ? "rgba(255,255,255,0.72)"
+                              : "#6b7280",
+                          }}
                         >
                           <span className="inline-flex items-center gap-1.5">
                             <Swords className="h-3.5 w-3.5" />
@@ -648,7 +679,9 @@ export default function WeegstationOverzichtPage() {
                           <span className="truncate">ID: {matchmakingId}</span>
 
                           {row.locatie ? (
-                            <span className="truncate">Locatie: {row.locatie}</span>
+                            <span className="truncate">
+                              Locatie: {row.locatie}
+                            </span>
                           ) : null}
                         </div>
                       </div>
@@ -671,17 +704,19 @@ export default function WeegstationOverzichtPage() {
                       </div>
 
                       <div className="text-xs font-black uppercase tracking-[0.04em]">
-                        {safeText(row.stadium)}
+                        {displayStage(row)}
                       </div>
 
                       <div className="flex items-center justify-end gap-2">
                         <ActionButton
                           onClick={() =>
-                            router.push(`/dashboard/officials/weegstation/${matchmakingId}`)
+                            router.push(
+                              `/dashboard/officials/weegstation/${matchmakingId}`,
+                            )
                           }
                           tone="orange"
                         >
-                          Open weegstation
+                          Weegstation
                         </ActionButton>
 
                         <ActionButton
@@ -690,7 +725,9 @@ export default function WeegstationOverzichtPage() {
                           disabled={deletingId === matchmakingId}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
-                          {deletingId === matchmakingId ? "Verwijderen..." : "Verwijder"}
+                          {deletingId === matchmakingId
+                            ? "Wissen..."
+                            : "Wis data"}
                         </ActionButton>
                       </div>
                     </div>

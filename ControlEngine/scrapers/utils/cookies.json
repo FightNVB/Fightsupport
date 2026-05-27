@@ -1,7 +1,21 @@
 [
   {
+    "name": "sys42_device%5Bunlockcode%5D",
+    "value": "3910ac9f72484c2493a495995862b991",
+    "domain": "fightpassport.nl",
+    "path": "/",
+    "expires": 1811360515,
+    "size": 60,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "sameParty": false,
+    "sourceScheme": "Secure",
+    "sourcePort": 443
+  },
+  {
     "name": "PHPSESSID",
-    "value": "cdfrroimuel3jogd058c33psb1",
+    "value": "thavosdom588ghm51urvsvqmr8",
     "domain": "fightpassport.nl",
     "path": "/",
     "expires": -1,
@@ -9,20 +23,6 @@
     "httpOnly": false,
     "secure": true,
     "session": true,
-    "sameParty": false,
-    "sourceScheme": "Secure",
-    "sourcePort": 443
-  },
-  {
-    "name": "sys42_device%5Bunlockcode%5D",
-    "value": "5a84167810dd4c05910e977223bde464",
-    "domain": "fightpassport.nl",
-    "path": "/",
-    "expires": 1795198617,
-    "size": 60,
-    "httpOnly": false,
-    "secure": true,
-    "session": false,
     "sameParty": false,
     "sourceScheme": "Secure",
     "sourcePort": 443

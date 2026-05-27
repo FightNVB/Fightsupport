@@ -117,6 +117,34 @@ async function loadCookiesIfAny(page) {
   }
 }
 
+
+async function dashboardReady(page, timeoutMs = 12000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const ok = await page.evaluate(() => {
+        const hasTiles = document.querySelectorAll(".tileHeader.enabled").length > 0;
+        const hasDashboard = !!document.querySelector(".dashboard");
+        const txt = String(document.body?.innerText || "").toLowerCase();
+        return hasTiles || hasDashboard || txt.includes("dashboard");
+      });
+      if (ok) return true;
+    } catch {}
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+async function clearBrowserCookiesOnly(page) {
+  try {
+    const cookies = await page.cookies();
+    if (cookies.length) await page.deleteCookie(...cookies);
+    console.log("🧹 Browser-cookies gewist voor deze sessie; cookies.json blijft bewaard");
+  } catch (e) {
+    console.log("⚠️ Browser-cookies konden niet gewist worden:", e?.message ?? e);
+  }
+}
+
 // --------------------------------------------------
 // ✅ NIEUW: EXPORT ensureLoggedIn(page)
 // --------------------------------------------------
@@ -331,11 +359,21 @@ export async function loginFightPassport() {
     if (hadCookies) {
       await safeGoto(page, FP_URL);
       await safeZoom100(page);
-      if (await loggedInDomProof(page)) {
-        console.log("✅ Ingelogd via cookies (trusted device)");
-        return;
+
+      if (await loginFormVisible(page)) {
+        console.log("⚠️ Cookies aanwezig, maar loginpagina staat open → normale login nodig");
+      } else if (await loggedInDomProof(page)) {
+        const dashOk = await dashboardReady(page, 12000);
+        if (dashOk) {
+          console.log("✅ Ingelogd via cookies (trusted device)");
+          return;
+        }
+
+        console.log("⚠️ Cookies lijken geldig, maar dashboard is niet gevonden → opnieuw master-login uitvoeren");
+        await clearBrowserCookiesOnly(page);
+      } else {
+        console.log("⚠️ Cookies ongeldig → normale login nodig");
       }
-      console.log("⚠️ Cookies ongeldig → normale login nodig");
     }
 
     // 3) normale login
@@ -432,6 +470,11 @@ export async function loginFightPassport() {
     console.log("🟢 SUCCESVOL ingelogd");
     await page.waitForTimeout(1200);
     await safeZoom100(page);
+
+    const dashOkAfterLogin = await dashboardReady(page, 15000);
+    if (!dashOkAfterLogin) {
+      console.log("⚠️ Ingelogd, maar dashboard nog niet gevonden. Scraper probeert alsnog verder.");
+    }
 
     await saveCookies(page);
   }

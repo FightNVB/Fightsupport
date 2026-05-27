@@ -286,20 +286,60 @@ function getKlasse(ctx: any) {
   );
 }
 
-function formatMaxKg(v: any) {
+function normalizeWeightValueForExcel(v: any) {
+  const raw = safe(v, "");
+  if (!raw) return "";
+
+  const n = Number(
+    raw
+      .replace(",", ".")
+      .replace(/[^\d.-]/g, ""),
+  );
+
+  if (!Number.isFinite(n)) {
+    return raw
+      .replace(/\s*kg$/i, "")
+      .trim();
+  }
+
+  return Number.isInteger(n)
+    ? String(Math.abs(n))
+    : String(Math.abs(n)).replace(".", ",");
+}
+
+function isOpenAboveWeightType(v: any) {
+  const t = normalizeText(v).replace(/[\s_-]+/g, "_");
+  return (
+    t === "open_above" ||
+    t === "above" ||
+    t === "plus" ||
+    t === "open_plus" ||
+    t.includes("open_above") ||
+    t.includes("boven") ||
+    t.includes("vanaf") ||
+    t.includes("plus")
+  );
+}
+
+function formatMaxKg(v: any, type: any = "") {
   const raw = safe(v, "");
   if (!raw) return "";
 
   const rawTxt = String(raw).trim();
 
-  // Gewichtsklassen zoals 95+ mogen niet als -95 kg worden weergegeven.
-  // Voorbeeld: "95+", "+95", "95+ kg" -> "95+ kg".
+  // Gewichtsklassen zoals 95+ mogen nooit als -95 kg worden weergegeven.
+  // Dit vangt zowel max_gewicht_notatie="95+" als max_gewicht=95 + type=open_above af.
   const plusMatch =
     rawTxt.match(/^(\d+(?:[,.]\d+)?)\s*\+/) ||
     rawTxt.match(/^\+\s*(\d+(?:[,.]\d+)?)/);
   if (plusMatch) {
     const value = plusMatch[1].replace(".", ",");
     return `${value}+ kg`;
+  }
+
+  if (isOpenAboveWeightType(type)) {
+    const value = normalizeWeightValueForExcel(rawTxt);
+    return value ? `${value}+ kg` : "";
   }
 
   const n = Number(
@@ -325,25 +365,46 @@ function formatMaxKg(v: any) {
 
 function getMaxKg(ctx: any) {
   const extra = rawJsonObject(ctx);
-  return formatMaxKg(
-    pickFirst(
-      ctx?.max_gewicht,
-      ctx?.max_gewicht_kg,
-      ctx?.maxgewicht,
-      ctx?.gewichtslimiet,
-      ctx?.afgesproken_gewicht,
-      ctx?.partij_gewicht,
-      extra?.max_gewicht,
-      extra?.max_gewicht_kg,
-      extra?.maxgewicht,
-      extra?.gewichtslimiet,
-      extra?.afgesproken_gewicht,
-      extra?.partij_gewicht,
-      extra?.weight_limit,
-      extra?.maxWeight,
-      extra?.max_weight,
-    ),
+
+  const notatie = pickFirst(
+    ctx?.max_gewicht_notatie,
+    ctx?.max_gewicht_notation,
+    ctx?.max_gewicht_label,
+    ctx?.gewicht_notatie,
+    extra?.max_gewicht_notatie,
+    extra?.max_gewicht_notation,
+    extra?.max_gewicht_label,
+    extra?.gewicht_notatie,
   );
+
+  const type = pickFirst(
+    ctx?.max_gewicht_type,
+    ctx?.maxgewicht_type,
+    ctx?.gewichtslimiet_type,
+    extra?.max_gewicht_type,
+    extra?.maxgewicht_type,
+    extra?.gewichtslimiet_type,
+  );
+
+  const gewicht = pickFirst(
+    ctx?.max_gewicht,
+    ctx?.max_gewicht_kg,
+    ctx?.maxgewicht,
+    ctx?.gewichtslimiet,
+    ctx?.afgesproken_gewicht,
+    ctx?.partij_gewicht,
+    extra?.max_gewicht,
+    extra?.max_gewicht_kg,
+    extra?.maxgewicht,
+    extra?.gewichtslimiet,
+    extra?.afgesproken_gewicht,
+    extra?.partij_gewicht,
+    extra?.weight_limit,
+    extra?.maxWeight,
+    extra?.max_weight,
+  );
+
+  return formatMaxKg(pickFirst(notatie, gewicht), type);
 }
 
 function normalizeText(v: any) {
@@ -1836,3 +1897,5 @@ export async function GET(req: Request) {
     );
   }
 }
+
+// FIX: 95+ blijft 95+ en wordt nooit als -95 opgeslagen.

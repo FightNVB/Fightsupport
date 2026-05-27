@@ -9,7 +9,6 @@ import {
   Scale,
   ArrowLeft,
   Building2,
-  Megaphone,
   FileText,
 } from "lucide-react";
 
@@ -173,10 +172,8 @@ export default function DashboardPage() {
     (roles ?? []).includes("matchmaker") || canAdmin;
 
   const canSportscholen =
-    (roles ?? []).includes("admin") || canAdmin;
+    (roles ?? []).includes("trainer") || (roles ?? []).includes("admin") || canAdmin;
 
-  const canPromotor =
-    (roles ?? []).includes("promotor") || canAdmin;
 
   if (loading) {
     return (
@@ -243,23 +240,19 @@ export default function DashboardPage() {
           },
           {
             label: "Sportscholen",
-            subtitle: "Beheer sportscholen",
+            subtitle: canAdmin ? "Beheer en trainer-overzicht" : "Mijn fightcrew",
             href: "/dashboard/sportscholen",
             icon: Building2 as any,
           },
         ]
       : []),
 
-    ...(canPromotor
-      ? [
-          {
-            label: "Promotor Portaal",
-            subtitle: "Beheer en geef evenementen door",
-            href: "/dashboard/promotor",
-            icon: Megaphone as any,
-          },
-        ]
-      : []),
+    {
+      label: "Informatie",
+      subtitle: "Nieuws, uitleg en algemene informatie",
+      href: "/dashboard/informatie",
+      icon: FileText as any,
+    },
 
     ...(canMatchmaker
       ? [
@@ -399,9 +392,6 @@ export default function DashboardPage() {
       <TopLogoBand />
       <TitleBand
         email={user.email ?? ""}
-        leftActionLabel="Informatie"
-        leftActionIcon={<FileText size={15} strokeWidth={2.6} />}
-        onLeftAction={() => router.push("/dashboard/informatie")}
         actionLabel="Uitloggen"
         actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
         onAction={async () => {
@@ -521,17 +511,11 @@ function TopLogoBand() {
 
 function TitleBand({
   email,
-  leftActionLabel,
-  leftActionIcon,
-  onLeftAction,
   actionLabel,
   actionIcon,
   onAction,
 }: {
   email: string;
-  leftActionLabel?: string;
-  leftActionIcon?: ReactNode;
-  onLeftAction?: () => void | Promise<void>;
   actionLabel: string;
   actionIcon?: ReactNode;
   onAction: () => void | Promise<void>;
@@ -578,25 +562,6 @@ function TitleBand({
           minHeight: 92,
         }}
       >
-        {leftActionLabel && onLeftAction ? (
-          <div
-            className="title-actions-left"
-            style={{
-              position: "absolute",
-              left: 18,
-              top: "50%",
-              transform: "translateY(-50%)",
-              zIndex: 2,
-            }}
-          >
-            <HeaderSilverButton
-              label={leftActionLabel}
-              icon={leftActionIcon}
-              onClick={onLeftAction}
-            />
-          </div>
-        ) : null}
-
         <div
           className="title-actions-right"
           style={{

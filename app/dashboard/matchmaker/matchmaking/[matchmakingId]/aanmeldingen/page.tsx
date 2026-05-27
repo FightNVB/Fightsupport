@@ -17,6 +17,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
+  Download,
   Edit3,
   FileUp,
   Loader2,
@@ -31,6 +32,7 @@ import {
 
 const ORANGE = "#ff4d00";
 const LOGO_SRC = "/branding/fightsupport/excel-logo.png";
+const EXCEL_TEMPLATE_URL = "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
 
 type Aanmelding = Record<string, any>;
 type BusyMode =
@@ -850,6 +852,17 @@ export default function AanmeldingenPage() {
                 Upload bestand
               </button>
             </div>
+
+            <div style={{ marginTop: 10 }}>
+              <a
+                className="fs-silver-btn compact-action"
+                href={EXCEL_TEMPLATE_URL}
+                download="fightsupport-upload.xlsx"
+              >
+                <Download size={16} />
+                Download template
+              </a>
+            </div>
           </AccordionPanel>
 
           <AccordionPanel
@@ -1090,6 +1103,13 @@ export default function AanmeldingenPage() {
                 Alles
               </button>
 
+              <Link
+                href="/dashboard/matchmaker/fightpassport"
+                className="fs-silver-btn compact"
+              >
+                FightPassport koppelen
+              </Link>
+
               <button
                 className="fs-green-btn compact"
                 onClick={controleer}
@@ -1110,7 +1130,7 @@ export default function AanmeldingenPage() {
                 className="fs-blue-btn compact"
               >
                 <Users size={15} />
-                Gecontroleerde vechters
+                Ga naar matchen
               </Link>
             </div>
           </div>

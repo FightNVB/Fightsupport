@@ -70,6 +70,10 @@ function runNodeScript(scriptPath: string, args: string[], cwd?: string): Promis
       windowsHide: true,
       env: {
         ...process.env,
+        // Control-engine routes gebruiken ALTIJD de master-login uit scrapers/config/login_master.json.
+        // Hiermee voorkom je dat een globale FP_MATCHMAKER_ID de admin/master scraper naar een matchmaker-profiel stuurt.
+        FP_MATCHMAKER_ID: "",
+        FP_SESSION_MODE: "master",
         SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
         ComSpec: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
       },
