@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -24,7 +23,6 @@ import {
 } from "lucide-react";
 
 const ORANGE = "#ff4d00";
-const SHIELD = "/branding/fightsupport/vs-shield1.png";
 
 type Fighter = Record<string, any>;
 type ResultRow = Record<string, any>;
@@ -787,7 +785,7 @@ function rowMatchesFighter(row: ResultRow, f?: Fighter | null) {
 }
 const page: CSSProperties = {
   minHeight: "100vh",
-  padding: "10px 14px 24px",
+  padding: "8px 10px 16px",
   color: "#f4f4f5",
   background:
     "radial-gradient(circle at top, rgba(255,77,0,.10), transparent 30%), linear-gradient(135deg,#101114,#28292d 52%,#111214)",
@@ -1313,17 +1311,6 @@ export default function NieuweMatchPage() {
           />
 
           <div className="fs-center">
-            <div className="fs-logo-box">
-              <Image
-                src={SHIELD}
-                alt="FightSupport Vechter info"
-                width={100}
-                height={50}
-                priority
-                className="fs-logo"
-              />
-            </div>
-
             <div className="fs-details">
               <div className="fs-details-head">
                 <Swords size={15} />
@@ -1581,8 +1568,8 @@ export default function NieuweMatchPage() {
         }
 
         .fs-page-head {
-          min-height: 92px;
-          border-radius: 24px;
+          min-height: 72px;
+          border-radius: 20px;
           border: 1px solid rgba(255, 255, 255, 0.24);
           background:
             linear-gradient(
@@ -1604,10 +1591,10 @@ export default function NieuweMatchPage() {
             inset 0 -3px 0 rgba(255, 77, 0, 0.65),
             0 24px 70px rgba(0, 0, 0, 0.52);
           display: grid;
-          grid-template-columns: 170px 1fr 140px;
-          gap: 18px;
+          grid-template-columns: 150px 1fr 130px;
+          gap: 8px;
           align-items: center;
-          padding: 14px 22px;
+          padding: 10px 18px;
         }
 
         .fs-back {
@@ -1644,7 +1631,7 @@ export default function NieuweMatchPage() {
         .fs-head-title b {
           display: block;
           color: ${ORANGE};
-          font-size: 24px;
+          font-size: 22px;
           line-height: 1;
           margin-top: 2px;
           text-transform: uppercase;
@@ -1658,8 +1645,8 @@ export default function NieuweMatchPage() {
         }
 
         .fs-message {
-          margin-top: 10px;
-          border-radius: 16px;
+          margin-top: 8px;
+          border-radius: 14px;
           padding: 12px 14px;
           color: #ffd1bf;
           border: 1px solid rgba(255, 77, 0, 0.5);
@@ -1668,9 +1655,9 @@ export default function NieuweMatchPage() {
         }
 
         .fs-matchplate {
-          margin-top: 16px;
-          border-radius: 26px;
-          padding: 14px;
+          margin-top: 8px;
+          border-radius: 20px;
+          padding: 10px;
           border: 1px solid rgba(220, 220, 225, 0.42);
           background:
             radial-gradient(circle at center, rgba(140, 140, 146, 0.36), rgba(45, 46, 50, 0.58) 42%, rgba(13, 13, 15, 0.98) 100%),
@@ -1680,14 +1667,14 @@ export default function NieuweMatchPage() {
             inset 0 -2px 0 rgba(0, 0, 0, 0.78),
             0 22px 70px rgba(0, 0, 0, 0.56);
           display: grid;
-          grid-template-columns: minmax(300px, 0.76fr) minmax(520px, 1.32fr) minmax(300px, 0.76fr);
-          gap: 20px;
+          grid-template-columns: minmax(280px, 0.82fr) minmax(440px, 1.04fr) minmax(280px, 0.82fr);
+          gap: 10px;
           align-items: start;
         }
 
         .fs-fighter {
-          min-height: 350px;
-          border-radius: 18px;
+          min-height: auto;
+          border-radius: 14px;
           overflow: hidden;
           border: 1px solid rgba(255, 255, 255, 0.2);
           background:
@@ -1703,7 +1690,7 @@ export default function NieuweMatchPage() {
         }
 
         .fs-fighter-title {
-          height: 46px;
+          height: 42px;
           display: flex;
           align-items: center;
           gap: 10px;
@@ -1726,13 +1713,13 @@ export default function NieuweMatchPage() {
         }
 
         .fs-fighter-body {
-          padding: 13px;
+          padding: 10px;
         }
 
         .fs-fighter-name {
           margin: 0;
           color: ${ORANGE};
-          font-size: 24px;
+          font-size: 22px;
           line-height: 0.98;
           letter-spacing: -0.03em;
           text-transform: uppercase;
@@ -1749,7 +1736,7 @@ export default function NieuweMatchPage() {
           display: flex;
           flex-wrap: wrap;
           gap: 7px;
-          margin: 10px 0;
+          margin: 8px 0;
         }
 
         .mini-badge {
@@ -1757,7 +1744,7 @@ export default function NieuweMatchPage() {
           gap: 7px;
           align-items: center;
           border-radius: 8px;
-          padding: 6px 8px;
+          padding: 5px 7px;
           font-size: 11px;
           font-weight: 1000;
           border: 1px solid rgba(255, 255, 255, 0.13);
@@ -1780,17 +1767,17 @@ export default function NieuweMatchPage() {
         .fs-info-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 5px 12px;
+          gap: 3px 10px;
         }
 
         .fs-info-line {
           display: flex;
           justify-content: space-between;
-          gap: 12px;
-          padding: 6px 0;
+          gap: 8px;
+          padding: 4px 0;
           border-bottom: 1px solid rgba(255, 255, 255, 0.08);
           color: #e4e4e7;
-          font-size: 13px;
+          font-size: 12px;
         }
 
         .fs-info-line span {
@@ -1816,7 +1803,7 @@ export default function NieuweMatchPage() {
         }
 
         .fs-keur {
-          margin-top: 10px;
+          margin-top: 8px;
           border-radius: 14px;
           overflow: hidden;
           border: 1px solid rgba(255, 255, 255, 0.13);
@@ -1832,7 +1819,7 @@ export default function NieuweMatchPage() {
           align-items: center;
           justify-content: space-between;
           gap: 10px;
-          padding: 9px 12px;
+          padding: 7px 10px;
           color: white;
           font-size: 11px;
           font-weight: 1000;
@@ -1842,7 +1829,7 @@ export default function NieuweMatchPage() {
         }
 
         .fs-whitebox {
-          padding: 9px;
+          padding: 7px;
           background: white;
           color: #18181b;
           white-space: pre-wrap;
@@ -1853,56 +1840,16 @@ export default function NieuweMatchPage() {
         .fs-center {
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 8px;
           align-items: stretch;
           position: relative;
           z-index: 2;
         }
 
-        .fs-logo-box {
-          position: relative;
-          height: 90px;
-          margin: 0 auto 10px;
-          width: calc(100% - 18px);
-          border-radius: 26px;
-          display: grid;
-          place-items: center;
-          overflow: hidden;
-          background:
-            radial-gradient(circle at center, rgba(255, 130, 32, 0.14) 0%, rgba(18, 18, 20, 0.94) 52%, rgba(4, 4, 5, 0.98) 100%),
-            linear-gradient(180deg, #292a2e 0%, #101113 45%, #050506 100%);
-          border: 1px solid rgba(225, 225, 230, 0.22);
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.18),
-            inset 0 -2px 0 rgba(0, 0, 0, 0.65),
-            0 12px 28px rgba(0, 0, 0, 0.45);
-        }
-
-        .fs-logo-box::before {
-          content: "";
-          position: absolute;
-          top: 0;
-          left: 18px;
-          right: 18px;
-          height: 1px;
-          background: linear-gradient(
-            90deg,
-            transparent,
-            rgba(255, 255, 255, 0.5),
-            transparent
-          );
-        }
-
-        .fs-logo {
-          width: min(260px, 82%);
-          height: auto;
-          object-fit: contain;
-          transform: scale(0.92);
-          filter: drop-shadow(0 7px 15px rgba(0, 0, 0, 0.7)) contrast(1.06);
-        }
-
         .fs-details {
-          border-radius: 18px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          border-radius: 14px;
           overflow: hidden;
           border: 1px solid rgba(225, 225, 230, 0.28);
           background:
@@ -1915,17 +1862,25 @@ export default function NieuweMatchPage() {
             0 14px 34px rgba(0, 0, 0, 0.42);
         }
 
+        .fs-details .fs-info-line {
+          padding: 6px 10px;
+        }
+
         .fs-details-head,
         .fs-block-head {
           display: flex;
           align-items: center;
           gap: 7px;
-          padding: 11px 14px;
+          padding: 8px 12px;
           color: #fff;
           font-weight: 1000;
           letter-spacing: 0.08em;
           background: linear-gradient(180deg, #292a2d, #070708);
           box-shadow: inset 0 -2px 0 rgba(255, 77, 0, 0.55);
+        }
+
+        .fs-details-head {
+          grid-column: 1 / -1;
         }
 
         .fs-weight-field,
@@ -1966,7 +1921,7 @@ export default function NieuweMatchPage() {
 
         .fs-weight-input-row input {
           width: 100%;
-          height: 46px;
+          height: 42px;
           border-radius: 13px;
           border: 1px solid rgba(255, 255, 255, 0.24);
           outline: none;
@@ -1998,13 +1953,13 @@ export default function NieuweMatchPage() {
         }
 
         .fs-center-alert {
-          min-height: 108px;
-          border-radius: 16px;
-          padding: 18px 22px;
+          min-height: 72px;
+          border-radius: 14px;
+          padding: 10px 14px;
           display: grid;
-          grid-template-columns: 96px 1fr;
+          grid-template-columns: 56px 1fr;
           align-items: center;
-          gap: 20px;
+          gap: 10px;
           border: 1px solid rgba(255, 97, 13, 0.88);
           background:
             radial-gradient(circle at left, rgba(255, 77, 0, 0.20), transparent 38%),
@@ -2021,13 +1976,13 @@ export default function NieuweMatchPage() {
         }
 
         .fs-alert-icon {
-          width: 74px;
-          height: 64px;
+          width: 48px;
+          height: 42px;
           margin: 0 auto;
           display: grid;
           place-items: center;
           color: #0b0b0c;
-          font-size: 42px;
+          font-size: 28px;
           line-height: 1;
           font-weight: 1000;
           clip-path: polygon(50% 0, 100% 100%, 0 100%);
@@ -2046,7 +2001,7 @@ export default function NieuweMatchPage() {
 
         .fs-alert-title {
           color: ${ORANGE};
-          font-size: 18px;
+          font-size: 15px;
           line-height: 1.1;
           font-weight: 1000;
           text-transform: uppercase;
@@ -2056,7 +2011,7 @@ export default function NieuweMatchPage() {
         .fs-alert-detail {
           margin-top: 7px;
           color: #ffffff;
-          font-size: 17px;
+          font-size: 14px;
           line-height: 1.36;
           font-weight: 950;
         }
@@ -2092,7 +2047,7 @@ export default function NieuweMatchPage() {
         }
 
         .fs-checks {
-          margin-top: 16px;
+          margin-top: 8px;
           border-radius: 20px;
           border: 1px solid rgba(210, 210, 215, 0.34);
           background:
@@ -2125,7 +2080,7 @@ export default function NieuweMatchPage() {
 
         .fs-check-card {
           min-height: 118px;
-          border-radius: 18px;
+          border-radius: 14px;
           padding: 16px 17px;
           border: 1px solid rgba(225, 225, 230, 0.22);
           background:
@@ -2159,7 +2114,7 @@ export default function NieuweMatchPage() {
           display: flex;
           justify-content: center;
           align-items: center;
-          gap: 12px;
+          gap: 8px;
           margin-bottom: 9px;
           flex-wrap: wrap;
         }
@@ -2177,7 +2132,7 @@ export default function NieuweMatchPage() {
         }
 
         .fs-check-value {
-          font-size: 24px;
+          font-size: 22px;
           line-height: 1;
           font-weight: 1000;
           color: ${ORANGE};
@@ -2199,7 +2154,7 @@ export default function NieuweMatchPage() {
           align-items: center;
           gap: 7px;
           border-radius: 8px;
-          padding: 6px 8px;
+          padding: 5px 7px;
           font-size: 11px;
           font-weight: 1000;
           border: 1px solid rgba(255, 255, 255, 0.18);
@@ -2304,13 +2259,13 @@ export default function NieuweMatchPage() {
         .fs-weight-summary {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 12px;
+          gap: 8px;
           margin: 18px 0;
         }
 
         .fs-weight-summary > div {
           min-height: 112px;
-          border-radius: 18px;
+          border-radius: 14px;
           padding: 15px;
           border: 1px solid rgba(255, 255, 255, 0.16);
           background: linear-gradient(
@@ -2343,20 +2298,20 @@ export default function NieuweMatchPage() {
           display: block;
           margin-top: 8px;
           color: #fff;
-          font-size: 24px;
+          font-size: 22px;
           line-height: 1;
         }
 
         .fs-weight-summary small {
           display: block;
-          margin-top: 10px;
+          margin-top: 8px;
           color: #f4f4f5;
           font-weight: 800;
           line-height: 1.35;
         }
 
         .fs-weight-confirm-field {
-          margin-top: 16px;
+          margin-top: 8px;
           border-radius: 20px;
           border: 1px solid rgba(255, 77, 0, 0.42);
         }
@@ -2366,7 +2321,7 @@ export default function NieuweMatchPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 20px;
+          gap: 10px;
           border-bottom: 1px solid rgba(255, 255, 255, 0.16);
           background: linear-gradient(
             180deg,
@@ -2393,12 +2348,12 @@ export default function NieuweMatchPage() {
 
         .fs-modal-badge {
           width: 58px;
-          height: 46px;
-          border-radius: 18px;
+          height: 42px;
+          border-radius: 14px;
           display: grid;
           place-items: center;
           color: #fff;
-          font-size: 24px;
+          font-size: 22px;
           font-weight: 1000;
           background: linear-gradient(180deg, #ff8a00, #ff4d00);
           box-shadow:
@@ -2419,11 +2374,11 @@ export default function NieuweMatchPage() {
 
         .fs-modal-list {
           display: grid;
-          gap: 12px;
+          gap: 8px;
         }
 
         .fs-modal-rule {
-          border-radius: 18px;
+          border-radius: 14px;
           padding: 16px;
           border: 1px solid rgba(255, 77, 0, 0.4);
           background: linear-gradient(
@@ -2450,7 +2405,7 @@ export default function NieuweMatchPage() {
         .fs-modal-question {
           margin-top: 22px;
           padding: 14px 16px;
-          border-radius: 16px;
+          border-radius: 14px;
           color: #fff;
           border: 1px solid rgba(255, 255, 255, 0.16);
           background: rgba(255, 255, 255, 0.06);
@@ -2459,7 +2414,7 @@ export default function NieuweMatchPage() {
         .fs-modal-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 12px;
+          gap: 8px;
           margin-top: 22px;
         }
 
@@ -2494,13 +2449,13 @@ export default function NieuweMatchPage() {
         .fs-weight-summary {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 12px;
+          gap: 8px;
           margin: 18px 0;
         }
 
         .fs-weight-summary > div {
           min-height: 112px;
-          border-radius: 18px;
+          border-radius: 14px;
           padding: 15px;
           border: 1px solid rgba(255, 255, 255, 0.16);
           background: linear-gradient(
@@ -2533,20 +2488,20 @@ export default function NieuweMatchPage() {
           display: block;
           margin-top: 8px;
           color: #fff;
-          font-size: 24px;
+          font-size: 22px;
           line-height: 1;
         }
 
         .fs-weight-summary small {
           display: block;
-          margin-top: 10px;
+          margin-top: 8px;
           color: #f4f4f5;
           font-weight: 800;
           line-height: 1.35;
         }
 
         .fs-weight-confirm-field {
-          margin-top: 16px;
+          margin-top: 8px;
           border-radius: 20px;
           border: 1px solid rgba(255, 77, 0, 0.42);
         }
@@ -2556,14 +2511,14 @@ export default function NieuweMatchPage() {
           padding: 26px;
           display: flex;
           align-items: center;
-          gap: 18px;
+          gap: 8px;
         }
 
         .fs-wait-ring {
           width: 72px;
           height: 72px;
           flex: 0 0 auto;
-          border-radius: 18px;
+          border-radius: 14px;
           display: grid;
           place-items: center;
           color: #fff;
@@ -2580,7 +2535,7 @@ export default function NieuweMatchPage() {
 
         .fs-wait-title {
           color: #fff;
-          font-size: 24px;
+          font-size: 22px;
           font-weight: 1000;
           text-transform: uppercase;
         }
@@ -2618,7 +2573,7 @@ export default function NieuweMatchPage() {
 
           .fs-center-alert {
             grid-template-columns: 70px 1fr;
-            padding: 14px;
+            padding: 10px;
           }
 
           .fs-alert-icon {
@@ -2638,16 +2593,6 @@ export default function NieuweMatchPage() {
 
           .fs-info-grid {
             grid-template-columns: 1fr;
-          }
-
-          .fs-logo-box {
-            height: 185px;
-            margin: 0;
-          }
-
-          .fs-logo {
-            width: 280px;
-            max-width: 96%;
           }
         }
       `}</style>
