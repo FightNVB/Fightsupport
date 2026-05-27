@@ -1,33 +1,96 @@
+# =========================
 # Environment variables
+# =========================
 .env
 .env.local
 .env.*.local
+**/.env
 
+# =========================
 # Node modules
+# =========================
 node_modules/
+**/node_modules/
 
+# =========================
 # Logs
+# =========================
 logs/
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
+# =========================
 # OS files
+# =========================
 .DS_Store
 Thumbs.db
+desktop.ini
 
+# =========================
 # IDE
+# =========================
 .vscode/
 .idea/
 
+# =========================
 # Build outputs
+# =========================
 dist/
 build/
 .next/
+out/
+coverage/
 tsconfig.tsbuildinfo
 
-ControlEngine/scrapers/utils/cookies.json
-ControlEngine/scrapers/fp_bundle/downloads/
+# =========================
+# Cache
+# =========================
+.cache/
+.turbo/
+.vercel/
+
+# =========================
+# Supabase
+# =========================
+.supabase/
+
+# =========================
+# FightSupport scraper
+# =========================
+ControlEngine/scrapers/.env
 ControlEngine/scrapers/cookies.json
+ControlEngine/scrapers/utils/cookies.json
 ControlEngine/scrapers/utils/fp_session_state.json
 ControlEngine/scrapers/config/login_master.json
-ControlEngine/scrapers/.env
+
+# Downloads
+ControlEngine/scrapers/fp_bundle/downloads/
+ControlEngine/scrapers/fp_bundle_mm/downloads/
+ControlEngine/scrapers/sportscholen/downloads/
+
+# Temp / scraper output
+ControlEngine/scrapers/tmp/
+ControlEngine/scrapers/debug/
+
+# Browser data
+playwright-report/
+test-results/
+screenshots/
+
+# =========================
+# Local data
+# =========================
+*.sqlite
+*.sqlite3
+*.db
+
+# =========================
+# Secrets
+# =========================
+*.pem
+*.key
+*.crt
+*.p12
