@@ -906,7 +906,7 @@ async function fetchMatchmakingTournamentBouts(matchmakingId: string) {
   if (!matchmakingId) return [] as any[];
 
   const columns =
-    "id, matchmaking_id, upload_id, partij_nr, is_toernooi, toernooi_code, raw_json, va_rood, va_blauw, fighter_id, rood_naam, blauw_naam, rood_gym, blauw_gym, discipline, klasse, max_gewicht, verwijderd, source_type";
+    "id, matchmaking_id, upload_id, partij_nr, is_toernooi, toernooi_code, raw_json, va_rood, va_blauw, rood_naam, blauw_naam, rood_gym, blauw_gym, discipline, klasse, max_gewicht, verwijderd, source_type";
 
   const base = supabase
     .from("matchmaking_bouts_raw")

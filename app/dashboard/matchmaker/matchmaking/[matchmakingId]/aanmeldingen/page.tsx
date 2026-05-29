@@ -240,7 +240,10 @@ function isFailedAanmelding(r: Aanmelding) {
 }
 
 function isRawAanmelding(r: Aanmelding) {
-  return statusOf(r) === "rauw";
+  const st = statusOf(r);
+  // Controle_bezig blijft in de praktijk "niet gecheckt" zolang er geen eindresultaat is.
+  // Zo verdwijnen vechters niet uit beeld na een mislukte/onderbroken autocheck-start.
+  return st === "rauw" || st === "controle_bezig";
 }
 
 function rowToForm(r: Aanmelding): FighterForm {
@@ -401,7 +404,14 @@ export default function AanmeldingenPage() {
     return rawRows;
   }, [viewMode, scrapedRows, failedRows, allRows, rawRows]);
 
-  const rowsForCheck = viewMode === "failed" ? failedRows : rawRows;
+  const rowsForCheck =
+    viewMode === "failed"
+      ? failedRows
+      : viewMode === "all"
+        ? rows.filter((r) =>
+            ["rauw", "controle_bezig", "scrape_mislukt"].includes(statusOf(r)),
+          )
+        : rawRows;
 
   const eventName = pick(matchmaking || {}, [
     "naam",
@@ -1113,11 +1123,7 @@ export default function AanmeldingenPage() {
               <button
                 className="fs-green-btn compact"
                 onClick={controleer}
-                disabled={
-                  busy ||
-                  !rowsForCheck.length ||
-                  ["checked", "all"].includes(viewMode)
-                }
+                disabled={busy || !rowsForCheck.length}
               >
                 <Radar size={15} />
                 {viewMode === "failed"

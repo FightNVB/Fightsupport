@@ -1,4 +1,4 @@
-// app/api/officials/start/route.ts
+// app/api/control-engine/officials/start/route.ts
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
@@ -25,7 +25,7 @@ const supabase = createClient(
 
 const DEBUG = process.env.CONTROL_ENGINE_DEBUG === "1";
 
-// officials gebruikt de officials scraper
+// officials gebruikt de eigen officials scraper
 const SCRAPER_FILE = "scraper_fp_officials.js";
 
 function dlog(...args: any[]) {
@@ -115,7 +115,6 @@ async function withScraperLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-
 function clampInt(n: any, def: number, min: number, max: number): number {
   const num = Number(n);
   if (!Number.isFinite(num)) return def;
@@ -124,7 +123,8 @@ function clampInt(n: any, def: number, min: number, max: number): number {
 }
 
 function isRoleAllowedForRoute(role: string | null | undefined) {
-  return role === "admin" || role === "superadmin";
+  const r = String(role ?? "").trim().toLowerCase();
+  return r === "hoofdofficial" || r === "admin" || r === "superadmin";
 }
 
 async function updateRunProgress(args: {
@@ -160,7 +160,7 @@ async function updateRunProgress(args: {
     .eq("id", args.controle_run_id);
 
   if (error) {
-    console.warn("[officials/start] progress update mislukt", error);
+    console.warn("[control-engine/officials/start] progress update mislukt", error);
   }
 }
 
@@ -176,7 +176,7 @@ async function markOtherRunsNotLatest(
 
   if (error) {
     console.warn(
-      "[officials/start] kon andere runs niet op is_latest=false zetten",
+      "[control-engine/officials/start] kon andere runs niet op is_latest=false zetten",
       error
     );
   }
@@ -356,7 +356,7 @@ export async function POST(req: Request) {
 
     if (!isRoleAllowedForRoute(role)) {
       return NextResponse.json(
-        { error: "Geen toegang tot admin start route" },
+        { error: "Geen toegang tot officials start route" },
         { status: 403 }
       );
     }
@@ -379,7 +379,7 @@ export async function POST(req: Request) {
       current_step: "Oude controlegegevens opruimen...",
     });
 
-    console.log("[control-engine/admin/start] 🧹 cleanup oude raw data...");
+    console.log("[control-engine/officials/start] 🧹 cleanup oude raw data...");
 
     const cleanupTargets = [
       "fighters_raw",
@@ -399,7 +399,7 @@ export async function POST(req: Request) {
       if (error) throw error;
     }
 
-    console.log("[control-engine/admin/start] ✅ cleanup klaar");
+    console.log("[control-engine/officials/start] ✅ cleanup klaar");
 
     await updateRunProgress({
       controle_run_id: controle_run_id!,
@@ -450,7 +450,7 @@ export async function POST(req: Request) {
       current_step: `Scrape voorbereiden (${va_nummers.length} vechters)...`,
     });
 
-    console.log("[officials/start] run", {
+    console.log("[control-engine/officials/start] run", {
       matchmaking_id,
       controle_run_id,
       do_scrape,
@@ -470,7 +470,7 @@ export async function POST(req: Request) {
       userId,
     });
 
-    dlog("[officials/start] va_sample", va_nummers.slice(0, 12));
+    dlog("[control-engine/officials/start] va_sample", va_nummers.slice(0, 12));
 
     const fpBundlePath = resolveScriptPath(
       "scrapers",
@@ -478,10 +478,10 @@ export async function POST(req: Request) {
       SCRAPER_FILE
     );
 
-    dlog("[officials/start] fpBundlePath =", fpBundlePath);
+    dlog("[control-engine/officials/start] fpBundlePath =", fpBundlePath);
 
     if (do_scrape && va_nummers.length > 0) {
-      console.log("[officials/start] ▶ fp_bundle start", {
+      console.log("[control-engine/officials/start] ▶ fp_bundle start", {
         va_count: va_nummers.length,
         scraper: SCRAPER_FILE,
       });
@@ -497,6 +497,10 @@ export async function POST(req: Request) {
           fpBundlePath,
           [matchmaking_id!, controle_run_id!, ...va_nummers],
           {
+            // Control-engine/officials start gebruikt ALTIJD de master-login.
+            // Belangrijk: process.env.FP_MATCHMAKER_ID kan globaal bestaan, maar mag hier niet doorlekken.
+            FP_MATCHMAKER_ID: "",
+            FP_SESSION_MODE: "master",
             WORKERS: String(workers),
             STAGGER_MS: String(stagger_ms),
             TAB_ATTEMPTS: String(tab_attempts),
@@ -509,7 +513,7 @@ export async function POST(req: Request) {
           "fp_bundle_officials"
         );
 
-        console.log("[officials/start] ✅ fp_bundle_officials klaar", {
+        console.log("[control-engine/officials/start] ✅ fp_bundle klaar", {
           ms: res.ms,
           va_count: va_nummers.length,
           scraper: SCRAPER_FILE,
@@ -523,7 +527,7 @@ export async function POST(req: Request) {
         });
       } catch (e: any) {
         console.log(
-          "[officials/start] ❌ fp_bundle_officials failed (continuing)",
+          "[control-engine/officials/start] ❌ fp_bundle failed (continuing)",
           {
             error: e?.message ?? String(e),
             scraper: SCRAPER_FILE,
@@ -538,7 +542,7 @@ export async function POST(req: Request) {
         });
       }
     } else {
-      console.log("[officials/start] scrape skipped", {
+      console.log("[control-engine/officials/start] scrape skipped", {
         do_scrape,
         va_count: va_nummers.length,
         scraper: SCRAPER_FILE,
@@ -551,7 +555,7 @@ export async function POST(req: Request) {
       });
     }
 
-    console.log("[officials/start] ▶ buildControleBoutContext...");
+    console.log("[control-engine/officials/start] ▶ buildControleBoutContext...");
 
     await updateRunProgress({
       controle_run_id: controle_run_id!,
@@ -561,7 +565,7 @@ export async function POST(req: Request) {
 
     await buildControleBoutContext(matchmaking_id!, controle_run_id!);
 
-    console.log("[officials/start] ✅ buildControleBoutContext klaar");
+    console.log("[control-engine/officials/start] ✅ buildControleBoutContext klaar");
 
     await updateRunProgress({
       controle_run_id: controle_run_id!,
@@ -569,12 +573,12 @@ export async function POST(req: Request) {
       current_step: "Toernooi-context opbouwen...",
     });
 
-    console.log("[officials/start] ▶ buildToernooiContext...");
+    console.log("[control-engine/officials/start] ▶ buildToernooiContext...");
     const toernooiRows = await buildToernooiContext(
       matchmaking_id!,
       controle_run_id!
     );
-    console.log("[officials/start] ✅ buildToernooiContext klaar", {
+    console.log("[control-engine/officials/start] ✅ buildToernooiContext klaar", {
       rows: Array.isArray(toernooiRows) ? toernooiRows.length : 0,
     });
 
@@ -584,9 +588,9 @@ export async function POST(req: Request) {
       current_step: "Context verrijken met FightPassport-data...",
     });
 
-    console.log("[officials/start] ▶ enrichControleBoutContext...");
+    console.log("[control-engine/officials/start] ▶ enrichControleBoutContext...");
     await enrichControleBoutContext(matchmaking_id!, controle_run_id!);
-    console.log("[officials/start] ✅ enrichControleBoutContext klaar");
+    console.log("[control-engine/officials/start] ✅ enrichControleBoutContext klaar");
 
     await updateRunProgress({
       controle_run_id: controle_run_id!,
@@ -594,7 +598,7 @@ export async function POST(req: Request) {
       current_step: "Regelcontrole voorbereiden...",
     });
 
-    console.log("[officials/start] ▶ load ctxRows for rulesEngine...");
+    console.log("[control-engine/officials/start] ▶ load ctxRows for rulesEngine...");
 
     const { data: rawCtxRows, error: ctxErr } = await supabase
       .from("controle_bout_context")
@@ -624,7 +628,7 @@ export async function POST(req: Request) {
               )
           );
 
-    console.log("[officials/start] ✅ ctxRows loaded", {
+    console.log("[control-engine/officials/start] ✅ ctxRows loaded", {
       matchmaking_rows: rawCtxRows?.length ?? 0,
       current_run_rows: ctxRowsCurrentRun.length,
       rows_used_for_rules: ctxRows.length,
@@ -644,23 +648,23 @@ export async function POST(req: Request) {
       current_step: "RulesEngine draait...",
     });
 
-    console.log("[officials/start] ▶ rulesEngine...");
+    console.log("[control-engine/officials/start] ▶ rulesEngine...");
     const hits = await rulesEngine({
       matchmaking_id,
       controle_run_id: controle_run_id!,
       ctxRows: (ctxRows ?? []) as any[],
     });
 
-    console.log("[officials/start] ✅ rulesEngine klaar", {
+    console.log("[control-engine/officials/start] ✅ rulesEngine klaar", {
       hits: Array.isArray(hits) ? hits.length : 0,
     });
 
     console.log(
-      "[officials/start] ℹ️ saveControleResultaten gebeurt in rulesEngine zelf"
+      "[control-engine/officials/start] ℹ️ saveControleResultaten gebeurt in rulesEngine zelf"
     );
 
     if (DEBUG && Array.isArray(hits) && hits[0]) {
-      console.log("[officials/start] hit_sample", hits[0]);
+      console.log("[control-engine/officials/start] hit_sample", hits[0]);
     }
 
     await updateRunProgress({
@@ -675,7 +679,7 @@ export async function POST(req: Request) {
         .select("id", { count: "exact", head: true })
         .eq("controle_run_id", controle_run_id!);
 
-      console.log("[officials/start] controle_resultaten count", {
+      console.log("[control-engine/officials/start] controle_resultaten count", {
         count: count ?? null,
       });
     } catch {}
@@ -722,7 +726,7 @@ export async function POST(req: Request) {
       role,
     });
   } catch (err: any) {
-    console.error("❌ officials/start fout:", err);
+    console.error("❌ ControlEngine admin fout:", err);
 
     if (controle_run_id) {
       await supabase

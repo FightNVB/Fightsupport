@@ -1925,7 +1925,6 @@ export default function ControleMatchmakingPage() {
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [orderedRows, setOrderedRows] = useState<AnyRow[]>([]);
   const [lineupMode, setLineupMode] = useState(false);
-  const [dragId, setDragId] = useState<string | null>(null);
   const [saveOrderBusy, setSaveOrderBusy] = useState(false);
 
   const [statusByPartij, setStatusByPartij] = useState<
@@ -2028,8 +2027,19 @@ export default function ControleMatchmakingPage() {
   }
 
   function movePartij(fromIndex: number, toIndex: number) {
-    if (toIndex < 0 || toIndex >= orderedRows.length) return;
-    setOrderedRows((prev) => arrayMove(prev, fromIndex, toIndex));
+    setOrderedRows((prev) => {
+      if (
+        fromIndex < 0 ||
+        fromIndex >= prev.length ||
+        toIndex < 0 ||
+        toIndex >= prev.length ||
+        fromIndex === toIndex
+      ) {
+        return prev;
+      }
+
+      return arrayMove(prev, fromIndex, toIndex);
+    });
   }
 
   function swapPartijCorners(index: number) {
@@ -2178,7 +2188,6 @@ export default function ControleMatchmakingPage() {
   function cancelLineupMode() {
     setLineupMode(false);
     syncOrderedRowsFromRows(rows);
-    setDragId(null);
   }
 
   async function addPartijSubmit() {
@@ -2727,11 +2736,14 @@ export default function ControleMatchmakingPage() {
   }, [rows]);
 
   const rowsByPartijNr = useMemo(() => {
-    const baseRows = lineupMode
-      ? orderedRows.filter((r) => !isToernooiRow(r))
-      : gewoneRows;
+    if (lineupMode) {
+      // In lineup mode is orderedRows de visuele volgorde.
+      // Niet opnieuw sorteren op het oude partij_nr, want dan lijken
+      // de pijltjes en auto-sort niets te doen totdat je opslaat.
+      return orderedRows.filter((r) => !isToernooiRow(r));
+    }
 
-    return [...baseRows].sort(
+    return [...gewoneRows].sort(
       (a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0),
     );
   }, [gewoneRows, orderedRows, lineupMode]);
@@ -3236,7 +3248,7 @@ export default function ControleMatchmakingPage() {
                       color: "#7c2d12",
                     }}
                   >
-                    Sleep partijen, gebruik pijltjes of wissel direct rood/blauw
+                    Gebruik pijltjes omhoog/omlaag of wissel direct rood/blauw
                     met
                     <span className="font-black"> Hoek wisselen</span>.
                   </div>
@@ -3946,46 +3958,13 @@ export default function ControleMatchmakingPage() {
                         return (
                           <tr
                             key={stableId}
-                            draggable={lineupMode}
-                            onDragStart={() => {
-                              if (!lineupMode) return;
-                              setDragId(stableId);
-                            }}
-                            onDragOver={(e) => {
-                              if (!lineupMode) return;
-                              e.preventDefault();
-                            }}
-                            onDrop={(e) => {
-                              if (!lineupMode || !dragId) return;
-                              e.preventDefault();
-                              const fromIndex = orderedRows.findIndex(
-                                (x) => getStableRowKey(x) === dragId,
-                              );
-                              const toIndex = orderedRows.findIndex(
-                                (x) => getStableRowKey(x) === stableId,
-                              );
-                              if (
-                                fromIndex >= 0 &&
-                                toIndex >= 0 &&
-                                fromIndex !== toIndex
-                              ) {
-                                setOrderedRows((prev) =>
-                                  arrayMove(prev, fromIndex, toIndex),
-                                );
-                              }
-                              setDragId(null);
-                            }}
-                            onDragEnd={() => setDragId(null)}
                             style={{
                               backgroundColor: zebraWhite
                                 ? "#ffffff"
                                 : "#0d0d0d",
                               color: zebraWhite ? "#000" : "#fff",
-                              cursor: lineupMode ? "grab" : "default",
-                              outline:
-                                lineupMode && dragId === stableId
-                                  ? "2px solid rgba(255,77,0,0.55)"
-                                  : "none",
+                              cursor: "default",
+                              outline: "none",
                             }}
                           >
                             <td className="py-3 px-4 font-semibold align-top">
@@ -4108,13 +4087,6 @@ export default function ControleMatchmakingPage() {
                                       <Repeat className="h-3.5 w-3.5" />
                                       Hoek wisselen
                                     </button>
-
-                                    <span
-                                      className="text-[11px] font-bold opacity-80"
-                                      style={{ letterSpacing: "0.04em" }}
-                                    >
-                                      SLEEP
-                                    </span>
                                   </div>
                                 ) : null}
                               </div>

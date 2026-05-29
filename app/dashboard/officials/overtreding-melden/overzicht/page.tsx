@@ -97,6 +97,37 @@ function normalizeBondteam(value?: string | null) {
   return (value || "").trim().toUpperCase();
 }
 
+function valueFromInterneNotitie(note: string | null | undefined, key: string) {
+  const lines = String(note || "").split(/\r?\n/);
+  const wanted = key.trim().toUpperCase();
+
+  for (const line of lines) {
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+
+    const k = line.slice(0, idx).trim().toUpperCase();
+    const v = line.slice(idx + 1).trim();
+
+    if (k === wanted) return v;
+  }
+
+  return "";
+}
+
+function bronVan(m: Melding) {
+  return (
+    m.bron ||
+    m.bron_type ||
+    m.melding_bron ||
+    valueFromInterneNotitie(m.interne_notitie, "BRON") ||
+    ""
+  );
+}
+
+function melderRolVan(m: Melding) {
+  return valueFromInterneNotitie(m.interne_notitie, "MELDER_ROL") || "";
+}
+
 function bondteamVan(m: Melding) {
   return (
     m.gemeld_door_bondteam ||
@@ -104,8 +135,16 @@ function bondteamVan(m: Melding) {
     m.aangemaakt_door_bondteam ||
     m.bron_bondteam ||
     m.bondteam ||
+    valueFromInterneNotitie(m.interne_notitie, "BONDTEAM") ||
+    valueFromInterneNotitie(m.interne_notitie, "MELDER_BONDTEAM") ||
     ""
   );
+}
+
+function isOfficialMelding(m: Melding) {
+  const bron = lower(bronVan(m));
+  const melderRol = lower(melderRolVan(m));
+  return bron === "official" || melderRol === "official";
 }
 
 function melderNaamVan(m: Melding) {
@@ -259,6 +298,11 @@ export default function OfficialsOvertredingenOverzichtPage() {
         ? loaded
         : loaded.filter((m) => {
             const itemBondteam = norm(bondteamVan(m));
+
+            // Oude/official meldingen hebben soms nog geen bondteam-kolom gevuld.
+            // Die mogen niet verdwijnen uit het officials-overzicht als BRON/MELDER_ROL official is.
+            if (!itemBondteam && isOfficialMelding(m)) return true;
+
             return itemBondteam === profileBondteam;
           });
 
@@ -302,6 +346,8 @@ export default function OfficialsOvertredingenOverzichtPage() {
         melderNaamVan(x),
         melderEmailVan(x),
         bondteamVan(x),
+        bronVan(x),
+        melderRolVan(x),
       ]
         .filter(Boolean)
         .join(" ")
@@ -381,14 +427,15 @@ export default function OfficialsOvertredingenOverzichtPage() {
                   <th className="border-b border-zinc-700 p-2 text-left">Ernst</th>
                   <th className="border-b border-zinc-700 p-2 text-left">Status</th>
                   <th className="border-b border-zinc-700 p-2 text-left">Melder</th>
+                  <th className="border-b border-zinc-700 p-2 text-left">Bondteam/bron</th>
                   <th className="border-b border-zinc-700 p-2 text-left">Omschrijving</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} className="p-5 text-center font-bold text-zinc-300">Meldingen laden...</td></tr>
+                  <tr><td colSpan={9} className="p-5 text-center font-bold text-zinc-300">Meldingen laden...</td></tr>
                 ) : filtered.length === 0 ? (
-                  <tr><td colSpan={8} className="p-5 text-center font-bold text-zinc-300">Geen meldingen gevonden.</td></tr>
+                  <tr><td colSpan={9} className="p-5 text-center font-bold text-zinc-300">Geen meldingen gevonden.</td></tr>
                 ) : filtered.map((m) => (
                   <tr key={m.id} className="border-b border-zinc-800 bg-black/20 hover:bg-black/35">
                     <td className="p-2 font-black text-white">{fmtDate(datumOvertredingVan(m))}</td>
@@ -397,7 +444,8 @@ export default function OfficialsOvertredingenOverzichtPage() {
                     <td className="p-2 text-zinc-200">{m.categorie || "-"}</td>
                     <td className="p-2"><span className="border border-orange-500/40 bg-orange-950/30 px-2 py-1 text-[10px] font-black uppercase text-orange-200">{m.ernst || "-"}</span></td>
                     <td className="p-2"><span className={`border px-2 py-1 text-[10px] font-black uppercase ${statusClass(m.status)}`}>{m.status || "open"}</span></td>
-                    <td className="p-2"><div className="font-bold text-zinc-100">{melderNaamVan(m)}</div><div className="text-[10px] text-zinc-400">{bondteamVan(m) || melderEmailVan(m) || "-"}</div></td>
+                    <td className="p-2"><div className="font-bold text-zinc-100">{melderNaamVan(m)}</div><div className="text-[10px] text-zinc-400">{melderEmailVan(m) || melderRolVan(m) || "-"}</div></td>
+                    <td className="p-2"><div className="font-black text-orange-200">{bondteamVan(m) || "Geen bondteam"}</div><div className="text-[10px] uppercase text-zinc-400">{bronVan(m) || "-"}</div></td>
                     <td className="max-w-xl p-2 text-zinc-300">{tekstVan(m)}</td>
                   </tr>
                 ))}

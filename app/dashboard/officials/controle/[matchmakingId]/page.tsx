@@ -27,7 +27,6 @@ import { authedFetch } from "@/lib/api/authedFetch";
 import NvbDarkButton from "@/components/NvbDarkButton";
 import NvbLightButton from "@/components/NvbLightButton";
 
-
 const inter = { className: "font-sans" };
 
 const NVB_ORANGE = "#ff4d00";
@@ -63,6 +62,16 @@ type ResRow = {
   boodschap: string | null;
   review_status?: string | null;
   original_resultaat?: string | null;
+  // Velden uit weigh_in_bouts, zodat het overzicht niet hoeft te gokken
+  // op basis van alleen de tekst in controle_resultaten.
+  dispensatie_nodig?: boolean | string | null;
+  dispensatie_verleend?: boolean | string | null;
+  dispensatie_reason?: string | null;
+  reglement_status?: string | null;
+  praktijk_status?: string | null;
+  eindstatus?: string | null;
+  gewicht_strafpunt_rood?: number | string | null;
+  gewicht_strafpunt_blauw?: number | string | null;
 };
 
 type FilterKey =
@@ -547,6 +556,70 @@ type WeegstationBadgeInfo = {
   tone: "minpunt" | "disp_ok" | "disp_bad" | "afkeur" | "goedkeur" | "info";
 };
 
+function boolLike(v: any): boolean | null {
+  if (v == null) return null;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const s = String(v).trim().toLowerCase();
+  if (!s) return null;
+  if (
+    ["true", "1", "ja", "yes", "y", "verleend", "goedgekeurd", "ok"].includes(s)
+  )
+    return true;
+  if (
+    [
+      "false",
+      "0",
+      "nee",
+      "no",
+      "n",
+      "afgewezen",
+      "afgekeurd",
+      "geweigerd",
+    ].includes(s)
+  )
+    return false;
+  return null;
+}
+
+function hasDeniedWeegDispensatie(rows: ResRow[] | undefined): boolean {
+  return (rows ?? []).some((r) => {
+    if (!isWeegstationRow(r)) return false;
+    const nodig = boolLike((r as any).dispensatie_nodig);
+    const verleend = boolLike((r as any).dispensatie_verleend);
+    const reason = String((r as any).dispensatie_reason ?? "")
+      .trim()
+      .toLowerCase();
+    const code = String((r as any).rule_code ?? "")
+      .trim()
+      .toUpperCase();
+    const msg = String((r as any).boodschap ?? "")
+      .trim()
+      .toLowerCase();
+    const res = normResultaat((r as any).resultaat);
+
+    if (nodig === true && verleend === false) return true;
+    if (
+      reason.includes("afgewezen") ||
+      reason.includes("afgekeurd") ||
+      reason.includes("geweigerd")
+    )
+      return true;
+    if (
+      (code.includes("DISP") || msg.includes("dispensatie")) &&
+      (res === "afgekeurd" ||
+        code.includes("AFGEKEURD") ||
+        code.includes("AFGEWEZEN") ||
+        msg.includes("afgewezen") ||
+        msg.includes("afgekeurd") ||
+        msg.includes("niet verleend") ||
+        msg.includes("geweigerd"))
+    )
+      return true;
+    return false;
+  });
+}
+
 function isWeegstationRow(r: Partial<ResRow> | null | undefined): boolean {
   const rule = String((r as any)?.rule ?? "")
     .trim()
@@ -564,7 +637,12 @@ function isWeegstationRow(r: Partial<ResRow> | null | undefined): boolean {
   return (
     rule.startsWith("weegstation") ||
     source === "weigh_in_bouts" ||
+    code.startsWith("WEEGSTATION") ||
     code.startsWith("MINPUNT") ||
+    (code.includes("DISP") &&
+      (source === "weigh_in_bouts" ||
+        rule.includes("weeg") ||
+        msg.includes("weeg"))) ||
     msg.includes("weegstation") ||
     msg.includes("weegdispensatie")
   );
@@ -607,11 +685,35 @@ function weegstationBadgesFromRows(
       continue;
     }
 
-    if (rule.includes("dispensatie") || msgLower.includes("weegdispensatie")) {
+    const isWeegDispensatie =
+      rule.includes("weegdispensatie") ||
+      rule.includes("weeg dispensatie") ||
+      code.includes("WEEGDISP") ||
+      code.includes("WEEG_DISP") ||
+      code.includes("WEGING_DISP") ||
+      msgLower.includes("weegdispensatie") ||
+      msgLower.includes("weeg dispensatie");
+
+    const directDispensatieNodig = boolLike((r as any).dispensatie_nodig);
+    const directDispensatieVerleend = boolLike((r as any).dispensatie_verleend);
+    const directDispensatieReason = String((r as any).dispensatie_reason ?? "")
+      .trim()
+      .toLowerCase();
+
+    if (isWeegDispensatie || directDispensatieNodig === true) {
       const afgekeurd =
+        directDispensatieVerleend === false ||
+        directDispensatieReason.includes("afgewezen") ||
+        directDispensatieReason.includes("afgekeurd") ||
+        directDispensatieReason.includes("geweigerd") ||
         res === "afgekeurd" ||
         code.includes("AFKEUR") ||
+        code.includes("AFGEKEURD") ||
+        code.includes("AFGEWEZEN") ||
+        code.includes("GEWEIGERD") ||
         msgLower.includes("afgekeurd") ||
+        msgLower.includes("afgewezen") ||
+        msgLower.includes("afkeur") ||
         msgLower.includes("niet verleend") ||
         msgLower.includes("geweigerd");
 
@@ -685,6 +787,25 @@ function isWeegstationAandachtBadge(badge: WeegstationBadgeInfo): boolean {
 
 function hasWeegstationAandachtspunt(rows: ResRow[] | undefined): boolean {
   return weegstationBadgesFromRows(rows).some(isWeegstationAandachtBadge);
+}
+
+function statusFromWeegstationRows(
+  rows: ResRow[] | undefined,
+): PartijStatus | null {
+  const badges = weegstationBadgesFromRows(rows);
+
+  // Een afgekeurde weegdispensatie of afkeur op gewicht moet in het
+  // overzicht zwaarder wegen dan een algemene "status ok" melding.
+  if (badges.some((b) => b.tone === "disp_bad" || b.tone === "afkeur")) {
+    return "afgekeurd";
+  }
+
+  // Verleende weegdispensatie en minpunt blijven als aandachtspunt zichtbaar,
+  // maar zijn geen harde afkeur.
+  if (badges.some((b) => b.tone === "disp_ok")) return "dispensatie";
+  if (badges.some((b) => b.tone === "minpunt")) return "actie";
+
+  return null;
 }
 
 function WeegstationBadge({ badge }: { badge: WeegstationBadgeInfo }) {
@@ -1882,7 +2003,6 @@ export default function ControleMatchmakingPage() {
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [orderedRows, setOrderedRows] = useState<AnyRow[]>([]);
   const [lineupMode, setLineupMode] = useState(false);
-  const [dragId, setDragId] = useState<string | null>(null);
   const [saveOrderBusy, setSaveOrderBusy] = useState(false);
 
   const [statusByPartij, setStatusByPartij] = useState<
@@ -2159,7 +2279,6 @@ export default function ControleMatchmakingPage() {
   function cancelLineupMode() {
     setLineupMode(false);
     syncOrderedRowsFromRows(rows);
-    setDragId(null);
   }
 
   async function addPartijSubmit() {
@@ -2374,7 +2493,8 @@ export default function ControleMatchmakingPage() {
       }
 
       setMsg(json?.message ?? "✅ Lineup is omgezet naar uitslagen.");
-      setReloadTick((x) => x + 1);
+      router.replace("/dashboard/officials");
+      return;
     });
   }
 
@@ -2561,10 +2681,112 @@ export default function ControleMatchmakingPage() {
 
       if (weegErr) throw weegErr;
 
+      // Extra bron: weigh_in_bouts bevat de waarheid over weegdispensatie.
+      // controle_resultaten kan nog een algemene "goedkeur na weging" hebben,
+      // maar als weigh_in_bouts.dispensatie_verleend=false is, moet overzicht AFKEUR tonen.
+      const { data: directWeegRows, error: directWeegErr } = await supabase
+        .from("weigh_in_bouts")
+        .select(
+          "id, partij_nr, controle_run_id, matchmaking_id, reglement_status, praktijk_status, eindstatus, dispensatie_nodig, dispensatie_verleend, dispensatie_reason, gewicht_strafpunt_rood, gewicht_strafpunt_blauw, rood_gewogen_gewicht, blauw_gewogen_gewicht, gewicht_verschil",
+        )
+        .eq("matchmaking_id", matchmakingId);
+
+      if (directWeegErr) throw directWeegErr;
+
+      const directWeegResultaten: ResRow[] = (
+        (directWeegRows ?? []) as AnyRow[]
+      )
+        .map((w) => {
+          const pn = Number(w.partij_nr);
+          const dispNodig = boolLike(w.dispensatie_nodig);
+          const dispVerleend = boolLike(w.dispensatie_verleend);
+          const eind = String(
+            w.eindstatus ?? w.praktijk_status ?? w.reglement_status ?? "",
+          ).toUpperCase();
+          const strafRood = Number(w.gewicht_strafpunt_rood ?? 0) || 0;
+          const strafBlauw = Number(w.gewicht_strafpunt_blauw ?? 0) || 0;
+          const hasMinpunt = strafRood > 0 || strafBlauw > 0;
+          const minpuntHoek =
+            strafRood > 0 ? "rood" : strafBlauw > 0 ? "blauw" : null;
+          const reason = String(w.dispensatie_reason ?? "").trim();
+
+          let resultaat: ResRow["resultaat"] = "ok";
+          let rule = "weegstation_status";
+          let ruleCode =
+            eind === "AFKEUR" ? "WEEGSTATION_AFKEUR" : "WEEGSTATION_OK";
+          let boodschap =
+            eind === "AFKEUR" ? "Afkeur op gewicht" : "Goedkeur na weging";
+          let hoek: "rood" | "blauw" | null = null;
+
+          if (dispNodig === true) {
+            rule = "weegstation_dispensatie";
+            if (dispVerleend === false) {
+              resultaat = "afgekeurd";
+              ruleCode = "WEEGSTATION_DISPENSATIE_AFGEWEZEN";
+              boodschap = reason
+                ? `Weegdispensatie afgekeurd: ${reason}`
+                : "Weegdispensatie afgekeurd";
+            } else if (dispVerleend === true) {
+              resultaat = "dispensatie";
+              ruleCode = "WEEGSTATION_DISPENSATIE_VERLEEND";
+              boodschap = reason
+                ? `Weegdispensatie verleend: ${reason}`
+                : "Weegdispensatie verleend";
+            } else if (eind === "AFKEUR") {
+              resultaat = "afgekeurd";
+              ruleCode = "WEEGSTATION_DISPENSATIE_AFGEWEZEN";
+              boodschap = reason
+                ? `Weegdispensatie afgekeurd: ${reason}`
+                : "Weegdispensatie afgekeurd";
+            } else {
+              resultaat = "dispensatie";
+              ruleCode = "WEEGSTATION_DISPENSATIE_NODIG";
+              boodschap = reason
+                ? `Weegdispensatie nodig: ${reason}`
+                : "Weegdispensatie nodig";
+            }
+          } else if (hasMinpunt) {
+            resultaat = "actie";
+            rule = "weegstation_minpunt";
+            ruleCode = "MINPUNT";
+            boodschap =
+              minpuntHoek === "rood"
+                ? "Minpunt rood"
+                : minpuntHoek === "blauw"
+                  ? "Minpunt blauw"
+                  : "Minpunt toegekend";
+            hoek = minpuntHoek;
+          } else if (eind === "AFKEUR") {
+            resultaat = "afgekeurd";
+          }
+
+          return {
+            id: `weigh_in_bouts:${w.id}`,
+            source_table: "weigh_in_bouts",
+            source_id: String(w.id ?? ""),
+            partij_nr: Number.isFinite(pn) ? pn : null,
+            hoek,
+            resultaat,
+            rule,
+            rule_code: ruleCode,
+            boodschap,
+            dispensatie_nodig: w.dispensatie_nodig,
+            dispensatie_verleend: w.dispensatie_verleend,
+            dispensatie_reason: w.dispensatie_reason,
+            reglement_status: w.reglement_status,
+            praktijk_status: w.praktijk_status,
+            eindstatus: w.eindstatus,
+            gewicht_strafpunt_rood: w.gewicht_strafpunt_rood,
+            gewicht_strafpunt_blauw: w.gewicht_strafpunt_blauw,
+          };
+        })
+        .filter((w) => Number.isFinite(Number(w.partij_nr)));
+
       const mergedResMap = new Map<string, ResRow>();
       for (const item of [
         ...((resRows ?? []) as ResRow[]),
         ...((weegRows ?? []) as ResRow[]),
+        ...directWeegResultaten,
       ]) {
         const key = String(
           item.id ??
@@ -2598,8 +2820,16 @@ export default function ControleMatchmakingPage() {
       const dispMap: Record<number, boolean> = {};
       for (const pn of Object.keys(resByPn)) {
         const pnNum = Number(pn);
-        const rr = (resByPn[pnNum] ?? []).filter((r) => !isWeegstationRow(r));
-        const hasDisp = rr.some((r) => normResultaatRow(r) === "dispensatie");
+        const allRowsForPartij = resByPn[pnNum] ?? [];
+        const rr = allRowsForPartij.filter((r) => !isWeegstationRow(r));
+        const weegRowsForPartij = allRowsForPartij.filter(isWeegstationRow);
+        const weegDispAfgekeurd = hasDeniedWeegDispensatie(weegRowsForPartij);
+        const hasDisp =
+          !weegDispAfgekeurd &&
+          (rr.some((r) => normResultaatRow(r) === "dispensatie") ||
+            weegstationBadgesFromRows(weegRowsForPartij).some(
+              (b) => b.tone === "disp_ok",
+            ));
         if (hasDisp) dispMap[pnNum] = true;
       }
 
@@ -2615,6 +2845,17 @@ export default function ControleMatchmakingPage() {
         const rrForRulesEngine = rr.filter((res) => !isWeegstationRow(res));
 
         let status = statusFromResultatenOrOk(rrForRulesEngine, ctx);
+
+        const weegStatus = statusFromWeegstationRows(
+          rr.filter(isWeegstationRow),
+        );
+        if (weegStatus === "afgekeurd") {
+          status = "afgekeurd";
+        } else if (weegStatus === "dispensatie" && status === "ok") {
+          status = "dispensatie";
+        } else if (weegStatus === "actie" && status === "ok") {
+          status = "actie";
+        }
 
         const allForPn = allRes.filter((res) => Number(res.partij_nr) === pn);
         const licentieRows = allForPn.filter(isLicentieRow);
@@ -2689,14 +2930,19 @@ export default function ControleMatchmakingPage() {
     for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
       const pn = Number(pnStr);
       if (!Number.isFinite(pn)) continue;
-      if (
-        rr.some(
-          (r) =>
-            !isWeegstationRow(r) &&
-            !isBelgischeGymInfoRow(r) &&
-            normResultaatRow(r) === "afgekeurd",
-        )
-      ) {
+
+      const heeftRulesEngineAfkeur = rr.some(
+        (r) =>
+          !isWeegstationRow(r) &&
+          !isBelgischeGymInfoRow(r) &&
+          normResultaatRow(r) === "afgekeurd",
+      );
+
+      const heeftWeegstationAfkeur = weegstationBadgesFromRows(
+        rr.filter(isWeegstationRow),
+      ).some((b) => b.tone === "disp_bad" || b.tone === "afkeur");
+
+      if (heeftRulesEngineAfkeur || heeftWeegstationAfkeur) {
         m[pn] = true;
       }
     }
@@ -2712,10 +2958,15 @@ export default function ControleMatchmakingPage() {
     for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
       const pn = Number(pnStr);
       if (!Number.isFinite(pn)) continue;
-      if (
-        rr.some((r) => !isWeegstationRow(r) && normResultaatRow(r) === "actie")
-      )
-        m[pn] = true;
+
+      const heeftRulesEngineActie = rr.some(
+        (r) => !isWeegstationRow(r) && normResultaatRow(r) === "actie",
+      );
+      const heeftWeegstationMinpunt = weegstationBadgesFromRows(
+        rr.filter(isWeegstationRow),
+      ).some((b) => b.tone === "minpunt");
+
+      if (heeftRulesEngineActie || heeftWeegstationMinpunt) m[pn] = true;
     }
     return m;
   }, [resultatenByPartij]);
@@ -2772,8 +3023,8 @@ export default function ControleMatchmakingPage() {
   const rowsByPartijNr = useMemo(() => {
     if (lineupMode) {
       // In lineup mode is orderedRows de visuele volgorde.
-      // Niet opnieuw sorteren op het oude partij_nr, want dan lijken slepen
-      // en de pijltjes niets te doen totdat je opslaat.
+      // Niet opnieuw sorteren op het oude partij_nr, want dan lijken
+      // de pijltjes en auto-sort niets te doen totdat je opslaat.
       return orderedRows.filter((r) => !isToernooiRow(r));
     }
 
@@ -3356,7 +3607,7 @@ export default function ControleMatchmakingPage() {
                       color: "#7c2d12",
                     }}
                   >
-                    Sleep partijen, gebruik pijltjes of wissel direct rood/blauw
+                    Gebruik pijltjes omhoog/omlaag of wissel direct rood/blauw
                     met
                     <span className="font-black"> Hoek wisselen</span>.
                   </div>
@@ -4064,18 +4315,22 @@ export default function ControleMatchmakingPage() {
                         const heeftAfkeur = Number.isFinite(originalPn)
                           ? !!hasAfkeurByPartij[originalPn]
                           : false;
-                        const heeftDispensatie = Number.isFinite(originalPn)
-                          ? !!hasDispByPartij[originalPn] ||
-                            !!dispRequestByPartij[originalPn]
-                          : false;
-                        const heeftActie = Number.isFinite(originalPn)
-                          ? !!hasActieByPartij[originalPn]
-                          : false;
                         const weegstationBadges = Number.isFinite(originalPn)
                           ? weegstationBadgesFromRows(
                               weegstationByPartij[originalPn],
                             )
                           : [];
+                        const weegDispAfgekeurd = weegstationBadges.some(
+                          (b) => b.tone === "disp_bad",
+                        );
+                        const heeftDispensatie = Number.isFinite(originalPn)
+                          ? !weegDispAfgekeurd &&
+                            (!!hasDispByPartij[originalPn] ||
+                              !!dispRequestByPartij[originalPn])
+                          : false;
+                        const heeftActie = Number.isFinite(originalPn)
+                          ? !!hasActieByPartij[originalPn]
+                          : false;
                         const geenTegenstander = isGeenTegenstander(r);
                         const busy = Number.isFinite(originalPn)
                           ? busyPartij[originalPn]
@@ -4089,60 +4344,13 @@ export default function ControleMatchmakingPage() {
                         return (
                           <tr
                             key={stableId}
-                            draggable={lineupMode}
-                            onDragStart={(e) => {
-                              if (!lineupMode) return;
-                              e.dataTransfer.effectAllowed = "move";
-                              e.dataTransfer.setData("text/plain", stableId);
-                              setDragId(stableId);
-                            }}
-                            onDragOver={(e) => {
-                              if (!lineupMode) return;
-                              e.preventDefault();
-                            }}
-                            onDrop={(e) => {
-                              if (!lineupMode) return;
-                              e.preventDefault();
-
-                              const droppedId =
-                                dragId || e.dataTransfer.getData("text/plain");
-                              if (!droppedId) {
-                                setDragId(null);
-                                return;
-                              }
-
-                              setOrderedRows((prev) => {
-                                const fromIndex = prev.findIndex(
-                                  (x) => getStableRowKey(x) === droppedId,
-                                );
-                                const toIndex = prev.findIndex(
-                                  (x) => getStableRowKey(x) === stableId,
-                                );
-
-                                if (
-                                  fromIndex < 0 ||
-                                  toIndex < 0 ||
-                                  fromIndex === toIndex
-                                ) {
-                                  return prev;
-                                }
-
-                                return arrayMove(prev, fromIndex, toIndex);
-                              });
-
-                              setDragId(null);
-                            }}
-                            onDragEnd={() => setDragId(null)}
                             style={{
                               backgroundColor: zebraWhite
                                 ? "#ffffff"
                                 : "#0d0d0d",
                               color: zebraWhite ? "#000" : "#fff",
-                              cursor: lineupMode ? "grab" : "default",
-                              outline:
-                                lineupMode && dragId === stableId
-                                  ? "2px solid rgba(255,77,0,0.55)"
-                                  : "none",
+                              cursor: "default",
+                              outline: "none",
                             }}
                           >
                             <td className="py-3 px-4 font-semibold align-top">
@@ -4280,13 +4488,6 @@ export default function ControleMatchmakingPage() {
                                       <Repeat className="h-3.5 w-3.5" />
                                       Hoek wisselen
                                     </button>
-
-                                    <span
-                                      className="text-[11px] font-bold opacity-80"
-                                      style={{ letterSpacing: "0.04em" }}
-                                    >
-                                      SLEEP
-                                    </span>
                                   </div>
                                 ) : null}
                               </div>

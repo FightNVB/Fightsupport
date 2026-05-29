@@ -46,6 +46,10 @@ function isElevatedRole(role: string | null) {
   return r === "admin" || r === "superadmin";
 }
 
+function isElevatedRoles(roles: string[]) {
+  return roles.some((r) => isElevatedRole(r));
+}
+
 function fmtDate(v: string | null) {
   if (!v) return "-";
   const d = new Date(v);
@@ -89,7 +93,7 @@ function statusBadgeStyle(status: RequestStatus) {
 }
 
 export default function BondteamVerzoekenBeheerPage() {
-  const [role, setRole] = useState<string | null>(null);
+  const [roles, setRoles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<RequestRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -116,25 +120,39 @@ export default function BondteamVerzoekenBeheerPage() {
     }
 
     if (!user) {
-      setRole(null);
+      setRoles([]);
       setLoading(false);
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from("user_profiles")
+    const { data: roleRows, error: rolesError } = await supabase
+      .from("user_roles")
       .select("role")
-      .eq("id", user.id)
-      .maybeSingle();
+      .eq("user_id", user.id);
 
-    if (profileError) {
-      console.error("user_profiles role error", profileError);
+    if (rolesError) {
+      console.error("user_roles error", rolesError);
     }
 
-    const nextRole = profile?.role ?? null;
-    setRole(nextRole);
+    let nextRoles = (roleRows ?? [])
+      .map((r: any) => String(r.role ?? "").trim())
+      .filter(Boolean);
 
-    if (!isElevatedRole(nextRole)) {
+    // Fallback voor oude accounts die nog alleen user_profiles.role hebben.
+    if (!nextRoles.length) {
+      const { data: profile, error: profileError } = await supabase
+        .from("user_profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError) console.error("user_profiles role fallback error", profileError);
+      if (profile?.role) nextRoles = [profile.role];
+    }
+
+    setRoles(nextRoles);
+
+    if (!isElevatedRoles(nextRoles)) {
       setLoading(false);
       return;
     }
@@ -269,7 +287,7 @@ export default function BondteamVerzoekenBeheerPage() {
     });
   }, [rows, statusFilter, search]);
 
-  if (!loading && !isElevatedRole(role)) {
+  if (!loading && !isElevatedRoles(roles)) {
     return (
       <main
         className="min-h-screen px-4 py-5 md:px-6"

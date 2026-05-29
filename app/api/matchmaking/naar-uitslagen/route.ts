@@ -36,16 +36,33 @@ function jsonError(message: string, status = 400, extra?: unknown) {
   return NextResponse.json({ ok: false, error: message, extra }, { status });
 }
 
+async function cleanupOldUitslagenData(matchmakingId: string) {
+  // Bij opnieuw klaarzetten van uitslagen moet de uitslagenflow volledig vers zijn.
+  // Eerst resultaten verwijderen, daarna bouts. Dit voorkomt oude concepten, oude minpunten en dubbele partijen.
+  const { error: oldResultsErr } = await supabaseAdmin
+    .from("uitslagen_resultaten")
+    .delete()
+    .eq("matchmaking_id", matchmakingId);
+
+  if (oldResultsErr) throw oldResultsErr;
+
+  const { error: oldBoutsErr } = await supabaseAdmin
+    .from("uitslagen_bouts")
+    .delete()
+    .eq("matchmaking_id", matchmakingId);
+
+  if (oldBoutsErr) throw oldBoutsErr;
+}
+
 type ControleRow = {
   partij_nr: number | string | null;
+  bout_id?: string | null;
   source_id: string | null;
   source_table: string | null;
   toernooi_code?: string | null;
   va_nummer?: string | number | null;
+  toernooi_va_nummer?: string | number | null;
   fighter_id?: string | null;
-  vechter_id?: string | null;
-  rood_va?: string | number | null;
-  blauw_va?: string | number | null;
   rule: string | null;
   rule_code: string | null;
   resultaat: string | null;
@@ -64,8 +81,11 @@ type PartyDecision = {
 };
 
 function isApprovedOverride(row: ControleRow) {
-  const status = norm(row.actie_status);
-  return ["goedgekeurd", "approved", "akkoord", "ok"].includes(status);
+  const actieStatus = norm(row.actie_status);
+  const reviewStatus = norm(row.review_status);
+  return [actieStatus, reviewStatus].some((status) =>
+    ["goedgekeurd", "approved", "akkoord", "ok"].includes(status)
+  );
 }
 
 function isAfkeur(row: ControleRow) {
@@ -81,7 +101,9 @@ function isDispensatie(row: ControleRow) {
 }
 
 function isDispensatieVerleend(row: ControleRow) {
-  return upper(row.rule_code) === "VERLEEND";
+  const result = upper(row.resultaat);
+  const code = upper(row.rule_code);
+  return result === "VERLEEND" || code === "VERLEEND" || isApprovedOverride(row);
 }
 
 function isInfo(row: ControleRow) {
@@ -115,7 +137,11 @@ function rowTournamentKey(row: ControleRow) {
   const code = tournamentCode(row.toernooi_code);
   if (!code) return null;
 
-  const id = normVa(row.va_nummer) || s(row.fighter_id) || s(row.vechter_id) || normVa(row.source_id);
+  const id =
+    normVa(row.toernooi_va_nummer) ||
+    normVa(row.va_nummer) ||
+    s(row.fighter_id) ||
+    normVa(row.source_id);
   if (!id) return null;
 
   return `T:${code}:${id}`;
@@ -126,12 +152,18 @@ function rawTournamentKeys(row: any) {
   if (!code) return [];
 
   const ids = [
+    row.toernooi_va_nummer,
     row.va_nummer,
     row.va,
     row.fighter_va,
     row.vechter_va,
     row.fighter_id,
-    row.vechter_id,
+    row.rood_va,
+    row.blauw_va,
+    row.va_rood,
+    row.va_blauw,
+    row.rood_va_nummer,
+    row.blauw_va_nummer,
     row.id,
   ]
     .map((x) => normVa(x) || s(x))
@@ -149,6 +181,36 @@ function minpuntHoek(row: ControleRow): "rood" | "blauw" | null {
   return null;
 }
 
+function rawRowKeys(row: any) {
+  const keys = new Set<string>();
+  const partijNr = n(row.partij_nr, 0);
+
+  if (row.id) keys.add(`ID:${s(row.id)}`);
+  if (row.bout_id) keys.add(`ID:${s(row.bout_id)}`);
+  if (partijNr) keys.add(`P:${partijNr}`);
+
+  return Array.from(keys);
+}
+
+function controleRowKeys(row: ControleRow) {
+  const keys = new Set<string>();
+  const partijNr = n(row.partij_nr, 0);
+
+  if (row.bout_id) keys.add(`ID:${s(row.bout_id)}`);
+  if (row.source_id) keys.add(`ID:${s(row.source_id)}`);
+  if (partijNr) keys.add(`P:${partijNr}`);
+
+  return Array.from(keys);
+}
+
+function mergeDecision(target: PartyDecision, source: PartyDecision) {
+  target.blocked = target.blocked || source.blocked;
+  target.hasControle = target.hasControle || source.hasControle;
+  target.roodMinpunten += source.roodMinpunten;
+  target.blauwMinpunten += source.blauwMinpunten;
+  target.blockedReasons.push(...source.blockedReasons);
+}
+
 function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
   decision.hasControle = true;
 
@@ -156,6 +218,7 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
   const code = upper(row.rule_code);
   const rule = norm(row.rule);
 
+  // ACTIE minpunt is de enige actie die door mag. Deze telt als strafpunt, niet als blokkade.
   if (resultaat === "actie" && (rule.includes("minpunt") || code.includes("MINPUNT"))) {
     const hoek = minpuntHoek(row);
     if (hoek === "rood") decision.roodMinpunten += 1;
@@ -163,8 +226,10 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  // Alleen OK en INFO mogen door. Alles anders blokkeert, ook bij toernooi-vechters.
-  if (isInfo(row) || isOk(row)) return;
+  // Goedgekeurde/naar OK gezette meldingen blokkeren niet meer.
+  // Let op: een gewone OK/INFO-regel mag pas na de blokkerende controles vrijgeven,
+  // want weegstation_status OK mag een rules-engine ACTIE/AFKEUR/DISPENSATIE niet opheffen.
+  if (isApprovedOverride(row)) return;
 
   if (hasVerbod(row)) {
     decision.blocked = true;
@@ -172,15 +237,15 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  if (isAfkeur(row) && !isApprovedOverride(row)) {
+  if (isAfkeur(row)) {
     decision.blocked = true;
-    decision.blockedReasons.push("AFKEUR zonder actie_status goedgekeurd");
+    decision.blockedReasons.push("AFKEUR aanwezig");
     return;
   }
 
   if (isDispensatie(row) && !isDispensatieVerleend(row)) {
     decision.blocked = true;
-    decision.blockedReasons.push("Dispensatie niet verleend");
+    decision.blockedReasons.push("Dispensatie open/nodig/afgewezen");
     return;
   }
 
@@ -190,12 +255,17 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  decision.blocked = true;
-  decision.blockedReasons.push(`Controle-status blokkeert: ${s(row.resultaat) || s(row.rule_code) || "onbekend"}`);
+  if (isOk(row) || isInfo(row) || isDispensatieVerleend(row)) return;
+
+  const status = s(row.resultaat) || s(row.rule_code);
+  if (status) {
+    decision.blocked = true;
+    decision.blockedReasons.push(`Controle-status blokkeert: ${status}`);
+  }
 }
 
 function buildDecisions(rows: ControleRow[]) {
-  const byPartij = new Map<number, PartyDecision>();
+  const byKey = new Map<string, PartyDecision>();
   const byTournamentFighter = new Map<string, PartyDecision>();
 
   function newDecision(): PartyDecision {
@@ -208,11 +278,11 @@ function buildDecisions(rows: ControleRow[]) {
     };
   }
 
-  function ensurePartij(partijNr: number) {
-    const current = byPartij.get(partijNr);
+  function ensureKey(key: string) {
+    const current = byKey.get(key);
     if (current) return current;
     const next = newDecision();
-    byPartij.set(partijNr, next);
+    byKey.set(key, next);
     return next;
   }
 
@@ -231,13 +301,15 @@ function buildDecisions(rows: ControleRow[]) {
       continue;
     }
 
-    const partijNr = n(row.partij_nr, 0);
-    if (!partijNr) continue;
+    const keys = controleRowKeys(row);
+    if (!keys.length) continue;
 
-    applyControleRowToDecision(row, ensurePartij(partijNr));
+    for (const key of keys) {
+      applyControleRowToDecision(row, ensureKey(key));
+    }
   }
 
-  return { byPartij, byTournamentFighter };
+  return { byKey, byTournamentFighter, newDecision };
 }
 
 function rawRowDecision(row: any, decisions: ReturnType<typeof buildDecisions>) {
@@ -246,23 +318,26 @@ function rawRowDecision(row: any, decisions: ReturnType<typeof buildDecisions>) 
   // Toernooi-vechters staan op partij_nr 0 en moeten per toernooi_code + VA/fighter_id geblokkeerd worden.
   if (partijNr === 0 || tournamentCode(row.toernooi_code)) {
     const keys = rawTournamentKeys(row);
-    const found = keys
-      .map((key) => decisions.byTournamentFighter.get(key))
-      .find(Boolean);
-    return found ?? null;
+    const merged = decisions.newDecision();
+    for (const key of keys) {
+      const found = decisions.byTournamentFighter.get(key);
+      if (found) mergeDecision(merged, found);
+    }
+    return merged.hasControle ? merged : null;
   }
 
-  return decisions.byPartij.get(partijNr) ?? null;
+  // Reguliere partijen kunnen controle-regels hebben op bout_id/source_id/id én op partij_nr.
+  // Alle regels bij elkaar bepalen de totale status. Een weegstation OK mag dus nooit een rules-engine ACTIE/AFKEUR overschrijven.
+  const merged = decisions.newDecision();
+  for (const key of rawRowKeys(row)) {
+    const found = decisions.byKey.get(key);
+    if (found) mergeDecision(merged, found);
+  }
+
+  return merged.hasControle ? merged : null;
 }
 
-function rawRowStatusOkOrInfo(row: any) {
-  const status = upper(row.eindstatus ?? row.status ?? row.controle_status ?? row.resultaat);
-  return status === "OK" || status === "INFO";
-}
 
-function isTournamentRawRow(row: any) {
-  return n(row.partij_nr, 0) === 0 || !!tournamentCode(row.toernooi_code);
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -295,9 +370,8 @@ export async function POST(req: NextRequest) {
 
     const { data: controleRows, error: controleErr } = await supabaseAdmin
       .from("controle_resultaten")
-      .select("partij_nr,source_id,source_table,toernooi_code,va_nummer,fighter_id,vechter_id,rood_va,blauw_va,rule,rule_code,resultaat,severity,actie_status,review_status,hoek")
-      .eq("matchmaking_id", matchmakingId)
-      .in("source_table", ["weigh_in_bouts", "matchmaking_bouts_raw"]);
+      .select("partij_nr,bout_id,source_id,source_table,toernooi_code,toernooi_va_nummer,va_nummer,fighter_id,rule,rule_code,resultaat,severity,actie_status,review_status,hoek")
+      .eq("matchmaking_id", matchmakingId);
 
     if (controleErr) throw controleErr;
 
@@ -306,14 +380,12 @@ export async function POST(req: NextRequest) {
     const eligible = rawBouts.filter((row: any) => {
       const decision = rawRowDecision(row, decisions);
 
-      // Hoofdregel: alleen status OK of INFO mag door.
-      // Normale partijen gebruiken eindstatus/status op matchmaking_bouts_raw + partij_nr-controle.
-      // Toernooi-vechters gebruiken controle_resultaten per toernooi_code + VA/fighter_id, omdat partij_nr daar 0 is.
-      if (isTournamentRawRow(row) && decision?.hasControle) return !decision.blocked;
-      if (!rawRowStatusOkOrInfo(row)) return false;
-      if (decision?.blocked) return false;
-
-      return true;
+      // Hoofdregel:
+      // - Geen meldingen voor deze partij = OK, dus door naar uitslagen.
+      // - Alleen OK/INFO/goedgekeurde meldingen/minpunt = door.
+      // - Elke open ACTIE, AFKEUR, verbod of open/nodige/afgewezen DISPENSATIE blokkeert.
+      // - Weegstation-regels tellen mee, maar staan los van rules-engine regels: OK bij wegen heft andere blokkades niet op.
+      return !decision?.blocked;
     });
 
     if (!eligible.length) {
@@ -334,8 +406,10 @@ export async function POST(req: NextRequest) {
 
     if (existingRun?.id) {
       uitslagenRunId = String(existingRun.id);
-      await supabaseAdmin.from("uitslagen_resultaten").delete().eq("matchmaking_id", matchmakingId);
-      await supabaseAdmin.from("uitslagen_bouts").delete().eq("matchmaking_id", matchmakingId);
+      await supabaseAdmin
+        .from("uitslagen_runs")
+        .update({ status: "open", bron: "matchmaking" })
+        .eq("id", uitslagenRunId);
     } else {
       const { data: insertedRun, error: insRunErr } = await supabaseAdmin
         .from("uitslagen_runs")
@@ -346,6 +420,8 @@ export async function POST(req: NextRequest) {
       if (insRunErr) throw insRunErr;
       uitslagenRunId = String(insertedRun.id);
     }
+
+    await cleanupOldUitslagenData(matchmakingId);
 
     const nowIso = new Date().toISOString();
     const boutInsertRows = eligible.map((row: any) => {
@@ -429,7 +505,7 @@ export async function POST(req: NextRequest) {
       newOwnerBondteam: userBondteam || s(body?.bondteam) || null,
       actorUserId: userId,
       actorRole: role,
-      opmerking: `Alleen partijen/toernooi-vechters met status OK of INFO (${eligible.length}/${rawBouts.length}) zijn doorgestuurd naar uitslagen. Alles behalve OK/INFO, open actie, afkeur of dispensatie is overgeslagen: ${blockedCount}.`,
+      opmerking: `Alleen partijen/toernooi-vechters zonder open blokkerende meldingen (${eligible.length}/${rawBouts.length}) zijn doorgestuurd naar uitslagen. Open actie, afkeur, verbod of open/nodige/afgewezen dispensatie is overgeslagen: ${blockedCount}.`,
       metadata: {
         route: "api/matchmaking/naar-uitslagen/route",
         eligible_count: eligible.length,
@@ -438,6 +514,23 @@ export async function POST(req: NextRequest) {
         controle_count: controleRows?.length ?? 0,
       },
     });
+
+    const { error: mmStatusErr } = await supabaseAdmin
+      .from("matchmakings")
+      .update({
+        status: "klaar_voor_uitslagen",
+        stadium: "uitslagen_in_bewerking",
+        huidige_eigenaar_type: "bondteam",
+        huidige_eigenaar_user_id: null,
+        huidige_eigenaar_bondteam: userBondteam || s(body?.bondteam) || null,
+        locked_for_editing: true,
+        ready_for_results_at: nowIso,
+        last_updated_at: nowIso,
+        last_updated_by: userId,
+      })
+      .eq("id", matchmakingId);
+
+    if (mmStatusErr) throw mmStatusErr;
 
     await supabaseAdmin
       .from("matchmaking_uploads")
@@ -451,7 +544,7 @@ export async function POST(req: NextRequest) {
       bouts: boutInsertRows.length,
       skipped: blockedCount,
       lifecycle,
-      message: "Alleen partijen/toernooi-vechters met status OK of INFO zijn omgezet naar uitslagenflow; alles anders is geblokkeerd en minpunten zijn meegenomen.",
+      message: "Alleen partijen/toernooi-vechters zonder open blokkerende meldingen zijn omgezet naar uitslagenflow; alles anders is geblokkeerd en minpunten zijn meegenomen.",
     });
   } catch (err: any) {
     console.error("matchmaking/naar-uitslagen POST error:", err);

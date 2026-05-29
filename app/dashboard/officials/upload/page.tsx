@@ -495,7 +495,7 @@ export default function UploadMatchmakingOfficialPage() {
                     className={inputBaseClass()}
                     value={eventNaam}
                     onChange={(e) => setEventNaam(e.target.value)}
-                    placeholder="Bijvoorbeeld: Gala VON"
+                    placeholder="Bijvoorbeeld: Fightday"
                   />
                 </InputBlock>
 

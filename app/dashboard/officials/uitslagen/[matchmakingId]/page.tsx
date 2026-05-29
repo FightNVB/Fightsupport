@@ -522,7 +522,6 @@ export default function OfficialsUitslagenDetailPage() {
                     height={205}
                     priority
                     className="object-contain"
-                    style={{ height: "205px", width: "auto" }}
                   />
                 </div>
 
@@ -626,7 +625,7 @@ export default function OfficialsUitslagenDetailPage() {
             <div className="mt-5 rounded-none border-[6px] border-[#d1d5dc] bg-[linear-gradient(180deg,#28313b_0%,#18212a_100%)] p-4 shadow-[inset_0_0_0_2px_#5d6670,0_10px_18px_rgba(0,0,0,0.45)]">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm font-black uppercase tracking-[3px] text-zinc-300">
-                  Partij {currentIndex + 1} van {rows.length} · nummer {current.partij_nr}
+                  Partij {currentIndex + 1} van {rows.length} · Origineel partijnummer {current.partij_nr}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -663,6 +662,7 @@ export default function OfficialsUitslagenDetailPage() {
                   <button
                     key={r.id}
                     onClick={() => setCurrentIndex(i)}
+                    title={`Origineel partijnummer ${r.partij_nr}`}
                     className={[
                       "h-9 min-w-9 rounded-none border-2 px-3 text-sm font-black transition",
                       i === currentIndex
@@ -672,7 +672,7 @@ export default function OfficialsUitslagenDetailPage() {
                           : "border-[#9ca0a8] bg-black/35 text-zinc-300 hover:border-[#ffb067]",
                     ].join(" ")}
                   >
-                    {r.partij_nr}
+                    {i + 1}
                   </button>
                 ))}
               </div>

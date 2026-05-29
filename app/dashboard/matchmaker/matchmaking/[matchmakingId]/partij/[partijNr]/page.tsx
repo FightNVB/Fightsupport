@@ -1060,24 +1060,74 @@ function displayResultaat(row: ControleResultaatRow): {
   return { label: String(r).toUpperCase(), tone: "info" };
 }
 
+function rowHasVerbod(row: ControleResultaatRow): boolean {
+  const hay = [
+    row?.rule_code,
+    row?.rule,
+    row?.boodschap,
+    row?.aantekeningen,
+    row?.review_note,
+    row?.severity,
+  ]
+    .map((v) => String(v ?? "").toLowerCase())
+    .join(" ");
+
+  return hay.includes("startverbod") || hay.includes("verbod");
+}
+
+function rowReviewType(row: ControleResultaatRow): "info" | "actie" | "afkeur" | "dispensatie" | "ok" | "anders" {
+  const res = normResultaat(row?.resultaat);
+  const code = String(row?.rule_code ?? "").toUpperCase();
+  const msg = String(row?.boodschap ?? "").toLowerCase();
+
+  if (!res || res === "ok") return "ok";
+  if (res === "dispensatie") return "dispensatie";
+  if (res === "afgekeurd") return "afkeur";
+  if (res === "actie") return "actie";
+  if (res === "info" || msg.includes("geen data") || msg.includes("no data") || msg.includes("missing")) {
+    return "info";
+  }
+
+  // Belgische keurmerkregels zijn in deze page informatief/actie, niet echte afkeur.
+  if (code.startsWith("KEURMERK_BE_")) return "info";
+
+  return "anders";
+}
+
 function canReviewResultaatForRoles(
   row: ControleResultaatRow,
   roleNames: string[],
+  decision: "approve" | "reject",
 ): boolean {
-  const res = normResultaat(row?.resultaat);
-  if (!res || res === "ok") return false;
+  const type = rowReviewType(row);
+  if (type === "ok") return false;
 
   const roles = (roleNames ?? []).map((r) => String(r).trim().toLowerCase());
   const isSuperadmin = roles.includes("superadmin");
   const isMatchmaker = roles.includes("matchmaker");
-  const isAdminRole =
-    roles.includes("admin") || roles.includes("hoofdofficial");
+  const isOfficial = roles.includes("official");
+  const isHoofdofficial = roles.includes("hoofdofficial");
+  const isAdminRole = roles.includes("admin") || isHoofdofficial;
   const isDispensatieAdmin = roles.includes("dispensatie_admin");
 
+  // Verbod/startverbod mag alleen door superadmin goed- of afgekeurd worden.
+  if (rowHasVerbod(row) && !isSuperadmin) return false;
+
   if (isSuperadmin) return true;
-  if (isDispensatieAdmin) return res === "dispensatie";
-  if (isAdminRole) return res === "actie" || res === "afgekeurd";
-  if (isMatchmaker) return res === "actie";
+
+  // Optionele bestaande rol behouden: alleen dispensaties reviewen.
+  if (isDispensatieAdmin) return type === "dispensatie";
+
+  // Hoofdofficial/admin: info, actie en afkeur goed- of afkeuren.
+  if (isAdminRole) {
+    return type === "info" || type === "actie" || type === "afkeur";
+  }
+
+  // Matchmaker/official: info en actie alleen goedkeuren, niet afkeuren.
+  if ((isMatchmaker || isOfficial) && decision === "approve") {
+    return type === "info" || type === "actie";
+  }
+
   return false;
 }
 
@@ -1468,7 +1518,11 @@ export default function PartijDetailPage() {
   }
 
   function canApproveRule(r: ControleResultaatRow) {
-    return canReviewResultaatForRoles(r, roleNames);
+    return canReviewResultaatForRoles(r, roleNames, "approve");
+  }
+
+  function canRejectRule(r: ControleResultaatRow) {
+    return canReviewResultaatForRoles(r, roleNames, "reject");
   }
 
   async function saveAantekeningen(resultaatId: string, text: string) {
@@ -1592,31 +1646,6 @@ export default function PartijDetailPage() {
         throw new Error("Je hebt geen rechten om deze melding goed te keuren.");
       }
 
-      const res = normResultaat(row?.resultaat);
-
-      if (!isSuperadmin && res === "dispensatie") {
-        throw new Error(
-          "Dispensatie kan hier niet. Gaat naar dispensatie-module.",
-        );
-      }
-
-      if (
-        !isSuperadmin &&
-        res !== "actie" &&
-        res !== "afgekeurd" &&
-        res !== "dispensatie"
-      ) {
-        throw new Error(
-          "Alleen ACTIE of AFKEUR kan hier worden goedgekeurd. Superadmin mag hier alles goedkeuren.",
-        );
-      }
-
-      if (isSuperadmin && (!res || res === "ok")) {
-        throw new Error(
-          "Deze melding staat al op OK of heeft geen goed te keuren resultaat.",
-        );
-      }
-
       const reason = String(getNoteFor(resultaatId) ?? "").trim();
 
       const { data: sess } = await supabase.auth.getSession();
@@ -1656,33 +1685,8 @@ export default function PartijDetailPage() {
 
     try {
       const row = regels.find((r) => r.id === resultaatId);
-      if (row && !canApproveRule(row)) {
+      if (row && !canRejectRule(row)) {
         throw new Error("Je hebt geen rechten om deze melding af te keuren.");
-      }
-
-      const res = normResultaat(row?.resultaat);
-
-      if (!isSuperadmin && res === "dispensatie") {
-        throw new Error(
-          "Dispensatie kan hier niet. Gaat naar dispensatie-module.",
-        );
-      }
-
-      if (
-        !isSuperadmin &&
-        res !== "actie" &&
-        res !== "afgekeurd" &&
-        res !== "dispensatie"
-      ) {
-        throw new Error(
-          "Alleen ACTIE of AFKEUR kan hier worden afgekeurd. Superadmin mag hier alles afkeuren.",
-        );
-      }
-
-      if (isSuperadmin && (!res || res === "ok")) {
-        throw new Error(
-          "Deze melding staat al op OK of heeft geen af te keuren resultaat.",
-        );
       }
 
       const reason = String(getNoteFor(resultaatId) ?? "").trim();
@@ -3120,6 +3124,7 @@ export default function PartijDetailPage() {
                       {regels.map((r) => {
                         const disp = displayResultaat(r);
                         const canApprove = canApproveRule(r);
+                        const canReject = canRejectRule(r);
 
                         return (
                           <tr key={r.id}>
@@ -3187,25 +3192,29 @@ export default function PartijDetailPage() {
                             </td>
 
                             <td className="px-3 py-2 align-top">
-                              {canApprove ? (
+                              {canApprove || canReject ? (
                                 <div className="flex flex-col gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => approveSingle(r.id)}
-                                    disabled={approving}
-                                    className="px-3 py-1 text-xs rounded bg-[var(--brand-orange)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
-                                  >
-                                    Goedkeuren
-                                  </button>
+                                  {canApprove ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => approveSingle(r.id)}
+                                      disabled={approving}
+                                      className="px-3 py-1 text-xs rounded bg-[var(--brand-orange)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
+                                    >
+                                      Goedkeuren
+                                    </button>
+                                  ) : null}
 
-                                  <button
-                                    type="button"
-                                    onClick={() => rejectSingle(r.id)}
-                                    disabled={approving}
-                                    className="px-3 py-1 text-xs rounded font-semibold hover:opacity-90 disabled:opacity-50 bg-[#2a2a2e] text-white"
-                                  >
-                                    Afkeuren
-                                  </button>
+                                  {canReject ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => rejectSingle(r.id)}
+                                      disabled={approving}
+                                      className="px-3 py-1 text-xs rounded font-semibold hover:opacity-90 disabled:opacity-50 bg-[#2a2a2e] text-white"
+                                    >
+                                      Afkeuren
+                                    </button>
+                                  ) : null}
                                 </div>
                               ) : (
                                 <span className="text-xs text-zinc-400">—</span>

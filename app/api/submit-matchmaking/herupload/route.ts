@@ -263,6 +263,45 @@ function resolveLifecycleBronType(role: RoleName): string {
   return "official_upload";
 }
 
+type UploadUserProfile = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  bondteam: string | null;
+  role: string | null;
+};
+
+async function findUserProfileForUpload(auth: any): Promise<UploadUserProfile> {
+  const authUserId = String(auth?.userId ?? auth?.id ?? "").trim();
+  const authEmail = String(auth?.email ?? auth?.user?.email ?? "").trim().toLowerCase();
+
+  if (authUserId) {
+    const { data, error } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, full_name, email, bondteam, role")
+      .eq("id", authUserId)
+      .maybeSingle();
+
+    if (error) throw new Error(`User profile zoeken mislukt: ${error.message}`);
+    if (data?.id) return data as UploadUserProfile;
+  }
+
+  if (authEmail) {
+    const { data, error } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, full_name, email, bondteam, role")
+      .eq("email", authEmail)
+      .maybeSingle();
+
+    if (error) throw new Error(`User profile zoeken op email mislukt: ${error.message}`);
+    if (data?.id) return data as UploadUserProfile;
+  }
+
+  throw new Error(
+    "Geen rij gevonden in user_profiles voor deze ingelogde gebruiker. Upload is gestopt om fk_upload_user te voorkomen."
+  );
+}
+
 /* =========================================================
    Main route
 ========================================================= */
@@ -275,8 +314,10 @@ export async function POST(req: Request) {
       "official",
       "hoofdofficial",
     ]);
-    const userId = auth.userId;
-    const role = roleLower(auth.role);
+    const authUserId = String((auth as any)?.userId ?? "").trim();
+    const profileForUpload = await findUserProfileForUpload(auth);
+    const userId = String(profileForUpload.id).trim();
+    const role = roleLower(auth.role ?? profileForUpload.role);
 
     let evenement_naam = "";
     let evenement_datum = "";
@@ -431,7 +472,7 @@ export async function POST(req: Request) {
       const { data: existingMatchmaking, error: existingMatchmakingErr } =
         await supabaseAdmin
           .from("matchmakings")
-          .select("id,event_id,matchmaker_id,maker_type,maker_user_id,bron_type")
+          .select("id,event_id,matchmaker_id,maker_type,maker_user_id,bron_type,status,stadium,final_status,huidige_eigenaar_type,huidige_eigenaar_user_id,huidige_eigenaar_bondteam")
           .eq("id", incomingMatchmakingId)
           .maybeSingle();
 
@@ -450,6 +491,9 @@ export async function POST(req: Request) {
       }
 
       existingMatchmakingForReuse = existingMatchmaking;
+      if (existingMatchmakingForReuse?.bron_type) {
+        lifecycleBronType = String(existingMatchmakingForReuse.bron_type);
+      }
     }
 
     let evId = event_id ? String(event_id).trim() : "";
@@ -507,14 +551,16 @@ export async function POST(req: Request) {
       existingMatchmakingForReuse?.matchmaker_id ??
       (role === "matchmaker" ? userId : null);
 
-const lifecycleStage = "concept_matchmaking" as const;
-const lifecycleOwnerType =
-  role === "admin" || role === "superadmin" ? "admin" : "matchmaker";
-const lifecycleOwnerUserId =
-  lifecycleOwnerType === "admin" || lifecycleOwnerType === "matchmaker"
-    ? userId
-    : null;
+const lifecycleStage =
+  existingMatchmakingForReuse?.status ??
+  existingMatchmakingForReuse?.stadium ??
+  "ingediend_admin";
+
+const lifecycleOwnerType = "admin";
+const lifecycleOwnerUserId = null;
 const lifecycleOwnerBondteam = null;
+const submittedToAdminAt =
+  existingMatchmakingForReuse?.submitted_to_admin_at ?? now;
 
     if (incomingMatchmakingId) {
       const s = incomingMatchmakingId;
@@ -534,6 +580,8 @@ const lifecycleOwnerBondteam = null;
           status: lifecycleStage,
           bron_type: lifecycleBronType,
           stadium: lifecycleStage,
+          final_status: lifecycleStage,
+          submitted_to_admin_at: submittedToAdminAt,
 
           huidige_eigenaar_type: lifecycleOwnerType,
           huidige_eigenaar_user_id: lifecycleOwnerUserId,
@@ -570,6 +618,8 @@ const lifecycleOwnerBondteam = null;
           status: lifecycleStage,
           bron_type: lifecycleBronType,
           stadium: lifecycleStage,
+          final_status: lifecycleStage,
+          submitted_to_admin_at: submittedToAdminAt,
 
           huidige_eigenaar_type: lifecycleOwnerType,
           huidige_eigenaar_user_id: lifecycleOwnerUserId,
@@ -612,7 +662,11 @@ const lifecycleOwnerBondteam = null;
       ownerBondteam: lifecycleOwnerBondteam,
       actorUserId: userId,
       actorRole: role,
-      metadata: { route: "app/api/submit_matchmaking/start/route.ts" },
+      metadata: {
+        route: "app/api/submit_matchmaking/herupload/route.ts",
+        auth_user_id: authUserId,
+        preserved_bron_type: lifecycleBronType,
+      },
     });
 
     const lifecycleBondteam = bondteam;

@@ -35,6 +35,36 @@ export async function POST(req: Request) {
     if (!datum) return NextResponse.json({ error: "Datum is verplicht." }, { status: 400 });
     if (!bondteam) return NextResponse.json({ error: "Bondteam is verplicht." }, { status: 400 });
 
+    // FK-fix: matchmakings.matchmaker_id verwijst naar public.user_profiles.id.
+    // Als de auth user nog geen profielrij heeft, crasht de insert op matchmakings.
+    const { data: existingProfile, error: profileLookupErr } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id,email,full_name,role,bondteam")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileLookupErr) throw profileLookupErr;
+
+    let profile = existingProfile;
+
+    if (!profile) {
+      const meta = (user.user_metadata ?? {}) as Record<string, any>;
+      const { data: createdProfile, error: profileInsertErr } = await supabaseAdmin
+        .from("user_profiles")
+        .insert({
+          id: user.id,
+          email: user.email ?? null,
+          full_name: s(meta.full_name) || s(meta.name) || s(body?.matchmaker_naam) || null,
+          role: s(meta.role) || "Matchmaker",
+          bondteam: s(meta.bondteam) || bondteam || null,
+        })
+        .select("id,email,full_name,role,bondteam")
+        .single();
+
+      if (profileInsertErr) throw profileInsertErr;
+      profile = createdProfile;
+    }
+
     const now = new Date().toISOString();
     const insertRow = {
       naam,
@@ -49,7 +79,7 @@ export async function POST(req: Request) {
       matchmaker_id: user.id,
       maker_user_id: user.id,
       uploaded_by: user.id,
-      matchmaker_naam: s(body?.matchmaker_naam) || s(body?.matchmaker) || null,
+      matchmaker_naam: s(body?.matchmaker_naam) || s(body?.matchmaker) || s(profile?.full_name) || null,
       huidige_eigenaar_type: "matchmaker",
       huidige_eigenaar_user_id: user.id,
       huidige_eigenaar_bondteam: null,

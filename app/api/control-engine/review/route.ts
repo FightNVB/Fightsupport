@@ -17,12 +17,27 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function normalizeResultaat(v: any): "ok" | "actie" | "afgekeurd" | "dispensatie" {
+type NormalizedResultaat = "ok" | "info" | "actie" | "afgekeurd" | "dispensatie";
+
+function normalizeResultaat(v: any): NormalizedResultaat {
   const s = String(v ?? "").trim().toLowerCase();
-  if (s === "ok") return "ok";
+  if (s === "ok" || s === "goedgekeurd") return "ok";
+  if (s === "info" || s === "let op" || s === "let_op") return "info";
   if (s === "dispensatie") return "dispensatie";
   if (s === "afkeur" || s === "afgekeurd" || s === "afkeuren") return "afgekeurd";
   return "actie";
+}
+
+function normalizeRole(v: any): string {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function isVerbodMelding(hay: string): boolean {
+  // Startverbod en ieder ander "verbod" mag alleen door superadmin worden gereviewd.
+  return hay.includes("verbod");
 }
 
 function normalizeVa(v: any): string | null {
@@ -124,12 +139,33 @@ export async function POST(req: Request) {
     const msg = String(row?.boodschap ?? "").toLowerCase();
     const hay = `${code} ${ruleName} ${msg}`;
 
-    const isLicentieOfKeurmerk =
-      hay.includes("licentie") || hay.includes("keurmerk");
+    const roleKey = normalizeRole(role);
+    const isSuperadmin = roleKey === "superadmin";
+    const isAdmin = roleKey === "admin";
+    const isMatchmaker = roleKey === "matchmaker";
+    const isOfficial = roleKey === "official" || roleKey === "officials";
+    const isHoofdofficial =
+      roleKey === "hoofdofficial" ||
+      roleKey === "headofficial" ||
+      roleKey === "hoofd official".replace(/\s+/g, "");
+
+    const isVerbod = isVerbodMelding(hay);
+
+    if (huidig === "ok") {
+      return NextResponse.json({ error: "Deze melding is al OK/goedgekeurd." }, { status: 400 });
+    }
+
+    // VERBOD: alleen superadmin mag goed- of afkeuren.
+    if (isVerbod && !isSuperadmin) {
+      return NextResponse.json(
+        { error: "Alleen superadmin mag een verbod goed- of afkeuren." },
+        { status: 403 }
+      );
+    }
 
     // DISPENSATIE: normaal via dispensatie-module,
     // maar superadmin mag direct goed/afkeuren vanuit de controle-detailpagina.
-    if (huidig === "dispensatie" && role !== "superadmin") {
+    if (huidig === "dispensatie" && !isSuperadmin) {
       return NextResponse.json(
         { error: "Dispensatie kan niet via review API (gebruik dispensatie-module)." },
         { status: 400 }
@@ -145,50 +181,43 @@ export async function POST(req: Request) {
     const mmId = String(row?.matchmaking_id ?? body?.matchmaking_id ?? "").trim();
     if (mmId) {
       await assertCanAccessMatchmaking({ matchmaking_id: mmId, userId, role });
-    } else if (!(role === "admin" || role === "superadmin")) {
+    } else if (!(isAdmin || isHoofdofficial || isSuperadmin)) {
       return NextResponse.json({ error: "Geen rechten" }, { status: 403 });
     }
 
-    if (role === "matchmaker") {
+    const isInfoOfActie = huidig === "info" || huidig === "actie";
+    const isAfkeur = huidig === "afgekeurd";
+
+    // Matchmaker + official: alleen INFO/ACTIE goedkeuren. Niet afkeuren.
+    if (isMatchmaker || isOfficial) {
       if (decision !== "approve") {
-        return NextResponse.json({ error: "Matchmakers kunnen alleen goedkeuren." }, { status: 403 });
-      }
-
-      const denied =
-        hay.includes("licentie") ||
-        hay.includes("keurmerk") ||
-        hay.includes("startverbod");
-
-      if (denied) {
-        return NextResponse.json({ error: "Matchmakers mogen deze melding niet overrulen." }, { status: 403 });
-      }
-
-      const allowed =
-        hay.includes("belg") ||
-        hay.includes("buitenland") ||
-        hay.includes("40") ||
-        hay.includes("ouder") ||
-        (hay.includes("naam") && hay.includes("mismatch")) ||
-        hay.includes("ontbreek") ||
-        hay.includes("missing") ||
-        hay.includes("onbekend") ||
-        hay.includes("geen va");
-
-      if (!allowed) {
-        return NextResponse.json({
-          error:
-            "Matchmakers mogen alleen INFO/ACTIE meldingen goedkeuren (België/40+/naam mismatch/missende gegevens).",
-        }, { status: 403 });
-      }
-    }
-
-    if (decision === "approve" && huidig === "afgekeurd" && isLicentieOfKeurmerk) {
-      if (role !== "superadmin") {
         return NextResponse.json(
-          { error: "Alleen superadmin mag AFKEUR op licentie of keurmerk overrulen." },
+          { error: "Matchmakers en officials kunnen alleen INFO/ACTIE goedkeuren." },
           { status: 403 }
         );
       }
+
+      if (!isInfoOfActie) {
+        return NextResponse.json(
+          { error: "Matchmakers en officials mogen alleen INFO/ACTIE meldingen goedkeuren." },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Hoofdofficial + admin: INFO/ACTIE/AFKEUR goed- of afkeuren.
+    // Superadmin: alles, inclusief dispensatie en verbod.
+    if (isHoofdofficial || isAdmin) {
+      if (!(isInfoOfActie || isAfkeur)) {
+        return NextResponse.json(
+          { error: "Hoofdofficial en admin mogen alleen INFO, ACTIE en AFKEUR goed- of afkeuren." },
+          { status: 403 }
+        );
+      }
+    }
+
+    if (!(isMatchmaker || isOfficial || isHoofdofficial || isAdmin || isSuperadmin)) {
+      return NextResponse.json({ error: "Geen rechten voor review." }, { status: 403 });
     }
 
     if (decision === "approve") {

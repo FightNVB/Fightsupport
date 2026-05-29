@@ -1,0 +1,8 @@
+{
+  "status": "error",
+  "message": "VPS live scherm is nog niet ingesteld. Zet FIGHTPASSPORT_LIVE_URL en eventueel FIGHTPASSPORT_LIVE_COMMAND in je environment.",
+  "browser_url": null,
+  "pid": null,
+  "started_at": null,
+  "updated_at": "2026-05-27T15:45:50.954Z"
+}

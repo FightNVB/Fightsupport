@@ -58,6 +58,17 @@ async function safeInsertCase(supabase: any, row: Record<string, any>) {
   throw new Error("Melding opslaan mislukt: te veel onbekende kolommen in discipline_cases.");
 }
 
+
+async function getBearerUserId(req: NextRequest, supabase: any) {
+  const auth = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return null;
+
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error) return null;
+  return data?.user?.id || null;
+}
+
 async function getProfile(supabase: any, userId: string | null) {
   if (!userId) return null;
   const { data } = await supabase
@@ -80,13 +91,28 @@ export async function POST(req: NextRequest) {
     if (!naam) return NextResponse.json({ ok: false, error: "Naam betrokkene is verplicht." }, { status: 400 });
     if (!omschrijving) return NextResponse.json({ ok: false, error: "Omschrijving is verplicht." }, { status: 400 });
 
-    const melderUserId = cleanString(body.melder_user_id) || cleanString(body.aangemaakt_door);
+    const authUserId = await getBearerUserId(req, supabase);
+    const melderUserId = authUserId || cleanString(body.melder_user_id) || cleanString(body.aangemaakt_door);
     const profile = await getProfile(supabase, melderUserId);
 
     const melderNaam = cleanString(body.melder_naam) || cleanString(profile?.full_name) || "Official";
     const melderEmail = cleanString(body.melder_email) || cleanString(profile?.email);
     const melderBondteam = cleanString(body.melder_bondteam) || cleanString(profile?.bondteam);
     const melderRole = cleanString(profile?.role) || "Official";
+
+    if (!melderUserId) {
+      return NextResponse.json(
+        { ok: false, error: "Gebruiker niet gevonden. Log opnieuw in en probeer opnieuw." },
+        { status: 401 }
+      );
+    }
+
+    if (!melderBondteam) {
+      return NextResponse.json(
+        { ok: false, error: "Bondteam ontbreekt bij deze official. Vul bondteam in user_profiles voordat je een melding opslaat." },
+        { status: 400 }
+      );
+    }
 
     const interneNotitie = [
       "Melding aangemaakt door official.",

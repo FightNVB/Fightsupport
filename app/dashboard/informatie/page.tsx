@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useEffect, type CSSProperties, type ReactNode } from "react";
+import React, { type CSSProperties, type ReactNode } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/context/AuthContext";
 import {
   ClipboardList,
   Scale,
@@ -149,39 +148,6 @@ const darkPlate: CSSProperties = {
 
 export default function InformatiePage() {
   const router = useRouter();
-  const { user, roles, loading } = useAuth();
-
-  useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
-      return;
-    }
-
-    const allowed = !!user;
-
-    if (!loading && user && !allowed) {
-      router.replace("/dashboard");
-    }
-  }, [loading, roles, router, user]);
-
-  if (loading) {
-    return (
-      <main style={pageBackground}>
-        <CenteredMessage text="Bezig met laden..." />
-      </main>
-    );
-  }
-
-  if (!user) return null;
-
-  const roleList = roles ?? [];
-  const allowed =
-    roleList.includes("official") ||
-    roleList.includes("hoofdofficial") ||
-    roleList.includes("admin") ||
-    roleList.includes("superadmin");
-
-  if (!allowed) return null;
 
   const actions: MenuAction[] = [
     {
@@ -859,33 +825,5 @@ function CardChromeOverlay() {
         `,
       }}
     />
-  );
-}
-
-function CenteredMessage({ text }: { text: string }) {
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <SteelFrame>
-        <div
-          style={{
-            ...darkPlate,
-            padding: "24px 30px",
-            fontSize: 18,
-            fontWeight: 800,
-            color: "#f1f1f1",
-          }}
-        >
-          {text}
-        </div>
-      </SteelFrame>
-    </div>
   );
 }

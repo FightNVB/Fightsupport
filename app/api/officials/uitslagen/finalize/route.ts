@@ -165,6 +165,39 @@ export async function POST(req: NextRequest) {
 
     const now = new Date().toISOString();
 
+    const { data: mmStageRow, error: mmStageReadErr } = await supabase
+      .from("matchmakings")
+      .select("status, stadium, bondteam, huidige_eigenaar_bondteam")
+      .eq("id", matchmakingId)
+      .maybeSingle();
+
+    if (mmStageReadErr) return bad(mmStageReadErr.message, 500);
+    if (!mmStageRow) return bad("Matchmaking niet gevonden.", 404);
+
+    const currentStage = clean((mmStageRow as any).stadium || (mmStageRow as any).status);
+
+    // Volgens matchmaking_stage_transitions moet dit eerst:
+    // klaar_voor_uitslagen -> uitslagen_in_bewerking -> uitslagen_definitief.
+    // Als de pagina direct finaliseert terwijl de matchmaking nog op klaar_voor_uitslagen staat,
+    // zetten we hem eerst veilig op uitslagen_in_bewerking.
+    if (currentStage === "klaar_voor_uitslagen") {
+      const { error: inBewerkingErr } = await supabase
+        .from("matchmakings")
+        .update({
+          stadium: "uitslagen_in_bewerking",
+          status: "uitslagen_in_bewerking",
+          huidige_eigenaar_type: "bondteam",
+          huidige_eigenaar_user_id: null,
+          last_updated_at: now,
+          last_updated_by: userId,
+        })
+        .eq("id", matchmakingId);
+
+      if (inBewerkingErr) return bad(inBewerkingErr.message, 500);
+    } else if (currentStage && currentStage !== "uitslagen_in_bewerking" && currentStage !== "uitslagen_definitief") {
+      return bad(`Deze matchmaking staat op '${currentStage}' en kan niet als uitslagen worden gefinaliseerd.`, 409);
+    }
+
     const { error: resultUpdateErr } = await supabase
       .from("uitslagen_resultaten")
       .update({
@@ -191,17 +224,9 @@ export async function POST(req: NextRequest) {
       console.warn("[officials/uitslagen/finalize] optionele run update mislukt:", optionalRunErr.message);
     }
 
-    const { data: mmRow, error: mmReadErr } = await supabase
-      .from("matchmakings")
-      .select("bondteam, huidige_eigenaar_bondteam")
-      .eq("id", matchmakingId)
-      .maybeSingle();
-
-    if (mmReadErr) return bad(mmReadErr.message, 500);
-
     const targetBondteam =
-      clean((mmRow as any)?.huidige_eigenaar_bondteam) ||
-      clean((mmRow as any)?.bondteam) ||
+      clean((mmStageRow as any)?.huidige_eigenaar_bondteam) ||
+      clean((mmStageRow as any)?.bondteam) ||
       null;
 
     const { error: mmCoreErr } = await supabase
@@ -213,6 +238,7 @@ export async function POST(req: NextRequest) {
         huidige_eigenaar_user_id: null,
         huidige_eigenaar_bondteam: targetBondteam,
         locked_for_editing: true,
+        results_finalized_at: now,
         last_updated_at: now,
         last_updated_by: userId,
       })

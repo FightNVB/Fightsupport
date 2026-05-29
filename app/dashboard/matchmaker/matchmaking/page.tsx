@@ -28,7 +28,7 @@ const BONDTEAM_OPTIONS = [
   "WPKL",
 ] as const;
 
-type ViewTab = "zelf" | "uploads" | "controle" | "retour";
+type ViewTab = "zelf" | "uploads" | "retour";
 
 const silverBackplate: CSSProperties = {
   background:
@@ -263,7 +263,6 @@ function isVisibleForMatchmakerOverview(row: MatchmakingRow, userId: string) {
 
 function getTabType(row: MatchmakingRow): ViewTab {
   if (isRetourVanNvb(row)) return "retour";
-  if (isAangebodenAanNvb(row)) return "controle";
   if (getMatchmakingType(row) === "upload") return "uploads";
   return "zelf";
 }
@@ -283,20 +282,6 @@ function getLogDate(row: MatchmakingRow) {
   }
 
   return row.created_at ?? row.last_updated_at ?? null;
-}
-
-function getLogText(row: MatchmakingRow) {
-  const name = row.naam || "Deze matchmaking";
-
-  if (isAangebodenAanNvb(row)) {
-    return `${name} is op ${formatDateTime(getLogDate(row))} naar NVB controle gestuurd.`;
-  }
-
-  if (getMatchmakingType(row) === "upload") {
-    return `${name} is op ${formatDateTime(getLogDate(row))} succesvol geüpload.`;
-  }
-
-  return `${name} is op ${formatDateTime(getLogDate(row))} gemaakt in de app.`;
 }
 
 function toMatchmakingRow(row: MatchmakingDbRow): MatchmakingRow {
@@ -341,6 +326,7 @@ function MatchmakingPageContent() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [reuploadingId, setReuploadingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState("");
 
   const [showCreate, setShowCreate] = useState(false);
@@ -435,12 +421,14 @@ function MatchmakingPageContent() {
     if (profileError) console.error("Fout bij laden profiel:", profileError);
 
     const normalizedProfile: Profile = {
-      id: user.id,
+      id: profileData?.id ?? user.id,
       full_name: profileData?.full_name ?? "",
       bondteam: normalizeBondteam(profileData?.bondteam ?? ""),
     };
 
     setProfile(normalizedProfile);
+
+    const profileUserId = normalizedProfile.id;
 
     const directOwnQuery = supabase
       .from("matchmakings")
@@ -474,10 +462,10 @@ function MatchmakingPageContent() {
       .eq("is_archived", false)
       .or(
         [
-          `huidige_eigenaar_user_id.eq.${user.id}`,
-          `matchmaker_id.eq.${user.id}`,
-          `maker_user_id.eq.${user.id}`,
-          `uploaded_by.eq.${user.id}`,
+          `huidige_eigenaar_user_id.eq.${profileUserId}`,
+          `matchmaker_id.eq.${profileUserId}`,
+          `maker_user_id.eq.${profileUserId}`,
+          `uploaded_by.eq.${profileUserId}`,
         ].join(","),
       )
       .order("datum", { ascending: false });
@@ -653,7 +641,7 @@ function MatchmakingPageContent() {
       setSuccessMsg(
         "✅ Upload is gelukt en naar NVB/admin controle gestuurd. Je blijft op deze pagina. De matchmaking is pas weer te openen zodra admin hem retour stuurt.",
       );
-      setViewTab("controle");
+      setViewTab("uploads");
       await load();
     } catch (e) {
       console.error(e);
@@ -661,6 +649,70 @@ function MatchmakingPageContent() {
     } finally {
       setUploading(false);
       }
+  }
+
+  async function reuploadMM(row: MatchmakingRow, file: File | null) {
+    if (!file) return;
+
+    try {
+      setReuploadingId(row.id);
+      setSuccessMsg("");
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        alert("Gebruiker niet gevonden.");
+        return;
+      }
+
+      const filePath = `matchmakings/${user.id}/herupload/${row.id}/${Date.now()}_${file.name}`;
+
+      const { error: storageError } = await supabase.storage
+        .from("uploads")
+        .upload(filePath, file, { upsert: true });
+
+      if (storageError) {
+        console.error(storageError);
+        alert(`Herupload naar storage mislukt: ${storageError.message}`);
+        return;
+      }
+
+      const res = await authedFetch("/api/submit-matchmaking/herupload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: row.id,
+          file_path: filePath,
+          raw_filename: file.name,
+          evenement_naam: row.naam,
+          evenement_datum: row.datum,
+          locatie: row.locatie,
+          bondteam: row.bondteam,
+          promotor: row.promotor,
+          matchmaker: profile?.full_name?.trim() || null,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok || payload?.ok === false) {
+        console.error("herupload failed:", res.status, payload);
+        alert(payload?.error || "Herupload matchmaking mislukt.");
+        return;
+      }
+
+      setSuccessMsg("✅ Herupload is gelukt. De upload is bijgewerkt.");
+      setViewTab("uploads");
+      await load();
+    } catch (e) {
+      console.error(e);
+      alert("Onverwachte fout bij herupload.");
+    } finally {
+      setReuploadingId(null);
+    }
   }
 
   async function deleteMM(matchmakingId: string) {
@@ -700,21 +752,8 @@ function MatchmakingPageContent() {
     return {
       zelf: ownRows.filter((r) => getTabType(r) === "zelf").length,
       uploads: ownRows.filter((r) => getTabType(r) === "uploads").length,
-      controle: ownRows.filter((r) => getTabType(r) === "controle").length,
       retour: ownRows.filter((r) => getTabType(r) === "retour").length,
     };
-  }, [ownRows]);
-
-  const logRows = useMemo(() => {
-    return ownRows
-      .filter((r) => !isRetourVanNvb(r))
-      .filter((r) => getMatchmakingType(r) === "upload")
-      .sort(
-        (a, b) =>
-          new Date(getLogDate(b) ?? 0).getTime() -
-          new Date(getLogDate(a) ?? 0).getTime(),
-      )
-      .slice(0, 5);
   }, [ownRows]);
 
   const monthOptions = useMemo(() => {
@@ -1091,55 +1130,12 @@ function MatchmakingPageContent() {
                       </div>
                     )}
 
-                    {!loading && logRows.length > 0 && (
-                      <div
-                        className="mb-5 rounded-[24px] border p-4 md:p-5"
-                        style={{
-                          background:
-                            "linear-gradient(180deg, rgba(47,47,51,0.98) 0%, rgba(22,22,24,0.98) 100%)",
-                          borderColor: "rgba(255,77,0,0.45)",
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
-                        }}
-                      >
-                        <div className="text-sm font-black uppercase tracking-[0.18em] text-white">
-                          Meldingen / log
-                        </div>
-                        <div className="mt-1 text-xs text-zinc-300">
-                          Succesvolle uploads en inzendingen. Matchmakings die
-                          aan NVB/admin zijn aangeboden staan in de tab
-                          “Geüpload voor controle” zonder open-link.
-                        </div>
-                        <div className="mt-4 space-y-2">
-                          {logRows.map((r) => (
-                            <div
-                              key={`log-${r.id}`}
-                              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm"
-                              style={{
-                                borderColor: "rgba(255,255,255,0.12)",
-                                background: "rgba(255,255,255,0.06)",
-                                color: "#fff",
-                              }}
-                            >
-                              <span>{getLogText(r)}</span>
-                              <span className="rounded-full border border-orange-400/50 px-3 py-1 text-xs uppercase tracking-[0.1em] text-orange-200">
-                                Upload
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
                     {!loading && (
                       <div className="mb-5 rounded-[24px] border p-4 md:p-4">
                         <div className="mb-4 flex flex-wrap items-center gap-2">
                           {[
                             ["zelf", `Zelf gemaakte MM (${tabCounts.zelf})`],
                             ["uploads", `Uploads (${tabCounts.uploads})`],
-                            [
-                              "controle",
-                              `Geüpload voor controle (${tabCounts.controle})`,
-                            ],
                             ["retour", `Retour van NVB (${tabCounts.retour})`],
                           ].map(([key, label]) => {
                             const active = viewTab === key;
@@ -1346,7 +1342,26 @@ function MatchmakingPageContent() {
                                         {formatDateTime(getLogDate(r))}
                                       </td>
                                       <td className="px-4 py-3">
-                                        {isAangebodenAanNvb(r) ? (
+                                        {rowType === "uploads" ? (
+                                          <div className="flex flex-wrap items-center gap-3">
+                                            <label className="cursor-pointer rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black">
+                                              {reuploadingId === r.id
+                                                ? "Bezig…"
+                                                : "Herupload MM"}
+                                              <input
+                                                type="file"
+                                                accept=".xlsx,.xls"
+                                                disabled={reuploadingId === r.id}
+                                                onChange={(e) => {
+                                                  const file = e.target.files?.[0] ?? null;
+                                                  void reuploadMM(r, file);
+                                                  e.currentTarget.value = "";
+                                                }}
+                                                className="hidden"
+                                              />
+                                            </label>
+                                          </div>
+                                        ) : isAangebodenAanNvb(r) ? (
                                           <span
                                             className="inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.08em]"
                                             style={{

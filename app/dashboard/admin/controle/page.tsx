@@ -1010,6 +1010,7 @@ export default function ControleOverzichtPage() {
                         onClick={() => (window.location.href = "/dashboard/admin/upload")}
                       />
                     </Small>
+
                   </div>
                 </div>
 
@@ -1039,6 +1040,16 @@ export default function ControleOverzichtPage() {
                     title="Update sportscholen tabel (keurmerk data)"
                   >
                     {sportsBusy ? "Sportscholen…" : "Sportscholen sync"}
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      (window.location.href = "/dashboard/matchmaker/fightpassport")
+                    }
+                    className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-2 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                    title="Open FightPassport sync pagina"
+                  >
+                    Sync FightPassport
                   </button>
 
                   {sportsMsg ? (

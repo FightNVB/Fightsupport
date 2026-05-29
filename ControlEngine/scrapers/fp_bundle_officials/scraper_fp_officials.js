@@ -1,4 +1,4 @@
-// ControlEngine/scrapers/fp_bundle/scraper_fp_bundle.js
+// ControlEngine/scrapers/fp_bundle_officials/scraper_fp_officials.js
 // ✅ MASTER tab logt 1x in en blijft open (sessie warm)
 // ✅ Per VA: worker opent NIEUWE TAB DIRECT op fighter-url:
 //     https://fightpassport.nl/#va_vechter/<va>

@@ -8,6 +8,42 @@ import {
 
 export const runtime = "nodejs";
 
+const isMissingColumnError = (error: any) =>
+  error?.code === "42703" ||
+  String(error?.message ?? "").toLowerCase().includes("column") &&
+    String(error?.message ?? "").toLowerCase().includes("does not exist");
+
+const isMissingTableError = (error: any) =>
+  error?.code === "42P01" ||
+  String(error?.message ?? "").toLowerCase().includes("relation") &&
+    String(error?.message ?? "").toLowerCase().includes("does not exist");
+
+async function deleteByMatchmakingId(table: string, matchmaking_id: string) {
+  const { error } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .eq("matchmaking_id", matchmaking_id);
+
+  // Sommige oudere tabellen hebben geen matchmaking_id of bestaan niet in elke omgeving.
+  // Dan ruimen we ze elders op via controle_run_id, of slaan we ze veilig over.
+  if (error && !isMissingColumnError(error) && !isMissingTableError(error)) {
+    throw error;
+  }
+}
+
+async function deleteByControleRunIds(table: string, runIds: string[]) {
+  if (!runIds.length) return;
+
+  const { error } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .in("controle_run_id", runIds);
+
+  if (error && !isMissingColumnError(error) && !isMissingTableError(error)) {
+    throw error;
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -23,7 +59,7 @@ export async function POST(req: Request) {
     const { userId, role } = await requireUserWithRole(req);
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
-    // 0) hoofdrecord eerst ophalen, want HIER zit de echte FK naar events
+    // 0) Hoofdrecord eerst ophalen, want hier zit meestal de FK naar events.
     const { data: matchmakingRow, error: matchmakingLookupError } =
       await supabaseAdmin
         .from("matchmakings")
@@ -40,7 +76,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // fallback uit uploads alleen voor logging/veiligheid
+    // Fallback uit uploads alleen voor logging/veiligheid.
     const { data: uploadRow, error: uploadLookupError } = await supabaseAdmin
       .from("matchmaking_uploads")
       .select("id, matchmaking_id, event_id")
@@ -51,10 +87,9 @@ export async function POST(req: Request) {
 
     if (uploadLookupError) throw uploadLookupError;
 
-    const event_id =
-      matchmakingRow?.event_id ?? uploadRow?.event_id ?? null;
+    const event_id = matchmakingRow?.event_id ?? uploadRow?.event_id ?? null;
 
-    // 1) runs ophalen
+    // 1) Controle-runs ophalen voordat we controle_runs verwijderen.
     const { data: runs, error: runsErr } = await supabaseAdmin
       .from("controle_runs")
       .select("id")
@@ -64,148 +99,40 @@ export async function POST(req: Request) {
 
     const runIds = (runs ?? []).map((r: any) => r.id).filter(Boolean);
 
-    // 2) alles verwijderen wat aan controle_run_id hangt
-    if (runIds.length) {
-      {
-        const { error } = await supabaseAdmin
-          .from("controle_resultaten")
-          .delete()
-          .in("controle_run_id", runIds);
-        if (error) throw error;
-      }
+    // 2) Alles verwijderen wat aan controle_run_id hangt.
+    // Dit voorkomt FK-problemen als sommige tabellen geen directe matchmaking_id hebben.
+    await deleteByControleRunIds("controle_resultaten", runIds);
+    await deleteByControleRunIds("controle_bout_context", runIds);
+    await deleteByControleRunIds("controle_toernooi_context", runIds);
+    await deleteByControleRunIds("uitslagen_raw", runIds);
 
-      {
-        const { error } = await supabaseAdmin
-          .from("controle_bout_context")
-          .delete()
-          .in("controle_run_id", runIds);
-        if (error) throw error;
-      }
+    // 3) Cleanup op matchmaking_id.
+    // Kind-tabellen eerst, daarna raw/context/run-tabellen, daarna uploads en hoofdrecord.
+    const childTablesByMatchmakingId = [
+      "weigh_in_audit",
+      "weigh_in_bouts",
+      "uitslagen_runs",
+      "controle_resultaten",
+      "controle_bout_context",
+      "controle_toernooi_context",
+      "dispensatie_requests",
+      "controle_uitslagen",
+      "definitive_matchmaking_bouts",
+      "definitive_matchmakings",
+      "matchmaking_bouts_raw",
+      "fighters_raw",
+      "uitslagen_raw",
+      "controle_runs",
+    ];
 
-      {
-        const { error } = await supabaseAdmin
-          .from("uitslagen_raw")
-          .delete()
-          .in("controle_run_id", runIds);
-        if (error) throw error;
-      }
+    for (const table of childTablesByMatchmakingId) {
+      await deleteByMatchmakingId(table, matchmaking_id);
     }
 
-    // 3) cleanup op matchmaking_id
-    {
-      const { error } = await supabaseAdmin
-        .from("controle_resultaten")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
+    // 4) Uploads weg.
+    await deleteByMatchmakingId("matchmaking_uploads", matchmaking_id);
 
-    {
-      const { error } = await supabaseAdmin
-        .from("controle_bout_context")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("controle_toernooi_context")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("dispensatie_requests")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("controle_uitslagen")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("weigh_in_audit")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("weigh_in_bouts")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("definitive_matchmaking_bouts")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("definitive_matchmakings")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("matchmaking_bouts_raw")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("fighters_raw")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("uitslagen_raw")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    {
-      const { error } = await supabaseAdmin
-        .from("controle_runs")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    // 4) uploads weg
-    {
-      const { error } = await supabaseAdmin
-        .from("matchmaking_uploads")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-      if (error) throw error;
-    }
-
-    // 5) matchmaking hoofdrecord weg
+    // 5) Matchmaking hoofdrecord weg.
     {
       const { error } = await supabaseAdmin
         .from("matchmakings")
@@ -214,8 +141,8 @@ export async function POST(req: Request) {
       if (error) throw error;
     }
 
-    // 6) event pas verwijderen NADAT matchmakings weg is
-    // en alleen als geen andere matchmaking meer naar dit event verwijst
+    // 6) Event pas verwijderen nadat matchmakings weg is,
+    // en alleen als geen andere matchmaking meer naar dit event verwijst.
     let deletedEvent = false;
 
     if (event_id) {

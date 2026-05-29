@@ -191,8 +191,8 @@ function normalizeRole(value?: string | null) {
       return "Hoofdofficial";
     case "admin":
       return "Admin";
-    case "promotor":
-      return "Promotor";
+    case "trainer":
+      return "Trainer";
     case "sportschool":
       return "Sportschool";
     case "superadmin":
@@ -1223,7 +1223,7 @@ function UserCard({
                   "Official",
                   "Hoofdofficial",
                   "Admin",
-                  "Promotor",
+                  "Trainer",
                   "Sportschool",
                   "Superadmin",
                 ]}
@@ -1396,7 +1396,7 @@ export default function AccountsBeheerPage() {
 
   async function deleteUser(id: string) {
     const yes = window.confirm(
-      "Gebruiker verwijderen? (dit verwijdert ook de Supabase Auth user)"
+      "Gebruiker verwijderen? Dit verwijdert user_roles, user_profiles en de Supabase Auth user."
     );
     if (!yes) return;
 
@@ -1512,7 +1512,7 @@ export default function AccountsBeheerPage() {
                 icon={<UserPlus size={36} strokeWidth={2.55} />}
                 eyebrow="Admin"
                 title="Gebruiker uitnodigen"
-                subtitle="Maak handmatig een gebruiker aan en verstuur direct een uitnodiging per e-mail."
+                subtitle="Maak handmatig een gebruiker aan. Eén hoofdrol wordt opgeslagen in user_profiles; Official krijgt ook toegang tot matchmaker-functies."
               />
 
               <div
@@ -1551,7 +1551,7 @@ export default function AccountsBeheerPage() {
                       "Official",
                       "Hoofdofficial",
                       "Admin",
-                      "Promotor",
+                      "Trainer",
                       "Sportschool",
                       "Superadmin",
                     ]}
@@ -1596,7 +1596,7 @@ export default function AccountsBeheerPage() {
                 }
                 eyebrow="Overzicht"
                 title={tab === "requests" ? "Open account requests" : "Bestaande gebruikers"}
-                subtitle="Beoordeel aanvragen, zoek snel op naam of e-mail en werk gebruikers direct bij."
+                subtitle="Beheer één hoofdrol per gebruiker via user_profiles. Auth draait op de achtergrond via de API met service role."
               />
 
               <div

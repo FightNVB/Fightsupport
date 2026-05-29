@@ -3,11 +3,9 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 
 const NVB_ORANGE = "#ff4d00";
-const logoSrc = "/branding/fightsupport/excel-logo.png";
 
 type RequestRow = {
   id: string;
@@ -96,13 +94,13 @@ function fmtDateNL(d: string | null | undefined, withTime = false) {
 const pageBg: CSSProperties = {
   minHeight: "100vh",
   background:
-    "radial-gradient(circle at 50% 0%, rgba(255,77,0,0.10) 0%, rgba(255,77,0,0.02) 12%, transparent 26%), linear-gradient(180deg, #06080d 0%, #0a0d12 100%)",
+    "linear-gradient(180deg, #2b2b2b 0%, #202020 100%)",
   color: "#fff",
 };
 
 const topShell: CSSProperties = {
   border: "1px solid rgba(205,205,215,0.35)",
-  borderRadius: 22,
+  borderRadius: 0,
   overflow: "hidden",
   background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
   boxShadow: "0 18px 40px rgba(0,0,0,0.34)",
@@ -131,22 +129,22 @@ const orangeButton: CSSProperties = {
 
 const contentShell: CSSProperties = {
   marginTop: 14,
-  borderRadius: 24,
+  borderRadius: 0,
   overflow: "hidden",
-  background: "linear-gradient(180deg, #f1f1f3 0%, #d9dadf 100%)",
+  background: "#121212",
   border: "1px solid rgba(115,118,128,0.6)",
   boxShadow: "0 16px 34px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.75)",
 };
 
 const lightHeaderCard: CSSProperties = {
-  borderRadius: 20,
+  borderRadius: 0,
   border: "1px solid rgba(122,124,132,0.45)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.78), rgba(238,238,241,0.95))",
+  background: "#1c1c1c",
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.78)",
 };
 
 const darkCard: CSSProperties = {
-  borderRadius: 18,
+  borderRadius: 0,
   background: "linear-gradient(180deg, #10161d 0%, #060a10 100%)",
   border: "1px solid rgba(176,180,190,0.14)",
   boxShadow: "0 10px 22px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -401,10 +399,11 @@ export default function DispensatieDetailPage() {
 
   const mmId = reqRow?.matchmaking_id ?? null;
   const partijNr = reqRow?.partij_nr ?? null;
-  const controlDetailHref = mmId && partijNr != null ? `/dashboard/admin/controle/${mmId}/${partijNr}` : "#";
+  const partijDetailHref = mmId && partijNr != null ? `/dashboard/matchmaker/matchmaking/${mmId}/partij/${partijNr}` : "#";
+  const controleHref = mmId ? `/dashboard/admin/controle/${mmId}` : "#";
 
   return (
-    <main style={pageBg}>
+    <main style={pageBg}><style>{`.disp-silver-btn, .disp-silver-btn *{color:#000!important;}`}</style>
       <div className="mx-auto max-w-[1600px] px-4 py-3 md:px-5 md:py-4">
         <div style={topShell}>
           <div style={darkHeader} className="px-4 py-4 md:px-6 md:py-5">
@@ -413,24 +412,29 @@ export default function DispensatieDetailPage() {
                 <button
                   type="button"
                   onClick={() => router.push("/dashboard/dispensatie")}
-                  className="inline-flex h-[42px] items-center rounded-[8px] px-4 text-sm font-semibold"
+                  className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black"
                   style={silverButton}
                 >
                   ← Overzicht
                 </button>
                 {mmId && partijNr != null ? (
-                  <Link href={controlDetailHref} className="inline-flex h-[42px] items-center rounded-[8px] px-4 text-sm font-semibold" style={silverButton}>
-                    Controle detail
+                  <Link href={partijDetailHref} className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black" style={silverButton}>
+                    Partij detail
+                  </Link>
+                ) : null}
+                {mmId ? (
+                  <Link href={controleHref} className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black" style={silverButton}>
+                    Controle
                   </Link>
                 ) : null}
               </div>
 
               <div className="flex justify-center">
-                <Image src={logoSrc} alt="FightSupport" width={350} height={90} priority className="h-auto w-auto max-w-full" />
+                <div className="text-xs font-black uppercase tracking-[0.25em] text-[#ff4d00]">FightSupport Admin</div>
               </div>
 
               <div className="flex items-center justify-start gap-3 md:justify-end">
-                <span className="inline-flex h-[42px] items-center rounded-[8px] px-4 text-sm font-semibold" style={silverButton}>
+                <span className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black" style={silverButton}>
                   Rol: {myRole ?? "-"}
                 </span>
               </div>
@@ -458,7 +462,7 @@ export default function DispensatieDetailPage() {
               </div>
 
               {err ? (
-                <div className="mt-4 rounded-[14px] border border-red-200/60 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
+                <div className="mt-4  border border-red-200/60 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
                   {err}
                 </div>
               ) : null}
@@ -489,7 +493,7 @@ export default function DispensatieDetailPage() {
                 <Panel className="xl:col-span-3">
                   <div className="flex items-center justify-between gap-2">
                     <CardTitle title="PDF" />
-                    <label className="inline-flex cursor-pointer items-center rounded-[8px] px-3 py-2 text-sm font-bold" style={orangeButton}>
+                    <label className="inline-flex cursor-pointer items-center  px-3 py-2 text-sm font-bold" style={orangeButton}>
                       {uploading ? "..." : "Upload"}
                       <input
                         type="file"
@@ -514,7 +518,7 @@ export default function DispensatieDetailPage() {
                           key={a.id}
                           type="button"
                           onClick={() => openAttachment(a)}
-                          className="block w-full rounded-[10px] px-3 py-2 text-left text-sm font-semibold text-black hover:brightness-105"
+                          className="block w-full  px-3 py-2 text-left text-sm font-semibold text-black hover:brightness-105"
                           style={{ ...silverButton, ...slimSilverFrame }}
                           title={a.original_filename ?? a.storage_path}
                         >
@@ -532,12 +536,12 @@ export default function DispensatieDetailPage() {
                   <CardTitle title="Discussie" />
                   <div className="mt-3 flex-1 overflow-auto space-y-2 pr-1">
                     {messages.length === 0 ? (
-                      <div className="rounded-[12px] border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/55">
+                      <div className=" border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/55">
                         Nog geen berichten.
                       </div>
                     ) : (
                       messages.map((m) => (
-                        <div key={m.id} className="rounded-[12px] border border-white/10 bg-white/5 px-3 py-2">
+                        <div key={m.id} className=" border border-white/10 bg-white/5 px-3 py-2">
                           <div className="text-[11px] text-white/40">{m.user_id}</div>
                           <div className="mt-1 text-sm font-medium text-white">{m.message}</div>
                           <div className="mt-1 text-[11px] text-white/40">{fmtDateNL(m.created_at, true)}</div>
@@ -551,10 +555,10 @@ export default function DispensatieDetailPage() {
                       value={msgText}
                       onChange={(e) => setMsgText(e.target.value)}
                       placeholder="Typ bericht..."
-                      className="min-w-0 flex-1 rounded-[10px] px-3 py-2 text-sm outline-none"
+                      className="min-w-0 flex-1  px-3 py-2 text-sm outline-none"
                       style={inputStyle}
                     />
-                    <button type="button" onClick={postMessage} className="rounded-[10px] px-4 py-2 text-sm font-bold" style={orangeButton}>
+                    <button type="button" onClick={postMessage} className=" px-4 py-2 text-sm font-bold" style={orangeButton}>
                       Plaats
                     </button>
                   </div>
@@ -566,7 +570,7 @@ export default function DispensatieDetailPage() {
                   <textarea
                     value={voteNote}
                     onChange={(e) => setVoteNote(e.target.value)}
-                    className="mt-2 w-full rounded-[10px] px-3 py-2 text-sm outline-none"
+                    className="mt-2 w-full  px-3 py-2 text-sm outline-none"
                     rows={4}
                     placeholder="Bijv. reden / toelichting..."
                     style={inputStyle}
@@ -576,7 +580,7 @@ export default function DispensatieDetailPage() {
                     <button
                       type="button"
                       onClick={() => vote("approve")}
-                      className="rounded-[10px] px-4 py-2 text-sm font-bold text-white"
+                      className=" px-4 py-2 text-sm font-bold text-white"
                       style={{
                         background: "linear-gradient(180deg, #22c55e 0%, #16a34a 58%, #0c7a34 100%)",
                         border: "1px solid rgba(170,255,200,0.28)",
@@ -588,7 +592,7 @@ export default function DispensatieDetailPage() {
                     <button
                       type="button"
                       onClick={() => vote("reject")}
-                      className="rounded-[10px] px-4 py-2 text-sm font-bold text-white"
+                      className=" px-4 py-2 text-sm font-bold text-white"
                       style={{
                         background: "linear-gradient(180deg, #ef4444 0%, #dc2626 58%, #a31313 100%)",
                         border: "1px solid rgba(255,190,190,0.24)",
@@ -608,7 +612,7 @@ export default function DispensatieDetailPage() {
                     <textarea
                       value={decideReason}
                       onChange={(e) => setDecideReason(e.target.value)}
-                      className="mt-3 w-full rounded-[10px] px-3 py-2 text-sm outline-none"
+                      className="mt-3 w-full  px-3 py-2 text-sm outline-none"
                       rows={3}
                       placeholder="Reden (verplicht)..."
                       style={inputStyle}
@@ -619,7 +623,7 @@ export default function DispensatieDetailPage() {
                         type="button"
                         onClick={() => decide("approved")}
                         disabled={!isSuperadmin}
-                        className="rounded-[10px] px-4 py-2 text-sm font-bold"
+                        className=" px-4 py-2 text-sm font-bold"
                         style={isSuperadmin ? orangeButton : { ...silverButton, opacity: 0.5 }}
                       >
                         Definitief goed
@@ -628,7 +632,7 @@ export default function DispensatieDetailPage() {
                         type="button"
                         onClick={() => decide("rejected")}
                         disabled={!isSuperadmin}
-                        className="rounded-[10px] px-4 py-2 text-sm font-bold"
+                        className=" px-4 py-2 text-sm font-bold"
                         style={isSuperadmin ? { ...silverButton, ...slimSilverFrame } : { ...silverButton, opacity: 0.5 }}
                       >
                         Definitief afkeur
@@ -636,7 +640,7 @@ export default function DispensatieDetailPage() {
                       <button
                         type="button"
                         onClick={() => loadAll()}
-                        className="ml-auto rounded-[10px] px-4 py-2 text-sm font-bold"
+                        className="ml-auto  px-4 py-2 text-sm font-bold"
                         style={{ ...silverButton, ...slimSilverFrame }}
                       >
                         Refresh
@@ -679,7 +683,7 @@ function InfoRow({ label, value, mono = false }: { label: string; value: React.R
 
 function SmallStat({ label, value, status }: { label: string; value: React.ReactNode; status?: string }) {
   return (
-    <div className="rounded-[12px] border border-[#aeb2bb] bg-white px-3 py-2 text-right shadow-sm">
+    <div className=" border border-[#aeb2bb] bg-white px-3 py-2 text-right shadow-sm">
       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{label}</div>
       <div className="mt-1 flex justify-end">{status ? <StatusBadge status={status}>{value}</StatusBadge> : <span className="text-base font-extrabold text-[#111827]">{value}</span>}</div>
     </div>
@@ -704,7 +708,7 @@ function StatusBadge({ status, children }: { status: string; children: React.Rea
   }
 
   return (
-    <span className="inline-flex min-h-[28px] items-center rounded-full px-3 text-xs font-extrabold uppercase tracking-[0.08em]" style={style}>
+    <span className="inline-flex min-h-[24px] items-center border px-2 text-xs font-black uppercase tracking-[0.08em]" style={style}>
       {children}
     </span>
   );

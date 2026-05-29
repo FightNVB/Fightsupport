@@ -2,12 +2,10 @@
 
 import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { ArrowLeft, RefreshCcw, ShieldCheck, ClipboardList, Trash2, Scale } from "lucide-react";
 
-const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
 
 type RequestRow = {
@@ -107,13 +105,13 @@ function isDispensatieRow(r: RequestRow) {
 const pageBg: CSSProperties = {
   minHeight: "100vh",
   background:
-    "radial-gradient(circle at 50% 0%, rgba(255,77,0,0.10) 0%, rgba(255,77,0,0.02) 12%, transparent 26%), linear-gradient(180deg, #06080d 0%, #0a0d12 100%)",
+    "linear-gradient(180deg, #2b2b2b 0%, #202020 100%)",
   color: "#fff",
 };
 
 const topShell: CSSProperties = {
   border: "1px solid rgba(205,205,215,0.35)",
-  borderRadius: 22,
+  borderRadius: 0,
   overflow: "hidden",
   background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
   boxShadow: "0 18px 40px rgba(0,0,0,0.34)",
@@ -142,22 +140,22 @@ const orangeButton: CSSProperties = {
 
 const contentShell: CSSProperties = {
   marginTop: 14,
-  borderRadius: 24,
+  borderRadius: 0,
   overflow: "hidden",
-  background: "linear-gradient(180deg, #f1f1f3 0%, #d9dadf 100%)",
+  background: "#121212",
   border: "1px solid rgba(115,118,128,0.6)",
   boxShadow: "0 16px 34px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.75)",
 };
 
 const lightHeaderCard: CSSProperties = {
-  borderRadius: 20,
+  borderRadius: 0,
   border: "1px solid rgba(122,124,132,0.45)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.78), rgba(238,238,241,0.95))",
+  background: "#1c1c1c",
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.78)",
 };
 
 const statCard: CSSProperties = {
-  borderRadius: 16,
+  borderRadius: 0,
   background: "linear-gradient(180deg, #11171e 0%, #070b11 100%)",
   border: "1px solid rgba(176,180,190,0.14)",
   boxShadow: "0 8px 18px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -169,14 +167,14 @@ const iconBox: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  borderRadius: 12,
+  borderRadius: 0,
   background: "linear-gradient(180deg, #ff6a00 0%, #ff4d00 58%, #b73900 100%)",
   color: "#fff",
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22), 0 6px 12px rgba(255,77,0,0.18)",
 };
 
 const tableShell: CSSProperties = {
-  borderRadius: 20,
+  borderRadius: 0,
   overflow: "hidden",
   border: "1px solid rgba(86,89,97,0.8)",
   boxShadow: "0 16px 32px rgba(0,0,0,0.12)",
@@ -290,7 +288,7 @@ export default function DispensatiePage() {
   }, [rows]);
 
   return (
-    <main style={pageBg}>
+    <main style={pageBg}><style>{`.disp-silver-btn, .disp-silver-btn *{color:#000!important;}`}</style>
       <div className="mx-auto max-w-[1600px] px-4 py-3 md:px-5 md:py-4">
         <div style={topShell}>
           <div style={darkHeader} className="px-4 py-4 md:px-6 md:py-5">
@@ -299,7 +297,7 @@ export default function DispensatiePage() {
                 <button
                   type="button"
                   onClick={() => router.push("/dashboard")}
-                  className="inline-flex h-[42px] items-center gap-2 rounded-[8px] px-4 text-sm font-semibold"
+                  className="disp-silver-btn inline-flex h-[38px] items-center gap-2 border border-zinc-300 px-4 text-sm font-black uppercase !text-black"
                   style={silverButton}
                 >
                   <ArrowLeft size={16} strokeWidth={2.4} />
@@ -308,7 +306,7 @@ export default function DispensatiePage() {
                 <button
                   type="button"
                   onClick={load}
-                  className="inline-flex h-[42px] items-center gap-2 rounded-[8px] px-4 text-sm font-bold"
+                  className="inline-flex h-[38px] items-center gap-2 border border-[#ff4d00] px-4 text-sm font-black uppercase !text-black"
                   style={orangeButton}
                 >
                   <RefreshCcw size={16} strokeWidth={2.4} />
@@ -317,7 +315,7 @@ export default function DispensatiePage() {
               </div>
 
               <div className="flex justify-center">
-                <Image src={logoSrc} alt="FightSupport" width={350} height={90} priority className="h-auto w-auto max-w-full" />
+                <div className="text-xs font-black uppercase tracking-[0.25em] text-[#ff4d00]">FightSupport Admin</div>
               </div>
 
               <div className="hidden md:block" />
@@ -365,7 +363,7 @@ export default function DispensatiePage() {
                   <button
                     type="button"
                     onClick={load}
-                    className="inline-flex h-[38px] items-center gap-2 rounded-[8px] px-4 text-sm font-bold"
+                    className="disp-silver-btn inline-flex h-[38px] items-center gap-2 border border-zinc-300 px-4 text-sm font-black uppercase !text-black"
                     style={silverButton}
                   >
                     <RefreshCcw size={14} strokeWidth={2.5} />
@@ -408,13 +406,16 @@ export default function DispensatiePage() {
                                 <div className="flex flex-wrap gap-2">
                                   <MiniLink href={`/dashboard/dispensatie/${r.id}`} label="Stemmen" dark={dark} />
                                   {r.matchmaking_id && r.partij_nr != null ? (
-                                    <MiniLink href={`/dashboard/admin/controle/${r.matchmaking_id}/${r.partij_nr}`} label="Details" dark={dark} />
+                                    <MiniLink href={`/dashboard/matchmaker/matchmaking/${r.matchmaking_id}/partij/${r.partij_nr}`} label="Partij detail" dark={dark} />
+                                  ) : null}
+                                  {r.matchmaking_id ? (
+                                    <MiniLink href={`/dashboard/admin/controle/${r.matchmaking_id}`} label="Controle" dark={dark} />
                                   ) : null}
                                   {canDelete ? (
                                     <button
                                       type="button"
                                       onClick={() => deleteRequest(r.id)}
-                                      className="inline-flex h-[36px] items-center gap-2 rounded-[8px] px-3 text-xs font-bold"
+                                      className="inline-flex h-[32px] items-center gap-2 border px-3 text-xs font-black uppercase"
                                       style={dark ? { ...orangeButton, height: 36 } : { ...silverButton, height: 36, color: "#8c140c" }}
                                     >
                                       <Trash2 size={14} strokeWidth={2.4} />
@@ -483,8 +484,12 @@ function MiniLink({ href, label, dark = false }: { href: string; label: string; 
   return (
     <Link
       href={href}
-      className="inline-flex h-[36px] items-center rounded-[8px] px-3 text-xs font-bold"
-      style={dark ? { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff" } : { background: "#ffffff", border: "1px solid rgba(125,128,138,0.8)", color: "#111" }}
+      className="disp-silver-btn inline-flex h-[32px] items-center border border-zinc-300 px-3 text-xs font-black uppercase !text-black"
+      style={
+        dark
+          ? { background: "#ffffff", border: "1px solid rgba(255,255,255,0.92)", color: "#111" }
+          : { background: "#ffffff", border: "1px solid rgba(125,128,138,0.8)", color: "#111" }
+      }
     >
       {label}
     </Link>
@@ -492,7 +497,7 @@ function MiniLink({ href, label, dark = false }: { href: string; label: string; 
 }
 
 function StatusBadge({ status, children }: { status: string; children: React.ReactNode }) {
-  let style: CSSProperties = { background: "#eceff3", border: "1px solid #c4c9d1", color: "#334155" };
+  let style: CSSProperties = { background: "#eceff3", border: "1px solid #c4c9d1", color: "#d4d4d8" };
 
   if (status === "nieuw" || status === "open") {
     style = { background: "#ffedd5", border: "1px solid #fdba74", color: "#c2410c" };
@@ -503,7 +508,7 @@ function StatusBadge({ status, children }: { status: string; children: React.Rea
   }
 
   return (
-    <span className="inline-flex min-h-[28px] items-center rounded-full px-3 text-[11px] font-extrabold uppercase tracking-[0.08em]" style={style}>
+    <span className="inline-flex min-h-[24px] items-center border px-2 text-[11px] font-black uppercase tracking-[0.08em]" style={style}>
       {children}
     </span>
   );

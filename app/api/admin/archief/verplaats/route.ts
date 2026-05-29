@@ -102,23 +102,74 @@ export async function POST(req: NextRequest) {
       return bad("Je mag alleen matchmakings van je eigen bondteam verplaatsen.", 403);
     }
 
-    const currentStage = lower((mm as any).stadium || (mm as any).status);
-    const isFinished = currentStage === "uitslagen_definitief" || currentStage === "afgerond";
-    if (!isFinished) {
-      return bad("Alleen afgeronde matchmakings kunnen naar Admin Archief worden verplaatst.", 409);
-    }
+    const stadium = lower((mm as any).stadium);
+    const status = lower((mm as any).status);
+    let currentStage = stadium || status;
+    const finishedStages = ["uitslagen_definitief", "afgerond", "gearchiveerd", "admin_archief"];
+    let isFinished = finishedStages.includes(stadium) || finishedStages.includes(status);
 
     const now = new Date().toISOString();
+
+    // Herstel voor oude/blijvende records: de uitslagen kunnen al definitief zijn,
+    // terwijl matchmakings nog op klaar_voor_uitslagen of uitslagen_in_bewerking staat.
+    // Dan volgen we alsnog de geldige flow: klaar_voor_uitslagen -> uitslagen_in_bewerking -> uitslagen_definitief.
+    if (!isFinished && ["klaar_voor_uitslagen", "uitslagen_in_bewerking"].includes(currentStage)) {
+      const { data: run } = await supabaseAdmin
+        .from("uitslagen_runs")
+        .select("id, status")
+        .eq("matchmaking_id", matchmakingId)
+        .maybeSingle();
+
+      const runIsFinished = lower((run as any)?.status) === "afgerond" || lower((run as any)?.status) === "uitslagen_definitief";
+
+      if (runIsFinished) {
+        if (currentStage === "klaar_voor_uitslagen") {
+          const { error: inBewerkingErr } = await supabaseAdmin
+            .from("matchmakings")
+            .update({
+              status: "uitslagen_in_bewerking",
+              stadium: "uitslagen_in_bewerking",
+              last_updated_at: now,
+              last_updated_by: userId,
+            })
+            .eq("id", matchmakingId);
+
+          if (inBewerkingErr) throw inBewerkingErr;
+        }
+
+        const { error: repairErr } = await supabaseAdmin
+          .from("matchmakings")
+          .update({
+            status: "uitslagen_definitief",
+            stadium: "uitslagen_definitief",
+            results_finalized_at: now,
+            locked_for_editing: true,
+            last_updated_at: now,
+            last_updated_by: userId,
+          })
+          .eq("id", matchmakingId);
+
+        if (repairErr) throw repairErr;
+        currentStage = "uitslagen_definitief";
+        isFinished = true;
+      }
+    }
+
+    if (!isFinished) {
+      return bad(`Alleen definitief afgeronde matchmakings kunnen naar Admin Archief worden verplaatst. Huidige status: ${currentStage || "onbekend"}.`, 409);
+    }
 
     const { error: updErr } = await supabaseAdmin
       .from("matchmakings")
       .update({
-        status: "admin_archief",
-        stadium: "admin_archief",
+        status: "gearchiveerd",
+        stadium: "gearchiveerd",
         huidige_eigenaar_type: "admin",
         huidige_eigenaar_user_id: null,
         huidige_eigenaar_bondteam: mmBondteam || null,
         is_archived: true,
+        archived_at: now,
+        final_status: "gearchiveerd",
         locked_for_editing: true,
         last_updated_at: now,
         last_updated_by: userId,
@@ -129,14 +180,14 @@ export async function POST(req: NextRequest) {
 
     await supabaseAdmin
       .from("matchmaking_uploads")
-      .update({ flow_status: "admin_archief" })
+      .update({ flow_status: "gearchiveerd" })
       .eq("matchmaking_id", matchmakingId);
 
     await supabaseAdmin.from("matchmaking_flow_log").insert({
       matchmaking_id: matchmakingId,
       actie_type: "naar_admin_archief",
       van_stadium: currentStage || null,
-      naar_stadium: "admin_archief",
+      naar_stadium: "gearchiveerd",
       van_eigenaar_type: "bondteam",
       naar_eigenaar_type: "admin",
       naar_eigenaar_bondteam: mmBondteam || null,
@@ -149,7 +200,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       matchmaking_id: matchmakingId,
-      status: "admin_archief",
+      status: "gearchiveerd",
     });
   } catch (e: any) {
     console.error("[admin/archief/verplaats]", e);

@@ -740,7 +740,15 @@ export async function POST(req: Request) {
     }
 
     if (onlyOpen) {
-      aanmeldingenQuery = aanmeldingenQuery.in("status", ["nieuw", "rauw", "raw", "open", "aangemeld"]);
+      aanmeldingenQuery = aanmeldingenQuery.in("status", [
+        "nieuw",
+        "rauw",
+        "raw",
+        "open",
+        "aangemeld",
+        "controle_bezig",
+        "scrape_mislukt",
+      ]);
     }
 
     const { data: aanmeldingen, error: aanmeldingenError } = await aanmeldingenQuery;
@@ -783,18 +791,9 @@ export async function POST(req: Request) {
 
     const aanmeldingIds = rows.map((r: any) => s(r.id)).filter(Boolean);
 
-    await safeUpdateByIds(
-      "aanmeldingen",
-      {
-        status: "controle_bezig",
-        scrape_started_at: new Date().toISOString(),
-        scrape_failed_at: null,
-        scrape_error: null,
-        scrape_run_id,
-        updated_at: new Date().toISOString(),
-      },
-      aanmeldingIds
-    );
+    // Let op: zet aanmeldingen hier nog NIET op controle_bezig.
+    // Eerst controleren we of er een geldige FightPassport-sessie is en of de scraper echt kan starten.
+    // Anders verdwijnen ze uit "Niet gecheckt" zonder dat Puppeteer heeft gedraaid.
 
     await deleteOldMatchmakerRaw(matchmaking_id, va_nummers);
 
@@ -851,6 +850,21 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
+
+    // Pas NU markeren als controle_bezig: we hebben een matchmaker, sessie en scriptpad.
+    // Vanaf dit punt wordt Puppeteer daadwerkelijk gestart.
+    await safeUpdateByIds(
+      "aanmeldingen",
+      {
+        status: "controle_bezig",
+        scrape_started_at: new Date().toISOString(),
+        scrape_failed_at: null,
+        scrape_error: null,
+        scrape_run_id,
+        updated_at: new Date().toISOString(),
+      },
+      aanmeldingIds
+    );
 
     const scrapeResult = await runNodeScript(
       fpBundleMMPath,

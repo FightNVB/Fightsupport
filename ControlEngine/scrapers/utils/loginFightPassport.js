@@ -367,13 +367,20 @@ export async function loginFightPassport(options = {}) {
     throw new Error("❌ login_master.json NIET gevonden");
   }
 
-  const login = matchmakerId
-    ? { username: usernameFromOptions, password: passwordFromOptions }
-    : JSON.parse(fs.readFileSync(LOGIN_PATH, "utf8"));
-  const { username, password } = login;
+  let username = usernameFromOptions;
+  let password = passwordFromOptions;
 
-  if (!username || !password) {
-    throw new Error("FightPassport gebruikersnaam of wachtwoord ontbreekt.");
+  // Bij matchmaker-sessies gebruiken we primair de opgeslagen cookies uit
+  // fightpassport_sessions. Dan zijn username/password niet nodig voor scrapes.
+  // Alleen zonder matchmakerId gebruiken we de oude master-login via login_master.json.
+  if (!matchmakerId) {
+    const login = JSON.parse(fs.readFileSync(LOGIN_PATH, "utf8"));
+    username = String(login?.username ?? "").trim();
+    password = String(login?.password ?? "").trim();
+
+    if (!username || !password) {
+      throw new Error("FightPassport gebruikersnaam of wachtwoord ontbreekt.");
+    }
   }
 
   const browser = await puppeteer.launch({
@@ -408,8 +415,12 @@ export async function loginFightPassport(options = {}) {
         console.log("⚠️ Cookies aanwezig, maar loginpagina staat open → normale login nodig");
       } else if (await loggedInDomProof(page)) {
         const dashOk = await dashboardReady(page, 12000);
-        if (dashOk) {
-          console.log("✅ Ingelogd via cookies (trusted device)");
+        if (dashOk || matchmakerId) {
+          console.log(
+            matchmakerId
+              ? "✅ Matchmaker sessie geladen uit database"
+              : "✅ Ingelogd via cookies (trusted device)"
+          );
           return;
         }
 
@@ -418,6 +429,12 @@ export async function loginFightPassport(options = {}) {
       } else {
         console.log("⚠️ Cookies ongeldig → normale login nodig");
       }
+    }
+
+    if (matchmakerId && (!username || !password)) {
+      throw new Error(
+        "Matchmaker FightPassport sessie is ongeldig of verlopen. Koppel FightPassport opnieuw."
+      );
     }
 
     // 3) normale login

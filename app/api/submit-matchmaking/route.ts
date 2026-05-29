@@ -1,4 +1,4 @@
-// app/api/submit_matchmaking/start/route.ts
+// app/api/submit-matchmaking/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
@@ -249,6 +249,88 @@ function resolveLifecycleBronType(role: RoleName): string {
   return "official_upload";
 }
 
+
+type UploadUserProfile = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  bondteam: string | null;
+  role: string | null;
+};
+
+async function findUserProfileForUpload(auth: any): Promise<UploadUserProfile> {
+  const authProfileId = String(
+    auth?.profile?.id ?? auth?.userProfile?.id ?? auth?.profileId ?? ""
+  ).trim();
+  const authEmail = String(
+    auth?.profile?.email ?? auth?.userProfile?.email ?? auth?.email ?? auth?.user?.email ?? ""
+  )
+    .trim()
+    .toLowerCase();
+  const fallbackAuthUserId = String(auth?.userId ?? auth?.id ?? auth?.user?.id ?? "").trim();
+
+  // Voor FightSupport is public.user_profiles leidend voor applicatie-login:
+  // id + role + bondteam komen uit user_profiles. uploaded_by verwijst ook naar user_profiles(id).
+  // Daarom zoeken we eerst op profiel-id als authz die meegeeft, anders op e-mail.
+  let query = supabaseAdmin
+    .from("user_profiles")
+    .select("id, full_name, email, bondteam, role");
+
+  if (authProfileId) {
+    query = query.eq("id", authProfileId);
+  } else if (authEmail) {
+    query = query.ilike("email", authEmail);
+  } else if (fallbackAuthUserId) {
+    query = query.eq("id", fallbackAuthUserId);
+  } else {
+    throw new Error("Geen ingelogde gebruiker gevonden voor deze upload.");
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    throw new Error(`Ingelogde gebruiker zoeken in public.user_profiles mislukt: ${error.message}`);
+  }
+
+  if (!data?.id) {
+    throw new Error(
+      "Ingelogde gebruiker bestaat niet in public.user_profiles. " +
+        `Gezocht met profileId=${authProfileId || "-"}, email=${authEmail || "-"}, fallbackUserId=${fallbackAuthUserId || "-"}. ` +
+        "Voor uploads moet de ingelogde gebruiker als rij in public.user_profiles bestaan."
+    );
+  }
+
+  return data as UploadUserProfile;
+}
+
+
+async function assertPublicUserProfileId(profileId: string): Promise<UploadUserProfile> {
+  const id = String(profileId ?? "").trim();
+  if (!id) {
+    throw new Error("Geen public.user_profiles.id bepaald voor matchmaking_uploads.uploaded_by.");
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, full_name, email, bondteam, role")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Controle uploaded_by in public.user_profiles mislukt: ${error.message}`);
+  }
+
+  if (!data?.id) {
+    throw new Error(
+      `Ongeldige uploaded_by voor matchmaking_uploads: ${id}. ` +
+        "Deze waarde bestaat niet in public.user_profiles.id. " +
+        "Gebruik de profiel-id uit public.user_profiles, niet auth.users.id."
+    );
+  }
+
+  return data as UploadUserProfile;
+}
+
 /* =========================================================
    Main route
 ========================================================= */
@@ -261,8 +343,11 @@ export async function POST(req: Request) {
       "official",
       "hoofdofficial",
     ]);
-    const userId = auth.userId;
-    const role = roleLower(auth.role);
+    const authUserId = String((auth as any)?.userId ?? "").trim();
+    const authRole = roleLower((auth as any)?.role);
+    let profileForUpload: UploadUserProfile | null = null;
+    let userId = "";
+    let role: RoleName = authRole;
 
     let evenement_naam = "";
     let evenement_datum = "";
@@ -273,7 +358,7 @@ export async function POST(req: Request) {
     let hoofdofficial: string | null = null;
     let promotor: string | null = null;
 
-    const uploaded_by: string = userId;
+    let uploaded_by = "";
 
     let matchmaking_id: string | null = null;
     let force_new = false;
@@ -284,9 +369,10 @@ export async function POST(req: Request) {
     let lifecycleBronType: string | null = null;
     let raw_filename: string | null = null;
 
-    let bouts: any[] = [];
+    let requestedLifecycleMode: string | null = null;
+    let requestedKeepOwner: string | null = null;
 
-    lifecycleBronType = resolveLifecycleBronType(role);
+    let bouts: any[] = [];
 
     if (isJson(req)) {
       const body = await req.json();
@@ -315,6 +401,13 @@ export async function POST(req: Request) {
         ? String(body.matchmaking_id).trim()
         : null;
       force_new = Boolean(body.force_new ?? false);
+
+      requestedLifecycleMode = body.lifecycle_mode
+        ? String(body.lifecycle_mode).trim().toLowerCase()
+        : null;
+      requestedKeepOwner = body.keep_owner
+        ? String(body.keep_owner).trim().toLowerCase()
+        : null;
 
       event_id = body.event_id ? String(body.event_id).trim() : null;
 
@@ -349,6 +442,11 @@ export async function POST(req: Request) {
       matchmaking_id = String(form.get("matchmaking_id") ?? "").trim() || null;
       force_new = String(form.get("force_new") ?? "false") === "true";
 
+      requestedLifecycleMode =
+        String(form.get("lifecycle_mode") ?? "").trim().toLowerCase() || null;
+      requestedKeepOwner =
+        String(form.get("keep_owner") ?? "").trim().toLowerCase() || null;
+
       event_id = String(form.get("event_id") ?? "").trim() || null;
 
       if (!file) {
@@ -371,6 +469,35 @@ export async function POST(req: Request) {
         },
         { status: 415 }
       );
+    }
+
+    profileForUpload = await findUserProfileForUpload(auth);
+
+    console.log("[submit-matchmaking] ingelogde user_profiles gebruiker", {
+      id: profileForUpload.id,
+      email: profileForUpload.email,
+      role: profileForUpload.role,
+      bondteam: profileForUpload.bondteam,
+      authUserId,
+    });
+
+    // BELANGRIJK VOOR fk_upload_user:
+    // matchmaking_uploads.uploaded_by verwijst naar public.user_profiles(id).
+    // Gebruik hier dus nooit auth.users.id. Controleer dit hard voordat we insert doen.
+    profileForUpload = await assertPublicUserProfileId(profileForUpload.id);
+    userId = String(profileForUpload.id).trim();
+    uploaded_by = userId;
+
+    role = roleLower(profileForUpload.role ?? authRole);
+    lifecycleBronType = resolveLifecycleBronType(role);
+
+    if (!matchmaker && role === "matchmaker") {
+      matchmaker = profileForUpload.full_name || profileForUpload.email || null;
+    }
+
+    if (!bondteam && profileForUpload.bondteam) {
+      const profileBondteam = String(profileForUpload.bondteam).trim().toUpperCase();
+      if (ALLOWED_BONDTEAMS.has(profileBondteam)) bondteam = profileBondteam;
     }
 
     if (!evenement_naam || !evenement_datum) {
@@ -448,18 +575,46 @@ export async function POST(req: Request) {
 
     let mmId = "";
 
-    const makerType = role === "matchmaker" ? "matchmaker" : null;
-const makerUserId = role === "matchmaker" ? userId : null;
-const matchmakerIdForRow = makerUserId;
+    const isOfficialUpload = role === "official" || role === "hoofdofficial";
 
-const lifecycleStage = "concept_matchmaking" as const;
-const lifecycleOwnerType =
-  role === "admin" || role === "superadmin" ? "admin" : "matchmaker";
-const lifecycleOwnerUserId =
-  lifecycleOwnerType === "admin" || lifecycleOwnerType === "matchmaker"
-    ? userId
-    : null;
-const lifecycleOwnerBondteam = null;
+    // Belangrijk:
+    // - uploaded_by moet altijd public.user_profiles.id zijn, niet auth.users.id.
+    // - Een hoofdofficial/official die zelf uploadt, is zelf de maker en houdt
+    //   de MM bij het eigen bondteam om hem zelf te kunnen controleren.
+    // - Alleen matchmaker-uploads gaan automatisch naar admin-controle.
+    const makerType =
+      role === "matchmaker"
+        ? "matchmaker"
+        : isOfficialUpload
+          ? role
+          : role === "admin" || role === "superadmin"
+            ? "admin"
+            : null;
+
+    const makerUserId = userId;
+
+    // matchmaker_id alleen vullen als de ingelogde maker echt matchmaker is.
+    // Bij hoofdofficial/admin uploads is er vaak alleen een tekstveld matchmaker/promotor.
+    const matchmakerIdForRow = role === "matchmaker" ? userId : null;
+
+    const shouldSendToAdmin =
+      requestedLifecycleMode === "submitted_to_admin" ||
+      requestedKeepOwner === "admin" ||
+      role === "matchmaker";
+
+    const lifecycleStage = shouldSendToAdmin
+      ? "ingediend_admin"
+      : ("concept_matchmaking" as const);
+
+    const lifecycleOwnerType = shouldSendToAdmin
+      ? "admin"
+      : isOfficialUpload
+        ? "bondteam"
+        : "admin";
+
+    const lifecycleOwnerUserId = shouldSendToAdmin ? null : isOfficialUpload ? userId : null;
+    const lifecycleOwnerBondteam = shouldSendToAdmin ? null : isOfficialUpload ? bondteam : null;
+    const submittedToAdminAt = shouldSendToAdmin ? now : null;
 
     if (!force_new && matchmaking_id) {
       const s = String(matchmaking_id).trim();
@@ -506,6 +661,8 @@ const lifecycleOwnerBondteam = null;
           status: lifecycleStage,
           bron_type: lifecycleBronType,
           stadium: lifecycleStage,
+          final_status: lifecycleStage,
+          submitted_to_admin_at: submittedToAdminAt,
 
           huidige_eigenaar_type: lifecycleOwnerType,
           huidige_eigenaar_user_id: lifecycleOwnerUserId,
@@ -542,6 +699,8 @@ const lifecycleOwnerBondteam = null;
           status: lifecycleStage,
           bron_type: lifecycleBronType,
           stadium: lifecycleStage,
+          final_status: lifecycleStage,
+          submitted_to_admin_at: submittedToAdminAt,
 
           huidige_eigenaar_type: lifecycleOwnerType,
           huidige_eigenaar_user_id: lifecycleOwnerUserId,
@@ -584,10 +743,20 @@ const lifecycleOwnerBondteam = null;
       ownerBondteam: lifecycleOwnerBondteam,
       actorUserId: userId,
       actorRole: role,
-      metadata: { route: "app/api/submit_matchmaking/start/route.ts" },
+      metadata: {
+        route: "app/api/submit-matchmaking/route.ts",
+        auth_user_id: authUserId,
+        requested_lifecycle_mode: requestedLifecycleMode,
+        requested_keep_owner: requestedKeepOwner,
+      },
     });
 
     const lifecycleBondteam = bondteam;
+
+    // Laatste beveiliging tegen FK-fout: uploaded_by moet exact public.user_profiles.id zijn.
+    // Dit voorkomt dat auth.users.id zoals e43d7b0c-... per ongeluk wordt opgeslagen.
+    uploaded_by = userId;
+    await assertPublicUserProfileId(uploaded_by);
 
     const { data: uploadRow, error: uploadErr } = await supabaseAdmin
       .from("matchmaking_uploads")
