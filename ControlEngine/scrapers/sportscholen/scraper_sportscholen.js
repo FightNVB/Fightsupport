@@ -151,7 +151,7 @@ async function waitForDashboard(page) {
 
     if (state.hasDashboardText && state.hasSportscholenTile) return true;
 
-    await page.waitForTimeout(500);
+    await sleep(500);
   }
 
   throw new Error("Dashboard niet gevonden");
@@ -172,7 +172,7 @@ async function clickSportscholenTile(page) {
   });
 
   if (clickedOld) {
-    await page.waitForTimeout(800);
+    await sleep(800);
     return;
   }
 
@@ -201,7 +201,7 @@ async function clickSportscholenTile(page) {
     throw new Error("SPORTSCHOLEN tile niet gevonden. titles=" + JSON.stringify(titles));
   }
 
-  await page.waitForTimeout(800);
+  await sleep(800);
 }
 
 async function downloadExcel(page, browser) {

@@ -100,16 +100,16 @@ async function closeAnyModal(page) {
       const el = await page.$(sel);
       if (el) {
         await el.click();
-        await page.waitForTimeout(120);
+        await wait(120);
       }
     } catch {}
   }
 
   try {
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(80);
+    await wait(80);
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(80);
+    await wait(80);
   } catch {}
 }
 
