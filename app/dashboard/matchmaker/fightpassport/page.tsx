@@ -28,6 +28,8 @@ export default function FightPassportPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [waitingForConnect, setWaitingForConnect] = useState(false);
+  const [manualUnlockMode, setManualUnlockMode] = useState(false);
 
   const status = norm(session?.status);
   const active = status === "active" || status === "logged_in" || status === "gekoppeld";
@@ -60,48 +62,118 @@ export default function FightPassportPage() {
     loadStatus();
   }, []);
 
+  useEffect(() => {
+    if (!waitingForConnect && !unlockRequired && !manualUnlockMode) return;
+
+    const t = window.setInterval(() => {
+      loadStatus(true);
+    }, 1500);
+
+    return () => window.clearInterval(t);
+  }, [waitingForConnect, unlockRequired, manualUnlockMode]);
+
   async function startLogin() {
     setBusy(true);
-    setMsg("");
+    setWaitingForConnect(true);
+    setManualUnlockMode(false);
+    setUnlockCode("");
+    setMsg("FightPassport wordt geopend. Zodra de unlockmail binnenkomt kun je de code hieronder invullen.");
 
-    try {
-      const res = await authedFetch("/api/matchmaker/fightpassport/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username,
-          password,
-          action: "login",
-          trust_device: trustDevice,
-        }),
-      });
-
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok) throw new Error(json?.error || "Inloggen mislukt");
-
-      setPassword("");
-      setSession(json?.session || null);
-
-      const nextStatus = norm(json?.session?.status);
-      const nextMessage = norm(json?.session?.message);
-      const needsUnlock =
-        nextStatus === "unlock_required" ||
-        nextStatus === "waiting_for_unlock" ||
-        nextMessage.includes("unlock") ||
-        nextMessage.includes("pincode");
-
-      if (needsUnlock) {
-        setMsg("FightPassport vraagt om een unlockcode. Vul hieronder alleen de 7-cijferige code in en bevestig.");
-      } else {
-        setMsg("FightPassport is gekoppeld. Je kunt nu Autocheck starten zonder opnieuw in te loggen.");
-      }
-
-      await loadStatus(true);
-    } catch (e: any) {
-      setMsg(e?.message || "Inloggen mislukt");
-      await loadStatus(true);
-    } finally {
+    // Toon stap 2 bewust al na een paar seconden.
+    // De connect-route kan open blijven omdat Puppeteer op het unlockscherm wacht.
+    window.setTimeout(() => {
+      setManualUnlockMode(true);
       setBusy(false);
+      setMsg("Als FightPassport om een pincode vraagt, vul hier de 7-cijferige unlockcode uit de mail in.");
+    }, 4000);
+
+    const runConnect = async () => {
+      try {
+        const res = await authedFetch("/api/matchmaker/fightpassport/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username,
+            password,
+            action: "login",
+            trust_device: trustDevice,
+          }),
+        });
+
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok || !json?.ok) {
+          const needsUnlock = json?.needsUnlock || String(json?.error || "").toLowerCase().includes("unlock");
+          if (needsUnlock) {
+            setManualUnlockMode(true);
+            setMsg("FightPassport vraagt om een unlockcode. Vul hieronder alleen de 7-cijferige code in en bevestig.");
+          } else {
+            throw new Error(json?.error || "Inloggen mislukt");
+          }
+        } else {
+          setPassword("");
+          setSession(json?.session || null);
+
+          const nextStatus = norm(json?.session?.status);
+          const nextMessage = norm(json?.session?.message);
+          const needsUnlock =
+            nextStatus === "unlock_required" ||
+            nextStatus === "waiting_for_unlock" ||
+            nextMessage.includes("unlock") ||
+            nextMessage.includes("pincode");
+
+          if (needsUnlock) {
+            setManualUnlockMode(true);
+            setMsg("FightPassport vraagt om een unlockcode. Vul hieronder alleen de 7-cijferige code in en bevestig.");
+          } else {
+            setManualUnlockMode(false);
+            setMsg("FightPassport is gekoppeld. Je kunt nu Autocheck starten zonder opnieuw in te loggen.");
+          }
+        }
+      } catch (e: any) {
+        setMsg(e?.message || "Inloggen mislukt");
+      } finally {
+        setWaitingForConnect(false);
+        setBusy(false);
+        await loadStatus(true);
+      }
+    };
+
+    runConnect();
+
+    // Blijf los van de openstaande request de status ophalen.
+    for (let i = 0; i < 180; i++) {
+      await new Promise((r) => window.setTimeout(r, 1000));
+
+      try {
+        const res = await authedFetch("/api/matchmaker/fightpassport/status");
+        const json = await res.json().catch(() => ({}));
+        if (res.ok) {
+          const nextSession = json?.session || null;
+          setSession(nextSession);
+
+          const nextStatus = norm(nextSession?.status);
+          const nextMessage = norm(nextSession?.message);
+
+          if (
+            nextStatus === "unlock_required" ||
+            nextStatus === "waiting_for_unlock" ||
+            nextMessage.includes("unlock") ||
+            nextMessage.includes("pincode")
+          ) {
+            setManualUnlockMode(true);
+            setBusy(false);
+            setMsg("FightPassport vraagt om een unlockcode. Vul hieronder alleen de 7-cijferige code in en bevestig.");
+            break;
+          }
+
+          if (nextStatus === "active" || nextStatus === "logged_in" || nextStatus === "gekoppeld") {
+            setManualUnlockMode(false);
+            setMsg("FightPassport is gekoppeld. Je kunt nu Autocheck starten zonder opnieuw in te loggen.");
+            break;
+          }
+        }
+      } catch {}
     }
   }
 
@@ -115,22 +187,63 @@ export default function FightPassportPage() {
         throw new Error("Vul een geldige unlockcode van 7 cijfers in.");
       }
 
-      const res = await authedFetch("/api/matchmaker/fightpassport/connect", {
+      // Deze route schrijft alleen fp_unlock_request.json.
+      // De openstaande Puppeteer pakt de code op, vult input.pincode, zet het vinkje en klikt AANMELDEN.
+      let res = await authedFetch("/api/matchmaker/fightpassport/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "unlock",
+          code,
           unlock_code: code,
           trust_device: trustDevice,
         }),
       });
 
+      // Fallback naar algemene unlock-route als die bij jou daar staat.
+      if (res.status === 404) {
+        res = await authedFetch("/api/fightpassport/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code,
+            unlock_code: code,
+            trust_device: trustDevice,
+          }),
+        });
+      }
+
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.ok) throw new Error(json?.error || "Unlockcode bevestigen mislukt");
 
       setUnlockCode("");
-      setSession(json?.session || null);
-      setMsg("Unlockcode bevestigd. FightPassport is gekoppeld.");
+      setMsg("Unlockcode verzonden naar Puppeteer. Wachten tot FightPassport op dashboard staat...");
+
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => window.setTimeout(r, 1000));
+        const st = await authedFetch("/api/matchmaker/fightpassport/status");
+        const sj = await st.json().catch(() => ({}));
+
+        if (st.ok) {
+          const nextSession = sj?.session || null;
+          setSession(nextSession);
+
+          const nextStatus = norm(nextSession?.status);
+          const nextMessage = norm(nextSession?.message);
+
+          if (nextStatus === "active" || nextStatus === "logged_in" || nextStatus === "gekoppeld") {
+            setManualUnlockMode(false);
+            setWaitingForConnect(false);
+            setMsg("Unlockcode bevestigd. FightPassport is gekoppeld.");
+            break;
+          }
+
+          if (nextStatus === "failed" || nextMessage.includes("niet geaccepteerd")) {
+            setMsg(nextSession?.message || "Unlockcode niet geaccepteerd.");
+            break;
+          }
+        }
+      }
+
       await loadStatus(true);
     } catch (e: any) {
       setMsg(e?.message || "Unlockcode bevestigen mislukt");
@@ -154,6 +267,8 @@ export default function FightPassportPage() {
       setUsername("");
       setPassword("");
       setUnlockCode("");
+      setWaitingForConnect(false);
+      setManualUnlockMode(false);
       await loadStatus(true);
       setMsg("FightPassport sessie losgekoppeld.");
     } catch (e: any) {
@@ -163,8 +278,13 @@ export default function FightPassportPage() {
     }
   }
 
-  const statusLabel = active ? "Gekoppeld" : unlockRequired ? "Unlockcode nodig" : "Niet gekoppeld";
-  const statusColor = active ? "#46ff8a" : unlockRequired ? "#ffd166" : ORANGE;
+  // Let op: DB kan nog stale "active" zijn van een vorige poging.
+  // Als we nu bezig zijn met koppelen/wachten, moet stap 2 ALTIJD zichtbaar mogen zijn.
+  const showUnlockStep = unlockRequired || waitingForConnect || manualUnlockMode;
+  const effectiveActive = active && !showUnlockStep;
+
+  const statusLabel = effectiveActive ? "Gekoppeld" : showUnlockStep ? "Unlockcode nodig" : "Niet gekoppeld";
+  const statusColor = effectiveActive ? "#46ff8a" : showUnlockStep ? "#ffd166" : ORANGE;
 
   return (
     <main style={shell}>
@@ -192,14 +312,14 @@ export default function FightPassportPage() {
           )}
           <div>
             <b>{statusLabel}</b>
-            <div style={muted}>{session?.message || "Nog geen FightPassport sessie gevonden."}</div>
+            <div style={muted}>{showUnlockStep ? "Puppeteer wacht op de unlockcode uit de mail." : session?.message || "Nog geen FightPassport sessie gevonden."}</div>
             {session?.updated_at && (
               <div style={muted}>Laatst bijgewerkt: {new Date(session.updated_at).toLocaleString("nl-NL")}</div>
             )}
           </div>
         </div>
 
-        {!unlockRequired && (
+        {!effectiveActive && !showUnlockStep && (
           <section style={panel}>
             <h2 style={panelTitle}>Stap 1 — Inloggen</h2>
             <p style={muted}>
@@ -243,12 +363,12 @@ export default function FightPassportPage() {
           </section>
         )}
 
-        {unlockRequired && (
+        {showUnlockStep && (
           <section style={unlockPanel}>
             <h2 style={panelTitle}>Stap 2 — Unlockcode bevestigen</h2>
             <p style={muted}>
-              FightPassport heeft de login geaccepteerd maar vraagt nu om de 7-cijferige unlockcode. Vul alleen de code in,
-              laat vertrouwd apparaat aan staan en bevestig.
+              Als het Puppeteer-scherm op de pincodepagina staat, vul hieronder de 7-cijferige code uit de mail in.
+              Puppeteer vult de pincode in, zet het vinkje aan en klikt daarna op AANMELDEN.
             </p>
 
             <div style={grid}>

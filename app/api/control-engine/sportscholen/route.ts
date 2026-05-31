@@ -127,6 +127,11 @@ function runScraper(scriptPath: string): Promise<{ stdout: string; stderr: strin
             // BELANGRIJK: sportscholen hoort ALTIJD master-login te gebruiken.
             // Dus nooit per ongeluk een matchmaker-profiel/cookies doorgeven.
             FP_MATCHMAKER_ID: "",
+            FP_SESSION_MODE: "master",
+
+            // Zelfde headless-regels als admin/officials.
+            HEADLESS: process.env.HEADLESS ?? "false",
+            PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
 
             SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
             ComSpec: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",

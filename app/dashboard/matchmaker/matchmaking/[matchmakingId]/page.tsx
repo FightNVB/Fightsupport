@@ -365,6 +365,7 @@ function licenseValueToOk(v: any): boolean | null {
 
 function isMissingLicentie(ctx: AnyRow, side: "rood" | "blauw"): boolean {
   if (!ctx) return false;
+  if (isExactBoksen(ctx)) return false;
   const prefix = `${side}_`;
   const preferred = [
     `${prefix}licentie_ok`,
@@ -409,6 +410,46 @@ function hasValue(v: any): boolean {
   return v != null && String(v).trim() !== "";
 }
 
+function normalizeDisciplineForRule(v: any): string {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[ \s_-]+/g, " ");
+}
+
+function isExactBoksen(ctx: AnyRow | null | undefined): boolean {
+  if (!ctx) return false;
+  return normalizeDisciplineForRule(
+    ctx?.discipline ??
+      ctx?.discipline_mm ??
+      ctx?.discipline_fp ??
+      ctx?.wedstrijd_discipline ??
+      ctx?.bout_discipline,
+  ) === "boksen";
+}
+
+function isBoksenNoVaInfoRow(r: Partial<ResRow> | null | undefined): boolean {
+  const code = String((r as any)?.rule_code ?? "").toUpperCase();
+  const rule = String((r as any)?.rule ?? "").toUpperCase();
+  const msg = String((r as any)?.boodschap ?? "").toUpperCase();
+  const haystack = `${code} ${rule} ${msg}`;
+
+  const mentionsVaOrFightPassport =
+    /(^|[^A-Z])VA([^A-Z]|$)/.test(haystack) ||
+    haystack.includes("VA_NUMMER") ||
+    haystack.includes("VA-NUMMER") ||
+    haystack.includes("VA NUMMER") ||
+    haystack.includes("FIGHTPASSPORT") ||
+    haystack.includes("FIGHT PASSPORT") ||
+    haystack.includes("GEEN INFO") ||
+    haystack.includes("GEEN SCRAPE") ||
+    haystack.includes("SCRAPE-INFO") ||
+    haystack.includes("SCRAPE INFO") ||
+    haystack.includes("INFO ONTBREEKT");
+
+  return mentionsVaOrFightPassport || isLicentieRow(r);
+}
+
 function hasScrapeInfoForSide(ctx: AnyRow, side: "rood" | "blauw"): boolean {
   if (!ctx) return false;
 
@@ -438,6 +479,12 @@ function isContextCompleet(ctx: AnyRow): boolean {
   const blauwVa = ctx?.blauw_va_mm ?? ctx?.va_blauw;
   const roodNaam = ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? ctx?.rood_naam;
   const blauwNaam = ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? ctx?.blauw_naam;
+
+  // Exact discipline "Boksen" werkt met boksboekjes en hoeft geen VA/FightPassport-info te hebben.
+  // Let op: dit is bewust exact, dus Kickboksen valt hier niet onder.
+  if (isExactBoksen(ctx)) {
+    return hasValue(roodNaam) && hasValue(blauwNaam);
+  }
 
   // Geen info betekent: geen VA of geen scrape-info.
   // Een partij hoeft niet alle FP-velden te hebben om wél bruikbare info te hebben.
@@ -2612,6 +2659,8 @@ export default function ControleMatchmakingPage() {
       for (const rr of activeRes) {
         const pn = Number(rr.partij_nr);
         if (!Number.isFinite(pn) || pn <= 0) continue;
+        const ctxForPn = ctxByPn[pn];
+        if (isExactBoksen(ctxForPn) && isBoksenNoVaInfoRow(rr)) continue;
         if (!resByPn[pn]) resByPn[pn] = [];
         resByPn[pn].push(rr);
       }
@@ -2639,7 +2688,10 @@ export default function ControleMatchmakingPage() {
         if (dispMap[pn]) status = "dispensatie";
 
         const allForPn = allRes.filter((res) => Number(res.partij_nr) === pn);
-        const licentieRows = allForPn.filter(isLicentieRow);
+        const relevantForPn = isExactBoksen(ctx)
+          ? allForPn.filter((res) => !isBoksenNoVaInfoRow(res))
+          : allForPn;
+        const licentieRows = relevantForPn.filter(isLicentieRow);
         const licentieGoedgekeurd =
           licentieRows.length > 0 &&
           licentieRows.every((res) =>

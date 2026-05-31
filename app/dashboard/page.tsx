@@ -1,8 +1,14 @@
 "use client";
 
-import React, { useEffect, type CSSProperties, type ReactNode } from "react";
+import React, {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { authedFetch } from "@/lib/api/authedFetch";
 import {
   Shield,
   ClipboardList,
@@ -22,6 +28,39 @@ type PortalAction = {
     className?: string;
   }>;
 };
+
+type UserProfileRow = {
+  role: string | null;
+  bondteam: string | null;
+};
+
+function normalizeRole(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().toLowerCase();
+}
+
+function normalizeBondteam(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const normalized = String(value).trim().toUpperCase();
+  return normalized === "NULL" ? "" : normalized;
+}
+
+async function fetchUserProfile(): Promise<UserProfileRow | null> {
+  const response = await authedFetch("/api/me/profile", {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    console.error("user_profiles laden mislukt", response.status, message);
+    return null;
+  }
+
+  return (await response.json()) as UserProfileRow;
+}
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
@@ -152,7 +191,9 @@ const darkPlate: CSSProperties = {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, roles, loading, logout } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const [profile, setProfile] = useState<UserProfileRow | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -160,22 +201,36 @@ export default function DashboardPage() {
     }
   }, [loading, user, router]);
 
-  const canAdmin =
-    (roles ?? []).includes("admin") || (roles ?? []).includes("superadmin");
+  useEffect(() => {
+    let cancelled = false;
 
-  const canOfficial =
-    (roles ?? []).includes("official") ||
-    (roles ?? []).includes("hoofdofficial") ||
-    canAdmin;
+    async function loadUserProfile() {
+      if (loading) return;
 
-  const canMatchmaker =
-    (roles ?? []).includes("matchmaker") || canAdmin;
+      if (!user?.id) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
 
-  const canSportscholen =
-    (roles ?? []).includes("trainer") || (roles ?? []).includes("admin") || canAdmin;
+      setProfileLoading(true);
 
+      const data = await fetchUserProfile();
 
-  if (loading) {
+      if (!cancelled) {
+        setProfile(data);
+        setProfileLoading(false);
+      }
+    }
+
+    loadUserProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user?.id]);
+
+  if (loading || profileLoading) {
     return (
       <main style={pageBackground}>
         <div
@@ -207,8 +262,39 @@ export default function DashboardPage() {
 
   if (!user) return null;
 
+  const role = normalizeRole(profile?.role);
+  const bondteam = normalizeBondteam(profile?.bondteam);
+  const isNvbOrNoBondteam = bondteam === "" || bondteam === "NVB";
+
+  const isAdmin = role === "admin";
+  const isSuperadmin = role === "superadmin";
+  const isOfficial = role === "official";
+  const isHoofdofficial = role === "hoofdofficial";
+  const isMatchmaker = role === "matchmaker";
+  const isTrainerOrSportschool = role === "trainer" || role === "sportschool";
+
+  const isRootAdmin = (isAdmin || isSuperadmin) && isNvbOrNoBondteam;
+  const isOtherBondAdmin = isAdmin && !isNvbOrNoBondteam;
+  const isAnySuperadmin = isSuperadmin;
+
+  const canOpenAdmin = isRootAdmin || isAnySuperadmin;
+  const canOpenDispensatie = isRootAdmin || isAnySuperadmin;
+  const canOpenOfficial =
+    isRootAdmin ||
+    isAnySuperadmin ||
+    isOtherBondAdmin ||
+    isOfficial ||
+    isHoofdofficial;
+  const canOpenMatchmaker =
+    isRootAdmin ||
+    isAnySuperadmin ||
+    isOtherBondAdmin ||
+    isMatchmaker ||
+    isHoofdofficial;
+  const canOpenSportscholen = isRootAdmin || isTrainerOrSportschool;
+
   const actions: PortalAction[] = [
-    ...(canAdmin
+    ...(canOpenAdmin
       ? [
           {
             label: "Admin Portaal",
@@ -219,7 +305,7 @@ export default function DashboardPage() {
         ]
       : []),
 
-    ...(canOfficial
+    ...(canOpenOfficial
       ? [
           {
             label: "Official Portaal",
@@ -230,7 +316,7 @@ export default function DashboardPage() {
         ]
       : []),
 
-    ...(canSportscholen
+    ...(canOpenDispensatie
       ? [
           {
             label: "Dispensatie",
@@ -238,9 +324,16 @@ export default function DashboardPage() {
             href: "/dashboard/dispensatie",
             icon: Building2 as any,
           },
+        ]
+      : []),
+
+    ...(canOpenSportscholen
+      ? [
           {
             label: "Sportscholen",
-            subtitle: canAdmin ? "Beheer en trainer-overzicht" : "Mijn fightcrew",
+            subtitle: isRootAdmin
+              ? "Beheer en trainer-overzicht"
+              : "Mijn fightcrew",
             href: "/dashboard/sportscholen",
             icon: Building2 as any,
           },
@@ -254,7 +347,7 @@ export default function DashboardPage() {
       icon: FileText as any,
     },
 
-    ...(canMatchmaker
+    ...(canOpenMatchmaker
       ? [
           {
             label: "Matchmaker",
@@ -420,10 +513,7 @@ export default function DashboardPage() {
             <PortalCard
               key={action.href}
               icon={
-                <action.icon
-                  size={index === 0 ? 38 : 36}
-                  strokeWidth={2.55}
-                />
+                <action.icon size={index === 0 ? 38 : 36} strokeWidth={2.55} />
               }
               title={action.label}
               subtitle={action.subtitle}

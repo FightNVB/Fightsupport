@@ -105,17 +105,52 @@ async function waitForNewExcel(downloadDir, timeoutMs = 60000) {
 // 1. FightPassport navigatie
 //////////////////////////////////////////////////////////////
 async function waitForDashboard(page) {
-  // jouw originele manier (werkt meestal)
-  for (let i = 0; i < 15; i++) {
-    const ok = await page.evaluate(() => !!document.querySelector(".tileHeader"));
-    if (ok) return true;
-    await page.waitForTimeout(500);
-  }
+  for (let i = 0; i < 60; i++) {
+    const state = await page.evaluate(() => {
+      function isVisible(el) {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0" &&
+          r.width > 0 &&
+          r.height > 0
+        );
+      }
 
-  // fallback: titles bestaan (jij ziet ze ook in debug)
-  for (let i = 0; i < 20; i++) {
-    const ok = await page.evaluate(() => !!document.querySelector('[title="SPORTSCHOLEN"]'));
-    if (ok) return true;
+      const pincode =
+        document.querySelector("input.pincode") ||
+        document.querySelector("input.target_input.pincode") ||
+        document.querySelector("input[class*='pincode']");
+
+      const login = document.querySelector("input.gebruikersnaam");
+
+      const txt = String(document.body?.innerText || "").toLowerCase();
+
+      return {
+        isUnlock: !!(pincode && isVisible(pincode)),
+        isLogin: !!(login && isVisible(login)),
+        hasDashboardText: txt.includes("fightpassport") && txt.includes("afmelden"),
+        hasSportscholenTile:
+          !!document.querySelector('[title="SPORTSCHOLEN"]') ||
+          Array.from(document.querySelectorAll(".tileHeader")).some(
+            (t) => String(t.innerText || "").trim().toUpperCase() === "SPORTSCHOLEN"
+          ),
+      };
+    });
+
+    if (state.isUnlock) {
+      throw new Error("UNLOCK_REQUIRED: FightPassport vraagt om een unlockcode.");
+    }
+
+    if (state.isLogin) {
+      throw new Error("LOGIN_PAGE: FightPassport loginpagina staat open.");
+    }
+
+    if (state.hasDashboardText && state.hasSportscholenTile) return true;
+
     await page.waitForTimeout(500);
   }
 

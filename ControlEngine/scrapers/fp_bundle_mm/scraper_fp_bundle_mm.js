@@ -7,7 +7,7 @@
 // ✅ fighter_id = interne UUID, va_nummer = extern VA-nummer
 // ✅ Geen kolomkoppen in uitslagen-export = geen uitslagen, GEEN fout
 
-import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
+import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassportMatchmaker.js";
 import supabase from "../utils/supabaseClient.js";
 import fs from "fs";
 import path from "path";
@@ -1004,7 +1004,10 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     masterRefreshPromise = (async () => {
       console.log(`[bundle-mm] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
 
-      await ensureLoggedIn(masterPage, { force: true });
+      await ensureLoggedIn(masterPage, {
+        force: true,
+        matchmakerId: process.env.FP_MATCHMAKER_ID || null,
+      });
 
       try {
         cookies = await masterPage.cookies();

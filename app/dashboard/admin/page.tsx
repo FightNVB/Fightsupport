@@ -1,16 +1,16 @@
 "use client";
 
-import React, { useEffect, type CSSProperties, type ReactNode } from "react";
+import React, {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import {
-  ClipboardList,
-  Scale,
-  Trophy,
-  ArrowLeft,
-  History,
-} from "lucide-react";
+import { authedFetch } from "@/lib/api/authedFetch";
+import { ClipboardList, Scale, Trophy, ArrowLeft, History } from "lucide-react";
 
 type MenuAction = {
   label: string;
@@ -18,7 +18,41 @@ type MenuAction = {
   href?: string;
   external?: string;
   icon: any;
+  rootAdminOnly?: boolean;
 };
+
+type UserProfileRow = {
+  role: string | null;
+  bondteam: string | null;
+};
+
+function normalizeRole(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().toLowerCase();
+}
+
+function normalizeBondteam(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const normalized = String(value).trim().toUpperCase();
+  return normalized === "NULL" ? "" : normalized;
+}
+
+async function fetchUserProfile(): Promise<UserProfileRow | null> {
+  const response = await authedFetch("/api/me/profile", {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    console.error("user_profiles laden mislukt", response.status, message);
+    return null;
+  }
+
+  return (await response.json()) as UserProfileRow;
+}
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
@@ -149,23 +183,46 @@ const darkPlate: CSSProperties = {
 
 export default function AdminDashboardPage() {
   const router = useRouter();
-  const { user, roles, loading } = useAuth();
+  const { user, loading } = useAuth();
+  const [profile, setProfile] = useState<UserProfileRow | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
-      return;
+    }
+  }, [loading, router, user]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUserProfile() {
+      if (loading) return;
+
+      if (!user?.id) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+
+      setProfileLoading(true);
+
+      const data = await fetchUserProfile();
+
+      if (!cancelled) {
+        setProfile(data);
+        setProfileLoading(false);
+      }
     }
 
-    const roleList = roles ?? [];
-    const allowed = roleList.includes("admin") || roleList.includes("superadmin");
+    loadUserProfile();
 
-    if (!loading && user && !allowed) {
-      router.replace("/dashboard");
-    }
-  }, [loading, roles, router, user]);
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user?.id]);
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <main style={pageBackground}>
         <CenteredMessage text="Bezig met laden..." />
@@ -175,11 +232,39 @@ export default function AdminDashboardPage() {
 
   if (!user) return null;
 
-  const roleList = roles ?? [];
-  const allowed =
-    roleList.includes("admin") || roleList.includes("superadmin");
+  const normalizedRole = normalizeRole(profile?.role);
+  const normalizedBondteam = normalizeBondteam(profile?.bondteam);
+  const isAdmin = normalizedRole === "admin";
+  const isSuperadmin = normalizedRole === "superadmin";
+  const isNvbOrNoBondteam =
+    normalizedBondteam === "" || normalizedBondteam === "NVB";
 
-  if (!allowed) return null;
+  // Toegang tot /dashboard/admin:
+  // - Superadmin mag altijd het admin-portaal openen, ook bij NKF/WPKL/andere bond.
+  // - Admin mag alleen openen als bondteam leeg of NVB is.
+  const mayOpenAdminPortal = isSuperadmin || (isAdmin && isNvbOrNoBondteam);
+
+  // Root-admin tegels zijn alleen voor NVB/leeg:
+  // Algemeen, Beheer en Uitslagen verwerken.
+  // Superadmin van NKF/WPKL/andere bond ziet die dus NIET.
+  const mayOpenRootAdminTiles = (isAdmin || isSuperadmin) && isNvbOrNoBondteam;
+
+  if (!mayOpenAdminPortal) {
+    return (
+      <main style={pageBackground}>
+        <SharedStyles />
+        <TopLogoBand />
+        <TitleBand
+          title="Geen toegang"
+          subtitle="Dit admin-portaal is niet beschikbaar voor dit profiel"
+          actionLabel="Dashboard"
+          actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
+          onAction={() => router.push("/dashboard")}
+        />
+        <CenteredMessage text="Je profiel heeft geen toegang tot het admin-portaal." />
+      </main>
+    );
+  }
 
   const actions: MenuAction[] = [
     {
@@ -187,6 +272,7 @@ export default function AdminDashboardPage() {
       subtitle: "Dispensatie aanvragen",
       href: "/dashboard/admin/algemeen",
       icon: History,
+      rootAdminOnly: true,
     },
     {
       label: "Controle",
@@ -199,15 +285,17 @@ export default function AdminDashboardPage() {
       subtitle: "Gebruikers, rollen en eventbeheer",
       href: "/dashboard/admin/beheer",
       icon: ClipboardList,
+      rootAdminOnly: true,
     },
-    
+
     {
       label: "Uitslagen verwerken",
       subtitle: "Uitslagen beheren en uploadn naar FP",
       href: "/dashboard/admin/uitslagen/ready-to-upload",
       icon: Trophy,
+      rootAdminOnly: true,
     },
-  ];
+  ].filter((action) => !action.rootAdminOnly || mayOpenRootAdminTiles);
 
   return (
     <main style={pageBackground}>
@@ -246,7 +334,8 @@ export default function AdminDashboardPage() {
               buttonLabel="Openen"
               onClick={() => {
                 if (action.href) router.push(action.href);
-                if (action.external) window.open(action.external, "_blank", "noopener,noreferrer");
+                if (action.external)
+                  window.open(action.external, "_blank", "noopener,noreferrer");
               }}
             />
           ))}
@@ -284,7 +373,10 @@ function SharedStyles() {
       }
 
       .fs-card-hover {
-        transition: transform 180ms ease, filter 180ms ease, box-shadow 180ms ease;
+        transition:
+          transform 180ms ease,
+          filter 180ms ease,
+          box-shadow 180ms ease;
       }
 
       .fs-card-hover:hover {
@@ -320,7 +412,10 @@ function SharedStyles() {
       }
 
       .fs-metal-button {
-        transition: transform 90ms ease, box-shadow 120ms ease, filter 120ms ease;
+        transition:
+          transform 90ms ease,
+          box-shadow 120ms ease,
+          filter 120ms ease;
       }
 
       .fs-metal-button:hover {
@@ -551,10 +646,19 @@ function TitleBand({
   );
 }
 
-function SteelFrame({ children, hover = false }: { children: ReactNode; hover?: boolean }) {
+function SteelFrame({
+  children,
+  hover = false,
+}: {
+  children: ReactNode;
+  hover?: boolean;
+}) {
   return (
     <div className={hover ? "fs-card-hover" : undefined}>
-      <div style={steelFrameOuter} className={hover ? "fs-card-outer" : undefined}>
+      <div
+        style={steelFrameOuter}
+        className={hover ? "fs-card-outer" : undefined}
+      >
         <div
           className={hover ? "fs-card-glow" : undefined}
           style={{
@@ -684,7 +788,8 @@ function IconPlate({ children }: { children: ReactNode }) {
         justifyContent: "center",
         color: "#fff",
         border: "1px solid #7b2500",
-        background: "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
+        background:
+          "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
         boxShadow:
           "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
       }}
@@ -694,7 +799,13 @@ function IconPlate({ children }: { children: ReactNode }) {
   );
 }
 
-function SteelButton({ label, onClick }: { label: string; onClick: () => void }) {
+function SteelButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
@@ -799,7 +910,11 @@ function OrangeHotspot({
   variant?: 1 | 2 | 3;
 }) {
   const extraClass =
-    variant === 2 ? "fs-hotspot fs-hotspot-2" : variant === 3 ? "fs-hotspot fs-hotspot-3" : "fs-hotspot";
+    variant === 2
+      ? "fs-hotspot fs-hotspot-2"
+      : variant === 3
+        ? "fs-hotspot fs-hotspot-3"
+        : "fs-hotspot";
 
   return (
     <div

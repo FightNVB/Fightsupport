@@ -1,0 +1,28 @@
+[
+  {
+    "name": "PHPSESSID",
+    "value": "4tj0r48f6gtod5pk7lja8ttug8",
+    "domain": "fightpassport.nl",
+    "path": "/",
+    "expires": -1,
+    "size": 35,
+    "httpOnly": false,
+    "secure": true,
+    "session": true,
+    "sourceScheme": "Secure",
+    "sourcePort": 443
+  },
+  {
+    "name": "sys42_device%5Bunlockcode%5D",
+    "value": "f2aa51653c7448db86c2c75b0a0709ae",
+    "domain": "fightpassport.nl",
+    "path": "/",
+    "expires": 1811789312,
+    "size": 60,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "sourceScheme": "Secure",
+    "sourcePort": 443
+  }
+]

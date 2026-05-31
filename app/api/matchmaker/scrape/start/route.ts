@@ -874,6 +874,16 @@ export async function POST(req: Request) {
         // Dus niet beslissen op role, want een superadmin kan ook matchmaker zijn.
         FP_MATCHMAKER_ID: fpMatchmakerId,
         FP_SESSION_MODE: "matchmaker",
+
+        // Zelfde headless-regels als de werkende scrapers/koppelpagina.
+        HEADLESS: process.env.HEADLESS ?? "true",
+        PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "true",
+
+        // Zorg dat fp_bundle_mm dezelfde profielmap/cookies gebruikt als de koppelpagina.
+        FP_PROFILE_BASE_DIR:
+          process.env.FP_PROFILE_BASE_DIR ??
+          path.join(process.cwd(), "ControlEngine", "fightpassport_profiles"),
+
         WORKERS: String(workers),
         STAGGER_MS: String(stagger_ms),
         TAB_ATTEMPTS: String(tab_attempts),

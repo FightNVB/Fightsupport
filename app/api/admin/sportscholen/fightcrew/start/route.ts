@@ -160,6 +160,16 @@ async function startVaEnrichAfterFightcrew(params: {
     cwd: process.cwd(),
     env: {
       ...process.env,
+
+      // Team/sportschool gebruikt ALTIJD master-login, nooit matchmaker profiel/cookies.
+      FP_MATCHMAKER_ID: "",
+      FP_SESSION_MODE: "master",
+
+      // Zelfde headless-regels als admin/officials/sportscholen.
+      HEADLESS: process.env.HEADLESS ?? "false",
+      PUPPETEER_HEADLESS:
+        process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
+
       TEAM_SPORTSCHOOL_ID: sportschoolKey,
       FIGHTCREW_SPORTSCHOOL_ID: sportschoolKey,
       TEAM_SCRAPE_RUN_ID: scrapeRunId,
@@ -320,6 +330,16 @@ export async function POST(req: NextRequest) {
       cwd: process.cwd(),
       env: {
         ...process.env,
+
+        // Team/sportschool gebruikt ALTIJD master-login, nooit matchmaker profiel/cookies.
+        FP_MATCHMAKER_ID: "",
+        FP_SESSION_MODE: "master",
+
+        // Zelfde headless-regels als admin/officials/sportscholen.
+        HEADLESS: process.env.HEADLESS ?? "false",
+        PUPPETEER_HEADLESS:
+          process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
+
         TEAM_SPORTSCHOOL_ID: sportschoolKey,
         FIGHTCREW_SPORTSCHOOL_ID: sportschoolKey,
       },

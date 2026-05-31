@@ -1,4 +1,4 @@
-// ControlEngine/scrapers/fp_bundle_officials/scraper_fp_officials.js
+// ControlEngine/scrapers/fp_bundle/scraper_fp_bundle.js
 // ✅ MASTER tab logt 1x in en blijft open (sessie warm)
 // ✅ Per VA: worker opent NIEUWE TAB DIRECT op fighter-url:
 //     https://fightpassport.nl/#va_vechter/<va>
@@ -123,13 +123,33 @@ function fighterUrl(va) {
 
 async function isLoginPage(page) {
   try {
-    const loginEl = await page.$("input.gebruikersnaam").catch(() => null);
-    if (loginEl) return true;
-  } catch {}
+    return await page.evaluate(() => {
+      function isVisible(el) {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0" &&
+          r.width > 0 &&
+          r.height > 0
+        );
+      }
 
-  try {
-    const u = (page.url() || "").toLowerCase();
-    if (u.includes("login") || u.includes("#login") || u.includes("aanmeld")) return true;
+      // Unlock/pincodepagina is GEEN gewone loginpagina.
+      const pincode =
+        document.querySelector("input.pincode") ||
+        document.querySelector("input.target_input.pincode") ||
+        document.querySelector("input[class*='pincode']");
+      if (pincode && isVisible(pincode)) return false;
+
+      const loginEl = document.querySelector("input.gebruikersnaam");
+      if (loginEl && isVisible(loginEl)) return true;
+
+      const u = String(location.href || "").toLowerCase();
+      return u.includes("login") || u.includes("#login") || u.includes("aanmeld");
+    });
   } catch {}
 
   return false;

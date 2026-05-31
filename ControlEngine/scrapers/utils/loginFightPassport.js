@@ -4,7 +4,6 @@ import path from "path";
 import puppeteer from "puppeteer";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
-import supabase from "./supabaseClient.js";
 
 dotenv.config();
 
@@ -16,10 +15,39 @@ const ROOT = path.resolve(__dirname, "..");
 
 const LOGIN_PATH = path.join(ROOT, "config", "login_master.json");
 const COOKIES_PATH = path.join(ROOT, "utils", "cookies.json");
+const SESSION_STATE_PATH = path.join(ROOT, "utils", "fp_session_state.json");
 
 const FP_URL = "https://fightpassport.nl/";
 
 const SYS42_SELECTOR = 'img[src$="logo_header.svg"], img[src*="logo_header.svg"]';
+
+
+function writeFpSessionState(status, message, extra = {}) {
+  try {
+    const payload = {
+      status,
+      message,
+      updated_at: new Date().toISOString(),
+      needs_unlock: status === "unlock_required",
+      ...extra,
+    };
+
+    if (status !== "unlock_required") {
+      payload.last_unlock_required_at = null;
+    }
+
+    fs.writeFileSync(SESSION_STATE_PATH, JSON.stringify(payload, null, 2), "utf8");
+  } catch (e) {
+    console.log("⚠️ Kon fp_session_state.json niet bijwerken:", e?.message ?? e);
+  }
+}
+
+function markFightPassportReady(message = "FightPassport sessie is actief.") {
+  writeFpSessionState("ready", message, {
+    needs_unlock: false,
+    browser_url: null,
+  });
+}
 
 // --------------------------------------------------
 // HELPERS
@@ -62,56 +90,49 @@ async function loginFormVisible(page) {
 }
 
 async function loggedInDomProof(page) {
-  // “Hard proof” dat we in de FP shell zitten en NIET op login
+  // ECHTE dashboard-check.
+  // Let op: het unlockscherm heeft ook een logo, dus logo_header.svg/SYS42 image alleen is GEEN bewijs.
   try {
-    return await page.evaluate((SYS42_SELECTOR) => {
-      const loginInput = document.querySelector("input.gebruikersnaam");
-      if (loginInput) {
-        const style = window.getComputedStyle(loginInput);
-        const r = loginInput.getBoundingClientRect();
-        const visible =
+    return await page.evaluate(() => {
+      function isVisible(el) {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return (
           style.display !== "none" &&
           style.visibility !== "hidden" &&
           style.opacity !== "0" &&
           r.width > 0 &&
-          r.height > 0 &&
-          loginInput.offsetParent !== null;
-        if (visible) return false;
+          r.height > 0
+        );
       }
 
-      // SYS42 logo in header = je zit in FP shell (ingelogd UI)
-      const sys = document.querySelector(SYS42_SELECTOR);
-      if (sys) return true;
+      const loginInput = document.querySelector("input.gebruikersnaam");
+      if (loginInput && isVisible(loginInput)) return false;
 
-      // of we zitten al op een vechter-route
-      const hash = window.location.hash || "";
-      if (hash.includes("#va_vechter/")) return true;
+      const pinInput =
+        document.querySelector("input.pincode") ||
+        document.querySelector("input.target_input.pincode") ||
+        document.querySelector("input[class*='pincode']");
+      if (pinInput && isVisible(pinInput)) return false;
 
-      return false;
-    }, SYS42_SELECTOR);
+      const txt = String(document.body?.innerText || "").toLowerCase();
+
+      const hasDashboardText = txt.includes("fightpassport") && txt.includes("afmelden");
+
+      const hash = String(window.location.hash || "").toLowerCase();
+      const isFighterRoute = hash.includes("#va_vechter/");
+
+      return hasDashboardText || isFighterRoute;
+    });
   } catch {
     return false;
   }
 }
 
-async function saveCookies(page, matchmakerId = null) {
+async function saveCookies(page) {
   try {
     const newCookies = await page.cookies();
-    if (matchmakerId) {
-      const { error } = await supabase.from("fightpassport_sessions").upsert(
-        {
-          matchmaker_id: matchmakerId,
-          cookies: newCookies,
-          status: "active",
-          message: "FightPassport sessie actief.",
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "matchmaker_id" }
-      );
-      if (error) throw error;
-      console.log("Matchmaker-cookies opgeslagen in database");
-      return;
-    }
     fs.writeFileSync(COOKIES_PATH, JSON.stringify(newCookies, null, 2));
     console.log("💾 Cookies opgeslagen");
   } catch (e) {
@@ -119,25 +140,7 @@ async function saveCookies(page, matchmakerId = null) {
   }
 }
 
-async function loadCookiesIfAny(page, matchmakerId = null) {
-  if (matchmakerId) {
-    try {
-      const { data, error } = await supabase
-        .from("fightpassport_sessions")
-        .select("cookies")
-        .eq("matchmaker_id", matchmakerId)
-        .maybeSingle();
-      if (error) throw error;
-      const cookies = data?.cookies;
-      if (!Array.isArray(cookies) || !cookies.length) return false;
-      await page.setCookie(...cookies);
-      return true;
-    } catch (e) {
-      console.log("Matchmaker-cookies konden niet geladen worden:", e?.message ?? e);
-      return false;
-    }
-  }
-
+async function loadCookiesIfAny(page) {
   if (!fs.existsSync(COOKIES_PATH)) return false;
   try {
     const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
@@ -206,7 +209,10 @@ export async function ensureLoggedIn(page, opts = {}) {
     await safeZoom100(page);
 
     // 1) al ingelogd?
-    if (!force && (await loggedInDomProof(page))) return;
+    if (!force && (await loggedInDomProof(page))) {
+      markFightPassportReady("FightPassport was al ingelogd.");
+      return;
+    }
 
     // 2) cookies proberen (tenzij force)
     if (!force) {
@@ -216,6 +222,7 @@ export async function ensureLoggedIn(page, opts = {}) {
         await safeZoom100(page);
         if (await loggedInDomProof(page)) {
           console.log("✅ Ingelogd via cookies (trusted device)");
+          markFightPassportReady("Ingelogd via cookies (trusted device).");
           return;
         }
         console.log("⚠️ Cookies ongeldig → normale login nodig");
@@ -229,6 +236,7 @@ export async function ensureLoggedIn(page, opts = {}) {
         await safeZoom100(page);
         if (await loggedInDomProof(page)) {
           console.log("✅ Ingelogd via cookies (force, quick restore)");
+          markFightPassportReady("Ingelogd via cookies (force quick restore).");
           if (saveCookiesToDisk) await saveCookies(page);
           return;
         }
@@ -245,6 +253,7 @@ export async function ensureLoggedIn(page, opts = {}) {
     while (Date.now() - start < 60000) {
       if (await loggedInDomProof(page)) {
         console.log("✅ Al ingelogd (na redirect)");
+        markFightPassportReady("Al ingelogd na redirect.");
         return;
       }
       if (await loginFormVisible(page)) break;
@@ -328,6 +337,7 @@ export async function ensureLoggedIn(page, opts = {}) {
     }
 
     console.log("🟢 SUCCESVOL ingelogd");
+    markFightPassportReady("Succesvol ingelogd.");
     await page.waitForTimeout(1200);
     await safeZoom100(page);
 
@@ -352,39 +362,23 @@ export async function ensureLoggedIn(page, opts = {}) {
     throw new Error("ensureLoggedIn eindigde zonder ingelogd bewijs (hard stop)");
   }
 
+  markFightPassportReady("ensureLoggedIn afgerond.");
   return true;
 }
 
 // --------------------------------------------------
 // HOOFDLOGIN (ongewijzigd gedrag)
 // --------------------------------------------------
-export async function loginFightPassport(options = {}) {
-  const matchmakerId = String(options?.matchmakerId ?? "").trim() || null;
-  const usernameFromOptions = String(options?.username ?? "").trim();
-  const passwordFromOptions = String(options?.password ?? "").trim();
-
-  if (!matchmakerId && !fs.existsSync(LOGIN_PATH)) {
+export async function loginFightPassport() {
+  if (!fs.existsSync(LOGIN_PATH)) {
     throw new Error("❌ login_master.json NIET gevonden");
   }
 
-  let username = usernameFromOptions;
-  let password = passwordFromOptions;
-
-  // Bij matchmaker-sessies gebruiken we primair de opgeslagen cookies uit
-  // fightpassport_sessions. Dan zijn username/password niet nodig voor scrapes.
-  // Alleen zonder matchmakerId gebruiken we de oude master-login via login_master.json.
-  if (!matchmakerId) {
-    const login = JSON.parse(fs.readFileSync(LOGIN_PATH, "utf8"));
-    username = String(login?.username ?? "").trim();
-    password = String(login?.password ?? "").trim();
-
-    if (!username || !password) {
-      throw new Error("FightPassport gebruikersnaam of wachtwoord ontbreekt.");
-    }
-  }
+  const login = JSON.parse(fs.readFileSync(LOGIN_PATH, "utf8"));
+  const { username, password } = login;
 
   const browser = await puppeteer.launch({
-    headless: false,
+    headless: String(process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false").toLowerCase() === "true" ? true : false,
     defaultViewport: null,
     args: [
       "--no-sandbox",
@@ -403,10 +397,13 @@ export async function loginFightPassport(options = {}) {
     await safeZoom100(page);
 
     // 1) al ingelogd?
-    if (await loggedInDomProof(page)) return;
+    if (await loggedInDomProof(page)) {
+      markFightPassportReady("FightPassport was al ingelogd.");
+      return;
+    }
 
     // 2) cookies proberen
-    const hadCookies = await loadCookiesIfAny(page, matchmakerId);
+    const hadCookies = await loadCookiesIfAny(page);
     if (hadCookies) {
       await safeGoto(page, FP_URL);
       await safeZoom100(page);
@@ -415,12 +412,9 @@ export async function loginFightPassport(options = {}) {
         console.log("⚠️ Cookies aanwezig, maar loginpagina staat open → normale login nodig");
       } else if (await loggedInDomProof(page)) {
         const dashOk = await dashboardReady(page, 12000);
-        if (dashOk || matchmakerId) {
-          console.log(
-            matchmakerId
-              ? "✅ Matchmaker sessie geladen uit database"
-              : "✅ Ingelogd via cookies (trusted device)"
-          );
+        if (dashOk) {
+          console.log("✅ Ingelogd via cookies (trusted device)");
+          markFightPassportReady("Ingelogd via cookies (trusted device).");
           return;
         }
 
@@ -429,12 +423,6 @@ export async function loginFightPassport(options = {}) {
       } else {
         console.log("⚠️ Cookies ongeldig → normale login nodig");
       }
-    }
-
-    if (matchmakerId && (!username || !password)) {
-      throw new Error(
-        "Matchmaker FightPassport sessie is ongeldig of verlopen. Koppel FightPassport opnieuw."
-      );
     }
 
     // 3) normale login
@@ -447,6 +435,7 @@ export async function loginFightPassport(options = {}) {
     while (Date.now() - start < 60000) {
       if (await loggedInDomProof(page)) {
         console.log("✅ Al ingelogd (na redirect)");
+        markFightPassportReady("Al ingelogd na redirect.");
         return;
       }
       if (await loginFormVisible(page)) break;
@@ -529,6 +518,7 @@ export async function loginFightPassport(options = {}) {
     }
 
     console.log("🟢 SUCCESVOL ingelogd");
+    markFightPassportReady("Succesvol ingelogd.");
     await page.waitForTimeout(1200);
     await safeZoom100(page);
 
@@ -537,7 +527,7 @@ export async function loginFightPassport(options = {}) {
       console.log("⚠️ Ingelogd, maar dashboard nog niet gevonden. Scraper probeert alsnog verder.");
     }
 
-    await saveCookies(page, matchmakerId);
+    await saveCookies(page);
   }
 
   // 2 pogingen
@@ -556,5 +546,6 @@ export async function loginFightPassport(options = {}) {
     throw new Error("loginFightPassport eindigde zonder ingelogd bewijs (hard stop)");
   }
 
+  markFightPassportReady("loginFightPassport afgerond.");
   return { browser, page };
 }

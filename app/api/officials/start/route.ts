@@ -501,6 +501,11 @@ export async function POST(req: Request) {
             // Belangrijk: process.env.FP_MATCHMAKER_ID kan globaal bestaan, maar mag hier niet doorlekken.
             FP_MATCHMAKER_ID: "",
             FP_SESSION_MODE: "master",
+
+            // Zelfde headless-regels als de andere scrapers.
+            HEADLESS: process.env.HEADLESS ?? "false",
+            PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
+
             WORKERS: String(workers),
             STAGGER_MS: String(stagger_ms),
             TAB_ATTEMPTS: String(tab_attempts),

@@ -19,6 +19,16 @@ function s(v: unknown) {
   return String(v ?? "").trim();
 }
 
+function parseRawJson(v: any): any {
+  if (!v) return {};
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return {};
+  }
+}
+
 function norm(v: unknown) {
   return s(v).toLowerCase();
 }
@@ -148,7 +158,7 @@ function rowTournamentKey(row: ControleRow) {
 }
 
 function rawTournamentKeys(row: any) {
-  const code = tournamentCode(row.toernooi_code);
+  const code = tournamentCode(row.toernooi_code ?? parseRawJson(row.raw_json)?.toernooi_code);
   if (!code) return [];
 
   const ids = [
@@ -316,7 +326,10 @@ function rawRowDecision(row: any, decisions: ReturnType<typeof buildDecisions>) 
   const partijNr = n(row.partij_nr, 0);
 
   // Toernooi-vechters staan op partij_nr 0 en moeten per toernooi_code + VA/fighter_id geblokkeerd worden.
-  if (partijNr === 0 || tournamentCode(row.toernooi_code)) {
+  if (
+    partijNr === 0 ||
+    tournamentCode(row.toernooi_code ?? parseRawJson(row.raw_json)?.toernooi_code)
+  ) {
     const keys = rawTournamentKeys(row);
     const merged = decisions.newDecision();
     for (const key of keys) {
@@ -338,6 +351,65 @@ function rawRowDecision(row: any, decisions: ReturnType<typeof buildDecisions>) 
 }
 
 
+function hasValue(v: any): boolean {
+  return v != null && String(v).trim() !== "";
+}
+
+function licenseValueToKnown(v: any): boolean {
+  if (v == null) return false;
+  if (typeof v === "boolean" || typeof v === "number") return true;
+  return String(v).trim() !== "";
+}
+
+function hasScrapeInfoForSide(row: any, side: "rood" | "blauw") {
+  return (
+    hasValue(row?.[`${side}_naam_fp`]) ||
+    hasValue(row?.[`${side}_geboortedatum_fp`]) ||
+    hasValue(row?.[`${side}_geboortedatum`]) ||
+    licenseValueToKnown(
+      row?.[`${side}_licentie`] ??
+        row?.[`${side}_licentie_ok`] ??
+        row?.[`${side}_licentie_geldig`] ??
+        row?.[`${side}_licentie_status`] ??
+        row?.[`${side}_licentie_fp`] ??
+        row?.[`${side}_licentie_ja_nee`],
+    ) ||
+    hasValue(row?.[`${side}_totaal_wedstrijden`]) ||
+    hasValue(row?.[`${side}_nulmeting_totaal`])
+  );
+}
+
+function isContextCompleet(row: any): boolean {
+  const roodVa =
+    row?.rood_va_mm ?? row?.va_rood ?? row?.rood_va ?? row?.rood_va_nummer;
+  const blauwVa =
+    row?.blauw_va_mm ?? row?.va_blauw ?? row?.blauw_va ?? row?.blauw_va_nummer;
+  const roodNaam = row?.rood_naam_fp ?? row?.rood_naam_mm ?? row?.rood_naam;
+  const blauwNaam = row?.blauw_naam_fp ?? row?.blauw_naam_mm ?? row?.blauw_naam;
+
+  return (
+    hasValue(roodVa) &&
+    hasValue(blauwVa) &&
+    hasValue(roodNaam) &&
+    hasValue(blauwNaam) &&
+    hasScrapeInfoForSide(row, "rood") &&
+    hasScrapeInfoForSide(row, "blauw")
+  );
+}
+
+function isEligibleForLineup(
+  row: any,
+  decisions: ReturnType<typeof buildDecisions>,
+) {
+  // Exact dezelfde hoofdselectie als de jury-lineup export:
+  // geen info, afkeur, open actie en open/nodige/afgewezen dispensatie gaan niet door.
+  if (!isContextCompleet(row)) return false;
+
+  const decision = rawRowDecision(row, decisions);
+  if (decision?.blocked) return false;
+
+  return true;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -377,19 +449,12 @@ export async function POST(req: NextRequest) {
 
     const decisions = buildDecisions((controleRows ?? []) as ControleRow[]);
 
-    const eligible = rawBouts.filter((row: any) => {
-      const decision = rawRowDecision(row, decisions);
-
-      // Hoofdregel:
-      // - Geen meldingen voor deze partij = OK, dus door naar uitslagen.
-      // - Alleen OK/INFO/goedgekeurde meldingen/minpunt = door.
-      // - Elke open ACTIE, AFKEUR, verbod of open/nodige/afgewezen DISPENSATIE blokkeert.
-      // - Weegstation-regels tellen mee, maar staan los van rules-engine regels: OK bij wegen heft andere blokkades niet op.
-      return !decision?.blocked;
-    });
+    const eligible = rawBouts.filter((row: any) =>
+      isEligibleForLineup(row, decisions),
+    );
 
     if (!eligible.length) {
-      return jsonError("Geen goedgekeurde partijen gevonden voor uitslagen.", 409, {
+      return jsonError("Geen partijen geschikt voor uitslagen. Geen info, afkeur, open actie en open/nodige/afgewezen dispensatie worden niet meegenomen.", 409, {
         total_count: rawBouts.length,
         controle_count: controleRows?.length ?? 0,
       });
@@ -424,7 +489,7 @@ export async function POST(req: NextRequest) {
     await cleanupOldUitslagenData(matchmakingId);
 
     const nowIso = new Date().toISOString();
-    const boutInsertRows = eligible.map((row: any) => {
+    const boutInsertRows = eligible.map((row: any, index: number) => {
       const decision = rawRowDecision(row, decisions);
       const roodMinpunten = n(row.rood_minpunten ?? row.rood_min_punten ?? row.rood_strafpunten ?? row.gewicht_strafpunt_rood, 0) + (decision?.roodMinpunten ?? 0);
       const blauwMinpunten = n(row.blauw_minpunten ?? row.blauw_min_punten ?? row.blauw_strafpunten ?? row.gewicht_strafpunt_blauw, 0) + (decision?.blauwMinpunten ?? 0);
@@ -433,7 +498,7 @@ export async function POST(req: NextRequest) {
         uitslagen_run_id: uitslagenRunId,
         matchmaking_id: matchmakingId,
         bron_bout_id: row.id,
-        partij_nr: row.partij_nr,
+        partij_nr: index + 1,
         original_partij_nr: row.original_partij_nr ?? row.partij_nr,
         discipline: row.discipline ?? null,
         sub_discipline: row.sub_discipline ?? null,
@@ -505,7 +570,7 @@ export async function POST(req: NextRequest) {
       newOwnerBondteam: userBondteam || s(body?.bondteam) || null,
       actorUserId: userId,
       actorRole: role,
-      opmerking: `Alleen partijen/toernooi-vechters zonder open blokkerende meldingen (${eligible.length}/${rawBouts.length}) zijn doorgestuurd naar uitslagen. Open actie, afkeur, verbod of open/nodige/afgewezen dispensatie is overgeslagen: ${blockedCount}.`,
+      opmerking: `Alleen dezelfde partijen als de jury-lineup zonder geen-info/open blokkerende meldingen (${eligible.length}/${rawBouts.length}) zijn doorgestuurd naar uitslagen. Geen info, open actie, afkeur, verbod of open/nodige/afgewezen dispensatie is overgeslagen: ${blockedCount}.`,
       metadata: {
         route: "api/matchmaking/naar-uitslagen/route",
         eligible_count: eligible.length,
@@ -544,7 +609,7 @@ export async function POST(req: NextRequest) {
       bouts: boutInsertRows.length,
       skipped: blockedCount,
       lifecycle,
-      message: "Alleen partijen/toernooi-vechters zonder open blokkerende meldingen zijn omgezet naar uitslagenflow; alles anders is geblokkeerd en minpunten zijn meegenomen.",
+      message: "Alleen dezelfde partijen als de jury-lineup zonder geen-info/open blokkerende meldingen zijn omgezet naar uitslagenflow; alles anders is geblokkeerd en minpunten zijn meegenomen.",
     });
   } catch (err: any) {
     console.error("matchmaking/naar-uitslagen POST error:", err);

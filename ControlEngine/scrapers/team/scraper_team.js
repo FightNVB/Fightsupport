@@ -1140,23 +1140,39 @@ async function scrapeFightcrewVaNumbers(sportschoolKey, vaList) {
 
   const bundlePath = path.resolve(
     __dirname,
-    "..",
-    "fp_bundle_mm",
-    "scraper_fp_bundle_mm.js"
+    "scraper_team_bundle.js"
   );
 
+  const scrapeRunId = `team_${new Date()
+    .toISOString()
+    .replace(/[-:.TZ]/g, "")
+    .slice(0, 14)}_${String(Date.now()).slice(-6)}`;
+
   await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [bundlePath], {
-      cwd: path.resolve(__dirname, ".."),
-      env: {
-        ...process.env,
-        VA_NUMBERS: cleanVaList.join(","),
-        SOURCE_TYPE: "sportschool_fighters",
-        SPORTSCHOOL_ID: String(sportschoolKey),
-        FIGHTCREW_MODE: "1",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      process.execPath,
+      [bundlePath, String(sportschoolKey), scrapeRunId, ...cleanVaList],
+      {
+        cwd: __dirname,
+        env: {
+          ...process.env,
+
+          // Team/sportschool gebruikt ALTIJD master-login, nooit matchmaker profiel/cookies.
+          FP_MATCHMAKER_ID: "",
+          FP_SESSION_MODE: "master",
+
+          // Zelfde headless-regels als admin/officials/sportscholen.
+          HEADLESS: process.env.HEADLESS ?? "false",
+          PUPPETEER_HEADLESS:
+            process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
+
+          SOURCE_TYPE: "sportschool_fighters",
+          SPORTSCHOOL_ID: String(sportschoolKey),
+          FIGHTCREW_MODE: "1",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      }
+    );
 
     child.stdout.on("data", (data) => {
       process.stdout.write(`[fightcrew-va] ${data}`);
