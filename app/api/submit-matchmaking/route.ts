@@ -243,9 +243,22 @@ function roleLower(r: any): RoleName {
   return "unknown";
 }
 
-function resolveLifecycleBronType(role: RoleName): string {
+function isNvbOrEmptyBondteam(v: any): boolean {
+  const s = String(v ?? "").trim().toUpperCase();
+  return !s || s === "NVB";
+}
+
+function resolveLifecycleBronType(role: RoleName, bondteamForRole?: string | null): string {
   if (role === "matchmaker") return "matchmaker_upload";
-  if (role === "admin" || role === "superadmin") return "admin_upload";
+
+  // Superadmin met NVB/leeg is centrale admin.
+  // Superadmin met een ander bondteam uploadt namens het eigen bondteam
+  // en mag dus niet automatisch naar de admin-flow schieten.
+  if (role === "superadmin") {
+    return isNvbOrEmptyBondteam(bondteamForRole) ? "admin_upload" : "official_upload";
+  }
+
+  if (role === "admin") return "admin_upload";
   return "official_upload";
 }
 
@@ -489,7 +502,6 @@ export async function POST(req: Request) {
     uploaded_by = userId;
 
     role = roleLower(profileForUpload.role ?? authRole);
-    lifecycleBronType = resolveLifecycleBronType(role);
 
     if (!matchmaker && role === "matchmaker") {
       matchmaker = profileForUpload.full_name || profileForUpload.email || null;
@@ -499,6 +511,8 @@ export async function POST(req: Request) {
       const profileBondteam = String(profileForUpload.bondteam).trim().toUpperCase();
       if (ALLOWED_BONDTEAMS.has(profileBondteam)) bondteam = profileBondteam;
     }
+
+    lifecycleBronType = resolveLifecycleBronType(role, bondteam ?? profileForUpload.bondteam);
 
     if (!evenement_naam || !evenement_datum) {
       return bad("Vul verplicht in: evenement_naam en evenement_datum.");
@@ -510,10 +524,16 @@ export async function POST(req: Request) {
       return bad("Onbekend bondteam.");
     }
 
-    if (role === "official" || role === "hoofdofficial") {
+    const isBondteamSuperadmin = role === "superadmin" && !isNvbOrEmptyBondteam(bondteam);
+
+    if (role === "official" || role === "hoofdofficial" || isBondteamSuperadmin) {
       const userBond = await getUserBondteam(userId);
       if (!userBond) return bad("Je profiel mist bondteam.", 403);
-      if (String(userBond) !== String(bondteam)) {
+
+      const normalizedUserBond = String(userBond).trim().toUpperCase();
+      const normalizedUploadBond = String(bondteam).trim().toUpperCase();
+
+      if (normalizedUserBond !== normalizedUploadBond) {
         return bad(
           "Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.",
           403
@@ -575,12 +595,15 @@ export async function POST(req: Request) {
 
     let mmId = "";
 
-    const isOfficialUpload = role === "official" || role === "hoofdofficial";
+    const isOfficialUpload =
+      role === "official" ||
+      role === "hoofdofficial" ||
+      (role === "superadmin" && !isNvbOrEmptyBondteam(bondteam));
 
     // Belangrijk:
     // - uploaded_by moet altijd public.user_profiles.id zijn, niet auth.users.id.
-    // - Een hoofdofficial/official die zelf uploadt, is zelf de maker en houdt
-    //   de MM bij het eigen bondteam om hem zelf te kunnen controleren.
+    // - Een hoofdofficial/official of superadmin van een ander bondteam dan NVB
+    //   uploadt namens het eigen bondteam en houdt de MM daar om hem zelf te controleren.
     // - Alleen matchmaker-uploads gaan automatisch naar admin-controle.
     const makerType =
       role === "matchmaker"
@@ -597,10 +620,6 @@ export async function POST(req: Request) {
     // Bij hoofdofficial/admin uploads is er vaak alleen een tekstveld matchmaker/promotor.
     const matchmakerIdForRow = role === "matchmaker" ? userId : null;
 
-    // Official/hoofdofficial uploads mogen NOOIT per ongeluk naar admin gaan.
-    // Ook niet als de upload-page nog oude velden meestuurt zoals
-    // lifecycle_mode=submitted_to_admin of keep_owner=admin.
-    // Alleen matchmaker uploads gaan automatisch naar admin-controle.
     const shouldSendToAdmin =
       !isOfficialUpload &&
       (
