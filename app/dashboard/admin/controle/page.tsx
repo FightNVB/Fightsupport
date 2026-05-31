@@ -398,6 +398,50 @@ export default function ControleOverzichtPage() {
     setScrapeOverlayOpen(false);
   }
 
+  async function sleepMs(ms: number) {
+    await new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function waitForControleRunFinished(matchmakingId: string, maxMs = 8 * 60 * 1000) {
+    const started = Date.now();
+
+    while (Date.now() - started < maxMs) {
+      try {
+        const { data, error } = await supabase
+          .from("controle_runs")
+          .select("id, status, afgerond_op, gestart_op")
+          .eq("matchmaking_id", matchmakingId)
+          .order("gestart_op", { ascending: false })
+          .limit(1);
+
+        if (!error) {
+          const run = Array.isArray(data) ? data[0] : null;
+          const status = String(run?.status ?? "").trim().toLowerCase();
+
+          if (
+            run?.afgerond_op ||
+            status === "klaar" ||
+            status === "completed" ||
+            status === "complete" ||
+            status === "done"
+          ) {
+            return true;
+          }
+
+          if (status === "failed" || status === "mislukt" || status === "error") {
+            return false;
+          }
+        }
+      } catch (e) {
+        console.warn("Controle-run status kon niet worden gelezen:", e);
+      }
+
+      await sleepMs(3500);
+    }
+
+    return false;
+  }
+
 
   async function checkFightPassportSession() {
     try {
@@ -651,15 +695,38 @@ export default function ControleOverzichtPage() {
 
       if (!res.ok) {
         const t = await res.text();
-        console.error("Start controle failed:", res.status, t);
+        console.error("Start controle response was niet ok:", res.status, t);
 
         const session = await checkFightPassportSession();
         if (isFightPassportUnlockStatus(session?.status)) {
           return;
         }
 
-        closeScrapeOverlay();
-        alert("Start controle mislukt. Check console/logs.");
+        setScrapeOverlayTitle("Controle loopt mogelijk nog");
+        setScrapeOverlayMessage(
+          "De server heeft nog geen nette eindmelding teruggegeven, maar de autocheck kan nog gewoon draaien."
+        );
+        setScrapeOverlaySub(
+          "Wacht nog even. FightSupport controleert automatisch of de run klaar is."
+        );
+
+        const finished = await waitForControleRunFinished(matchmakingId);
+
+        if (finished) {
+          setScrapeOverlayMessage("Controle is afgerond. Resultaten worden geladen...");
+          setScrapeOverlaySub("Nog heel even geduld.");
+          await load();
+          closeScrapeOverlay();
+          return;
+        }
+
+        setScrapeOverlayTitle("Controle niet bevestigd");
+        setScrapeOverlayMessage(
+          "De server gaf geen bevestiging binnen de wachttijd. Vernieuw de pagina of check de logs."
+        );
+        setScrapeOverlaySub(
+          "Dit betekent niet automatisch dat de scraper mislukt is; de resultaten kunnen al opgeslagen zijn."
+        );
         return;
       }
 
@@ -669,9 +736,33 @@ export default function ControleOverzichtPage() {
       await load();
       closeScrapeOverlay();
     } catch (e) {
-      console.error(e);
-      closeScrapeOverlay();
-      alert("Onverwachte fout bij starten controle.");
+      console.error("Start controle request gaf een fout of timeout:", e);
+
+      setScrapeOverlayTitle("Controle loopt mogelijk nog");
+      setScrapeOverlayMessage(
+        "De browser kreeg geen nette response terug, maar de server kan nog bezig zijn met scrapen."
+      );
+      setScrapeOverlaySub(
+        "Wacht nog even. FightSupport controleert automatisch of de run klaar is."
+      );
+
+      const finished = await waitForControleRunFinished(matchmakingId);
+
+      if (finished) {
+        setScrapeOverlayMessage("Controle is afgerond. Resultaten worden geladen...");
+        setScrapeOverlaySub("Nog heel even geduld.");
+        await load();
+        closeScrapeOverlay();
+        return;
+      }
+
+      setScrapeOverlayTitle("Controle niet bevestigd");
+      setScrapeOverlayMessage(
+        "De server gaf geen bevestiging binnen de wachttijd. Vernieuw de pagina of check de logs."
+      );
+      setScrapeOverlaySub(
+        "Dit betekent niet automatisch dat de scraper mislukt is; de resultaten kunnen al opgeslagen zijn."
+      );
     } finally {
       setBusyId(null);
       setIsBusy(false);
