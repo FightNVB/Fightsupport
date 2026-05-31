@@ -16,6 +16,7 @@ const ROOT = path.resolve(__dirname, "..");
 const LOGIN_PATH = path.join(ROOT, "config", "login_master.json");
 const COOKIES_PATH = path.join(ROOT, "utils", "cookies.json");
 const SESSION_STATE_PATH = path.join(ROOT, "utils", "fp_session_state.json");
+const UNLOCK_REQUEST_PATH = path.join(ROOT, "utils", "fp_unlock_request.json");
 
 const FP_URL = "https://fightpassport.nl/";
 
@@ -184,6 +185,266 @@ async function clearBrowserCookiesOnly(page) {
   }
 }
 
+async function unlockPageVisible(page) {
+  try {
+    return await page.evaluate(() => {
+      const txt = String(document.body?.innerText || "").toLowerCase();
+      const url = String(location.href || "").toLowerCase();
+      const hash = String(location.hash || "").toLowerCase();
+
+      const inputs = Array.from(document.querySelectorAll("input"));
+      const visibleInputs = inputs.filter((el) => {
+        const style = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0" &&
+          r.width > 0 &&
+          r.height > 0 &&
+          el.offsetParent !== null
+        );
+      });
+
+      const hasCodeLikeInput = visibleInputs.some((el) => {
+        const type = String(el.getAttribute("type") || "").toLowerCase();
+        const name = String(el.getAttribute("name") || "").toLowerCase();
+        const placeholder = String(el.getAttribute("placeholder") || "").toLowerCase();
+        const cls = String(el.getAttribute("class") || "").toLowerCase();
+        const maxLength = String(el.getAttribute("maxlength") || "");
+
+        return (
+          type === "text" ||
+          type === "number" ||
+          type === "tel" ||
+          name.includes("code") ||
+          placeholder.includes("code") ||
+          cls.includes("code") ||
+          cls.includes("pincode") ||
+          maxLength === "7"
+        );
+      });
+
+      const hasUnlockText =
+        txt.includes("unlock") ||
+        txt.includes("apparaat") ||
+        txt.includes("device") ||
+        txt.includes("vertrouw") ||
+        txt.includes("trusted") ||
+        txt.includes("registr") ||
+        txt.includes("verific") ||
+        txt.includes("verification") ||
+        txt.includes("e-mail") ||
+        txt.includes("email") ||
+        txt.includes("code");
+
+      const hasUnlockUrl =
+        url.includes("unlock") ||
+        url.includes("device") ||
+        url.includes("trusted") ||
+        url.includes("register") ||
+        hash.includes("unlock") ||
+        hash.includes("device") ||
+        hash.includes("trusted") ||
+        hash.includes("register");
+
+      return (hasUnlockText || hasUnlockUrl) && hasCodeLikeInput;
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function waitForUnlockCodeFromFile(timeoutMs = 10 * 60 * 1000) {
+  const started = Date.now();
+
+  console.log("🔐 Unlockscherm gevonden. Wacht op unlockcode uit FightSupport UI...");
+  console.log("🔐 Unlockcode-bestand:", UNLOCK_REQUEST_PATH);
+
+  writeFpSessionState("unlock_required", "FightPassport wacht op de 7-cijferige unlockcode.", {
+    browser_url: "/dashboard/admin/fightpassport-sessie",
+    unlock_request_path: UNLOCK_REQUEST_PATH,
+    last_unlock_required_at: new Date().toISOString(),
+  });
+
+  while (Date.now() - started < timeoutMs) {
+    try {
+      if (fs.existsSync(UNLOCK_REQUEST_PATH)) {
+        const raw = fs.readFileSync(UNLOCK_REQUEST_PATH, "utf8");
+        const data = JSON.parse(raw);
+        const code = String(data?.code ?? data?.unlock_code ?? "").trim();
+
+        if (/^\d{7}$/.test(code)) {
+          try {
+            fs.unlinkSync(UNLOCK_REQUEST_PATH);
+          } catch {}
+
+          console.log("🔐 Unlockcode ontvangen uit FightSupport UI");
+          return code;
+        }
+
+        console.log("⚠️ Unlockcode-bestand gevonden, maar code is ongeldig.");
+      }
+    } catch (e) {
+      console.log("⚠️ Unlockcode-bestand kon niet gelezen worden:", e?.message ?? e);
+    }
+
+    await sleep(1000);
+  }
+
+  throw new Error("UNLOCK_TIMEOUT: Geen unlockcode ontvangen binnen 10 minuten.");
+}
+
+async function submitUnlockCode(page, unlockCode) {
+  const code = String(unlockCode ?? "").trim();
+
+  if (!/^\d{7}$/.test(code)) {
+    throw new Error("UNLOCK_REQUIRED: FightPassport vraagt om een unlockcode/apparaatcode.");
+  }
+
+  const result = await page.evaluate((code) => {
+    function isVisible(el) {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0" &&
+        r.width > 0 &&
+        r.height > 0
+      );
+    }
+
+    function setNativeValue(el, value) {
+      const proto = Object.getPrototypeOf(el);
+      const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+      if (descriptor?.set) descriptor.set.call(el, value);
+      else el.value = value;
+
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    const codeInput =
+      document.querySelector("input.pincode") ||
+      document.querySelector("input.target_input.pincode") ||
+      document.querySelector("input[class*='pincode']") ||
+      Array.from(document.querySelectorAll("input")).find((el) => {
+        const maxLength = String(el.getAttribute("maxlength") || "");
+        const cls = String(el.getAttribute("class") || "").toLowerCase();
+        return isVisible(el) && (maxLength === "7" || cls.includes("code"));
+      });
+
+    if (!codeInput || !isVisible(codeInput)) {
+      return { filled: false, clicked: false, reason: "pincode input niet gevonden" };
+    }
+
+    codeInput.focus();
+    setNativeValue(codeInput, "");
+    setNativeValue(codeInput, code);
+    codeInput.blur?.();
+
+    const remember =
+      document.querySelector("input.deviceonthouden") ||
+      document.querySelector("input.target_input.deviceonthouden") ||
+      document.querySelector("input[class*='deviceonthouden']");
+
+    if (remember && isVisible(remember) && !remember.checked) {
+      remember.click?.();
+      remember.checked = true;
+      remember.dispatchEvent(new Event("input", { bubbles: true }));
+      remember.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    const clickables = Array.from(
+      document.querySelectorAll("button, input[type='submit'], input[type='button'], a")
+    ).filter(isVisible);
+
+    const aanmelden =
+      clickables.find((el) =>
+        String(el.innerText || el.value || el.textContent || "")
+          .trim()
+          .toLowerCase()
+          .includes("aanmelden")
+      ) ||
+      clickables.find((el) => {
+        const txt = String(el.innerText || el.value || el.textContent || "").trim().toLowerCase();
+        const cls = String(el.getAttribute("class") || "").toLowerCase();
+        return cls.includes("volgende") || txt.includes("volgende") || txt.includes("bevestig");
+      });
+
+    if (!aanmelden) {
+      codeInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+      codeInput.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true }));
+      return { filled: true, clicked: false, reason: "geen knop gevonden; Enter gestuurd" };
+    }
+
+    const buttonText = String(aanmelden.innerText || aanmelden.value || aanmelden.textContent || "").trim();
+    aanmelden.click?.();
+
+    return { filled: true, clicked: true, buttonText, reason: "" };
+  }, code);
+
+  if (!result?.filled) {
+    throw new Error("UNLOCK_REQUIRED: pincodeveld niet gevonden. debug=" + JSON.stringify(result ?? {}));
+  }
+
+  console.log("🔐 Unlockcode ingevuld");
+  console.log(`🔐 AANMELDEN geklikt: ${result.clicked ? "true" : "false"} (${result.buttonText || result.reason || "zonder tekst"})`);
+
+  await sleep(8000);
+}
+
+async function waitAfterUnlockSubmit(page, timeoutMs = 70000) {
+  console.log("⏳ Wacht op dashboard na unlock/AANMELDEN...");
+
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    if ((await loggedInDomProof(page)) && !(await unlockPageVisible(page))) {
+      console.log("🟢 Dashboard gevonden na unlock");
+      await sleep(1200);
+      markFightPassportReady("FightPassport unlock gelukt.");
+      return true;
+    }
+
+    try {
+      const state = await page.evaluate(() => ({
+        hasLogin: !!document.querySelector("input.gebruikersnaam"),
+      }));
+
+      if (state.hasLogin) {
+        throw new Error("UNLOCK_FAILED: Na unlock kwam FightPassport terug op loginpagina.");
+      }
+    } catch (e) {
+      if (String(e?.message ?? e).includes("UNLOCK_FAILED")) throw e;
+    }
+
+    await sleep(1000);
+  }
+
+  const dbg = await page.evaluate(() => ({
+    url: location.href,
+    hash: location.hash,
+    hasPincode: !!document.querySelector("input.pincode"),
+    hasLogin: !!document.querySelector("input.gebruikersnaam"),
+    text: String(document.body?.innerText || "").slice(0, 700),
+  }));
+
+  throw new Error("UNLOCK_FAILED: Dashboard niet gevonden na unlock. debug=" + JSON.stringify(dbg));
+}
+
+async function handleUnlockIfVisible(page, timeoutMs = 90000) {
+  if (!(await unlockPageVisible(page))) return false;
+
+  const code = await waitForUnlockCodeFromFile();
+  await submitUnlockCode(page, code);
+  await waitAfterUnlockSubmit(page, timeoutMs);
+  await saveCookies(page);
+  return true;
+}
+
 // --------------------------------------------------
 // ✅ NIEUW: EXPORT ensureLoggedIn(page)
 // --------------------------------------------------
@@ -258,6 +519,7 @@ export async function ensureLoggedIn(page, opts = {}) {
         markFightPassportReady("Al ingelogd na redirect.");
         return;
       }
+      if (await handleUnlockIfVisible(page)) return;
       if (await loginFormVisible(page)) break;
       await sleep(250);
     }
@@ -328,6 +590,8 @@ export async function ensureLoggedIn(page, opts = {}) {
       .then(() => true)
       .catch(() => false);
 
+    if (!ok && await handleUnlockIfVisible(page)) return;
+
     if (!ok) {
       const dbg = await page.evaluate(() => ({
         url: location.href,
@@ -339,6 +603,9 @@ export async function ensureLoggedIn(page, opts = {}) {
     }
 
     console.log("🟢 SUCCESVOL ingelogd");
+
+    if (await handleUnlockIfVisible(page)) return;
+
     markFightPassportReady("Succesvol ingelogd.");
     await sleep(1200);
     await safeZoom100(page);
@@ -399,6 +666,8 @@ export async function loginFightPassport() {
     await safeZoom100(page);
 
     // 1) al ingelogd?
+    if (await handleUnlockIfVisible(page)) return;
+
     if (await loggedInDomProof(page)) {
       markFightPassportReady("FightPassport was al ingelogd.");
       return;
@@ -440,6 +709,7 @@ export async function loginFightPassport() {
         markFightPassportReady("Al ingelogd na redirect.");
         return;
       }
+      if (await handleUnlockIfVisible(page)) return;
       if (await loginFormVisible(page)) break;
       await sleep(250);
     }
@@ -479,6 +749,8 @@ export async function loginFightPassport() {
 
     console.log("➡️ Login verzonden…");
 
+    if (await handleUnlockIfVisible(page)) return;
+
     const ok = await page
       .waitForFunction(
         (SYS42_SELECTOR) => {
@@ -509,6 +781,8 @@ export async function loginFightPassport() {
       .then(() => true)
       .catch(() => false);
 
+    if (!ok && await handleUnlockIfVisible(page)) return;
+
     if (!ok) {
       const dbg = await page.evaluate(() => ({
         url: location.href,
@@ -520,6 +794,9 @@ export async function loginFightPassport() {
     }
 
     console.log("🟢 SUCCESVOL ingelogd");
+
+    if (await handleUnlockIfVisible(page)) return;
+
     markFightPassportReady("Succesvol ingelogd.");
     await sleep(1200);
     await safeZoom100(page);
@@ -545,7 +822,9 @@ export async function loginFightPassport() {
 
   // laatste check
   if (!(await loggedInDomProof(page))) {
-    throw new Error("loginFightPassport eindigde zonder ingelogd bewijs (hard stop)");
+    if (!(await handleUnlockIfVisible(page))) {
+      throw new Error("loginFightPassport eindigde zonder ingelogd bewijs (hard stop)");
+    }
   }
 
   markFightPassportReady("loginFightPassport afgerond.");

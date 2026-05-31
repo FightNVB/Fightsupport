@@ -590,6 +590,12 @@ export default function ControleOverzichtPage() {
       setSportsMsg("");
       setSportsBusy(true);
 
+      openScrapeOverlay({
+        title: "Sportscholen sync",
+        message: "Sportscholen worden opgehaald uit FightPassport...",
+        sub: "Laat dit venster open. Als FightPassport een unlockcode vraagt, verschijnt hier een knop.",
+      });
+
       const res = await authedFetch("/api/control-engine/sportscholen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -598,14 +604,23 @@ export default function ControleOverzichtPage() {
       if (!res.ok) {
         const t = await res.text();
         console.error("Sportscholen run failed:", res.status, t);
+
+        const session = await checkFightPassportSession();
+        if (isFightPassportUnlockStatus(session?.status)) {
+          return;
+        }
+
+        closeScrapeOverlay();
         setSportsMsg(`❌ Sportscholen sync mislukt (${res.status}).`);
         return;
       }
 
       setSportsMsg("✅ Sportscholen sync gestart/afgerond.");
       await load();
+      closeScrapeOverlay();
     } catch (e) {
       console.error(e);
+      closeScrapeOverlay();
       setSportsMsg("❌ Onverwachte fout bij sportscholen sync.");
     } finally {
       setSportsBusy(false);
