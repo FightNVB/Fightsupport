@@ -732,7 +732,7 @@ export async function POST(req: Request) {
       datum: evenement_datum || null,
       locatie: locatie || null,
       matchmakerId: makerUserId,
-      makerType,
+      makerType: makerType === "matchmaker" ? "matchmaker" : "matchmaker_upload",
       makerUserId,
       bondteam: bondteam || null,
       eventId: evId || null,
