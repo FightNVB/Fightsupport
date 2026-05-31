@@ -21,6 +21,8 @@ const FP_URL = "https://fightpassport.nl/";
 
 const SYS42_SELECTOR = 'img[src$="logo_header.svg"], img[src*="logo_header.svg"]';
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 
 function writeFpSessionState(status, message, extra = {}) {
   try {
@@ -54,7 +56,7 @@ function markFightPassportReady(message = "FightPassport sessie is actief.") {
 // --------------------------------------------------
 async function safeGoto(page, url) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90000 });
-  await page.waitForTimeout(300);
+  await sleep(300);
 }
 
 async function safeZoom100(page) {
@@ -167,7 +169,7 @@ async function dashboardReady(page, timeoutMs = 12000) {
       });
       if (ok) return true;
     } catch {}
-    await page.waitForTimeout(500);
+    await sleep(500);
   }
   return false;
 }
@@ -257,7 +259,7 @@ export async function ensureLoggedIn(page, opts = {}) {
         return;
       }
       if (await loginFormVisible(page)) break;
-      await page.waitForTimeout(250);
+      await sleep(250);
     }
 
     if (!(await loginFormVisible(page)) && !(await loggedInDomProof(page))) {
@@ -338,7 +340,7 @@ export async function ensureLoggedIn(page, opts = {}) {
 
     console.log("🟢 SUCCESVOL ingelogd");
     markFightPassportReady("Succesvol ingelogd.");
-    await page.waitForTimeout(1200);
+    await sleep(1200);
     await safeZoom100(page);
 
     if (saveCookiesToDisk) {
@@ -439,7 +441,7 @@ export async function loginFightPassport() {
         return;
       }
       if (await loginFormVisible(page)) break;
-      await page.waitForTimeout(250);
+      await sleep(250);
     }
 
     if (!(await loginFormVisible(page)) && !(await loggedInDomProof(page))) {
@@ -519,7 +521,7 @@ export async function loginFightPassport() {
 
     console.log("🟢 SUCCESVOL ingelogd");
     markFightPassportReady("Succesvol ingelogd.");
-    await page.waitForTimeout(1200);
+    await sleep(1200);
     await safeZoom100(page);
 
     const dashOkAfterLogin = await dashboardReady(page, 15000);
