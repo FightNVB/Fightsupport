@@ -20,7 +20,14 @@ export type EnsureLifecycleInput = {
   locatie?: string | null;
   promotorId?: string | null;
   matchmakerId?: string | null;
-  makerType?: "matchmaker" | "matchmaker_upload" | null;
+  makerType?:
+    | "matchmaker"
+    | "matchmaker_upload"
+    | "admin"
+    | "superadmin"
+    | "official"
+    | "hoofdofficial"
+    | null;
   makerUserId?: string | null;
   bondteam?: string | null;
   eventId?: string | null;
