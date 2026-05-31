@@ -2066,7 +2066,7 @@ export default function PartijDetailPage() {
       x?.resultaat === "ACTIE" ? 2 :
       x?.resultaat === "INFO" ? 1 : 0;
 
-    const best = (resultaten ?? [])
+    const best = (regels ?? [])
       .filter((r: any) => Number(r.partij_nr) === partij)
       .sort((a: any, b: any) => prio(b) - prio(a))[0];
 
