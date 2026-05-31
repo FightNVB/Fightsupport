@@ -597,10 +597,17 @@ export async function POST(req: Request) {
     // Bij hoofdofficial/admin uploads is er vaak alleen een tekstveld matchmaker/promotor.
     const matchmakerIdForRow = role === "matchmaker" ? userId : null;
 
+    // Official/hoofdofficial uploads mogen NOOIT per ongeluk naar admin gaan.
+    // Ook niet als de upload-page nog oude velden meestuurt zoals
+    // lifecycle_mode=submitted_to_admin of keep_owner=admin.
+    // Alleen matchmaker uploads gaan automatisch naar admin-controle.
     const shouldSendToAdmin =
-      requestedLifecycleMode === "submitted_to_admin" ||
-      requestedKeepOwner === "admin" ||
-      role === "matchmaker";
+      !isOfficialUpload &&
+      (
+        requestedLifecycleMode === "submitted_to_admin" ||
+        requestedKeepOwner === "admin" ||
+        role === "matchmaker"
+      );
 
     const lifecycleStage = shouldSendToAdmin
       ? "ingediend_admin"
