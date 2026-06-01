@@ -32,7 +32,8 @@ import {
 
 const ORANGE = "#ff4d00";
 const LOGO_SRC = "/branding/fightsupport/excel-logo.png";
-const EXCEL_TEMPLATE_URL = "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
+const EXCEL_TEMPLATE_URL =
+  "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
 
 type Aanmelding = Record<string, any>;
 type BusyMode =
@@ -276,8 +277,7 @@ function busyText(mode: BusyMode) {
 }
 
 function busySubText(mode: BusyMode) {
-  if (mode === "controle")
-    return "Fightpaspoort check loopt.";
+  if (mode === "controle") return "Fightpaspoort check loopt.";
   if (mode === "upload")
     return "Het bestand wordt opgeslagen en toegevoegd aan deze matchmaking.";
   return "Deze actie wordt uitgevoerd.";
@@ -568,10 +568,18 @@ export default function AanmeldingenPage() {
           );
         });
 
-      if (allFinishedFresh) return;
+      if (allFinishedFresh) {
+        // Laat React/Supabase nog één extra refresh doen nadat de backend klaar is.
+        // Op live zagen we dat de scraper al klaar was, maar de pagina nog oude state toonde.
+        await new Promise((resolve) => setTimeout(resolve, 750));
+        await load(true);
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 2500));
     }
 
+    // Timeout is geen harde mislukking: doe altijd een laatste refresh zodat de UI
+    // alsnog de database-status toont wanneer de robotjes wél klaar zijn.
     await load(true);
   }
 
@@ -637,10 +645,15 @@ export default function AanmeldingenPage() {
         throw new Error(json?.error || "Fightpaspoort check mislukt");
 
       await waitForControleResult(ids, checkStartedAt);
-      setViewMode(viewMode === "failed" ? "failed" : "unchecked");
+
+      // Na een succesvolle check wil de matchmaker direct de gescrapte vechters zien.
+      // Anders blijft de tab "Niet gecheckt" leeg/oud lijken totdat iemand F5 drukt.
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      await load(true);
+      setViewMode(viewMode === "failed" ? "failed" : "checked");
       setMsg(
         json?.message ||
-          "Fightpaspoort check afgerond. Aanmeldingen hebben nu status gecheckt of mislukt.",
+          "Fightpaspoort check afgerond. Aanmeldingen staan nu bij Gescrapt.",
       );
     } catch (e: any) {
       setMsg(e?.message || "Fightpaspoort check mislukt");
