@@ -127,8 +127,24 @@ function isOfficialMelding(item: DisciplineCase) {
   );
 }
 
+function isMatchmakerMelding(item: DisciplineCase) {
+  const bron = bronVan(item);
+  const rol = melderRolVan(item);
+  const meta = officialMetaText(item);
+
+  return (
+    bron === "matchmaker" ||
+    bron === "matchmaker_melding" ||
+    bron.includes("matchmaker") ||
+    rol === "matchmaker" ||
+    meta.includes("melding aangemaakt door matchmaker") ||
+    meta.includes("bron: matchmaker") ||
+    meta.includes("melder_rol: matchmaker")
+  );
+}
+
 function isAdminDossier(item: DisciplineCase) {
-  return !isOfficialMelding(item);
+  return !isOfficialMelding(item) && !isMatchmakerMelding(item);
 }
 
 const silverButton =
@@ -143,7 +159,7 @@ export default function OvertredingenPage() {
   const [betrokkeneType, setBetrokkeneType] = useState("alle");
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [bronFilter, setBronFilter] = useState<"alle" | "official_melding" | "admin_dossier">("alle");
+  const [bronFilter, setBronFilter] = useState<"alle" | "official_melding" | "matchmaker_melding" | "admin_dossier">("alle");
   const [form, setForm] = useState({
     type: "overtreding",
     betrokkene_type: "matchmaker",
@@ -203,12 +219,14 @@ export default function OvertredingenPage() {
     const active = cases.reduce((sum, c) => sum + Number(c.actieve_acties || 0), 0);
     const points = cases.reduce((sum, c) => sum + Number(c.punten_totaal || 0), 0);
     const officialMeldingen = cases.filter(isOfficialMelding).length;
+    const matchmakerMeldingen = cases.filter(isMatchmakerMelding).length;
     const adminDossiers = cases.filter(isAdminDossier).length;
-    return { open, active, points, officialMeldingen, adminDossiers };
+    return { open, active, points, officialMeldingen, matchmakerMeldingen, adminDossiers };
   }, [cases]);
 
   const visibleCases = useMemo(() => {
     if (bronFilter === "official_melding") return cases.filter(isOfficialMelding);
+    if (bronFilter === "matchmaker_melding") return cases.filter(isMatchmakerMelding);
     if (bronFilter === "admin_dossier") return cases.filter(isAdminDossier);
     return cases;
   }, [cases, bronFilter]);
@@ -287,7 +305,7 @@ export default function OvertredingenPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 p-4 md:grid-cols-4">
+          <div className="grid gap-3 p-4 md:grid-cols-5">
             <div className="border border-zinc-600/70 bg-black/35 p-4">
               <div className="text-xs font-bold uppercase tracking-wider text-zinc-400">Open dossiers</div>
               <div className="mt-1 text-3xl font-black text-orange-300">{stats.open}</div>
@@ -313,6 +331,20 @@ export default function OvertredingenPage() {
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400"><Inbox size={15} /> Meldingen officials</div>
               <div className="mt-1 text-3xl font-black text-orange-300">{stats.officialMeldingen}</div>
               <div className="mt-1 text-[10px] font-black uppercase tracking-wider text-zinc-500">Admin gemaakt: {stats.adminDossiers}</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBronFilter((v) => v === "matchmaker_melding" ? "alle" : "matchmaker_melding")}
+              className={cls(
+                "border p-4 text-left transition",
+                bronFilter === "matchmaker_melding"
+                  ? "border-orange-400 bg-orange-950/40"
+                  : "border-zinc-600/70 bg-black/35 hover:border-orange-400/60"
+              )}
+            >
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400"><Inbox size={15} /> Meldingen matchmakers</div>
+              <div className="mt-1 text-3xl font-black text-orange-300">{stats.matchmakerMeldingen}</div>
+              <div className="mt-1 text-[10px] font-black uppercase tracking-wider text-zinc-500">Ontvangen van matchmaker</div>
             </button>
           </div>
         </header>
@@ -405,6 +437,18 @@ export default function OvertredingenPage() {
           </button>
           <button
             type="button"
+            onClick={() => setBronFilter("matchmaker_melding")}
+            className={cls(
+              "inline-flex items-center gap-2 border px-4 py-2 text-xs font-black uppercase",
+              bronFilter === "matchmaker_melding"
+                ? "border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 text-black"
+                : "border-orange-500/50 bg-orange-950/30 text-orange-200 hover:border-orange-400"
+            )}
+          >
+            <Inbox size={15} /> Ontvangen van matchmaker ({stats.matchmakerMeldingen})
+          </button>
+          <button
+            type="button"
             onClick={() => setBronFilter("admin_dossier")}
             className={cls(
               "inline-flex items-center gap-2 border px-4 py-2 text-xs font-black uppercase",
@@ -421,7 +465,7 @@ export default function OvertredingenPage() {
         {loading ? <div className="border border-zinc-600 bg-black/50 p-8 text-center font-bold text-zinc-300">Dossiers laden...</div> : null}
 
         <div className="grid gap-3">
-          {!loading && visibleCases.length === 0 && <div className="border border-zinc-600 bg-black/50 p-8 text-center font-bold text-zinc-300">{bronFilter === "official_melding" ? "Geen binnengekomen official-meldingen gevonden." : bronFilter === "admin_dossier" ? "Geen door admin gemaakte dossiers gevonden." : "Geen dossiers gevonden."}</div>}
+          {!loading && visibleCases.length === 0 && <div className="border border-zinc-600 bg-black/50 p-8 text-center font-bold text-zinc-300">{bronFilter === "official_melding" ? "Geen binnengekomen official-meldingen gevonden." : bronFilter === "matchmaker_melding" ? "Geen ontvangen matchmaker-meldingen gevonden." : bronFilter === "admin_dossier" ? "Geen door admin gemaakte dossiers gevonden." : "Geen dossiers gevonden."}</div>}
           {visibleCases.map((item) => (
             <Link key={item.id} href={`/dashboard/admin/algemeen/overtredingen/${item.id}`} className="group border border-zinc-600/70 bg-gradient-to-r from-[#24211f] to-[#111] p-4 shadow-xl hover:border-orange-400/70">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -435,12 +479,17 @@ export default function OvertredingenPage() {
                         <Inbox size={13} /> Melding official
                       </span>
                     ) : null}
+                    {isMatchmakerMelding(item) ? (
+                      <span className="inline-flex items-center gap-1 border border-orange-400/70 bg-orange-950/50 px-2 py-1 text-xs font-black uppercase text-orange-100">
+                        <Inbox size={13} /> Melding matchmaker
+                      </span>
+                    ) : null}
                   </div>
                   <div className="text-sm font-bold text-zinc-300">{item.categorie}</div>
-                  {isOfficialMelding(item) ? (
+                  {(isOfficialMelding(item) || isMatchmakerMelding(item)) ? (
                     <div className="mt-2 flex flex-wrap items-center gap-2 border border-zinc-600/80 bg-black/35 px-3 py-2 text-xs font-bold text-zinc-200">
                       <span className="inline-flex items-center gap-1 text-orange-200"><UserRound size={13} /> Gemeld door:</span>
-                      <span>{melderNaamVan(item) || "Onbekende official"}</span>
+                      <span>{melderNaamVan(item) || "Onbekende melder"}</span>
                       {melderRolVan(item) ? <span className="text-zinc-500">· {melderRolVan(item)}</span> : null}
                       {melderBondteamVan(item) ? <span className="border border-zinc-500 bg-[#111] px-2 py-0.5 text-zinc-100">Bondteam {melderBondteamVan(item)}</span> : null}
                       {melderEmailVan(item) ? <span className="text-zinc-400">· {melderEmailVan(item)}</span> : null}

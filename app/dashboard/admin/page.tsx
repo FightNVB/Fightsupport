@@ -269,7 +269,7 @@ export default function AdminDashboardPage() {
   const actions: MenuAction[] = [
     {
       label: "Algemeen",
-      subtitle: "Dispensatie aanvragen",
+      subtitle: "Algemeen beheer",
       href: "/dashboard/admin/algemeen",
       icon: History,
       rootAdminOnly: true,
