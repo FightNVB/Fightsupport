@@ -22,7 +22,7 @@ import {
 
 export const runtime = "nodejs";
 
-const SCRAPER_FILE = "scraper_fp_bundle_officials.js";
+const SCRAPER_FILE = "scraper_fp_officials.js";
 const LOG_PREFIX = "fp_bundle_official";
 
 function isAllowedRole(role: string | null | undefined) {
