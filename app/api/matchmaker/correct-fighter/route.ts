@@ -250,14 +250,16 @@ async function recalculateSingleFighter(args: {
 
   if (rulesResult.error) throw rulesResult.error;
 
+  const enrichedAny = enrichedContext as any;
+
   return {
     recalculated: true,
     controle_run_id,
     context_rows: contextResult.data?.length ?? 0,
     rules: hits.length,
-    keurmerk_status: enrichedContext.keurmerk_status ?? null,
-    keurmerk: enrichedContext.keurmerk ?? enrichedContext.heeft_keurmerk ?? null,
-    keurmerk_reden: enrichedContext.keurmerk_reden ?? null,
+    keurmerk_status: enrichedAny.keurmerk_status ?? null,
+    keurmerk: enrichedAny.keurmerk ?? enrichedAny.heeft_keurmerk ?? null,
+    keurmerk_reden: enrichedAny.keurmerk_reden ?? null,
   };
 }
 
