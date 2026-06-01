@@ -200,9 +200,9 @@ export default function MatchmakerDashboardPage() {
       icon: Users as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
-      label: "FightPassport site",
-      subtitle: "Open extern vechterprofielen en historie",
-      external: "https://fightpassport.nl/",
+      label: "Overtredingen melden",
+      subtitle: "Meld overtredingen en incidenten",
+      href: "/dashboard/matchmaker/overtreding-melden",
       icon: Trophy as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
