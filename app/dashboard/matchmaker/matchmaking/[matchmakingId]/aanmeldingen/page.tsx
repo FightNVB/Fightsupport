@@ -32,8 +32,7 @@ import {
 
 const ORANGE = "#ff4d00";
 const LOGO_SRC = "/branding/fightsupport/excel-logo.png";
-const EXCEL_TEMPLATE_URL =
-  "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
+const EXCEL_TEMPLATE_URL = "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
 
 type Aanmelding = Record<string, any>;
 type BusyMode =
@@ -277,7 +276,8 @@ function busyText(mode: BusyMode) {
 }
 
 function busySubText(mode: BusyMode) {
-  if (mode === "controle") return "Fightpaspoort check loopt.";
+  if (mode === "controle")
+    return "Fightpaspoort check loopt.";
   if (mode === "upload")
     return "Het bestand wordt opgeslagen en toegevoegd aan deze matchmaking.";
   return "Deze actie wordt uitgevoerd.";
@@ -314,6 +314,7 @@ export default function AanmeldingenPage() {
   const params = useParams<{ matchmakingId: string }>();
   const matchmakingId = String(params?.matchmakingId ?? "");
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const controlePollTokenRef = useRef(0);
 
   const [rows, setRows] = useState<Aanmelding[]>([]);
   const [uploads, setUploads] = useState<any[]>([]);
@@ -326,6 +327,8 @@ export default function AanmeldingenPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("unchecked");
+  const [waitTitle, setWaitTitle] = useState("Even wachten");
+  const [waitMessage, setWaitMessage] = useState("Fightpaspoort check loopt.");
 
   const [form, setForm] = useState<FighterForm>({
     discipline: "KICKBOKSEN",
@@ -350,7 +353,10 @@ export default function AanmeldingenPage() {
       }
 
       try {
-        const res = await authedFetch(`/api/matchmaker/${matchmakingId}`);
+        const res = await authedFetch(`/api/matchmaker/${matchmakingId}?t=${Date.now()}`, {
+          method: "GET",
+          cache: "no-store",
+        });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json?.error || "Laden mislukt");
 
@@ -515,6 +521,10 @@ export default function AanmeldingenPage() {
     }
   }
 
+  async function sleepMs(ms: number) {
+    await new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
   async function waitForControleResult(
     checkedIds: string[],
     checkStartedAt: number,
@@ -523,9 +533,13 @@ export default function AanmeldingenPage() {
     const startedAt = Date.now();
     const maxMs = 10 * 60 * 1000;
     const freshAfter = checkStartedAt - 5000;
+    let lastRows: Aanmelding[] = [];
 
     while (Date.now() - startedAt < maxMs) {
-      const res = await authedFetch(`/api/matchmaker/${matchmakingId}`);
+      const res = await authedFetch(`/api/matchmaker/${matchmakingId}?t=${Date.now()}`, {
+        method: "GET",
+        cache: "no-store",
+      });
       const json = await res.json().catch(() => ({}));
       if (!res.ok)
         throw new Error(json?.error || "Laden na Fightpaspoort check mislukt");
@@ -533,6 +547,7 @@ export default function AanmeldingenPage() {
       const nextRows: Aanmelding[] = Array.isArray(json?.aanmeldingen)
         ? json.aanmeldingen
         : [];
+      lastRows = nextRows;
       setRows(nextRows);
       setUploads(Array.isArray(json?.uploads) ? json.uploads : []);
       setMatchmaking(
@@ -543,44 +558,60 @@ export default function AanmeldingenPage() {
         wanted.has(String(aanmeldingId(r))),
       );
 
-      const allFinishedFresh =
-        selected.length > 0 &&
-        selected.every((r) => {
-          const st = statusOf(r);
-          const startedFresh =
-            timeValue(r?.scrape_started_at) >= freshAfter ||
-            timeValue(r?.controle_started_at) >= freshAfter;
-          const finishedFresh =
-            timeValue(r?.scraped_at) >= freshAfter ||
-            timeValue(r?.scrape_failed_at) >= freshAfter ||
-            timeValue(r?.checked_at) >= freshAfter ||
-            timeValue(r?.fightpaspoort_checked_at) >= freshAfter;
+      const selectedOrAll = selected.length > 0 ? selected : nextRows;
+      const stillRunning = selectedOrAll.some(
+        (r) => statusOf(r) === "controle_bezig",
+      );
+      const finishedCount = selectedOrAll.filter((r) => {
+        const st = statusOf(r);
+        const startedFresh =
+          timeValue(r?.scrape_started_at) >= freshAfter ||
+          timeValue(r?.controle_started_at) >= freshAfter;
+        const finishedFresh =
+          timeValue(r?.scraped_at) >= freshAfter ||
+          timeValue(r?.scrape_failed_at) >= freshAfter ||
+          timeValue(r?.checked_at) >= freshAfter ||
+          timeValue(r?.fightpaspoort_checked_at) >= freshAfter;
 
-          if (st === "controle_bezig") return false;
+        return (
+          st === "gescrapt" ||
+          st === "scrape_mislukt" ||
+          st === "gematcht" ||
+          st === "afgemeld" ||
+          finishedFresh ||
+          (startedFresh && st !== "controle_bezig")
+        );
+      }).length;
 
-          return (
-            finishedFresh ||
-            (startedFresh &&
-              (st === "gescrapt" ||
-                st === "scrape_mislukt" ||
-                st === "gematcht" ||
-                st === "afgemeld"))
-          );
-        });
+      setWaitMessage(
+        `Fightpaspoort check loopt. Verwerkt: ${finishedCount}/${selectedOrAll.length}.`,
+      );
 
-      if (allFinishedFresh) {
-        // Laat React/Supabase nog één extra refresh doen nadat de backend klaar is.
-        // Op live zagen we dat de scraper al klaar was, maar de pagina nog oude state toonde.
-        await new Promise((resolve) => setTimeout(resolve, 750));
+      const allFinished =
+        selectedOrAll.length > 0 &&
+        finishedCount >= selectedOrAll.length &&
+        !stillRunning;
+
+      if (allFinished) {
+        // Zelfde idee als admin-overzicht: na klaar nog kort wachten en dan pas definitief herladen.
+        setWaitMessage("Controle is afgerond. Resultaten worden geladen...");
+        await sleepMs(1000);
         await load(true);
-        return;
+        return true;
       }
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+
+      await sleepMs(2500);
     }
 
-    // Timeout is geen harde mislukking: doe altijd een laatste refresh zodat de UI
-    // alsnog de database-status toont wanneer de robotjes wél klaar zijn.
+    // Timeout is geen harde mislukking: live kan de server al klaar zijn terwijl de browser
+    // nog geen nette eindstatus zag. Altijd laatste refresh doen.
     await load(true);
+
+    const selectedAfterTimeout = lastRows.filter((r) =>
+      wanted.has(String(aanmeldingId(r))),
+    );
+    const checkRows = selectedAfterTimeout.length ? selectedAfterTimeout : lastRows;
+    return checkRows.some((r) => statusOf(r) === "gescrapt");
   }
 
   async function controleer() {
@@ -620,45 +651,82 @@ export default function AanmeldingenPage() {
       return;
     }
 
+    const pollToken = controlePollTokenRef.current + 1;
+    controlePollTokenRef.current = pollToken;
+
     setBusyMode("controle");
+    setWaitTitle("Even wachten");
+    setWaitMessage("Fightpaspoort check wordt gestart. Sluit deze pagina niet af.");
     setMsg("");
 
     try {
       const checkStartedAt = Date.now();
-      const res = await authedFetch("/api/matchmaker/scrape/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchmaking_id: matchmakingId,
-          mode: viewMode === "failed" ? "selected" : "open_only",
-          scope: viewMode === "failed" ? "failed" : "open",
-          only_open: viewMode !== "failed",
-          include_failed: viewMode === "failed",
-          force: viewMode === "failed",
-          aanmelding_ids: ids,
-          va_nummers: vaNummers,
-        }),
-      });
+      const requestBody = {
+        matchmaking_id: matchmakingId,
+        mode: viewMode === "failed" ? "selected" : "open_only",
+        scope: viewMode === "failed" ? "failed" : "open",
+        only_open: viewMode !== "failed",
+        include_failed: viewMode === "failed",
+        force: viewMode === "failed",
+        aanmelding_ids: ids,
+        va_nummers: vaNummers,
+      };
 
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok)
-        throw new Error(json?.error || "Fightpaspoort check mislukt");
+      let json: any = {};
+      let responseOk = false;
 
-      await waitForControleResult(ids, checkStartedAt);
+      try {
+        setWaitMessage("Robotjes zijn gestart. FightSupport wacht tot alle resultaten binnen zijn...");
+        const res = await authedFetch("/api/matchmaker/scrape/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
 
-      // Na een succesvolle check wil de matchmaker direct de gescrapte vechters zien.
-      // Anders blijft de tab "Niet gecheckt" leeg/oud lijken totdat iemand F5 drukt.
-      await new Promise((resolve) => setTimeout(resolve, 750));
+        json = await res.json().catch(() => ({}));
+        responseOk = res.ok;
+
+        if (!res.ok) {
+          console.error("Matchmaker Fightpaspoort check response was niet ok:", res.status, json);
+          setWaitTitle("Controle loopt mogelijk nog");
+          setWaitMessage(
+            "De browser kreeg geen nette eindmelding terug, maar de VPS kan nog bezig zijn met scrapen.",
+          );
+        }
+      } catch (e) {
+        console.error("Matchmaker Fightpaspoort check request gaf een fout of timeout:", e);
+        setWaitTitle("Controle loopt mogelijk nog");
+        setWaitMessage(
+          "De browser verloor de response, maar de scraper kan op de VPS nog gewoon doorlopen.",
+        );
+      }
+
+      // Belangrijk: ook bij een foute/timeout response blijven we pollen, net als in admin-overzicht.
+      // De VPS-log liet zien dat de backend klaar kan zijn terwijl de pagina nog oud lijkt.
+      const finishedOrDataSeen = await waitForControleResult(ids, checkStartedAt);
+
+      if (controlePollTokenRef.current !== pollToken) return;
+
+      await sleepMs(750);
       await load(true);
+
       setViewMode(viewMode === "failed" ? "failed" : "checked");
       setMsg(
-        json?.message ||
-          "Fightpaspoort check afgerond. Aanmeldingen staan nu bij Gescrapt.",
+        responseOk
+          ? json?.message || "Fightpaspoort check afgerond. Aanmeldingen staan nu bij Gescrapt."
+          : finishedOrDataSeen
+            ? "Fightpaspoort check lijkt afgerond. Resultaten zijn opnieuw geladen."
+            : json?.error || "Controle niet bevestigd. Vernieuw de pagina of check de VPS-log.",
       );
     } catch (e: any) {
+      await load(true).catch(() => {});
       setMsg(e?.message || "Fightpaspoort check mislukt");
     } finally {
-      setBusyMode("idle");
+      if (controlePollTokenRef.current === pollToken) {
+        setWaitTitle("Even wachten");
+        setWaitMessage("Fightpaspoort check loopt.");
+        setBusyMode("idle");
+      }
     }
   }
 
@@ -789,7 +857,9 @@ export default function AanmeldingenPage() {
 
   return (
     <main style={pageShell}>
-      {busyMode === "controle" && <WaitScreen mode={busyMode} />}
+      {busyMode === "controle" && (
+        <WaitScreen mode={busyMode} title={waitTitle} message={waitMessage} />
+      )}
 
       <section style={chromeFrame}>
         <header style={heroHeader}>
@@ -1476,7 +1546,15 @@ function AccordionPanel({
   );
 }
 
-function WaitScreen({ mode }: { mode: BusyMode }) {
+function WaitScreen({
+  mode,
+  title,
+  message,
+}: {
+  mode: BusyMode;
+  title?: string;
+  message?: string;
+}) {
   return (
     <div style={waitOverlay}>
       <div style={waitCard}>
@@ -1491,8 +1569,8 @@ function WaitScreen({ mode }: { mode: BusyMode }) {
         </div>
 
         <Loader2 size={46} style={spinner} />
-        <h2 style={waitTitle}>{busyText(mode)}</h2>
-        <p style={waitText}>{busySubText(mode)}</p>
+        <h2 style={waitTitle}>{title || busyText(mode)}</h2>
+        <p style={waitText}>{message || busySubText(mode)}</p>
 
         <div style={progressTrack}>
           <div style={progressFill} />
