@@ -17,7 +17,7 @@ import NvbDarkButton from "@/components/NvbDarkButton";
 const NVB_ORANGE = "#ff4d00";
 
 const API_OVERVIEW = "/api/officials/matchmakings-overzicht";
-const API_START_CONTROLE = "/api/officials/start";
+const API_START_CONTROLE = "/api/control-engine/officials/start";
 const API_DELETE_MATCHMAKING = "/api/control-engine/delete-matchmaking";
 const API_NAAR_UITSLAGEN = "/api/matchmaking/naar-uitslagen";
 const API_VERPLAATS_NAAR_ADMIN_ARCHIEF = "/api/admin/archief/verplaats";
