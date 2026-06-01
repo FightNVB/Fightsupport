@@ -1010,8 +1010,8 @@ export default function OfficialsOverzichtPage() {
                                 const zebra = i % 2 === 0;
                                 const rowBusy = busyId === r.id;
                                 const rowStatus =
-                                  r.uitslagen_run_status ??
                                   r.laatste_run?.status ??
+                                  r.uitslagen_run_status ??
                                   r.stadium ??
                                   r.status ??
                                   "Niet gecontroleerd";
