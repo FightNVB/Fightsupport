@@ -835,7 +835,7 @@ export default function FighterDetailPage() {
                       {canCorrectBout ? ` Toernooi ${fighter.toernooi_code} • VA ${fighter.va_nummer}` : " Geen toernooi_code/VA gevonden: corrigeren is hier uitgeschakeld."}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="sticky top-2 z-20 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#1b1714]/95 p-2 shadow-lg shadow-black/30 backdrop-blur md:static md:border-0 md:bg-transparent md:p-0 md:shadow-none md:backdrop-blur-none">
                     {!editMode ? (
                       <button
                         onClick={() => setEditMode(true)}
@@ -874,7 +874,7 @@ export default function FighterDetailPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-2 md:grid-cols-5">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                   <EditField label="VA" value={correctForm.va_nummer} disabled={!editMode} onChange={(v) => setCorrectForm((p) => ({ ...p, va_nummer: v.replace(/[^0-9]/g, "") }))} />
                   <EditField label="Naam" value={correctForm.naam} disabled={!editMode} onChange={(v) => setCorrectForm((p) => ({ ...p, naam: v }))} />
                   <EditField label="Sportschool" value={correctForm.gym} disabled={!editMode} onChange={(v) => setCorrectForm((p) => ({ ...p, gym: v }))} />

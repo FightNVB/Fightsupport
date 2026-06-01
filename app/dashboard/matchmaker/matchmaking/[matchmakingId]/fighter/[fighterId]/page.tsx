@@ -14,6 +14,9 @@ import {
   Trophy,
   User,
   XCircle,
+  Save,
+  X,
+  Pencil,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
@@ -61,6 +64,23 @@ type MatchmakingHeader = {
   locatie?: string | null;
   bondteam?: string | null;
 };
+
+type CorrectFighterForm = {
+  va_nummer: string;
+  naam: string;
+  gym: string;
+  discipline: string;
+  klasse: string;
+  geslacht: string;
+  geboortedatum: string;
+  gewicht: string;
+  email: string;
+  telefoon: string;
+  win: string;
+  loss: string;
+  draw: string;
+};
+
 
 function normalizeVa(v: unknown) {
   return String(v ?? "").replace(/[^0-9]/g, "");
@@ -228,6 +248,7 @@ function extractKeurmerkName(reason?: string | null, fallback = "-") {
 }
 
 const SCRAPE_START_ENDPOINT = (matchmakingId: string) => `/api/matchmaker/${matchmakingId}/fighters/herscrape`;
+const CORRECT_FIGHTER_ENDPOINT = "/api/matchmaker/correct-fighter";
 
 function safe(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
@@ -314,6 +335,23 @@ export default function FighterDetailPage() {
   const [meldingen, setMeldingen] = useState<FighterRuleResultRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [savingCorrectie, setSavingCorrectie] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [correctForm, setCorrectForm] = useState<CorrectFighterForm>({
+    va_nummer: "",
+    naam: "",
+    gym: "",
+    discipline: "",
+    klasse: "",
+    geslacht: "",
+    geboortedatum: "",
+    gewicht: "",
+    email: "",
+    telefoon: "",
+    win: "",
+    loss: "",
+    draw: "",
+  });
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -439,6 +477,21 @@ export default function FighterDetailPage() {
       };
 
       setFighter(nextFighter);
+      setCorrectForm({
+        va_nummer: safe(nextFighter.va_nummer, ""),
+        naam: safe(nextFighter.naam, ""),
+        gym: safe(nextFighter.gym, ""),
+        discipline: safe(nextFighter.discipline, ""),
+        klasse: safe(nextFighter.klasse, ""),
+        geslacht: safe(nextFighter.geslacht, ""),
+        geboortedatum: safe(nextFighter.geboortedatum ?? nextFighter.fp_geboortedatum, ""),
+        gewicht: safe(nextFighter.gewicht, ""),
+        email: safe(sourceAanmelding?.email, ""),
+        telefoon: safe(sourceAanmelding?.telefoon, ""),
+        win: safe(sourceAanmelding?.win ?? nextFighter.gewonnen, "0"),
+        loss: safe(sourceAanmelding?.loss ?? nextFighter.verloren, "0"),
+        draw: safe(sourceAanmelding?.draw ?? nextFighter.onbeslist, "0"),
+      });
       setSportschool({
         naam: nextFighter.gym,
         plaats: firstFilled(sourceAanmelding?.plaats, rawScraped?.plaats),
@@ -524,6 +577,62 @@ export default function FighterDetailPage() {
     }
   }
 
+
+  function updateCorrectForm<K extends keyof CorrectFighterForm>(key: K, value: CorrectFighterForm[K]) {
+    setCorrectForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function saveCorrectFighter(runAutocheckAfter: boolean) {
+    if (!fighter?.va_nummer && !fighter?.inschrijving_id) {
+      alert("Deze vechter heeft geen VA-nummer of inschrijving-id. Opslaan kan niet.");
+      return;
+    }
+
+    setSavingCorrectie(true);
+    try {
+      const payload = {
+        matchmaking_id: matchmakingId,
+        inschrijving_id: fighter?.inschrijving_id ?? null,
+        old_va_nummer: fighter?.va_nummer ?? fighterId,
+        new_va_nummer: correctForm.va_nummer,
+        naam: correctForm.naam,
+        gym: correctForm.gym,
+        discipline: correctForm.discipline,
+        klasse: correctForm.klasse,
+        geslacht: correctForm.geslacht,
+        geboortedatum: correctForm.geboortedatum,
+        gewicht: correctForm.gewicht,
+        email: correctForm.email,
+        telefoon: correctForm.telefoon,
+        win: correctForm.win,
+        loss: correctForm.loss,
+        draw: correctForm.draw,
+      };
+
+      const res = await authedFetch(CORRECT_FIGHTER_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `Opslaan mislukt (${res.status})`);
+
+      await load();
+      setEditOpen(false);
+
+      if (runAutocheckAfter) {
+        await runAutocheckFightpaspoort();
+      } else {
+        alert("Vechtergegevens opgeslagen in aanmeldingen.");
+      }
+    } catch (err: any) {
+      alert(err?.message || "Opslaan mislukt.");
+    } finally {
+      setSavingCorrectie(false);
+    }
+  }
+
   const raw = useMemo(() => parseRaw(fighter?.raw), [fighter?.raw]);
   const recordStats = useMemo(() => {
     if (uitslagen.length) {
@@ -574,6 +683,16 @@ export default function FighterDetailPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(96,74,58,0.36),transparent_30rem),radial-gradient(circle_at_bottom,rgba(255,90,31,0.08),transparent_24rem),linear-gradient(180deg,#100e0c,#080808_52%,#030303)] text-white">
       <div className="mx-auto max-w-7xl px-3 py-2 sm:px-5 lg:px-6">
+        {editOpen && (
+          <CorrectFighterModal
+            form={correctForm}
+            saving={savingCorrectie}
+            onChange={updateCorrectForm}
+            onClose={() => setEditOpen(false)}
+            onSave={() => saveCorrectFighter(false)}
+            onSaveAndAutocheck={() => saveCorrectFighter(true)}
+          />
+        )}
         <div className="fs-chrome-panel relative mb-3 overflow-hidden rounded-[1.15rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(135deg,#251f1a,#11100f_48%,#050505)] shadow-[0_0_0_1px_#59534d,0_0_0_5px_rgba(255,255,255,0.22),0_16px_34px_rgba(0,0,0,0.86),inset_0_2px_0_rgba(255,255,255,0.78),inset_0_-2px_0_rgba(0,0,0,0.95)] before:absolute before:inset-[7px] before:rounded-[0.82rem] before:border before:border-[#8f8982] before:content-[''] after:absolute after:left-10 after:top-0 after:h-[3px] after:w-48 after:bg-[linear-gradient(90deg,transparent,#fff,transparent)] after:content-['']">
           <div className="relative min-h-[126px] px-3 py-3">
             <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden px-[260px]">
@@ -664,6 +783,12 @@ export default function FighterDetailPage() {
                       className="inline-flex items-center justify-center gap-2 border-2 border-[#d7d4ce] bg-[linear-gradient(180deg,#ffffff,#adadad_44%,#eeeeee_52%,#6f6f6f)] px-5 py-2 text-sm font-black text-black shadow-[inset_0_1px_0_#fff,0_5px_0_#28140c,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110"
                     >
                       <ArrowLeft size={18} /> Terug
+                    </button>
+                    <button
+                      onClick={() => setEditOpen(true)}
+                      className="inline-flex items-center justify-center gap-2 border-2 border-[#ff7a3d] bg-[linear-gradient(180deg,#ff6a22,#b73600)] px-5 py-2 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_5px_0_#28140c,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110"
+                    >
+                      <Pencil size={17} /> Vechter bewerken
                     </button>
                     <button
                       onClick={runAutocheckFightpaspoort}
@@ -799,6 +924,173 @@ export default function FighterDetailPage() {
     </div>
   );
 }
+
+
+function CorrectFighterModal({
+  form,
+  saving,
+  onChange,
+  onClose,
+  onSave,
+  onSaveAndAutocheck,
+}: {
+  form: CorrectFighterForm;
+  saving: boolean;
+  onChange: <K extends keyof CorrectFighterForm>(key: K, value: CorrectFighterForm[K]) => void;
+  onClose: () => void;
+  onSave: () => void;
+  onSaveAndAutocheck: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[5000] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="Sluiten"
+        className="absolute inset-0 cursor-default"
+        onClick={saving ? undefined : onClose}
+      />
+
+      <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[1.15rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(180deg,#1b1714,#0d0c0b)] shadow-[0_0_0_1px_#524c46,0_0_0_7px_rgba(255,255,255,0.22),0_24px_70px_rgba(0,0,0,0.86)]">
+        <div className="flex items-center justify-between border-b border-[#b8afa6]/45 bg-[linear-gradient(90deg,#11100f,#211914,#3a1609)] px-4 py-3">
+          <div>
+            <div className="text-lg font-black uppercase tracking-[0.18em] text-[#ff8a4c]">
+              Vechter bewerken
+            </div>
+            <div className="text-xs font-semibold text-[#d1c3b7]">
+              Past de bronrij in aanmeldingen aan. Gebruik daarna eventueel Opslaan + Autocheck.
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="inline-flex h-9 w-9 items-center justify-center border-2 border-[#d7d4ce] bg-zinc-950 text-white hover:bg-[#ff4d00] disabled:opacity-60"
+          >
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <EditBox title="Persoonlijk">
+              <EditInput label="Naam" value={form.naam} onChange={(v) => onChange("naam", v)} />
+              <EditInput label="VA nummer" value={form.va_nummer} onChange={(v) => onChange("va_nummer", v.replace(/[^\d]/g, ""))} />
+              <EditInput label="Geboortedatum" type="date" value={form.geboortedatum} onChange={(v) => onChange("geboortedatum", v)} />
+              <EditSelect label="Geslacht" value={form.geslacht} onChange={(v) => onChange("geslacht", v)} options={["", "Man", "Vrouw"]} />
+            </EditBox>
+
+            <EditBox title="Wedstrijdgegevens">
+              <EditInput label="Discipline" value={form.discipline} onChange={(v) => onChange("discipline", v)} />
+              <EditInput label="Klasse" value={form.klasse} onChange={(v) => onChange("klasse", v)} />
+              <EditInput label="Gewicht" value={form.gewicht} onChange={(v) => onChange("gewicht", v)} />
+              <EditInput label="Sportschool" value={form.gym} onChange={(v) => onChange("gym", v)} />
+            </EditBox>
+
+            <EditBox title="Contact">
+              <EditInput label="Email" value={form.email} onChange={(v) => onChange("email", v)} />
+              <EditInput label="Telefoon" value={form.telefoon} onChange={(v) => onChange("telefoon", v)} />
+            </EditBox>
+
+            <EditBox title="Opgegeven record">
+              <EditInput label="Win" value={form.win} onChange={(v) => onChange("win", v.replace(/[^\d]/g, ""))} />
+              <EditInput label="Loss" value={form.loss} onChange={(v) => onChange("loss", v.replace(/[^\d]/g, ""))} />
+              <EditInput label="Draw" value={form.draw} onChange={(v) => onChange("draw", v.replace(/[^\d]/g, ""))} />
+            </EditBox>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 z-10 flex flex-wrap justify-end gap-2 border-t border-white/10 bg-[#100e0c] px-4 py-3 shadow-[0_-14px_28px_rgba(0,0,0,0.42)]">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="border-2 border-[#d7d4ce] bg-[linear-gradient(180deg,#ffffff,#adadad_44%,#eeeeee_52%,#6f6f6f)] px-4 py-2 text-sm font-black text-black disabled:opacity-60"
+          >
+            Annuleren
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="inline-flex items-center gap-2 border-2 border-[#ff7a3d] bg-[linear-gradient(180deg,#ff6a22,#b73600)] px-4 py-2 text-sm font-black text-white disabled:opacity-60"
+          >
+            <Save size={15} /> {saving ? "Opslaan..." : "Opslaan"}
+          </button>
+          <button
+            type="button"
+            onClick={onSaveAndAutocheck}
+            disabled={saving}
+            className="inline-flex items-center gap-2 border-2 border-[#ffb08a] bg-[linear-gradient(180deg,#ff8a3d,#d94400)] px-4 py-2 text-sm font-black text-white disabled:opacity-60"
+          >
+            <RefreshCw size={15} /> {saving ? "Bezig..." : "Opslaan + Autocheck"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditBox({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[0.85rem] border-2 border-[#8a8178] bg-[#15110f] p-3 shadow-xl shadow-black/35">
+      <div className="mb-2 text-xs font-black uppercase tracking-[0.20em] text-[#ff8a4c]">{title}</div>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function EditInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.12em] text-[#c8bdb3]">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-10 w-full border border-[#8a8178] bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-[#ff4d00]"
+      />
+    </label>
+  );
+}
+
+function EditSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.12em] text-[#c8bdb3]">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-10 w-full border border-[#8a8178] bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-[#ff4d00]"
+      >
+        {options.map((opt) => (
+          <option key={opt} value={opt}>{opt || "-"}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 
 function InfoCard({
   icon,

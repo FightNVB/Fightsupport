@@ -3123,16 +3123,22 @@ const waitBackdrop: CSSProperties = {
 const waitPanelOuter: CSSProperties = {
   position: "relative",
   zIndex: 1,
-  width: "min(92vw, 720px)",
+  width: "min(96vw, 960px)",
+  maxHeight: "92vh",
+  display: "flex",
+  flexDirection: "column",
   ...metalFrameStyle("orange"),
 };
 
 const waitPanelInner: CSSProperties = {
   borderRadius: 18,
-  overflow: "hidden",
+  overflowY: "auto",
+  overflowX: "hidden",
+  maxHeight: "86vh",
+  overscrollBehavior: "contain",
   border: "2px solid rgba(226,229,235,0.18)",
   boxShadow: "inset 0 0 0 2px rgba(19,22,29,0.66)",
-  padding: 22,
+  padding: "18px 18px 0",
   background:
     "radial-gradient(circle at 50% 0%, rgba(255,77,0,0.15), transparent 48%), radial-gradient(circle at 82% 0%, rgba(59,130,246,0.12), transparent 44%), linear-gradient(180deg, rgba(20,22,28,0.98) 0%, rgba(8,10,14,1) 100%)",
 };
@@ -3227,7 +3233,7 @@ const editCloseButton: CSSProperties = {
 
 const editGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
+  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
   gap: 14,
 };
 
@@ -3278,11 +3284,21 @@ const editInput: CSSProperties = {
 };
 
 const editActionRow: CSSProperties = {
+  position: "sticky",
+  bottom: 0,
+  zIndex: 20,
   display: "flex",
   justifyContent: "flex-end",
   gap: 10,
   flexWrap: "wrap",
   marginTop: 18,
+  marginLeft: -18,
+  marginRight: -18,
+  padding: "14px 18px 18px",
+  borderTop: "1px solid rgba(255,255,255,0.14)",
+  background:
+    "linear-gradient(180deg, rgba(12,14,19,0.92) 0%, rgba(8,10,14,1) 100%)",
+  boxShadow: "0 -12px 28px rgba(0,0,0,0.35)",
 };
 
 const editGhostButton: CSSProperties = {
