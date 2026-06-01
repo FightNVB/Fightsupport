@@ -717,6 +717,13 @@ function displayStatusOf(f: Fighter) {
   return "Niet gecontroleerd";
 }
 
+function displayStatusIconOf(f: Fighter) {
+  if (isGematcht(f)) return "⚔️";
+  if (isAfgemeld(f)) return "🚫";
+  if (statusOf(f) === "gescrapt") return "✅";
+  return "⏳";
+}
+
 function isBlockedFromMatching(f: Fighter) {
   return isAfgemeld(f) || isGematcht(f);
 }
@@ -1503,7 +1510,7 @@ export default function FightersPage() {
 
           <Link
             href={`/dashboard/matchmaker/matchmaking/${matchmakingId}`}
-            className="fs-back-btn"
+            className="fs-back-btn" style={{ color: "#000" }}
           >
             <ArrowLeft size={17} />
             Terug
@@ -1735,6 +1742,17 @@ export default function FightersPage() {
 
             <div style={{ overflowX: "auto" }}>
               <table style={table}>
+                <colgroup>
+                  <col style={{ width: 44 }} />
+                  <col />
+                  <col />
+                  <col style={{ width: 68 }} />
+                  <col style={{ width: 104 }} />
+                  <col style={{ width: 48 }} />
+                  <col style={{ width: 66 }} />
+                  <col style={{ width: 42 }} />
+                  <col style={{ width: 138 }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th style={thSelect}>
@@ -1747,13 +1765,9 @@ export default function FightersPage() {
                       />
                     </th>
                     {[
-                      "Discipline",
-                      "Klasse",
                       "Naam",
                       "Sportschool",
                       "VA",
-                      "Licentie",
-                      "Keurmerk",
                       "Record",
                       "Leeftijd",
                       "Gewicht",
@@ -1773,8 +1787,6 @@ export default function FightersPage() {
                     const matchId = inschrijvingIdOf(f);
                     const detailId = encodeURIComponent(detailIdOf(f));
                     const va = vaOf(f);
-                    const lic = statusLic(f);
-                    const keur = statusKeur(f);
                     const checked = selected.includes(rowKey);
                     const disabled = !matchId || isBlockedFromMatching(f);
                     const isRed = matchRed === matchId;
@@ -1793,8 +1805,6 @@ export default function FightersPage() {
                             title="Selecteer alleen voor opnieuw controleren"
                           />
                         </td>
-                        <td style={td}>{disciplineOf(f)}</td>
-                        <td style={td}>{klasseOf(f)}</td>
                         <td style={tdName}>
                           <button
                             type="button"
@@ -1821,17 +1831,13 @@ export default function FightersPage() {
                           </button>
                         </td>
                         <td style={td}>{gymOf(f)}</td>
-                        <td style={td}>{va || "-"}</td>
-                        <td style={td}>
-                          <Badge kind={lic} />
+                        <td style={tdVa}>{va || "-"}</td>
+                        <td style={tdRecord}>{recordOf(f, uitslagenRows)}</td>
+                        <td style={tdLeeftijd}>{leeftijdOf(f)}</td>
+                        <td style={tdGewicht}>{gewichtOf(f)}</td>
+                        <td style={tdStatusIcon} title={displayStatusOf(f)}>
+                          {displayStatusIconOf(f)}
                         </td>
-                        <td style={td}>
-                          <Badge kind={keur} />
-                        </td>
-                        <td style={td}>{recordOf(f, uitslagenRows)}</td>
-                        <td style={td}>{leeftijdOf(f)}</td>
-                        <td style={td}>{gewichtOf(f)}</td>
-                        <td style={td}>{displayStatusOf(f)}</td>
                         <td style={tdActions}>
                           <Link
                             className="fs-icon-btn"
@@ -1885,7 +1891,7 @@ export default function FightersPage() {
 
                   {!loading && !visible.length && (
                     <tr>
-                      <td style={emptyTd} colSpan={13}>
+                      <td style={emptyTd} colSpan={9}>
                         Geen gecontroleerde vechters gevonden.
                       </td>
                     </tr>
@@ -2233,28 +2239,83 @@ const tableHeader: CSSProperties = {
 const table: CSSProperties = {
   width: "100%",
   borderCollapse: "collapse",
-  minWidth: 1340,
+  tableLayout: "fixed",
+  minWidth: 980,
 };
 const th: CSSProperties = {
   textAlign: "left",
-  padding: "12px 12px",
+  padding: "10px 8px",
   color: "white",
   background: ORANGE,
   fontSize: 12,
   textTransform: "uppercase",
+  whiteSpace: "nowrap",
 };
 const thSelect: CSSProperties = { ...th, width: 44, textAlign: "center" };
 const td: CSSProperties = {
-  padding: "10px 12px",
+  padding: "9px 8px",
   verticalAlign: "middle",
   borderTop: "1px solid rgba(0,0,0,.1)",
   color: "#151515",
   fontWeight: 750,
   fontSize: 13,
 };
-const tdName: CSSProperties = { ...td, minWidth: 190 };
-const tdActions: CSSProperties = { ...td, whiteSpace: "nowrap", minWidth: 130 };
-const tdSelect: CSSProperties = { ...td, width: 44, textAlign: "center" };
+
+const tdVa: CSSProperties = {
+  ...td,
+  width: 68,
+  minWidth: 68,
+  maxWidth: 68,
+  whiteSpace: "nowrap",
+};
+
+const tdRecord: CSSProperties = {
+  ...td,
+  width: 104,
+  minWidth: 104,
+  maxWidth: 104,
+  whiteSpace: "nowrap",
+};
+
+const tdLeeftijd: CSSProperties = {
+  ...td,
+  width: 48,
+  minWidth: 48,
+  maxWidth: 48,
+  textAlign: "center",
+  whiteSpace: "nowrap",
+};
+
+const tdGewicht: CSSProperties = {
+  ...td,
+  width: 66,
+  minWidth: 66,
+  maxWidth: 66,
+  textAlign: "center",
+  whiteSpace: "nowrap",
+};
+
+const tdStatusIcon: CSSProperties = {
+  ...td,
+  width: 42,
+  minWidth: 42,
+  maxWidth: 42,
+  padding: "4px",
+  textAlign: "center",
+  fontSize: 18,
+  whiteSpace: "nowrap",
+};
+
+const tdName: CSSProperties = { ...td, minWidth: 0, overflow: "hidden" };
+const tdActions: CSSProperties = {
+  ...td,
+  width: 138,
+  minWidth: 138,
+  maxWidth: 138,
+  padding: "8px 6px",
+  whiteSpace: "nowrap",
+};
+const tdSelect: CSSProperties = { ...td, width: 44, minWidth: 44, maxWidth: 44, textAlign: "center" };
 const tr: CSSProperties = {
   background: "linear-gradient(180deg,#fff,#f7f7f8)",
 };
@@ -2306,5 +2367,8 @@ const spinner: CSSProperties = {
 const globalCss = `
 @keyframes fs-spin { to { transform: rotate(360deg); } }
 .fs-mini-spinner{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#ff4d00;animation:fs-spin .75s linear infinite;display:inline-block;flex:0 0 auto}
-.fs-back-btn,.fs-dark-btn,.fs-orange-btn,.fs-filter,.fs-tab,.fs-icon-btn,.fs-clear-btn,.fs-tournament-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;text-decoration:none;font-weight:950;cursor:pointer;transition:.15s ease;border:1px solid rgba(255,255,255,.22);white-space:nowrap}.fs-back-btn{justify-self:end;color:#101114;padding:9px 13px;max-width:max-content;background:linear-gradient(180deg,#ffffff,#c5c8ce 55%,#f2f3f5);border-color:rgba(255,255,255,.85);box-shadow:inset 0 1px 0 #fff,0 7px 18px rgba(0,0,0,.35)}.fs-dark-btn{color:#fff;padding:10px 14px;background:linear-gradient(180deg,#2c2e35,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 8px 16px rgba(0,0,0,.24)}.fs-strong-btn{border-color:rgba(255,77,0,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 0 0 1px rgba(255,77,0,.22),0 10px 22px rgba(255,77,0,.18)}.fs-locked{color:#f9c7b7;border-color:rgba(255,77,0,.55);background:linear-gradient(180deg,#3a1d14,#151515)}.fs-orange-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.85);background:linear-gradient(180deg,#ff5c15,#a22b00);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 22px rgba(255,77,0,.28)}.fs-tournament-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff6a21,#822100);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 24px rgba(255,77,0,.32)}.fs-icon-btn{width:34px;height:34px;padding:0;color:#fff;border-radius:9px;background:linear-gradient(180deg,#2b2d34,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.16);margin-right:5px}.fs-icon-btn.orange{background:linear-gradient(180deg,#ff5c15,#a22b00);border-color:rgba(255,77,0,.8)}.fs-icon-btn.red{background:linear-gradient(180deg,#ef4444,#991b1b);border-color:rgba(220,38,38,.9)}.fs-icon-btn.blue{background:linear-gradient(180deg,#3b82f6,#1d4ed8);border-color:rgba(37,99,235,.9)}.fs-clear-btn{margin-left:12px;padding:6px 10px;color:#111;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter{color:#111;padding:10px 13px;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter.active{color:#fff;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff5c15,#b32f00)}.fs-tab{color:#fff;padding:9px 12px;background:linear-gradient(180deg,#ff6a21,#b43300);border-color:rgba(255,77,0,.95);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 18px rgba(255,77,0,.16)}.fs-tab span{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;padding:0 7px;border-radius:999px;color:#111;background:linear-gradient(180deg,#ffffff,#d8dbe0);font-size:12px}.fs-tab.active{color:#fff;background:linear-gradient(180deg,#ff4d00,#7f2200);border-color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 2px rgba(255,77,0,.38),0 0 26px rgba(255,77,0,.34)}.fs-tab:disabled{opacity:.45;cursor:not-allowed}.fs-name-select{border:0;padding:0;margin:0;background:transparent;color:#ff4d00;font-size:15px;font-weight:950;cursor:default;text-align:left}.fs-name-select:not(:disabled){cursor:pointer;text-decoration:underline;text-underline-offset:3px}.fs-name-select.active{display:inline-flex;padding:6px 9px;border-radius:999px;color:#fff;background:linear-gradient(180deg,#ff5c15,#9a2800);box-shadow:0 0 0 1px rgba(255,77,0,.75),0 0 18px rgba(255,77,0,.24)}.fs-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 8px;background:#eef0f3;border:1px solid #c9ccd1;color:#111;font-weight:950;font-size:11px}.fs-badge.ok{background:#dcfce7;border-color:#16a34a;color:#166534}.fs-badge.bad{background:#fee2e2;border-color:#dc2626;color:#991b1b}button:disabled{opacity:.55;cursor:not-allowed}@media (max-width: 900px){.fs-back-btn{justify-self:start}}
+.fs-back-btn,.fs-dark-btn,.fs-orange-btn,.fs-filter,.fs-tab,.fs-icon-btn,.fs-clear-btn,.fs-tournament-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;text-decoration:none;font-weight:950;cursor:pointer;transition:.15s ease;border:1px solid rgba(255,255,255,.22);white-space:nowrap}.fs-back-btn {
+  color: #000 !important;justify-self:end;color:#101114;padding:9px 13px;max-width:max-content;background:linear-gradient(180deg,#ffffff,#c5c8ce 55%,#f2f3f5);border-color:rgba(255,255,255,.85);box-shadow:inset 0 1px 0 #fff,0 7px 18px rgba(0,0,0,.35)}.fs-dark-btn{color:#fff;padding:10px 14px;background:linear-gradient(180deg,#2c2e35,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 8px 16px rgba(0,0,0,.24)}.fs-strong-btn{border-color:rgba(255,77,0,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 0 0 1px rgba(255,77,0,.22),0 10px 22px rgba(255,77,0,.18)}.fs-locked{color:#f9c7b7;border-color:rgba(255,77,0,.55);background:linear-gradient(180deg,#3a1d14,#151515)}.fs-orange-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.85);background:linear-gradient(180deg,#ff5c15,#a22b00);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 22px rgba(255,77,0,.28)}.fs-tournament-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff6a21,#822100);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 24px rgba(255,77,0,.32)}.fs-icon-btn{width:34px;height:34px;padding:0;color:#fff;border-radius:9px;background:linear-gradient(180deg,#2b2d34,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.16);margin-right:5px}.fs-icon-btn.orange{background:linear-gradient(180deg,#ff5c15,#a22b00);border-color:rgba(255,77,0,.8)}.fs-icon-btn.red{background:linear-gradient(180deg,#ef4444,#991b1b);border-color:rgba(220,38,38,.9)}.fs-icon-btn.blue{background:linear-gradient(180deg,#3b82f6,#1d4ed8);border-color:rgba(37,99,235,.9)}.fs-clear-btn{margin-left:12px;padding:6px 10px;color:#111;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter{color:#111;padding:10px 13px;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter.active{color:#fff;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff5c15,#b32f00)}.fs-tab{color:#fff;padding:9px 12px;background:linear-gradient(180deg,#ff6a21,#b43300);border-color:rgba(255,77,0,.95);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 18px rgba(255,77,0,.16)}.fs-tab span{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;padding:0 7px;border-radius:999px;color:#111;background:linear-gradient(180deg,#ffffff,#d8dbe0);font-size:12px}.fs-tab.active{color:#fff;background:linear-gradient(180deg,#ff4d00,#7f2200);border-color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 2px rgba(255,77,0,.38),0 0 26px rgba(255,77,0,.34)}.fs-tab:disabled{opacity:.45;cursor:not-allowed}.fs-name-select{border:0;padding:0;margin:0;background:transparent;color:#ff4d00;font-size:15px;font-weight:950;cursor:default;text-align:left}.fs-name-select:not(:disabled){cursor:pointer;text-decoration:underline;text-underline-offset:3px}.fs-name-select.active{display:inline-flex;padding:6px 9px;border-radius:999px;color:#fff;background:linear-gradient(180deg,#ff5c15,#9a2800);box-shadow:0 0 0 1px rgba(255,77,0,.75),0 0 18px rgba(255,77,0,.24)}.fs-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 8px;background:#eef0f3;border:1px solid #c9ccd1;color:#111;font-weight:950;font-size:11px}.fs-badge.ok{background:#dcfce7;border-color:#16a34a;color:#166534}.fs-badge.bad{background:#fee2e2;border-color:#dc2626;color:#991b1b}button:disabled{opacity:.55;cursor:not-allowed}@media (max-width: 900px){.fs-back-btn{justify-self:start}}
 `;
+
+

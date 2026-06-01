@@ -9,14 +9,14 @@ export default function HomePage() {
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-black">
       {/* HERO */}
-      <div className="absolute inset-0 flex items-center justify-center">
+      <div className="absolute inset-0">
         <Image
           src="/branding/fightsupport/fightsupport.png"
           alt="FightSupport hero"
           fill
           priority
           sizes="100vw"
-          className="object-contain object-[center_55%]"
+          className="object-cover object-center"
         />
       </div>
 
@@ -24,12 +24,16 @@ export default function HomePage() {
       <div className="pointer-events-none absolute inset-0 bg-black/10" />
 
       {/* BUTTON ONLY */}
-      <div className="relative z-20 flex h-full items-center justify-center">
+      <div className="relative z-20 h-full">
         <button
           onClick={() => router.push("/login")}
           aria-label="Ga naar login"
           className="
-            mt-[120px]
+            absolute
+            left-1/2
+            bottom-[8%]
+            -translate-x-1/2
+
             min-w-[280px]
             px-12 py-4
 
