@@ -745,13 +745,20 @@ export async function POST(req: Request) {
       }
     }
 
+    const lifecycleMakerType =
+      makerType === "matchmaker"
+        ? "matchmaker"
+        : makerType === "official" || makerType === "hoofdofficial"
+          ? "official"
+          : "admin";
+
     await ensureLifecycleRecord({
       matchmakingId: String(mmId),
       naam: evenement_naam || null,
       datum: evenement_datum || null,
       locatie: locatie || null,
-      matchmakerId: makerUserId,
-      makerType: makerType === "matchmaker" ? "matchmaker" : "matchmaker_upload",
+      matchmakerId: role === "matchmaker" ? makerUserId : null,
+      makerType: lifecycleMakerType,
       makerUserId,
       bondteam: bondteam || null,
       eventId: evId || null,
@@ -767,6 +774,8 @@ export async function POST(req: Request) {
         auth_user_id: authUserId,
         requested_lifecycle_mode: requestedLifecycleMode,
         requested_keep_owner: requestedKeepOwner,
+        maker_type: makerType,
+        lifecycle_maker_type: lifecycleMakerType,
       },
     });
 
@@ -799,6 +808,18 @@ export async function POST(req: Request) {
       .single();
 
     if (uploadErr) {
+      console.error("[submit-matchmaking] matchmaking_uploads insert mislukt", {
+        error: uploadErr.message,
+        code: (uploadErr as any)?.code,
+        details: (uploadErr as any)?.details,
+        hint: (uploadErr as any)?.hint,
+        matchmaking_id: mmId,
+        event_id: evId,
+        uploaded_by,
+        role,
+        makerType,
+        bondteam,
+      });
       return NextResponse.json({ error: uploadErr.message }, { status: 500 });
     }
 
@@ -913,6 +934,15 @@ export async function POST(req: Request) {
         .insert(rows);
 
       if (boutErr) {
+        console.error("[submit-matchmaking] matchmaking_bouts_raw insert mislukt", {
+          error: boutErr.message,
+          code: (boutErr as any)?.code,
+          details: (boutErr as any)?.details,
+          hint: (boutErr as any)?.hint,
+          matchmaking_id: mmId,
+          upload_id: uploadIdFinal,
+          rows: rows.length,
+        });
         return NextResponse.json({ error: boutErr.message }, { status: 500 });
       }
     }
