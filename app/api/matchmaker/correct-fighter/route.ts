@@ -4,6 +4,17 @@ import {
   assertCanAccessMatchmaking,
   requireUserWithRole,
 } from "@/app/api/_utils/authz";
+import {
+  buildSingleFighterContext,
+  normalizeVa,
+  type AnyRow,
+} from "@/lib/matchmaker/buildSingleFighterContext";
+import { enrichSingleFighterContext } from "@/lib/matchmaker/enrichSingleFighterContext";
+import { rulesSingleFighter } from "@/lib/matchmaker/rulesSingleFighter";
+import {
+  saveSingleFighterContexts,
+  saveSingleFighterRules,
+} from "@/lib/matchmaker/saveSingleFighterContext";
 
 export const runtime = "nodejs";
 
@@ -19,22 +30,37 @@ function normalizeText(input: unknown): string | null {
   return s ? s : null;
 }
 
-function normalizeVa(input: unknown): string | null {
-  const s = String(input ?? "").replace(/[^0-9]/g, "").replace(/^0+/, "");
-  return s || null;
-}
-
 function normalizeNumber(input: unknown): number | null {
   if (input === null || input === undefined || input === "") return null;
   const n = Number(String(input).replace(",", ".").replace(/[^0-9.-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeDate(input: unknown): string | null {
+  const raw = String(input ?? "").trim();
+  if (!raw) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const nl = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (nl) {
+    return `${nl[3]}-${nl[2].padStart(2, "0")}-${nl[1].padStart(2, "0")}`;
+  }
+
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
 function splitName(fullName: string | null) {
   const name = String(fullName ?? "").trim().replace(/\s+/g, " ");
   if (!name) return { voornaam: null as string | null, achternaam: null as string | null };
+
   const parts = name.split(" ");
-  if (parts.length === 1) return { voornaam: parts[0], achternaam: null as string | null };
+  if (parts.length === 1) {
+    return { voornaam: parts[0], achternaam: null as string | null };
+  }
+
   return {
     voornaam: parts[0],
     achternaam: parts.slice(1).join(" "),
@@ -54,6 +80,7 @@ function safeJson(raw: any): Record<string, any> {
 function duplicateKey(naam: string | null, va: string | null) {
   const n = String(naam ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   const v = String(va ?? "").trim();
+
   if (n && v) return `name-va:${n}|${v}`;
   if (v) return `va:${v}`;
   if (n) return `name:${n}`;
@@ -97,50 +124,141 @@ async function findAanmelding(args: {
   return null;
 }
 
-async function bestEffortUpdateContext(args: {
+async function loadLatestControleRunId(matchmaking_id: string, fallback?: string | null) {
+  if (fallback) return fallback;
+
+  const { data, error } = await supabase
+    .from("controle_runs")
+    .select("id, gestart_op, created_at")
+    .eq("matchmaking_id", matchmaking_id)
+    .order("gestart_op", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false, nullsFirst: false })
+    .limit(1);
+
+  if (error) {
+    console.warn("[matchmaker/correct-fighter] controle_run niet geladen:", error.message);
+    return null;
+  }
+
+  return data?.[0]?.id ? String(data[0].id) : null;
+}
+
+async function loadEventDate(matchmaking_id: string) {
+  const { data, error } = await supabase
+    .from("matchmakings")
+    .select("datum")
+    .eq("id", matchmaking_id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.datum ?? null;
+}
+
+async function loadFightersRaw(matchmaking_id: string, va_nummer: string | null) {
+  if (!va_nummer) return null;
+
+  const { data, error } = await supabase
+    .from("matchmaker_fighters_raw")
+    .select("*")
+    .eq("matchmaking_id", matchmaking_id)
+    .eq("va_nummer", va_nummer)
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false, nullsFirst: false })
+    .limit(1);
+
+  if (error) {
+    console.warn("[matchmaker/correct-fighter] matchmaker_fighters_raw niet geladen:", error.message);
+    return null;
+  }
+
+  return (data?.[0] ?? null) as AnyRow | null;
+}
+
+async function loadUitslagen(matchmaking_id: string, va_nummer: string | null) {
+  if (!va_nummer) return [] as AnyRow[];
+
+  const { data, error } = await supabase
+    .from("matchmaker_uitslagen_raw")
+    .select("*")
+    .eq("matchmaking_id", matchmaking_id)
+    .eq("va_nummer", va_nummer)
+    .order("datum", { ascending: false });
+
+  if (error) {
+    console.warn("[matchmaker/correct-fighter] matchmaker_uitslagen_raw niet geladen:", error.message);
+    return [] as AnyRow[];
+  }
+
+  return (data ?? []) as AnyRow[];
+}
+
+async function recalculateSingleFighter(args: {
   matchmaking_id: string;
-  inschrijving_id: string | number | null;
-  old_va_nummer: string | null;
-  patch: Record<string, any>;
+  controle_run_id: string | null;
+  aanmelding: AnyRow;
 }) {
-  const { matchmaking_id, inschrijving_id, old_va_nummer, patch } = args;
+  const { matchmaking_id, aanmelding } = args;
+  const controle_run_id = await loadLatestControleRunId(
+    matchmaking_id,
+    args.controle_run_id
+  );
 
-  const contextPatch: Record<string, any> = {
-    updated_at: new Date().toISOString(),
+  if (!controle_run_id) {
+    return {
+      recalculated: false,
+      reason: "Geen controle_run gevonden; aanmelding is wel opgeslagen.",
+    };
+  }
+
+  const va = normalizeVa(aanmelding?.va_nummer);
+  const [eventDate, fightersRaw, uitslagen] = await Promise.all([
+    loadEventDate(matchmaking_id),
+    loadFightersRaw(matchmaking_id, va),
+    loadUitslagen(matchmaking_id, va),
+  ]);
+
+  const baseContext = buildSingleFighterContext({
+    matchmakingId: matchmaking_id,
+    controleRunId: controle_run_id,
+    aanmelding,
+    fightersRaw,
+    uitslagen,
+    eventDate,
+  });
+
+  const enrichedContext = await enrichSingleFighterContext({
+    supabase,
+    context: baseContext,
+  });
+
+  const hits = rulesSingleFighter(enrichedContext);
+
+  const contextResult = await saveSingleFighterContexts({
+    supabase,
+    matchmakingId: matchmaking_id,
+    contexts: [enrichedContext],
+  });
+
+  if (contextResult.error) throw contextResult.error;
+
+  const rulesResult = await saveSingleFighterRules({
+    supabase,
+    matchmakingId: matchmaking_id,
+    controleRunId: controle_run_id,
+    hits,
+  });
+
+  if (rulesResult.error) throw rulesResult.error;
+
+  return {
+    recalculated: true,
+    controle_run_id,
+    context_rows: contextResult.data?.length ?? 0,
+    rules: hits.length,
+    keurmerk_status: enrichedContext.keurmerk_status ?? null,
+    keurmerk: enrichedContext.keurmerk ?? enrichedContext.heeft_keurmerk ?? null,
+    keurmerk_reden: enrichedContext.keurmerk_reden ?? null,
   };
-
-  if (patch.va_nummer !== undefined) contextPatch.va_nummer = patch.va_nummer;
-  if (patch.naam !== undefined) contextPatch.naam = patch.naam;
-  if (patch.gym !== undefined) {
-    contextPatch.gym_input = patch.gym;
-    contextPatch.gym = patch.gym;
-  }
-  if (patch.discipline !== undefined) contextPatch.discipline = patch.discipline;
-  if (patch.klasse !== undefined) contextPatch.klasse = patch.klasse;
-  if (patch.geslacht !== undefined) contextPatch.geslacht = patch.geslacht;
-  if (patch.geboortedatum !== undefined) {
-    contextPatch.geboortedatum_input = patch.geboortedatum;
-    contextPatch.geboortedatum = patch.geboortedatum;
-  }
-  if (patch.gewicht !== undefined) contextPatch.gewicht = patch.gewicht;
-  if (patch.email !== undefined) contextPatch.email = patch.email;
-  if (patch.telefoon !== undefined) contextPatch.telefoon = patch.telefoon;
-
-  try {
-    let q = supabase.from("matchmaker_fighter_context").update(contextPatch).eq("matchmaking_id", matchmaking_id);
-
-    const filters: string[] = [];
-    if (old_va_nummer) filters.push(`va_nummer.eq.${old_va_nummer}`);
-    if (patch.va_nummer) filters.push(`va_nummer.eq.${patch.va_nummer}`);
-    if (inschrijving_id) filters.push(`inschrijving_id.eq.${inschrijving_id}`);
-
-    if (filters.length) q = q.or(filters.join(","));
-
-    const { error } = await q;
-    if (error) console.warn("[matchmaker/correct-fighter] context update overgeslagen:", error.message);
-  } catch (e: any) {
-    console.warn("[matchmaker/correct-fighter] context update overgeslagen:", e?.message ?? e);
-  }
 }
 
 export async function POST(req: Request) {
@@ -173,7 +291,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const newVa = normalizeVa(body?.new_va_nummer ?? body?.va_nummer ?? aanmelding.va_nummer);
+    const newVa = normalizeVa(
+      body?.new_va_nummer ?? body?.va_nummer ?? aanmelding.va_nummer
+    );
     const naam = normalizeText(body?.naam ?? aanmelding.naam);
     const { voornaam, achternaam } = splitName(naam);
 
@@ -187,10 +307,11 @@ export async function POST(req: Request) {
     if (achternaam !== null) patch.achternaam = achternaam;
 
     if (body?.gym !== undefined) patch.gym = normalizeText(body.gym);
+    if (body?.sportschool !== undefined) patch.gym = normalizeText(body.sportschool);
     if (body?.discipline !== undefined) patch.discipline = normalizeText(body.discipline);
     if (body?.klasse !== undefined) patch.klasse = normalizeText(body.klasse);
     if (body?.geslacht !== undefined) patch.geslacht = normalizeText(body.geslacht);
-    if (body?.geboortedatum !== undefined) patch.geboortedatum = normalizeText(body.geboortedatum);
+    if (body?.geboortedatum !== undefined) patch.geboortedatum = normalizeDate(body.geboortedatum);
     if (body?.gewicht !== undefined) patch.gewicht = normalizeNumber(body.gewicht);
     if (body?.email !== undefined) patch.email = normalizeText(body.email);
     if (body?.telefoon !== undefined) patch.telefoon = normalizeText(body.telefoon);
@@ -198,7 +319,10 @@ export async function POST(req: Request) {
     if (body?.loss !== undefined) patch.loss = normalizeNumber(body.loss) ?? 0;
     if (body?.draw !== undefined) patch.draw = normalizeNumber(body.draw) ?? 0;
 
-    patch.duplicate_key = duplicateKey(patch.naam ?? aanmelding.naam, patch.va_nummer ?? aanmelding.va_nummer);
+    patch.duplicate_key = duplicateKey(
+      patch.naam ?? aanmelding.naam,
+      patch.va_nummer ?? aanmelding.va_nummer
+    );
 
     const raw = safeJson(aanmelding.raw);
     patch.raw = {
@@ -228,25 +352,39 @@ export async function POST(req: Request) {
       .from("aanmeldingen")
       .update(patch)
       .eq("id", aanmelding.id)
-      .select("id, matchmaking_id, naam, va_nummer, gym, discipline, klasse, geslacht, geboortedatum, gewicht, email, telefoon, win, loss, draw")
+      .select("*")
       .single();
 
     if (updateError) throw updateError;
 
-    await bestEffortUpdateContext({
-      matchmaking_id,
-      inschrijving_id: aanmelding.id,
-      old_va_nummer: normalizeVa(aanmelding.va_nummer),
-      patch,
-    });
+    const shouldRecalculate =
+      body?.recalculate === true ||
+      body?.herberekenen === true ||
+      body?.rebuild_context === true;
+
+    let recalculation: any = {
+      recalculated: false,
+      reason: "Alleen aanmelding opgeslagen; geen herberekening gevraagd.",
+    };
+
+    if (shouldRecalculate) {
+      recalculation = await recalculateSingleFighter({
+        matchmaking_id,
+        controle_run_id: body?.controle_run_id ? String(body.controle_run_id) : null,
+        aanmelding: updated,
+      });
+    }
 
     return NextResponse.json({
       ok: true,
-      message: "Aanmelding bijgewerkt.",
+      message: shouldRecalculate
+        ? "Aanmelding bijgewerkt + context/keurmerk/rules opnieuw berekend."
+        : "Aanmelding bijgewerkt.",
       matchmaking_id,
       old_va_nummer: normalizeVa(aanmelding.va_nummer),
-      new_va_nummer: newVa,
+      new_va_nummer: normalizeVa(updated.va_nummer),
       aanmelding: updated,
+      ...recalculation,
     });
   } catch (e: any) {
     console.error("[matchmaker/correct-fighter] fout:", e);
