@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -325,6 +326,11 @@ export default function OfficialsOverzichtPage() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("received");
 
+  const [heruploadBusyId, setHeruploadBusyId] = useState<string | null>(null);
+  const [rowMsgById, setRowMsgById] = useState<Record<string, string>>({});
+  const heruploadInputRef = useRef<HTMLInputElement | null>(null);
+  const heruploadRowRef = useRef<MatchmakingRow | null>(null);
+
   useEffect(() => {
     void load();
   }, []);
@@ -561,6 +567,96 @@ export default function OfficialsOverzichtPage() {
   }
 
 
+  function setRowMessage(rowId: string, message: string) {
+    setRowMsgById((prev) => ({
+      ...prev,
+      [rowId]: message,
+    }));
+  }
+
+  function openHerupload(row: MatchmakingRow) {
+    heruploadRowRef.current = row;
+    setRowMessage(row.id, "");
+    heruploadInputRef.current?.click();
+  }
+
+  async function handleHeruploadFile(file: File | null) {
+    const row = heruploadRowRef.current;
+    if (!row || !file) return;
+
+    const ok = window.confirm(
+      `Herupload matchmaking "${row.naam ?? row.id}"?\n\nBestaande VA-combinaties worden bijgewerkt, nieuwe partijen worden toegevoegd en partijen die niet meer in Excel staan worden verborgen.`
+    );
+
+    if (!ok) {
+      heruploadRowRef.current = null;
+      if (heruploadInputRef.current) heruploadInputRef.current.value = "";
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      setBusyId(row.id);
+      setHeruploadBusyId(row.id);
+      setRowMessage(row.id, "Herupload verwerken…");
+      setOverlayTitle("Herupload verwerken");
+      setOverlayMessage("Excel wordt verwerkt en gekoppeld aan deze official upload...");
+      setOverlaySubMessage("Bestaande partijen worden bijgewerkt; verwijderde Excel-regels worden verborgen.");
+      setOverlayOpen(true);
+
+      const form = new FormData();
+      form.append("file", file);
+      form.append("matchmaking_id", row.id);
+      form.append("force_new", "false");
+      form.append("evenement_naam", row.naam ?? "Herupload matchmaking");
+      form.append("evenement_datum", row.datum ?? new Date().toISOString().slice(0, 10));
+      form.append("locatie", row.locatie ?? "");
+      form.append("bondteam", row.bondteam ?? row.huidige_eigenaar_bondteam ?? bondteam ?? "");
+      form.append("promotor", row.promotor ?? "");
+      form.append("matchmaker", row.matchmaker_id ?? row.promotor ?? "official-herupload");
+
+      const res = await authedFetch("/api/submit-matchmaking/herupload", {
+        method: "POST",
+        body: form,
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        console.error("Official herupload failed:", res.status, json);
+        const msg = json?.error ? `❌ ${json.error}` : "❌ Herupload mislukt.";
+        setRowMessage(row.id, msg);
+        alert(msg);
+        return;
+      }
+
+      const stats = json?.stats ?? {};
+      setRowMessage(
+        row.id,
+        `✅ Herupload klaar: ${stats.updated ?? 0} aangepast · ${stats.inserted ?? stats.created ?? 0} nieuw · ${stats.removed ?? 0} verwijderd`
+      );
+      setOverlayMessage("Herupload klaar. Overzicht wordt bijgewerkt...");
+      await load();
+    } catch (e) {
+      console.error(e);
+      setRowMessage(row.id, "❌ Onverwachte fout bij herupload.");
+      alert("Herupload gaf een onverwachte fout. Check de logs/console.");
+    } finally {
+      setHeruploadBusyId(null);
+      heruploadRowRef.current = null;
+      if (heruploadInputRef.current) heruploadInputRef.current.value = "";
+      setBusyId(null);
+      setIsBusy(false);
+      setOverlayOpen(false);
+      setOverlayMessage("");
+      setOverlayTitle("Even wachten");
+      setOverlaySubMessage(
+        "Sluit deze pagina niet af totdat de resultaten zijn geladen."
+      );
+    }
+  }
+
+
   async function verplaatsNaarAdminArchief(row: MatchmakingRow) {
     const ok = window.confirm(
       `Deze afgeronde matchmaking wordt uit het officials-archief gehaald en naar Admin Archief verplaatst.\n\n${row.naam ?? "Onbekend evenement"}`
@@ -676,6 +772,15 @@ export default function OfficialsOverzichtPage() {
 
   return (
     <main className="min-h-screen px-4 py-6" style={{ background: "#eef0f3" }}>
+      <input
+        ref={heruploadInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={(e) => {
+          void handleHeruploadFile(e.target.files?.[0] ?? null);
+        }}
+      />
       <div className="mx-auto w-full max-w-[1650px]">
         <div
           className="rounded-[32px] p-[6px]"
@@ -1021,6 +1126,8 @@ export default function OfficialsOverzichtPage() {
                               filteredRows.map((r, i) => {
                                 const zebra = i % 2 === 0;
                                 const rowBusy = busyId === r.id;
+                                const rowHeruploadBusy = heruploadBusyId === r.id;
+                                const rowMsg = rowMsgById[r.id] ?? "";
                                 const rowStatus =
                                   r.laatste_run?.status ??
                                   r.uitslagen_run_status ??
@@ -1082,18 +1189,29 @@ export default function OfficialsOverzichtPage() {
                                         </Link>
 
                                         {activeTab === "uploaded" ? (
-                                          <button
-                                            onClick={() => startControle(r.id)}
-                                            disabled={rowBusy || isBusy}
-                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
-                                            title="Start volledige controle"
-                                          >
-                                            {rowBusy && isBusy
-                                              ? "Bezig…"
-                                              : isRunningStatus(rowStatus)
-                                              ? "Controle loopt…"
-                                              : "Start controle"}
-                                          </button>
+                                          <>
+                                            <button
+                                              onClick={() => startControle(r.id)}
+                                              disabled={rowBusy || isBusy}
+                                              className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
+                                              title="Start volledige controle"
+                                            >
+                                              {rowBusy && isBusy && !rowHeruploadBusy
+                                                ? "Bezig…"
+                                                : isRunningStatus(rowStatus)
+                                                ? "Controle loopt…"
+                                                : "Start controle"}
+                                            </button>
+
+                                            <button
+                                              onClick={() => openHerupload(r)}
+                                              disabled={rowBusy || isBusy || rowHeruploadBusy}
+                                              className="rounded border border-[var(--brand-orange)] bg-[#ff4d00] px-3 py-1 text-sm font-bold text-white hover:bg-[#d94700] disabled:opacity-60"
+                                              title="Herupload aangepaste Excel voor deze official upload"
+                                            >
+                                              {rowHeruploadBusy ? "Herupload…" : "Herupload"}
+                                            </button>
+                                          </>
                                         ) : null}
 
                                         {activeTab === "lineup" ? (
@@ -1143,8 +1261,29 @@ export default function OfficialsOverzichtPage() {
                                             className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
                                             title="Verwijdert deze matchmaking met gekoppelde controledata"
                                           >
-                                            {rowBusy && isBusy ? "Bezig…" : "Verwijderen"}
+                                            {rowBusy && isBusy && !rowHeruploadBusy ? "Bezig…" : "Verwijderen"}
                                           </button>
+                                        ) : null}
+
+                                        {rowMsg ? (
+                                          <span
+                                            className="text-xs font-semibold"
+                                            style={{
+                                              color: rowMsg.startsWith("✅")
+                                                ? zebra
+                                                  ? "#0a7a2f"
+                                                  : "#8dffb0"
+                                                : rowMsg.startsWith("⚠️")
+                                                ? zebra
+                                                  ? "#9a5a00"
+                                                  : "#ffd58f"
+                                                : zebra
+                                                ? "var(--brand-orange)"
+                                                : "#ffb38a",
+                                            }}
+                                          >
+                                            {rowMsg}
+                                          </span>
                                         ) : null}
                                       </div>
                                     </td>

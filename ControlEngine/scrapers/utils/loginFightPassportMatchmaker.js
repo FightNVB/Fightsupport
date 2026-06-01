@@ -170,7 +170,7 @@ async function getUnlockCodeOrWait(opts = {}) {
 
 async function safeGoto(page, url) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90000 });
-  await page.waitForTimeout(300);
+  await sleep(300);
 }
 
 async function safeZoom100(page) {
@@ -398,7 +398,7 @@ async function submitUnlockCode(page, unlockCode, trustDevice = true) {
   console.log(`🔐 AANMELDEN geklikt: ${result.clicked ? "true" : "false"} (${result.buttonText || result.reason || "zonder tekst"})`);
 
   // Na AANMELDEN gaat FightPassport normaal direct naar dashboard, maar cookies/redirect kunnen even duren.
-  await page.waitForTimeout(8000);
+  await sleep(8000);
 }
 
 async function waitAfterUnlockSubmit(page, timeoutMs = 70000) {
@@ -409,7 +409,7 @@ async function waitAfterUnlockSubmit(page, timeoutMs = 70000) {
   while (Date.now() - started < timeoutMs) {
     if ((await loggedInDomProof(page)) && !(await unlockPageVisible(page))) {
       console.log("🟢 Dashboard gevonden na unlock");
-      await page.waitForTimeout(1200);
+      await sleep(1200);
       return true;
     }
 
@@ -429,7 +429,7 @@ async function waitAfterUnlockSubmit(page, timeoutMs = 70000) {
       if (String(e?.message ?? e).includes("UNLOCK_FAILED")) throw e;
     }
 
-    await page.waitForTimeout(1000);
+    await sleep(1000);
   }
 
   const dbg = await page.evaluate(() => ({
@@ -531,7 +531,7 @@ async function waitForLoggedIn(page, timeoutMs, opts = {}, session = null, saveC
     }
 
     if (await loggedInDomProof(page)) {
-      await page.waitForTimeout(800);
+      await sleep(800);
 
       if (await unlockPageVisible(page)) {
         const codeToUse = unlockCode || await waitForUnlockCodeFromFile(opts);
@@ -542,7 +542,7 @@ async function waitForLoggedIn(page, timeoutMs, opts = {}, session = null, saveC
       return true;
     }
 
-    await page.waitForTimeout(500);
+    await sleep(500);
   }
 
   return false;
@@ -567,7 +567,7 @@ async function performNormalLogin(page, username, password, timeoutMs, session, 
       return;
     }
     if (await loginFormVisible(page)) break;
-    await page.waitForTimeout(250);
+    await sleep(250);
   }
 
   if (!(await loginFormVisible(page)) && !(await loggedInDomProof(page))) {
@@ -619,7 +619,7 @@ async function performNormalLogin(page, username, password, timeoutMs, session, 
   }
 
   console.log("🟢 SUCCESVOL ingelogd");
-  await page.waitForTimeout(1200);
+  await sleep(1200);
   await safeZoom100(page);
 
   if (saveCookiesToDisk) {
