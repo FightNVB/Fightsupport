@@ -448,7 +448,19 @@ export default function OfficialsOverzichtPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok) {
-        alert(json?.error ?? "Start controle mislukt.");
+        console.warn("Start controle response was niet OK:", json);
+        setOverlayTitle("Controle status controleren");
+        setOverlayMessage(
+          json?.error
+            ? `Controle gaf een melding: ${json.error}. Overzicht wordt opnieuw geladen...`
+            : "Controle gaf geen OK-response. Overzicht wordt opnieuw geladen..."
+        );
+        setOverlaySubMessage(
+          "Als de server de controle toch heeft afgerond, verschijnt de juiste status na verversen."
+        );
+
+        await new Promise((resolve) => window.setTimeout(resolve, 4000));
+        await load();
         return;
       }
 
@@ -600,7 +612,7 @@ export default function OfficialsOverzichtPage() {
       new Set(
         rows.map((r) =>
           normalizeStatus(
-            r.uitslagen_run_status ?? r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
+            r.laatste_run?.status ?? r.uitslagen_run_status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
           )
         )
       )
@@ -643,7 +655,7 @@ export default function OfficialsOverzichtPage() {
       const rowMonth = getMonthKey(r.datum);
       const rowEvent = (r.naam ?? "").trim().toLowerCase();
       const rowStatus = normalizeStatus(
-        r.uitslagen_run_status ?? r.laatste_run?.status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
+        r.laatste_run?.status ?? r.uitslagen_run_status ?? r.stadium ?? r.status ?? "Niet gecontroleerd"
       );
 
       if (filterMonth && rowMonth !== filterMonth) return false;
