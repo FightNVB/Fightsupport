@@ -17,6 +17,7 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, "..");
 
 const LOGIN_PATH = path.join(ROOT, "config", "login_master.json");
+const SESSION_STATE_PATH = path.join(ROOT, "utils", "fp_session_state.json");
 
 // oude/master paden
 const MASTER_COOKIES_PATH = path.join(ROOT, "utils", "cookies.json");
@@ -107,6 +108,35 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function writeFpSessionState(status, message, extra = {}) {
+  try {
+    const payload = {
+      status,
+      message,
+      updated_at: new Date().toISOString(),
+      needs_unlock: status === "unlock_required",
+      ...extra,
+    };
+
+    if (status !== "unlock_required") {
+      payload.last_unlock_required_at = null;
+    }
+
+    fs.writeFileSync(SESSION_STATE_PATH, JSON.stringify(payload, null, 2), "utf8");
+  } catch (e) {
+    console.log("⚠️ Kon fp_session_state.json niet bijwerken:", e?.message ?? e);
+  }
+}
+
+function markFightPassportReady(message = "FightPassport matchmaker-sessie is actief.", extra = {}) {
+  writeFpSessionState("ready", message, {
+    needs_unlock: false,
+    browser_url: null,
+    mode: "matchmaker",
+    ...extra,
+  });
+}
+
 function resolveUnlockRequestPath(matchmakerId = "") {
   const candidates = [
     path.join(ROOT, "utils", "fp_unlock_request.json"),
@@ -128,6 +158,14 @@ async function waitForUnlockCodeFromFile(opts = {}, timeoutMs = 10 * 60 * 1000) 
   console.log("🔐 Unlockscherm gevonden. Browser blijft open en wacht op unlockcode uit de UI...");
   console.log("🔐 Unlockcode-bestand:", paths.join(" | "));
 
+  writeFpSessionState("unlock_required", "FightPassport wacht op de 7-cijferige unlockcode voor matchmaker-login.", {
+    mode: "matchmaker",
+    matchmaker_id: matchmakerId,
+    unlock_request_path: paths[0],
+    unlock_request_paths: paths,
+    last_unlock_required_at: new Date().toISOString(),
+  });
+
   while (Date.now() - started < timeoutMs) {
     for (const unlockPath of paths) {
       try {
@@ -143,6 +181,11 @@ async function waitForUnlockCodeFromFile(opts = {}, timeoutMs = 10 * 60 * 1000) 
           } catch {}
 
           console.log("🔐 Unlockcode ontvangen uit UI");
+          writeFpSessionState("unlock_code_received", "Unlockcode ontvangen. FightPassport wordt nu geopend.", {
+            mode: "matchmaker",
+            matchmaker_id: matchmakerId,
+            needs_unlock: false,
+          });
           return code;
         }
 

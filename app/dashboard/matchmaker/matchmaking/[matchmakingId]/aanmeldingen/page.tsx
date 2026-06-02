@@ -32,7 +32,8 @@ import {
 
 const ORANGE = "#ff4d00";
 const LOGO_SRC = "/branding/fightsupport/excel-logo.png";
-const EXCEL_TEMPLATE_URL = "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
+const EXCEL_TEMPLATE_URL =
+  "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
 
 type Aanmelding = Record<string, any>;
 type BusyMode =
@@ -44,6 +45,27 @@ type BusyMode =
   | "save"
   | "load";
 type ViewMode = "unchecked" | "checked" | "failed" | "all";
+
+interface FpSessionStatus {
+  status?: string | null;
+  message?: string | null;
+  updated_at?: string | null;
+  last_error?: string | null;
+}
+
+function isFightPassportUnlockStatus(status: string | null | undefined) {
+  const value = String(status ?? "")
+    .trim()
+    .toLowerCase();
+  return (
+    value === "waiting_for_unlock" ||
+    value === "waiting_for_unlock_code" ||
+    value === "unlock_required" ||
+    value === "code_required" ||
+    value.includes("unlock") ||
+    value.includes("pincode")
+  );
+}
 
 type FighterForm = {
   discipline: string;
@@ -276,8 +298,7 @@ function busyText(mode: BusyMode) {
 }
 
 function busySubText(mode: BusyMode) {
-  if (mode === "controle")
-    return "Fightpaspoort check loopt.";
+  if (mode === "controle") return "Fightpaspoort check loopt.";
   if (mode === "upload")
     return "Het bestand wordt opgeslagen en toegevoegd aan deze matchmaking.";
   return "Deze actie wordt uitgevoerd.";
@@ -329,6 +350,8 @@ export default function AanmeldingenPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("unchecked");
   const [waitTitle, setWaitTitle] = useState("Even wachten");
   const [waitMessage, setWaitMessage] = useState("Fightpaspoort check loopt.");
+  const [fpSession, setFpSession] = useState<FpSessionStatus | null>(null);
+  const [fpSessionLoading, setFpSessionLoading] = useState(false);
 
   const [form, setForm] = useState<FighterForm>({
     discipline: "KICKBOKSEN",
@@ -353,10 +376,13 @@ export default function AanmeldingenPage() {
       }
 
       try {
-        const res = await authedFetch(`/api/matchmaker/${matchmakingId}?t=${Date.now()}`, {
-          method: "GET",
-          cache: "no-store",
-        });
+        const res = await authedFetch(
+          `/api/matchmaker/${matchmakingId}?t=${Date.now()}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          },
+        );
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json?.error || "Laden mislukt");
 
@@ -380,6 +406,54 @@ export default function AanmeldingenPage() {
   useEffect(() => {
     if (matchmakingId) load();
   }, [matchmakingId, load]);
+
+  async function checkFightPassportSession() {
+    try {
+      setFpSessionLoading(true);
+
+      const res = await authedFetch("/api/fightpassport/session", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!res.ok) return null;
+
+      const json = await res.json().catch(() => null);
+      const session: FpSessionStatus = {
+        status: json?.status ?? json?.session?.status ?? null,
+        message: json?.message ?? json?.session?.message ?? null,
+        updated_at: json?.updated_at ?? json?.session?.updated_at ?? null,
+        last_error: json?.last_error ?? json?.session?.last_error ?? null,
+      };
+
+      setFpSession(session);
+
+      if (isFightPassportUnlockStatus(session.status)) {
+        setWaitTitle("FightPassport unlockcode nodig");
+        setWaitMessage(
+          "FightPassport wacht op de 7-cijferige code uit je e-mail. Klik op Unlockcode invullen en laat dit scherm open.",
+        );
+      }
+
+      return session;
+    } catch (e) {
+      console.warn("FightPassport sessiestatus niet bereikbaar:", e);
+      return null;
+    } finally {
+      setFpSessionLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (busyMode !== "controle") return;
+
+    void checkFightPassportSession();
+    const timer = window.setInterval(() => {
+      void checkFightPassportSession();
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [busyMode]);
 
   const uploadTabs = useMemo(() => {
     return [...uploads].sort((a, b) => {
@@ -536,10 +610,13 @@ export default function AanmeldingenPage() {
     let lastRows: Aanmelding[] = [];
 
     while (Date.now() - startedAt < maxMs) {
-      const res = await authedFetch(`/api/matchmaker/${matchmakingId}?t=${Date.now()}`, {
-        method: "GET",
-        cache: "no-store",
-      });
+      const res = await authedFetch(
+        `/api/matchmaker/${matchmakingId}?t=${Date.now()}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
       const json = await res.json().catch(() => ({}));
       if (!res.ok)
         throw new Error(json?.error || "Laden na Fightpaspoort check mislukt");
@@ -610,7 +687,9 @@ export default function AanmeldingenPage() {
     const selectedAfterTimeout = lastRows.filter((r) =>
       wanted.has(String(aanmeldingId(r))),
     );
-    const checkRows = selectedAfterTimeout.length ? selectedAfterTimeout : lastRows;
+    const checkRows = selectedAfterTimeout.length
+      ? selectedAfterTimeout
+      : lastRows;
     return checkRows.some((r) => statusOf(r) === "gescrapt");
   }
 
@@ -655,8 +734,11 @@ export default function AanmeldingenPage() {
     controlePollTokenRef.current = pollToken;
 
     setBusyMode("controle");
+    setFpSession(null);
     setWaitTitle("Even wachten");
-    setWaitMessage("Fightpaspoort check wordt gestart. Sluit deze pagina niet af.");
+    setWaitMessage(
+      "Fightpaspoort check wordt gestart. Sluit deze pagina niet af.",
+    );
     setMsg("");
 
     try {
@@ -676,7 +758,9 @@ export default function AanmeldingenPage() {
       let responseOk = false;
 
       try {
-        setWaitMessage("Robotjes zijn gestart. FightSupport wacht tot alle resultaten binnen zijn...");
+        setWaitMessage(
+          "Robotjes zijn gestart. FightSupport wacht tot alle resultaten binnen zijn...",
+        );
         const res = await authedFetch("/api/matchmaker/scrape/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -687,14 +771,30 @@ export default function AanmeldingenPage() {
         responseOk = res.ok;
 
         if (!res.ok) {
-          console.error("Matchmaker Fightpaspoort check response was niet ok:", res.status, json);
-          setWaitTitle("Controle loopt mogelijk nog");
-          setWaitMessage(
-            "De browser kreeg geen nette eindmelding terug, maar de VPS kan nog bezig zijn met scrapen.",
+          console.error(
+            "Matchmaker Fightpaspoort check response was niet ok:",
+            res.status,
+            json,
           );
+
+          const session = await checkFightPassportSession();
+          if (isFightPassportUnlockStatus(session?.status)) {
+            setWaitTitle("FightPassport unlockcode nodig");
+            setWaitMessage(
+              "FightPassport wacht op de 7-cijferige code uit je e-mail. Klik op Unlockcode invullen en laat dit scherm open.",
+            );
+          } else {
+            setWaitTitle("Controle loopt mogelijk nog");
+            setWaitMessage(
+              "De browser kreeg geen nette eindmelding terug, maar de VPS kan nog bezig zijn met scrapen.",
+            );
+          }
         }
       } catch (e) {
-        console.error("Matchmaker Fightpaspoort check request gaf een fout of timeout:", e);
+        console.error(
+          "Matchmaker Fightpaspoort check request gaf een fout of timeout:",
+          e,
+        );
         setWaitTitle("Controle loopt mogelijk nog");
         setWaitMessage(
           "De browser verloor de response, maar de scraper kan op de VPS nog gewoon doorlopen.",
@@ -703,7 +803,10 @@ export default function AanmeldingenPage() {
 
       // Belangrijk: ook bij een foute/timeout response blijven we pollen, net als in admin-overzicht.
       // De VPS-log liet zien dat de backend klaar kan zijn terwijl de pagina nog oud lijkt.
-      const finishedOrDataSeen = await waitForControleResult(ids, checkStartedAt);
+      const finishedOrDataSeen = await waitForControleResult(
+        ids,
+        checkStartedAt,
+      );
 
       if (controlePollTokenRef.current !== pollToken) return;
 
@@ -713,10 +816,12 @@ export default function AanmeldingenPage() {
       setViewMode(viewMode === "failed" ? "failed" : "checked");
       setMsg(
         responseOk
-          ? json?.message || "Fightpaspoort check afgerond. Aanmeldingen staan nu bij Gescrapt."
+          ? json?.message ||
+              "Fightpaspoort check afgerond. Aanmeldingen staan nu bij Gescrapt."
           : finishedOrDataSeen
             ? "Fightpaspoort check lijkt afgerond. Resultaten zijn opnieuw geladen."
-            : json?.error || "Controle niet bevestigd. Vernieuw de pagina of check de VPS-log.",
+            : json?.error ||
+              "Controle niet bevestigd. Vernieuw de pagina of check de VPS-log.",
       );
     } catch (e: any) {
       await load(true).catch(() => {});
@@ -858,7 +963,14 @@ export default function AanmeldingenPage() {
   return (
     <main style={pageShell}>
       {busyMode === "controle" && (
-        <WaitScreen mode={busyMode} title={waitTitle} message={waitMessage} />
+        <WaitScreen
+          mode={busyMode}
+          title={waitTitle}
+          message={waitMessage}
+          fpSession={fpSession}
+          fpSessionLoading={fpSessionLoading}
+          onCheckFpSession={() => void checkFightPassportSession()}
+        />
       )}
 
       <section style={chromeFrame}>
@@ -1550,11 +1662,18 @@ function WaitScreen({
   mode,
   title,
   message,
+  fpSession,
+  fpSessionLoading,
+  onCheckFpSession,
 }: {
   mode: BusyMode;
   title?: string;
   message?: string;
+  fpSession?: FpSessionStatus | null;
+  fpSessionLoading?: boolean;
+  onCheckFpSession?: () => void;
 }) {
+  const needsUnlock = isFightPassportUnlockStatus(fpSession?.status);
   return (
     <div style={waitOverlay}>
       <div style={waitCard}>
@@ -1571,6 +1690,41 @@ function WaitScreen({
         <Loader2 size={46} style={spinner} />
         <h2 style={waitTitle}>{title || busyText(mode)}</h2>
         <p style={waitText}>{message || busySubText(mode)}</p>
+
+        {needsUnlock ? (
+          <div style={unlockActions}>
+            <button
+              type="button"
+              onClick={() =>
+                window.open(
+                  "/dashboard/admin/fightpassport-sessie",
+                  "_blank",
+                  "noopener,noreferrer",
+                )
+              }
+              style={unlockPrimaryButton}
+            >
+              Unlockcode invullen
+            </button>
+
+            <button
+              type="button"
+              onClick={onCheckFpSession}
+              disabled={fpSessionLoading}
+              style={{
+                ...unlockSecondaryButton,
+                opacity: fpSessionLoading ? 0.65 : 1,
+              }}
+            >
+              Status opnieuw checken
+            </button>
+          </div>
+        ) : null}
+
+        <div style={waitStatusPill}>
+          <span style={waitStatusDot} />
+          {needsUnlock ? "Wacht op unlockcode" : "Controle bezig"}
+        </div>
 
         <div style={progressTrack}>
           <div style={progressFill} />
@@ -1892,6 +2046,63 @@ const td: CSSProperties = {
   padding: "12px 15px",
   verticalAlign: "top",
   borderRight: "1px solid rgba(255,255,255,.12)",
+};
+
+const unlockActions: CSSProperties = {
+  marginTop: 22,
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 12,
+};
+
+const unlockPrimaryButton: CSSProperties = {
+  borderRadius: 0,
+  padding: "12px 18px",
+  background: "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)",
+  color: "#fff",
+  border: "1px solid rgba(255,255,255,0.22)",
+  boxShadow:
+    "inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 24px rgba(255,77,0,0.24)",
+  fontSize: 14,
+  fontWeight: 900,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  cursor: "pointer",
+};
+
+const unlockSecondaryButton: CSSProperties = {
+  borderRadius: 0,
+  padding: "12px 18px",
+  background: "linear-gradient(180deg, #3b3b40 0%, #202025 100%)",
+  color: "#fff",
+  border: "1px solid rgba(255,255,255,0.18)",
+  fontSize: 14,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const waitStatusPill: CSSProperties = {
+  marginTop: 18,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 10,
+  borderRadius: 999,
+  padding: "10px 16px",
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  color: "#fff",
+  fontSize: 13,
+  fontWeight: 700,
+};
+
+const waitStatusDot: CSSProperties = {
+  width: 10,
+  height: 10,
+  borderRadius: "50%",
+  background: ORANGE,
+  boxShadow: "0 0 18px rgba(255,77,0,0.75)",
 };
 
 const waitOverlay: CSSProperties = {
