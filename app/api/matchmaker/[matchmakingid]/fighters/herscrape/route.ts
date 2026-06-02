@@ -134,7 +134,13 @@ async function callScrapeStart(args: {
   scrapeRunId: string;
 }) {
   const { req, matchmakingId, token, vaNummers, aanmeldingIds, scrapeRunId } = args;
-  const origin = new URL(req.url).origin;
+
+  // Op de VPS kan server-side fetch naar de publieke origin falen.
+  // Gebruik daarom bij voorkeur de interne Next server.
+  const origin =
+    process.env.INTERNAL_APP_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    "http://127.0.0.1:3000";
 
   const res = await fetch(`${origin}/api/matchmaker/scrape/start`, {
     method: "POST",
