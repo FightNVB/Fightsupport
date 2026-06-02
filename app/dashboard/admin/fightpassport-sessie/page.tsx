@@ -181,9 +181,9 @@ export default function FightPassportSessiePage() {
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <div style={{ transform: "scale(0.85)", transformOrigin: "left center" }}>
                       <NvbLightButton
-                        label="← Terug naar controle"
+                        label="← Terug Dashboard"
                         onClick={() =>
-                          (window.location.href = "/dashboard/admin/controle")
+                          (window.location.href = "/dashboard")
                         }
                       />
                     </div>
