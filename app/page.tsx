@@ -77,15 +77,6 @@ export default function HomePage() {
 
         <div className="absolute inset-0 bg-black/10" />
 
-        <button
-          type="button"
-          aria-label="Menu"
-          className="absolute right-5 top-5 z-20 flex h-11 w-11 flex-col items-center justify-center gap-1.5 rounded-full border border-white/10 bg-black/25 backdrop-blur sm:right-8 sm:top-8"
-        >
-          <span className="h-0.5 w-7 rounded bg-white" />
-          <span className="h-0.5 w-7 rounded bg-white" />
-          <span className="h-0.5 w-7 rounded bg-white" />
-        </button>
 
         <div className="absolute left-[7vw] bottom-[13vh] z-10 hidden gap-5 lg:flex">
           <button
