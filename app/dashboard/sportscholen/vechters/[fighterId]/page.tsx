@@ -7,7 +7,9 @@ import {
   ArrowLeft,
   CalendarDays,
   Dumbbell,
+  MessageSquare,
   RefreshCw,
+  Send,
   ShieldAlert,
   ShieldCheck,
   Trophy,
@@ -250,6 +252,10 @@ export default function FighterDetailPage() {
   const [uitslagen, setUitslagen] = useState<Uitslag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [meldingType, setMeldingType] = useState("traint_niet_meer_bij_ons");
+  const [meldingText, setMeldingText] = useState("");
+  const [meldingSaving, setMeldingSaving] = useState(false);
+  const [meldingMsg, setMeldingMsg] = useState("");
 
   useEffect(() => {
     if (fighterId) load();
@@ -332,6 +338,61 @@ export default function FighterDetailPage() {
       setUitslagen([]);
     } finally {
       setLoading(false);
+    }
+  }
+
+
+
+  async function submitMelding() {
+    if (!fighter) return;
+
+    const tekst = meldingText.trim();
+    if (!tekst) {
+      setMeldingMsg("Vul eerst een korte toelichting in.");
+      return;
+    }
+
+    try {
+      setMeldingSaving(true);
+      setMeldingMsg("");
+
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+
+      const res = await fetch("/api/sportscholen/vechter-melding", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          fighter_id: fighter.id,
+          sportschool_id: fighter.sportschool_id ?? sportschool?.sportschool_id ?? null,
+          sportschool_naam: sportschool?.naam ?? null,
+          va_nummer: fighter.va_nummer ?? null,
+          naam: fighterName(fighter),
+          type: meldingType,
+          melding: tekst,
+          snapshot: {
+            fighter,
+            sportschool,
+            uitslagen_count: uitslagen.length,
+          },
+        }),
+      });
+
+      const json = await readJsonSafe(res);
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Melding versturen mislukt");
+      }
+
+      setMeldingText("");
+      setMeldingType("traint_niet_meer_bij_ons");
+      setMeldingMsg("Melding is verstuurd naar admin.");
+    } catch (e: any) {
+      setMeldingMsg(e?.message || "Melding versturen mislukt");
+    } finally {
+      setMeldingSaving(false);
     }
   }
 
@@ -558,6 +619,71 @@ export default function FighterDetailPage() {
                   ["Run", safe(fighter.scrape_run_id)],
                 ]}
               />
+            </div>
+
+
+
+            <div className="mb-3 border border-zinc-600 bg-[#121212] p-4 shadow-2xl">
+              <div className="mb-3 flex flex-col justify-between gap-2 md:flex-row md:items-center">
+                <div>
+                  <div className="flex items-center gap-2 text-lg font-black uppercase text-white">
+                    <MessageSquare size={20} className="text-[#ff4d00]" />
+                    Melding aan admin
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-400">
+                    Vraag een wijziging aan voor deze vechter, bijvoorbeeld traint niet meer bij ons, gegevens wijzigen of uitslag klopt niet.
+                  </div>
+                </div>
+                <div className="text-xs font-black uppercase tracking-[0.2em] text-[#ff4d00]">
+                  VA {safe(fighter.va_nummer)}
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-[260px_1fr_auto] md:items-end">
+                <label className="block text-xs font-black uppercase tracking-[0.18em] text-zinc-300">
+                  Type melding
+                  <select
+                    value={meldingType}
+                    onChange={(e) => setMeldingType(e.target.value)}
+                    className="mt-2 w-full border border-zinc-600 bg-[#111] px-3 py-2 text-sm font-bold text-white outline-none focus:border-[#ff4d00]"
+                  >
+                    <option value="traint_niet_meer_bij_ons">Traint niet meer bij ons</option>
+                    <option value="gegevens_wijzigen">Gegevens wijzigen</option>
+                    <option value="uitslag_klopt_niet">Uitslag klopt niet</option>
+                    <option value="licentie_klopt_niet">Licentie klopt niet</option>
+                    <option value="startverbod_klopt_niet">Startverbod klopt niet</option>
+                    <option value="sportschool_klopt_niet">Sportschool klopt niet</option>
+                    <option value="anders">Anders</option>
+                  </select>
+                </label>
+
+                <label className="block text-xs font-black uppercase tracking-[0.18em] text-zinc-300">
+                  Toelichting
+                  <textarea
+                    value={meldingText}
+                    onChange={(e) => setMeldingText(e.target.value)}
+                    rows={3}
+                    placeholder="Beschrijf kort wat admin moet controleren of aanpassen..."
+                    className="mt-2 w-full resize-none border border-zinc-600 bg-[#111] px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-[#ff4d00]"
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={submitMelding}
+                  disabled={meldingSaving || !meldingText.trim()}
+                  className="inline-flex min-h-[42px] items-center justify-center gap-2 border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {meldingSaving ? <RefreshCw size={17} className="animate-spin" /> : <Send size={17} />}
+                  Verstuur
+                </button>
+              </div>
+
+              {meldingMsg && (
+                <div className="mt-3 border border-zinc-700 bg-[#1c1c1c] p-3 text-sm font-bold text-zinc-200">
+                  {meldingMsg}
+                </div>
+              )}
             </div>
 
             {fighter.scrape_error && (

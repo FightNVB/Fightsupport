@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, type CSSProperties, type ReactNode } from "r
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { ArrowLeft, Settings, Link2, Cog, UsersRound } from "lucide-react";
+import { ArrowLeft, Settings, Link2, Cog, UsersRound, CalendarDays, MessageSquare } from "lucide-react";
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
@@ -87,6 +87,8 @@ export default function BeheerPortalPage() {
   const actions = useMemo<ActionCard[]>(
     () => [
       { title: "Gebruikers beheer", subtitle: "Accounts aanvragen en handmatig toevoegen", href: "/dashboard/admin/beheer/accounts-beheer", icon: Settings },
+      { title: "Agenda", subtitle: "Overzicht van alle evenementen", href: "/dashboard/admin/beheer/agenda", icon: CalendarDays },
+      { title: "Sportschool meldingen", subtitle: "Wijzigingsverzoeken van trainers behandelen", href: "/dashboard/admin/beheer/sportschool-meldingen", icon: MessageSquare },
       { title: "Talentstatus", subtitle: "Verwerk talentstatus partijen", href: "/dashboard/admin/beheer/talentstatus", icon: Link2 },
       { title: "Sportschool contactpersonen", subtitle: "Trainer-login koppelen en Fightcrew klaarzetten", href: "/dashboard/admin/beheer/sportscholen/contactpersonen", icon: UsersRound },
       { title: "Log / Audit", subtitle: "Logboek van belangrijke acties en wijzigingen", href: "/dashboard/admin/audit", icon: Cog },
@@ -124,7 +126,8 @@ export default function BeheerPortalPage() {
         .fs-metal-button { transition: transform 90ms ease, box-shadow 120ms ease, filter 120ms ease; }
         .fs-metal-button:hover { filter: brightness(1.02); box-shadow: inset 0 2px 1px rgba(255,255,255,1), inset 0 -3px 2px rgba(0,0,0,0.6), 0 7px 15px rgba(0,0,0,0.44), 0 0 10px rgba(255,77,0,0.08); }
         .fs-metal-button:active { transform: translateY(2px); }
-        @media (max-width: 900px) { .beheer-grid { grid-template-columns: 1fr !important; } }
+        @media (max-width: 1100px) { .beheer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+        @media (max-width: 760px) { .beheer-grid { grid-template-columns: 1fr !important; } }
         @media (max-width: 760px) { .title-actions-wrap { position: static !important; transform: none !important; display: flex; justify-content: center; margin-bottom: 8px; } .title-row { min-height: auto !important; } }
       `}</style>
 
@@ -144,9 +147,9 @@ export default function BeheerPortalPage() {
 
             <div style={{ marginTop: 10, height: 1, background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)" }} />
 
-            <div className="beheer-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, alignContent: "start" }}>
+            <div className="beheer-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, alignContent: "start" }}>
               {actions.map((action) => (
-                <PortalCard key={action.href} icon={<action.icon size={30} strokeWidth={2.5} />} title={action.title} subtitle={action.subtitle} buttonLabel="Openen" onClick={() => router.push(action.href)} />
+                <PortalCard key={action.href} icon={<action.icon size={24} strokeWidth={2.5} />} title={action.title} subtitle={action.subtitle} buttonLabel="Openen" onClick={() => router.push(action.href)} />
               ))}
             </div>
 
@@ -204,16 +207,16 @@ function SteelFrame({ children, hover = false }: { children: ReactNode; hover?: 
 function PortalCard({ icon, title, subtitle, buttonLabel, onClick }: { icon: ReactNode; title: string; subtitle: string; buttonLabel: string; onClick: () => void }) {
   return (
     <SteelFrame hover>
-      <div style={{ ...darkPlate, minHeight: 118, padding: "12px 12px 10px", display: "flex", flexDirection: "column" }}>
+      <div style={{ ...darkPlate, minHeight: 96, padding: "9px 10px 8px", display: "flex", flexDirection: "column" }}>
         <OrangeHotspot left={18} bottom={10} width={58} />
         <OrangeHotspot right={42} top={12} width={38} small variant={2} />
         <CardChromeOverlay />
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flex: 1 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
           <IconPlate>{icon}</IconPlate>
           <div style={{ minWidth: 0, flex: 1, paddingTop: 2 }}>
-            <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1, color: "#f1f1f1", textShadow: "0 3px 5px rgba(0,0,0,0.8)" }}>{title}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, lineHeight: 1, color: "#f1f1f1", textShadow: "0 3px 5px rgba(0,0,0,0.8)" }}>{title}</div>
             <div style={{ width: "100%", height: 1, marginTop: 8, background: "linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08), transparent)" }} />
-            <div style={{ marginTop: 8, fontSize: 13, color: "#d7d7d7", lineHeight: 1.22 }}>{subtitle}</div>
+            <div style={{ marginTop: 6, fontSize: 11.5, color: "#d7d7d7", lineHeight: 1.22 }}>{subtitle}</div>
           </div>
         </div>
         <div style={{ marginTop: 8, padding: "0 4px" }}>
@@ -226,7 +229,7 @@ function PortalCard({ icon, title, subtitle, buttonLabel, onClick }: { icon: Rea
 
 function IconPlate({ children }: { children: ReactNode }) {
   return (
-    <div style={{ width: 72, height: 58, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", border: "1px solid #7b2500", background: "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)" }}>
+    <div style={{ width: 56, height: 46, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", border: "1px solid #7b2500", background: "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)" }}>
       {children}
     </div>
   );
@@ -238,7 +241,7 @@ function SteelButton({ label, onClick }: { label: string; onClick: () => void })
       type="button"
       onClick={onClick}
       className="fs-metal-button"
-      style={{ width: "100%", height: 34, border: "1px solid #8f8f8f", background: "linear-gradient(180deg,#ffffff 0%,#eaeaea 12%,#cfcfcf 25%,#ffffff 40%,#9a9a9a 70%,#f0f0f0 100%)", color: "#131313", fontSize: 14, fontWeight: 900, boxShadow: "inset 0 2px 1px rgba(255,255,255,1), inset 0 -3px 2px rgba(0,0,0,0.6), 0 5px 12px rgba(0,0,0,0.38)", cursor: "pointer", textShadow: "0 1px 0 rgba(255,255,255,0.34)" }}
+      style={{ width: "100%", height: 30, border: "1px solid #8f8f8f", background: "linear-gradient(180deg,#ffffff 0%,#eaeaea 12%,#cfcfcf 25%,#ffffff 40%,#9a9a9a 70%,#f0f0f0 100%)", color: "#131313", fontSize: 12, fontWeight: 900, boxShadow: "inset 0 2px 1px rgba(255,255,255,1), inset 0 -3px 2px rgba(0,0,0,0.6), 0 5px 12px rgba(0,0,0,0.38)", cursor: "pointer", textShadow: "0 1px 0 rgba(255,255,255,0.34)" }}
     >
       {label}
     </button>
@@ -251,7 +254,7 @@ function HeaderSilverButton({ label, onClick, icon }: { label: string; onClick: 
       type="button"
       onClick={onClick}
       className="fs-metal-button"
-      style={{ minWidth: 132, height: 34, border: "1px solid rgba(185,185,185,0.95)", background: "linear-gradient(180deg,#ffffff 0%,#f3f3f3 10%,#d7d7d7 24%,#fcfcfc 42%,#bcbcbc 72%,#efefef 100%)", color: "#121212", fontSize: 13, fontWeight: 900, boxShadow: "inset 0 1px 0 rgba(255,255,255,1), inset 0 -2px 2px rgba(0,0,0,0.40), 0 4px 10px rgba(0,0,0,0.28)", cursor: "pointer", textShadow: "0 1px 0 rgba(255,255,255,0.55)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "0 12px", whiteSpace: "nowrap" }}
+      style={{ minWidth: 132, height: 30, border: "1px solid rgba(185,185,185,0.95)", background: "linear-gradient(180deg,#ffffff 0%,#f3f3f3 10%,#d7d7d7 24%,#fcfcfc 42%,#bcbcbc 72%,#efefef 100%)", color: "#121212", fontSize: 13, fontWeight: 900, boxShadow: "inset 0 1px 0 rgba(255,255,255,1), inset 0 -2px 2px rgba(0,0,0,0.40), 0 4px 10px rgba(0,0,0,0.28)", cursor: "pointer", textShadow: "0 1px 0 rgba(255,255,255,0.55)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "0 12px", whiteSpace: "nowrap" }}
     >
       {icon}
       {label}

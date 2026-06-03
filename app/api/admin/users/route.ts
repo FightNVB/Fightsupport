@@ -427,22 +427,8 @@ export async function DELETE(req: Request) {
 
     if (roleErr) cleanupWarnings.push(`user_roles overgeslagen: ${roleErr.message}`);
 
-    const legacyDeletes = [
-      supabaseAdmin.from("users").delete().eq("id", id),
-      supabaseAdmin.from("users").delete().eq("user_id", id),
-    ];
-
-    if (email) {
-      legacyDeletes.push(supabaseAdmin.from("users").delete().eq("email", email));
-    }
-
-    for (const legacyDelete of legacyDeletes) {
-      const { error } = await legacyDelete;
-
-      if (error && !isMissingLegacyTableOrColumn(error)) {
-        cleanupWarnings.push(`public.users cleanup melding: ${error.message}`);
-      }
-    }
+    // Let op: public.users wordt niet meer gebruikt in deze nieuwe account-flow.
+    // Nieuwe/beheerde accounts staan alleen in auth.users, user_profiles en user_roles.
 
     const { error: profileErr } = await supabaseAdmin
       .from("user_profiles")
@@ -474,7 +460,6 @@ export async function DELETE(req: Request) {
         auth_user: !authErr,
         user_profiles: true,
         user_roles: !roleErr,
-        users: true,
       },
       warnings: cleanupWarnings,
     });

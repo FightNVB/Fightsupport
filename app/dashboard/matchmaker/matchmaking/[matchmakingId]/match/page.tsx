@@ -1451,9 +1451,16 @@ export default function FightersPage() {
   async function afmelden(f: Fighter) {
     const id = inschrijvingIdOf(f);
     if (!id || isGematcht(f)) return;
-    const reason =
-      prompt(`Reden afmelding voor ${name(f)}?`) ||
-      "Afmelding vanuit matchmaker fighter-overzicht";
+
+    const reasonInput = prompt(`Reden afmelding voor ${name(f)}?`);
+
+    // Bij Annuleren geeft prompt null terug. Dan NIET afmelden.
+    if (reasonInput === null) {
+      setMsg("Afmelden geannuleerd.");
+      return;
+    }
+
+    const reason = reasonInput.trim() || "Afmelding vanuit matchmaker fighter-overzicht";
 
     setBusyId(id);
     setBusyText("Afmelding verwerken...");

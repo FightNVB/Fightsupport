@@ -463,9 +463,10 @@ export default function SportschoolPage() {
     keurmerkDays !== null && keurmerkDays >= 0 && keurmerkDays <= 62;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(112,96,84,0.22),transparent_30rem),linear-gradient(180deg,#4a4641,#38342f_45%,#2d2a27)] px-3 py-4 text-white sm:px-5">
-      <div className="mx-auto max-w-7xl">
-        <section className="mb-4 overflow-hidden rounded-[1.6rem] border-[4px] border-[#d8d3cc] bg-[linear-gradient(135deg,#27211d,#141210_48%,#070707)] shadow-[0_0_0_1px_rgba(255,255,255,0.14),0_18px_45px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.18)]">
+    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
+      <style>{`.sportschool-silver-btn, .sportschool-silver-btn *{color:#000!important;}`}</style>
+      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
+        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] shadow-2xl">
           <div className="relative px-4 py-4 sm:px-5">
 
             <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center">
@@ -532,24 +533,7 @@ export default function SportschoolPage() {
                 <button
                   type="button"
                   onClick={() => router.push("/dashboard")}
-                  className="
-                    inline-flex
-                    items-center
-                    justify-center
-                    gap-2
-                    rounded-xl
-                    border-[3px]
-                    border-[#d8d3cc]
-                    bg-[linear-gradient(180deg,#ffffff,#d7d7d7_42%,#8f8f8f)]
-                    px-5
-                    py-2
-                    text-sm
-                    font-black
-                    text-black
-                    shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_4px_10px_rgba(0,0,0,0.45)]
-                    transition
-                    hover:brightness-110
-                  "
+                  className="sportschool-silver-btn inline-flex items-center justify-center gap-2 border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black"
                 >
                   <ArrowLeft size={17} />
                   Terug
@@ -599,9 +583,9 @@ export default function SportschoolPage() {
               bad
             />
           </div>
-        </section>
+        </header>
 
-        <section className="mb-4 rounded-[1.6rem] border-[4px] border-[#d8d3cc] bg-[linear-gradient(180deg,#4b4742,#393632)] p-3 shadow-[0_14px_35px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.12)]">
+        <section className="border-b border-zinc-700 bg-[#181818] p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex min-h-11 flex-1 items-center gap-3 rounded-2xl border-[3px] border-[#a59b92] bg-[#110f0e] px-4">
               <Search size={18} className="text-[#ff9a66]" />
@@ -652,8 +636,9 @@ export default function SportschoolPage() {
           )}
         </section>
 
-        <section className="overflow-hidden rounded-[1.6rem] border-[4px] border-[#d8d3cc] bg-[linear-gradient(180deg,#4a4641,#34312d)] shadow-[0_18px_45px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.12)]">
-          <div className="border-b border-[#b8afa6]/45 bg-[linear-gradient(90deg,#171411,#2b211b,#4b1f0e)] px-5 py-3">
+        <section className="p-4 pt-0">
+          <div className="overflow-hidden border border-zinc-600 bg-[#111] shadow-2xl">
+          <div className="border-b border-zinc-700 bg-[#252525] px-5 py-3">
             <div className="text-lg font-black text-white">Vechters</div>
             <div className="text-xs text-[#d1c3b7]">
               Duidelijk overzicht voor trainers: VA, nulmeting, licentie en
@@ -663,7 +648,7 @@ export default function SportschoolPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[980px] table-fixed text-sm">
               <thead>
-                <tr className="border-b border-[#b8afa6]/45 bg-[#241f1b] text-xs uppercase tracking-[0.14em] text-[#d8d0c8]">
+                <tr className="bg-[#252525] text-xs uppercase text-zinc-300">
                   <th className="w-[26%] px-3 py-3 text-left">Vechter</th>
                   <th className="w-[10%] px-3 py-3 text-left">VA</th>
                   <th className="w-[18%] px-3 py-3 text-left">Nulmeting</th>
@@ -705,7 +690,7 @@ export default function SportschoolPage() {
                         key={
                           f.id || `${f.sportschool_id}-${f.va_nummer}-${idx}`
                         }
-                        className="border-b border-white/10 odd:bg-[#0b0b0b] even:bg-[#161616] hover:bg-[#2a1c14]/70"
+                        className="border border-zinc-800 bg-[#171717] hover:bg-[#202020]"
                       >
                         <td className="px-3 py-2.5 align-middle">
                           <div className="truncate font-black text-[#ff6a2a]">
@@ -777,7 +762,7 @@ export default function SportschoolPage() {
                                 `/dashboard/sportscholen/vechters/${f.id}`,
                               )
                             }
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#ff7a3d]/55 bg-[#24170f] font-black text-[#ff9a66] transition hover:bg-[#3a2418]"
+                            className="sportschool-silver-btn inline-flex h-9 w-9 items-center justify-center border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 font-black !text-black transition hover:brightness-110"
                             title="Open profiel"
                           >
                             <Eye size={16} />
@@ -788,6 +773,8 @@ export default function SportschoolPage() {
                   })}
               </tbody>
             </table>
+          </div>
+
           </div>
 
           {!loading && filtered.length === 0 && (
@@ -805,8 +792,8 @@ export default function SportschoolPage() {
             </div>
           )}
         </section>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
 
