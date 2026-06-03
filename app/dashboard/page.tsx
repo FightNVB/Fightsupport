@@ -357,8 +357,7 @@ export default function DashboardPage() {
     isRootAdmin ||
     isAnySuperadmin ||
     isOtherBondAdmin ||
-    isMatchmaker ||
-    isHoofdofficial;
+    isMatchmaker;
   const canOpenSportscholen = isRootAdmin || isTrainerOrSportschool;
 
   const actions: PortalAction[] = [
