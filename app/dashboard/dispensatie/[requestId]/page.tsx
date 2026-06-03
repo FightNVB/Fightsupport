@@ -63,9 +63,12 @@ type AttachmentRow = {
 };
 
 function normStatus(s: any) {
-  const x = String(s ?? "").trim().toLowerCase();
+  const x = String(s ?? "")
+    .trim()
+    .toLowerCase();
   if (!x) return "open";
-  if (["open", "pending", "approved", "rejected", "tied", "closed"].includes(x)) return x;
+  if (["open", "pending", "approved", "rejected", "tied", "closed"].includes(x))
+    return x;
   return x;
 }
 
@@ -91,85 +94,107 @@ function fmtDateNL(d: string | null | undefined, withTime = false) {
   });
 }
 
-const pageBg: CSSProperties = {
-  minHeight: "100vh",
-  background:
-    "linear-gradient(180deg, #2b2b2b 0%, #202020 100%)",
-  color: "#fff",
-};
+function shortId(v: unknown) {
+  const s = String(v ?? "").trim();
+  if (!s) return "-";
+  if (s.length <= 12) return s;
+  return `${s.slice(0, 8)}…${s.slice(-4)}`;
+}
 
-const topShell: CSSProperties = {
-  border: "1px solid rgba(205,205,215,0.35)",
-  borderRadius: 0,
-  overflow: "hidden",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
-  boxShadow: "0 18px 40px rgba(0,0,0,0.34)",
-};
+function Badge({
+  children,
+  type = "default",
+}: {
+  children: React.ReactNode;
+  type?: string;
+}) {
+  const cls =
+    type === "ok"
+      ? "border-green-500/50 bg-green-500/10 text-green-300"
+      : type === "bad"
+        ? "border-red-500/50 bg-red-500/10 text-red-300"
+        : type === "warn"
+          ? "border-[#ff4d00]/70 bg-[#ff4d00]/10 text-[#ff7a33]"
+          : "border-zinc-600 bg-[#242424] text-zinc-200";
 
-const darkHeader: CSSProperties = {
-  background:
-    "linear-gradient(90deg, rgba(44,46,53,0.98) 0%, rgba(61,63,72,0.96) 26%, rgba(36,38,45,0.98) 50%, rgba(61,63,72,0.96) 74%, rgba(44,46,53,0.98) 100%)",
-  borderBottom: `2px solid ${NVB_ORANGE}`,
-};
-
-const silverButton: CSSProperties = {
-  background:
-    "linear-gradient(180deg, #f7f7f8 0%, #cacbd0 18%, #f2f2f3 48%, #9c9ea6 78%, #d8d9dd 100%)",
-  border: "1px solid rgba(88,91,100,0.9)",
-  color: "#16181d",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 3px 8px rgba(0,0,0,0.18)",
-};
-
-const orangeButton: CSSProperties = {
-  background: "linear-gradient(180deg, #ff6a00 0%, #ff4d00 58%, #bc3800 100%)",
-  border: "1px solid rgba(255,200,160,0.35)",
-  color: "#fff",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 14px rgba(255,77,0,0.22)",
-};
-
-const contentShell: CSSProperties = {
-  marginTop: 14,
-  borderRadius: 0,
-  overflow: "hidden",
-  background: "#121212",
-  border: "1px solid rgba(115,118,128,0.6)",
-  boxShadow: "0 16px 34px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.75)",
-};
-
-const lightHeaderCard: CSSProperties = {
-  borderRadius: 0,
-  border: "1px solid rgba(122,124,132,0.45)",
-  background: "#1c1c1c",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.78)",
-};
-
-const darkCard: CSSProperties = {
-  borderRadius: 0,
-  background: "linear-gradient(180deg, #10161d 0%, #060a10 100%)",
-  border: "1px solid rgba(176,180,190,0.14)",
-  boxShadow: "0 10px 22px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
-  color: "#fff",
-};
-
-const slimSilverFrame: CSSProperties = {
-  border: "1px solid rgba(125,128,138,0.82)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 4px 10px rgba(0,0,0,0.10)",
-};
-
-const inputStyle: CSSProperties = {
-  background: "rgba(255,255,255,0.97)",
-  border: "1px solid rgba(178,180,188,0.95)",
-  color: "#111",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92)",
-};
-
-function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <section style={darkCard} className={`p-4 md:p-5 ${className}`}>
+    <span
+      className={`inline-flex items-center border px-2.5 py-1 text-xs font-black uppercase tracking-wide ${cls}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function statusType(status: string) {
+  if (status === "approved") return "ok";
+  if (status === "rejected") return "bad";
+  if (status === "pending" || status === "open") return "warn";
+  return "default";
+}
+
+function SilverButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+function OrangeButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+function DarkPanel({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`border border-zinc-600 bg-[#171717] p-4 ${className}`}>
       {children}
     </section>
   );
 }
+
+const inputStyle: CSSProperties = {
+  background: "#ffffff",
+  border: "1px solid rgba(160,160,170,0.95)",
+  color: "#111827",
+  outline: "none",
+};
 
 export default function DispensatieDetailPage() {
   const params = useParams();
@@ -197,18 +222,29 @@ export default function DispensatieDetailPage() {
       const uid = auth?.user?.id ?? null;
       if (!uid) return setMyRole(null);
 
-      const { data: ur, error: urErr } = await supabase.from("user_roles").select("role_id").eq("user_id", uid);
+      const { data: ur, error: urErr } = await supabase
+        .from("user_roles")
+        .select("role_id")
+        .eq("user_id", uid);
       if (urErr) throw urErr;
 
-      const roleIds = (ur ?? []).map((r: any) => Number(r.role_id)).filter((n) => Number.isFinite(n));
+      const roleIds = (ur ?? [])
+        .map((r: any) => Number(r.role_id))
+        .filter((n) => Number.isFinite(n));
       if (!roleIds.length) return setMyRole(null);
 
-      const { data: roles, error: rErr } = await supabase.from("roles").select("id,name").in("id", roleIds);
+      const { data: roles, error: rErr } = await supabase
+        .from("roles")
+        .select("id,name")
+        .in("id", roleIds);
       if (rErr) throw rErr;
 
-      const names = (roles ?? []).map((r: any) => String(r.name ?? "").toLowerCase());
+      const names = (roles ?? []).map((r: any) =>
+        String(r.name ?? "").toLowerCase(),
+      );
       if (names.includes("superadmin")) return setMyRole("superadmin");
-      if (names.includes("dispensatie_admin")) return setMyRole("dispensatie_admin");
+      if (names.includes("dispensatie_admin"))
+        return setMyRole("dispensatie_admin");
       if (names.includes("admin")) return setMyRole("admin");
       return setMyRole(names[0] ?? null);
     } catch {
@@ -225,18 +261,22 @@ export default function DispensatieDetailPage() {
       const { data: r, error: rErr } = await supabase
         .from("dispensatie_requests")
         .select(
-          "id,status,matchmaking_id,partij_nr,bout_id,rule_code,controle_run_id,decision,decision_reason,decided_by,decided_at,created_at,updated_at"
+          "id,status,matchmaking_id,partij_nr,bout_id,rule_code,controle_run_id,decision,decision_reason,decided_by,decided_at,created_at,updated_at",
         )
         .eq("id", requestId)
         .single();
       if (rErr) throw rErr;
       setReqRow(r as any);
 
-      const mmId = (r as any)?.matchmaking_id ? String((r as any).matchmaking_id) : null;
+      const mmId = (r as any)?.matchmaking_id
+        ? String((r as any).matchmaking_id)
+        : null;
       if (mmId) {
         const { data: ups, error: uErr } = await supabase
           .from("matchmaking_uploads")
-          .select("matchmaking_id,evenement_naam,evenement_datum,uploaded_by,uploaded_at,promotor,matchmaker,hoofdofficial")
+          .select(
+            "matchmaking_id,evenement_naam,evenement_datum,uploaded_by,uploaded_at,promotor,matchmaker,hoofdofficial",
+          )
           .eq("matchmaking_id", mmId)
           .order("uploaded_at", { ascending: false })
           .limit(1);
@@ -264,7 +304,9 @@ export default function DispensatieDetailPage() {
 
       const { data: a, error: aErr } = await supabase
         .from("dispensatie_attachments")
-        .select("id,request_id,storage_path,original_filename,content_type,uploaded_by,uploaded_at")
+        .select(
+          "id,request_id,storage_path,original_filename,content_type,uploaded_by,uploaded_at",
+        )
         .eq("request_id", requestId)
         .order("uploaded_at", { ascending: false });
       if (aErr) throw aErr;
@@ -305,7 +347,10 @@ export default function DispensatieDetailPage() {
       setErr(null);
       const text = msgText.trim();
       if (!text) return;
-      await callApi("/api/dispensatie/message", { request_id: requestId, message: text });
+      await callApi("/api/dispensatie/message", {
+        request_id: requestId,
+        message: text,
+      });
       setMsgText("");
       await loadAll();
     } catch (e: any) {
@@ -316,7 +361,11 @@ export default function DispensatieDetailPage() {
   async function vote(v: "approve" | "reject") {
     try {
       setErr(null);
-      await callApi("/api/dispensatie/vote", { request_id: requestId, vote: v, note: voteNote || null });
+      await callApi("/api/dispensatie/vote", {
+        request_id: requestId,
+        vote: v,
+        note: voteNote || null,
+      });
       await loadAll();
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -326,10 +375,15 @@ export default function DispensatieDetailPage() {
   async function decide(decision: "approved" | "rejected") {
     try {
       setErr(null);
-      if (!isSuperadmin) throw new Error("Alleen superadmin kan definitief beslissen.");
+      if (!isSuperadmin)
+        throw new Error("Alleen superadmin kan definitief beslissen.");
       const reason = decideReason.trim();
       if (!reason) throw new Error("Reden is verplicht.");
-      await callApi("/api/dispensatie/decide", { request_id: requestId, decision, reason });
+      await callApi("/api/dispensatie/decide", {
+        request_id: requestId,
+        decision,
+        reason,
+      });
       setDecideReason("");
       await loadAll();
     } catch (e: any) {
@@ -341,15 +395,18 @@ export default function DispensatieDetailPage() {
     try {
       setErr(null);
       setUploading(true);
-      if (file.type !== "application/pdf") throw new Error("Alleen PDF toegestaan.");
+      if (file.type !== "application/pdf")
+        throw new Error("Alleen PDF toegestaan.");
 
       const safeName = file.name.replace(/[^\w.\-() ]+/g, "_");
       const path = `${requestId}/${Date.now()}_${safeName}`;
 
-      const { error: upErr } = await supabase.storage.from("dispensatie").upload(path, file, {
-        contentType: "application/pdf",
-        upsert: false,
-      });
+      const { error: upErr } = await supabase.storage
+        .from("dispensatie")
+        .upload(path, file, {
+          contentType: "application/pdf",
+          upsert: false,
+        });
       if (upErr) throw upErr;
 
       await callApi("/api/dispensatie/attachment-register", {
@@ -370,7 +427,9 @@ export default function DispensatieDetailPage() {
   async function openAttachment(a: AttachmentRow) {
     try {
       setErr(null);
-      const { data, error } = await supabase.storage.from("dispensatie").createSignedUrl(a.storage_path, 60 * 10);
+      const { data, error } = await supabase.storage
+        .from("dispensatie")
+        .createSignedUrl(a.storage_path, 60 * 10);
       if (error) throw error;
       if (!data?.signedUrl) throw new Error("Geen signed url.");
       window.open(data.signedUrl, "_blank");
@@ -399,317 +458,361 @@ export default function DispensatieDetailPage() {
 
   const mmId = reqRow?.matchmaking_id ?? null;
   const partijNr = reqRow?.partij_nr ?? null;
-  const partijDetailHref = mmId && partijNr != null ? `/dashboard/matchmaker/matchmaking/${mmId}/partij/${partijNr}` : "#";
+  const partijDetailHref =
+    mmId && partijNr != null
+      ? `/dashboard/matchmaker/matchmaking/${mmId}/partij/${partijNr}`
+      : "#";
   const controleHref = mmId ? `/dashboard/admin/controle/${mmId}` : "#";
+  const currentStatus = normStatus(reqRow?.status);
+  const decisionStatus = normStatus(reqRow?.decision);
 
   return (
-    <main style={pageBg}><style>{`.disp-silver-btn, .disp-silver-btn *{color:#000!important;}`}</style>
-      <div className="mx-auto max-w-[1600px] px-4 py-3 md:px-5 md:py-4">
-        <div style={topShell}>
-          <div style={darkHeader} className="px-4 py-4 md:px-6 md:py-5">
-            <div className="grid items-center gap-3 md:grid-cols-[1fr_auto_1fr]">
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => router.push("/dashboard/dispensatie")}
-                  className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black"
-                  style={silverButton}
-                >
-                  ← Overzicht
-                </button>
-                {mmId && partijNr != null ? (
-                  <Link href={partijDetailHref} className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black" style={silverButton}>
-                    Partij detail
-                  </Link>
-                ) : null}
-                {mmId ? (
-                  <Link href={controleHref} className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black" style={silverButton}>
-                    Controle
-                  </Link>
-                ) : null}
-              </div>
+    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
+      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
+        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#ff4d00]">
+                FightSupport Admin / Dispensatie
+              </p>
+              <h1 className="text-2xl font-black uppercase">
+                Dispensatie detail
+              </h1>
+              <p className="mt-1 break-all text-sm text-zinc-300">
+                {requestId || "-"}
+              </p>
+            </div>
 
-              <div className="flex justify-center">
-                <div className="text-xs font-black uppercase tracking-[0.25em] text-[#ff4d00]">FightSupport Admin</div>
-              </div>
-
-              <div className="flex items-center justify-start gap-3 md:justify-end">
-                <span className="disp-silver-btn inline-flex h-[38px] items-center border border-zinc-300 px-4 text-sm font-black uppercase !text-black" style={silverButton}>
-                  Rol: {myRole ?? "-"}
-                </span>
-              </div>
+            <div className="flex flex-wrap gap-2">
+              <SilverButton
+                onClick={() => router.push("/dashboard/dispensatie")}
+              >
+                ← Overzicht
+              </SilverButton>
+              {mmId && partijNr != null ? (
+                <LinkButton href={partijDetailHref}>Partij detail</LinkButton>
+              ) : null}
+              {mmId ? (
+                <LinkButton href={controleHref}>Controle</LinkButton>
+              ) : null}
+              <OrangeButton onClick={loadAll} disabled={loading}>
+                {loading ? "Laden..." : "Refresh"}
+              </OrangeButton>
             </div>
           </div>
+        </header>
 
-          <div style={contentShell}>
-            <div className="p-4 md:p-5">
-              <div style={lightHeaderCard} className="px-4 py-4 md:px-5 md:py-5">
-                <div className="grid items-center gap-3 md:grid-cols-[1fr_auto]">
-                  <div>
-                    <h1 className="text-2xl font-extrabold md:text-4xl" style={{ color: NVB_ORANGE }}>
-                      Dispensatie Detail
-                    </h1>
-                    <div className="mt-1 text-sm text-[#334155]">Aanvraag, stemmen en besluit</div>
-                    <div className="mt-1 text-xs text-[#64748b] break-all">{requestId || "-"}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <SmallStat label="Status" value={statusLabel(reqRow?.status)} status={normStatus(reqRow?.status)} />
-                    <SmallStat label="Votes" value={voteCounts.total} />
-                    <SmallStat label="Akkoord" value={voteCounts.approve} />
-                    <SmallStat label="Afkeur" value={voteCounts.reject} />
-                  </div>
+        <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-5">
+          <Stat
+            title="Status"
+            value={
+              <Badge type={statusType(currentStatus)}>
+                {statusLabel(reqRow?.status)}
+              </Badge>
+            }
+          />
+          <Stat title="Votes" value={voteCounts.total} />
+          <Stat title="Akkoord" value={voteCounts.approve} tone="ok" />
+          <Stat title="Afkeur" value={voteCounts.reject} tone="bad" />
+          <Stat title="Rol" value={myRole ?? "-"} />
+        </div>
+
+        {err && (
+          <div className="m-4 border border-red-500 bg-red-950/60 p-3 text-sm font-bold text-red-200">
+            {err}
+          </div>
+        )}
+
+        <div className="grid gap-4 p-4 xl:grid-cols-12">
+          <DarkPanel className="xl:col-span-4">
+            <PanelTitle title="Aanvraag" />
+            <div className="mt-3 space-y-2 text-sm text-zinc-100">
+              <InfoRow label="Partijnr" value={reqRow?.partij_nr ?? "-"} />
+              <InfoRow label="Rule" value={reqRow?.rule_code ?? "-"} />
+              <InfoRow label="Bout ID" value={reqRow?.bout_id ?? "-"} mono />
+              <InfoRow
+                label="Matchmaking"
+                value={reqRow?.matchmaking_id ?? "-"}
+                mono
+              />
+              <InfoRow
+                label="Laatste update"
+                value={fmtDateNL(reqRow?.updated_at, true)}
+              />
+            </div>
+          </DarkPanel>
+
+          <DarkPanel className="xl:col-span-5">
+            <PanelTitle title="Evenement" />
+            <div className="mt-3 grid gap-2 text-sm text-zinc-100 md:grid-cols-2">
+              <InfoRow
+                label="Evenement"
+                value={uploadRow?.evenement_naam ?? "-"}
+              />
+              <InfoRow
+                label="Datum"
+                value={fmtDateNL(uploadRow?.evenement_datum)}
+              />
+              <InfoRow
+                label="Matchmaker"
+                value={uploadRow?.matchmaker ?? "-"}
+              />
+              <InfoRow label="Promotor" value={uploadRow?.promotor ?? "-"} />
+              <InfoRow
+                label="Hoofdofficial"
+                value={uploadRow?.hoofdofficial ?? "-"}
+              />
+              <InfoRow
+                label="Upload"
+                value={fmtDateNL(uploadRow?.uploaded_at, true)}
+              />
+            </div>
+          </DarkPanel>
+
+          <DarkPanel className="xl:col-span-3">
+            <div className="flex items-center justify-between gap-2">
+              <PanelTitle title="PDF" />
+              <label className="cursor-pointer border border-[#ff4d00] bg-[#ff4d00] px-3 py-2 text-sm font-black uppercase !text-black">
+                {uploading ? "..." : "Upload"}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    e.currentTarget.value = "";
+                    if (f) uploadPdf(f);
+                  }}
+                  disabled={uploading}
+                />
+              </label>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {attachments.length === 0 ? (
+                <div className="text-sm text-zinc-400">Geen bijlagen.</div>
+              ) : (
+                attachments.slice(0, 5).map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => openAttachment(a)}
+                    className="block w-full border border-zinc-300 bg-white px-3 py-2 text-left text-sm font-bold !text-black hover:brightness-105"
+                    title={a.original_filename ?? a.storage_path}
+                  >
+                    <div className="truncate">
+                      {a.original_filename ??
+                        a.storage_path.split("/").pop() ??
+                        "PDF"}
+                    </div>
+                    <div className="mt-1 text-xs text-black/55">
+                      {fmtDateNL(a.uploaded_at, true)}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </DarkPanel>
+        </div>
+
+        <div className="grid gap-4 p-4 pt-0 xl:grid-cols-2">
+          <DarkPanel className="flex min-h-[340px] flex-col">
+            <PanelTitle title="Discussie" />
+            <div className="mt-3 flex-1 space-y-2 overflow-auto pr-1">
+              {messages.length === 0 ? (
+                <div className="border border-zinc-700 bg-[#202020] px-3 py-3 text-sm text-zinc-400">
+                  Nog geen berichten.
                 </div>
+              ) : (
+                messages.map((m, index) => (
+                  <div
+                    key={m.id}
+                    className="border px-3 py-2"
+                    style={{
+                      backgroundColor: index % 2 === 0 ? "#ffffff" : "#0f0f0f",
+                      color: index % 2 === 0 ? "#000000" : "#ffffff",
+                      borderColor: index % 2 === 0 ? "#d4d4d8" : "#3f3f46",
+                    }}
+                  >
+                    <div className="text-[11px] opacity-60">
+                      {shortId(m.user_id)}
+                    </div>
+                    <div className="mt-1 text-sm font-medium">{m.message}</div>
+                    <div className="mt-1 text-[11px] opacity-60">
+                      {fmtDateNL(m.created_at, true)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <input
+                value={msgText}
+                onChange={(e) => setMsgText(e.target.value)}
+                placeholder="Typ bericht..."
+                className="min-w-0 flex-1 px-3 py-2 text-sm"
+                style={inputStyle}
+              />
+              <OrangeButton onClick={postMessage}>Plaats</OrangeButton>
+            </div>
+          </DarkPanel>
+
+          <DarkPanel className="min-h-[340px]">
+            <PanelTitle title="Stemmen" />
+            <div className="mt-3 text-sm text-zinc-300">Notitie optioneel</div>
+            <textarea
+              value={voteNote}
+              onChange={(e) => setVoteNote(e.target.value)}
+              className="mt-2 w-full px-3 py-2 text-sm"
+              rows={4}
+              placeholder="Bijv. reden / toelichting..."
+              style={inputStyle}
+            />
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => vote("approve")}
+                className="border border-green-400 bg-green-700 px-4 py-2 text-sm font-black uppercase text-white"
+              >
+                Stem akkoord
+              </button>
+              <button
+                type="button"
+                onClick={() => vote("reject")}
+                className="border border-red-400 bg-red-800 px-4 py-2 text-sm font-black uppercase text-white"
+              >
+                Stem afkeur
+              </button>
+              <div className="ml-auto text-xs text-zinc-400">
+                Status wordt <b className="text-white">pending</b>
+              </div>
+            </div>
+
+            <div className="mt-4 border-t border-zinc-700 pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <PanelTitle title="Superadmin besluit" />
+                {reqRow?.decision ? (
+                  <Badge type={statusType(decisionStatus)}>
+                    {String(reqRow.decision).toUpperCase()}
+                  </Badge>
+                ) : null}
               </div>
 
-              {err ? (
-                <div className="mt-4  border border-red-200/60 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
-                  {err}
+              <textarea
+                value={decideReason}
+                onChange={(e) => setDecideReason(e.target.value)}
+                className="mt-3 w-full px-3 py-2 text-sm"
+                rows={3}
+                placeholder="Reden verplicht..."
+                style={inputStyle}
+              />
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <OrangeButton
+                  onClick={() => decide("approved")}
+                  disabled={!isSuperadmin}
+                >
+                  Definitief goed
+                </OrangeButton>
+                <SilverButton
+                  onClick={() => decide("rejected")}
+                  disabled={!isSuperadmin}
+                >
+                  Definitief afkeur
+                </SilverButton>
+                <SilverButton onClick={loadAll}>Refresh</SilverButton>
+              </div>
+
+              {reqRow?.decision ? (
+                <div className="mt-3 text-xs text-zinc-400">
+                  {reqRow.decision_reason ?? "-"} •{" "}
+                  {fmtDateNL(reqRow.decided_at, true)} •{" "}
+                  {shortId(reqRow.decided_by)}
                 </div>
               ) : null}
-
-              <div className="mt-4 grid gap-4 xl:grid-cols-12">
-                <Panel className="xl:col-span-4">
-                  <CardTitle title="Aanvraag" />
-                  <div className="mt-3 space-y-2 text-sm text-white/88">
-                    <InfoRow label="partijnr" value={reqRow?.partij_nr ?? "-"} />
-                    <InfoRow label="rule" value={reqRow?.rule_code ?? "-"} />
-                    <InfoRow label="bout_id" value={reqRow?.bout_id ?? "-"} mono />
-                    <InfoRow label="matchmaking_id" value={reqRow?.matchmaking_id ?? "-"} mono />
-                  </div>
-                </Panel>
-
-                <Panel className="xl:col-span-5">
-                  <CardTitle title="Evenement" />
-                  <div className="mt-3 grid gap-2 text-sm text-white/88 md:grid-cols-2">
-                    <InfoRow label="evenement" value={uploadRow?.evenement_naam ?? "-"} />
-                    <InfoRow label="datum" value={fmtDateNL(uploadRow?.evenement_datum)} />
-                    <InfoRow label="matchmaker" value={uploadRow?.matchmaker ?? "-"} />
-                    <InfoRow label="promotor" value={uploadRow?.promotor ?? "-"} />
-                    <InfoRow label="hoofdofficial" value={uploadRow?.hoofdofficial ?? "-"} />
-                    <InfoRow label="upload" value={fmtDateNL(uploadRow?.uploaded_at, true)} />
-                  </div>
-                </Panel>
-
-                <Panel className="xl:col-span-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <CardTitle title="PDF" />
-                    <label className="inline-flex cursor-pointer items-center  px-3 py-2 text-sm font-bold" style={orangeButton}>
-                      {uploading ? "..." : "Upload"}
-                      <input
-                        type="file"
-                        accept="application/pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0] ?? null;
-                          e.currentTarget.value = "";
-                          if (f) uploadPdf(f);
-                        }}
-                        disabled={uploading}
-                      />
-                    </label>
-                  </div>
-
-                  <div className="mt-3 space-y-2">
-                    {attachments.length === 0 ? (
-                      <div className="text-sm text-white/55">Geen bijlagen.</div>
-                    ) : (
-                      attachments.slice(0, 4).map((a) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          onClick={() => openAttachment(a)}
-                          className="block w-full  px-3 py-2 text-left text-sm font-semibold text-black hover:brightness-105"
-                          style={{ ...silverButton, ...slimSilverFrame }}
-                          title={a.original_filename ?? a.storage_path}
-                        >
-                          <div className="truncate">{a.original_filename ?? a.storage_path.split("/").pop() ?? "PDF"}</div>
-                          <div className="mt-1 text-xs text-black/55">{fmtDateNL(a.uploaded_at, true)}</div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </Panel>
-              </div>
-
-              <div className="mt-4 grid gap-4 xl:grid-cols-2 items-stretch">
-                <Panel className="h-full flex flex-col min-h-[320px]">
-                  <CardTitle title="Discussie" />
-                  <div className="mt-3 flex-1 overflow-auto space-y-2 pr-1">
-                    {messages.length === 0 ? (
-                      <div className=" border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/55">
-                        Nog geen berichten.
-                      </div>
-                    ) : (
-                      messages.map((m) => (
-                        <div key={m.id} className=" border border-white/10 bg-white/5 px-3 py-2">
-                          <div className="text-[11px] text-white/40">{m.user_id}</div>
-                          <div className="mt-1 text-sm font-medium text-white">{m.message}</div>
-                          <div className="mt-1 text-[11px] text-white/40">{fmtDateNL(m.created_at, true)}</div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="mt-3 flex gap-2">
-                    <input
-                      value={msgText}
-                      onChange={(e) => setMsgText(e.target.value)}
-                      placeholder="Typ bericht..."
-                      className="min-w-0 flex-1  px-3 py-2 text-sm outline-none"
-                      style={inputStyle}
-                    />
-                    <button type="button" onClick={postMessage} className=" px-4 py-2 text-sm font-bold" style={orangeButton}>
-                      Plaats
-                    </button>
-                  </div>
-                </Panel>
-
-                <Panel className="h-full flex flex-col min-h-[320px]">
-                  <CardTitle title="Stemmen" />
-                  <div className="mt-3 text-sm text-white/72">Notitie (optioneel)</div>
-                  <textarea
-                    value={voteNote}
-                    onChange={(e) => setVoteNote(e.target.value)}
-                    className="mt-2 w-full  px-3 py-2 text-sm outline-none"
-                    rows={4}
-                    placeholder="Bijv. reden / toelichting..."
-                    style={inputStyle}
-                  />
-
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => vote("approve")}
-                      className=" px-4 py-2 text-sm font-bold text-white"
-                      style={{
-                        background: "linear-gradient(180deg, #22c55e 0%, #16a34a 58%, #0c7a34 100%)",
-                        border: "1px solid rgba(170,255,200,0.28)",
-                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 6px 14px rgba(22,163,74,0.20)",
-                      }}
-                    >
-                      Stem akkoord
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => vote("reject")}
-                      className=" px-4 py-2 text-sm font-bold text-white"
-                      style={{
-                        background: "linear-gradient(180deg, #ef4444 0%, #dc2626 58%, #a31313 100%)",
-                        border: "1px solid rgba(255,190,190,0.24)",
-                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 6px 14px rgba(220,38,38,0.20)",
-                      }}
-                    >
-                      Stem afkeur
-                    </button>
-                    <div className="ml-auto text-xs text-white/56">status wordt <b className="text-white/80">pending</b></div>
-                  </div>
-
-                  <div className="mt-4 border-t border-white/10 pt-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <CardTitle title="Superadmin besluit" />
-                      {reqRow?.decision ? <StatusBadge status={String(reqRow.decision).toLowerCase()}>{String(reqRow.decision).toUpperCase()}</StatusBadge> : null}
-                    </div>
-                    <textarea
-                      value={decideReason}
-                      onChange={(e) => setDecideReason(e.target.value)}
-                      className="mt-3 w-full  px-3 py-2 text-sm outline-none"
-                      rows={3}
-                      placeholder="Reden (verplicht)..."
-                      style={inputStyle}
-                    />
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => decide("approved")}
-                        disabled={!isSuperadmin}
-                        className=" px-4 py-2 text-sm font-bold"
-                        style={isSuperadmin ? orangeButton : { ...silverButton, opacity: 0.5 }}
-                      >
-                        Definitief goed
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => decide("rejected")}
-                        disabled={!isSuperadmin}
-                        className=" px-4 py-2 text-sm font-bold"
-                        style={isSuperadmin ? { ...silverButton, ...slimSilverFrame } : { ...silverButton, opacity: 0.5 }}
-                      >
-                        Definitief afkeur
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => loadAll()}
-                        className="ml-auto  px-4 py-2 text-sm font-bold"
-                        style={{ ...silverButton, ...slimSilverFrame }}
-                      >
-                        Refresh
-                      </button>
-                    </div>
-
-                    {reqRow?.decision ? (
-                      <div className="mt-3 text-xs text-white/60">
-                        {reqRow.decision_reason ?? "-"} • {fmtDateNL(reqRow.decided_at, true)} • {reqRow.decided_by ?? "-"}
-                      </div>
-                    ) : null}
-                  </div>
-                </Panel>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between text-xs text-[#475569]">
-                <div>{loading ? "Laden..." : ""}</div>
-                <div>{reqRow?.updated_at ? `Laatste update: ${fmtDateNL(reqRow.updated_at, true)}` : ""}</div>
-              </div>
             </div>
-          </div>
+          </DarkPanel>
         </div>
-      </div>
+
+        <div className="px-4 pb-4 text-right text-xs text-zinc-500">
+          {loading
+            ? "Laden..."
+            : reqRow?.updated_at
+              ? `Laatste update: ${fmtDateNL(reqRow.updated_at, true)}`
+              : ""}
+        </div>
+      </section>
     </main>
   );
 }
 
-function CardTitle({ title }: { title: string }) {
-  return <h2 className="text-xl font-extrabold leading-none md:text-2xl">{title}</h2>;
+function LinkButton({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className="border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110"
+    >
+      {children}
+    </Link>
+  );
 }
 
-function InfoRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
+function PanelTitle({ title }: { title: string }) {
+  return (
+    <h2 className="text-xl font-black uppercase leading-none text-[#ff4d00]">
+      {title}
+    </h2>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
   return (
     <div className="flex gap-2">
-      <span className="w-[110px] shrink-0 text-white/50">{label}:</span>
-      <span className={`${mono ? "font-mono text-[13px]" : ""} break-all text-white`}>{value}</span>
+      <span className="w-[112px] shrink-0 text-zinc-400">{label}:</span>
+      <span
+        className={`${mono ? "font-mono text-[13px]" : ""} break-all text-white`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-function SmallStat({ label, value, status }: { label: string; value: React.ReactNode; status?: string }) {
+function Stat({
+  title,
+  value,
+  tone = "default",
+}: {
+  title: string;
+  value: React.ReactNode;
+  tone?: "ok" | "bad" | "default";
+}) {
+  const color =
+    tone === "ok"
+      ? "text-green-300"
+      : tone === "bad"
+        ? "text-red-300"
+        : "text-zinc-200";
   return (
-    <div className=" border border-[#aeb2bb] bg-white px-3 py-2 text-right shadow-sm">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{label}</div>
-      <div className="mt-1 flex justify-end">{status ? <StatusBadge status={status}>{value}</StatusBadge> : <span className="text-base font-extrabold text-[#111827]">{value}</span>}</div>
+    <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+      <div className={`truncate text-xl font-black ${color}`}>{value}</div>
+      <p className="text-xs uppercase text-zinc-400">{title}</p>
     </div>
-  );
-}
-
-function StatusBadge({ status, children }: { status: string; children: React.ReactNode }) {
-  let style: CSSProperties = {
-    background: "#eceff3",
-    border: "1px solid #c4c9d1",
-    color: "#334155",
-  };
-
-  if (status === "open" || status === "nieuw") {
-    style = { background: "#ffedd5", border: "1px solid #fdba74", color: "#c2410c" };
-  } else if (status === "pending") {
-    style = { background: "#fef3c7", border: "1px solid #fcd34d", color: "#92400e" };
-  } else if (status === "approved") {
-    style = { background: "#dcfce7", border: "1px solid #86efac", color: "#166534" };
-  } else if (status === "rejected") {
-    style = { background: "#fee2e2", border: "1px solid #fca5a5", color: "#991b1b" };
-  }
-
-  return (
-    <span className="inline-flex min-h-[24px] items-center border px-2 text-xs font-black uppercase tracking-[0.08em]" style={style}>
-      {children}
-    </span>
   );
 }

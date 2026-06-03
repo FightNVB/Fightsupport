@@ -50,6 +50,17 @@ type Contact = {
   sportschool?: School | null;
 };
 
+type ExistingTrainerUser = {
+  id: string;
+  email?: string | null;
+  full_name?: string | null;
+  role?: string | null;
+  roles?: string[] | null;
+  bondteam?: string | null;
+  active_sportschool_id?: string | number | null;
+  meekijk_sportschool_id?: string | number | null;
+};
+
 function contactSchoolId(c: Contact): string {
   const direct =
     c.sportschool_id ??
@@ -84,6 +95,39 @@ const LOGO_SRC = "/branding/fightsupport/fightsupport1.png";
 function clean(v: unknown, fallback = "—") {
   const s = String(v ?? "").trim();
   return s || fallback;
+}
+
+function normalizeRoleValue(v: unknown) {
+  return String(v ?? "").trim().toLowerCase();
+}
+
+function userHasTrainerOrSportschoolRole(u: ExistingTrainerUser) {
+  const directRole = normalizeRoleValue(u.role);
+  const roles = Array.isArray(u.roles) ? u.roles.map(normalizeRoleValue) : [];
+  return (
+    directRole === "trainer" ||
+    directRole === "sportschool" ||
+    roles.includes("trainer") ||
+    roles.includes("sportschool")
+  );
+}
+
+function userIsNotLinkedToSportschool(u: ExistingTrainerUser) {
+  return !String(u.active_sportschool_id ?? "").trim();
+}
+
+function contactRoleForUser(u: ExistingTrainerUser) {
+  const roles = Array.isArray(u.roles) ? u.roles.map(normalizeRoleValue) : [];
+  const directRole = normalizeRoleValue(u.role);
+  if (roles.includes("sportschool") || directRole === "sportschool") return "sportschool";
+  return "trainer";
+}
+
+function trainerUserLabel(u: ExistingTrainerUser) {
+  const name = String(u.full_name ?? "").trim();
+  const email = String(u.email ?? "").trim();
+  if (name && email) return `${name} • ${email}`;
+  return name || email || u.id;
 }
 
 function fmtDateTime(v?: string | null) {
@@ -358,6 +402,8 @@ export default function ContactpersonenFightcrewPage() {
   const [schools, setSchools] = useState<School[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [fighters, setFighters] = useState<Fighter[]>([]);
+  const [trainerUsers, setTrainerUsers] = useState<ExistingTrainerUser[]>([]);
+  const [selectedTrainerUserId, setSelectedTrainerUserId] = useState("");
   const [schoolQ, setSchoolQ] = useState("");
   const [contactQ, setContactQ] = useState("");
   const [selected, setSelected] = useState<School | null>(null);
@@ -436,6 +482,28 @@ export default function ContactpersonenFightcrewPage() {
     const json = await res.json().catch(() => ({}));
     if (!res.ok) return;
     setMeekijkSportschoolId(json.sportschool_id ? String(json.sportschool_id) : null);
+  }
+
+  async function loadExistingTrainerUsers() {
+    const res = await fetch(`/api/admin/users`, {
+      headers: await tokenHeaders(),
+      cache: "no-store",
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setTrainerUsers([]);
+      return;
+    }
+
+    const rows = Array.isArray(json.users) ? json.users : [];
+    setTrainerUsers(
+      rows
+        .filter(userHasTrainerOrSportschoolRole)
+        .filter(userIsNotLinkedToSportschool)
+        .sort((a: ExistingTrainerUser, b: ExistingTrainerUser) =>
+          trainerUserLabel(a).localeCompare(trainerUserLabel(b), "nl"),
+        ),
+    );
   }
 
   async function toggleMeekijkSportschool(sportschoolId: string | number) {
@@ -736,6 +804,67 @@ export default function ContactpersonenFightcrewPage() {
     }
   }
 
+
+  async function saveExistingTrainerUserContact() {
+    setMelding("");
+    if (!selected) return setMelding("Kies eerst een sportschool.");
+    if (!selectedTrainerUserId) return setMelding("Kies eerst een bestaande trainer-gebruiker.");
+
+    const trainerUser = trainerUsers.find((u) => u.id === selectedTrainerUserId);
+    if (!trainerUser) return setMelding("Trainer-gebruiker niet gevonden.");
+    if (!trainerUser.email) return setMelding("Deze trainer-gebruiker heeft geen e-mailadres.");
+
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/sportscholen/contactpersonen`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await tokenHeaders()),
+        },
+        body: JSON.stringify({
+          sportschool_id: selected.sportschool_id,
+          user_id: trainerUser.id,
+          naam: trainerUser.full_name?.trim() || trainerUser.email,
+          email: trainerUser.email.trim(),
+          rol: contactRoleForUser(trainerUser),
+          actief: true,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok)
+        throw new Error(json.error ?? "Bestaande gebruiker koppelen mislukt");
+
+      const profileRes = await fetch(`/api/admin/users`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await tokenHeaders()),
+        },
+        body: JSON.stringify({
+          id: trainerUser.id,
+          active_sportschool_id: String(selected.sportschool_id),
+        }),
+      });
+      const profileJson = await profileRes.json().catch(() => ({}));
+      if (!profileRes.ok) {
+        throw new Error(
+          profileJson.error ??
+            "Contactpersoon gekoppeld, maar user_profiles.active_sportschool_id bijwerken mislukt",
+        );
+      }
+
+      await loadContacts(selected.sportschool_id);
+      await loadExistingTrainerUsers();
+      setSelectedTrainerUserId("");
+      setMelding("Bestaande trainer/sportschool-gebruiker is gekoppeld aan deze sportschool.");
+    } catch (e: any) {
+      setMelding(e?.message ?? "Bestaande gebruiker koppelen mislukt");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openEditContact(contact: Contact) {
     setEditContact(contact);
     setEditNaam(String(contact.naam ?? ""));
@@ -798,6 +927,7 @@ export default function ContactpersonenFightcrewPage() {
     if (user && canAdmin) {
       searchSchools();
       loadMeekijkSportschool();
+      loadExistingTrainerUsers();
       setContacts([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -969,7 +1099,7 @@ export default function ContactpersonenFightcrewPage() {
                 lineHeight: 1.45,
               }}
             >
-              Koppel eerst de contactpersoon aan de echte FightPassport
+              Koppel eerst een bestaande trainer-gebruiker of handmatige contactpersoon aan de echte FightPassport
               sportschool-key. Daarna haal je de Fightcrew op, verrijk je de
               gevonden VA-nummers beperkt en verstuur je pas de trainer-login.
             </p>
@@ -1342,7 +1472,48 @@ export default function ContactpersonenFightcrewPage() {
                 </b>
                 <div style={{ display: "grid", gap: 10, marginTop: 13 }}>
                   <div>
-                    <div style={labelStyle}>Naam</div>
+                    <div style={labelStyle}>Bestaande trainer/sportschool-gebruiker zonder gym</div>
+                    <select
+                      style={inputStyle}
+                      value={selectedTrainerUserId}
+                      onChange={(e) => setSelectedTrainerUserId(e.target.value)}
+                      disabled={!selected || busy}
+                    >
+                      <option
+                        value=""
+                        style={{ background: "#ffffff", color: "#111827" }}
+                      >
+                        {trainerUsers.length
+                          ? "Kies bestaande gebruiker met rol trainer/sportschool"
+                          : "Geen vrije trainer/sportschool-gebruikers gevonden"}
+                      </option>
+                      {trainerUsers.map((u) => (
+                        <option
+                          key={u.id}
+                          value={u.id}
+                          style={{ background: "#ffffff", color: "#111827" }}
+                        >
+                          {trainerUserLabel(u)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    style={buttonBase}
+                    onClick={saveExistingTrainerUserContact}
+                    disabled={busy || !selected || !selectedTrainerUserId}
+                  >
+                    <Link2 size={16} /> Bestaande gebruiker koppelen
+                  </button>
+                  <div
+                    style={{
+                      height: 1,
+                      background: "rgba(255,255,255,.10)",
+                      margin: "4px 0",
+                    }}
+                  />
+                  <div>
+                    <div style={labelStyle}>Naam handmatig contact</div>
                     <input
                       style={inputStyle}
                       value={naam}

@@ -360,99 +360,99 @@ export default function OfficialsOvertredingenOverzichtPage() {
   const ernstigCount = filtered.filter((m) => ["hoog", "ernstig"].includes((m.ernst || "").toLowerCase())).length;
 
   return (
-    <main className="min-h-screen bg-[#171514] text-zinc-100 print:bg-white print:text-black">
-      <div className="mx-auto max-w-7xl px-4 py-4 print:max-w-none print:px-0 print:py-0">
-        <div className="no-print mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-2">
-            <Link href="/dashboard/officials" className={silverButton()}>
-              <ArrowLeft size={14} /> Terug naar officials
-            </Link>
-            <Link href="/dashboard/officials/overtreding-melden" className={darkButton()}>
-              <Plus size={14} /> Nieuwe melding
-            </Link>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href="/dashboard/officials/overtreding-melden/rapport" className={silverButton()}>
-              <FileText size={14} /> Rapport
-            </Link>
-            <button onClick={load} disabled={loading} className={darkButton()}>
-              <RefreshCw size={14} /> Verversen
-            </button>
-          </div>
-        </div>
-
-        <header className="no-print mb-4 overflow-hidden border border-zinc-500/50 bg-gradient-to-br from-[#2b2825] via-[#171514] to-[#101010] shadow-xl">
-          <div className="border-b border-orange-500/40 px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="mb-1 inline-flex items-center gap-2 border border-orange-500/50 bg-black/40 px-2 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">
-                  <ShieldAlert size={13} /> FightSupport Officials
+    <main className="min-h-screen px-4 py-6 print:bg-white print:px-0 print:py-0" style={{ background: "#eef0f3" }}>
+      <div className="mx-auto w-full max-w-[1650px] print:max-w-none">
+        <div className="no-print rounded-[32px] p-[6px]" style={{ background: "linear-gradient(180deg, #f8f8f8 0%, #d8d8d8 22%, #8f8f8f 55%, #f0f0f0 100%)", boxShadow: "0 0 0 1px rgba(255,255,255,0.7), 0 22px 70px rgba(0,0,0,0.9)" }}>
+          <div className="relative overflow-hidden rounded-[28px]" style={{ background: "linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)", border: "3px solid rgba(63,63,70,0.35)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)" }}>
+            <header className="px-6 py-5" style={{ background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)", borderBottom: "3px solid rgba(255,77,0,0.55)" }}>
+              <div className="grid grid-cols-1 items-center gap-4 xl:grid-cols-[1fr_auto_1fr]">
+                <div className="justify-self-start">
+                  <div className="font-extrabold uppercase" style={{ fontSize: 28, letterSpacing: "0.04em", color: "#ff4d00" }}>Officials · Overzicht meldingen</div>
+                  <div className="mt-1 max-w-2xl text-sm text-white/85">{canSeeAllBonds ? "NVB superadmin: alle bondteams zichtbaar." : `Meldingen die naar admin zijn gestuurd. Alleen meldingen van bondteam ${myBondteam || "-"}.`}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link href="/dashboard/officials" className={silverButton()}><ArrowLeft size={14} /> Terug naar officials</Link>
+                    <Link href="/dashboard/officials/overtreding-melden" className={darkButton()}><Plus size={14} /> Nieuwe melding</Link>
+                  </div>
                 </div>
-                <h1 className="text-xl font-black uppercase tracking-wide text-white">Overzicht meldingen</h1>
-                <p className="mt-1 max-w-3xl text-xs font-semibold text-zinc-300">
-                  {canSeeAllBonds ? "NVB superadmin: alle bondteams zichtbaar." : `Meldingen die naar admin zijn gestuurd. Alleen meldingen van bondteam ${myBondteam || "-"}.`}
-                </p>
+                <div className="justify-self-center"><div className="relative h-[90px] w-[260px]"><Image src={LOGO} alt="FightSupport" fill priority className="object-contain" sizes="260px" /></div></div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Link href="/dashboard/officials/overtreding-melden/rapport" className={silverButton()}><FileText size={14} /> Rapport</Link>
+                  <button onClick={load} disabled={loading} className={darkButton()}><RefreshCw size={14} /> Ververs</button>
+                </div>
               </div>
-              <div className="relative h-12 w-44">
-                <Image src={LOGO} alt="FightSupport" fill priority className="object-contain" sizes="176px" />
+            </header>
+
+            <div className="px-4 py-6 md:px-6">
+              <div className="grid gap-3 md:grid-cols-6">
+                {[
+                  ["Bondteam", myBondteam || "-"],
+                  ["Rol", myRole || roles?.join(", ") || "-"],
+                  ["Totaal", items.length],
+                  ["Gefilterd", filtered.length],
+                  ["Open/actief", openCount],
+                  ["Hoog/ernstig", ernstigCount],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-2xl border border-zinc-700/30 bg-[#242428] p-3 text-white shadow-inner">
+                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-white/60">{label}</div>
+                    <div className="mt-1 text-2xl font-black text-[#ff4d00]">{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {error ? <div className="mt-4 flex items-center gap-2 rounded-2xl border border-red-400/50 bg-red-950/90 p-4 text-sm font-bold text-red-100"><AlertTriangle size={16} /> {error}</div> : null}
+
+              <div className="mt-4 rounded-2xl border p-3" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(239,242,246,0.98) 100%)", borderColor: "rgba(90,90,95,0.22)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 24px rgba(0,0,0,0.08)" }}>
+                <div className="flex items-center gap-2">
+                  <Search size={17} className="text-[#ff4d00]" />
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoeken op naam, VA, categorie, status, melder..." className="h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-950 outline-none focus:border-[#ff4d00]" />
+                </div>
+              </div>
+
+              <div className="mt-5 overflow-hidden rounded-2xl" style={{ border: "2px solid rgba(230,230,230,0.55)", background: "linear-gradient(180deg, rgba(18,18,18,0.18) 0%, rgba(10,10,10,0.22) 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)" }}>
+                <div className="h-[3px]" style={{ background: "rgba(255,77,0,0.75)" }} />
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm">
+                    <thead style={{ background: "linear-gradient(180deg, #ff6a00 0%, #ff5400 100%)", color: "#fff", borderBottom: "2px solid rgba(255,255,255,0.35)" }}>
+                      <tr>
+                        <th className="px-3 py-2 text-left">Datum</th>
+                        <th className="px-3 py-2 text-left">Ingediend</th>
+                        <th className="px-3 py-2 text-left">Betrokkene</th>
+                        <th className="px-3 py-2 text-left">Categorie</th>
+                        <th className="px-3 py-2 text-left">Ernst</th>
+                        <th className="px-3 py-2 text-left">Status</th>
+                        <th className="px-3 py-2 text-left">Melder</th>
+                        <th className="px-3 py-2 text-left">Bondteam/bron</th>
+                        <th className="px-3 py-2 text-left">Omschrijving</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading ? (
+                        <tr><td colSpan={9} className="bg-white p-8 text-center font-bold text-zinc-500">Meldingen laden...</td></tr>
+                      ) : filtered.length === 0 ? (
+                        <tr><td colSpan={9} className="bg-white p-8 text-center font-bold text-zinc-500">Geen meldingen gevonden.</td></tr>
+                      ) : filtered.map((m, i) => {
+                        const zebra = i % 2 === 0;
+                        return (
+                          <tr key={m.id} style={{ backgroundColor: zebra ? "#ffffff" : "#0d0d0d", color: zebra ? "#000" : "#fff" }}>
+                            <td className="px-3 py-2 font-black">{fmtDate(datumOvertredingVan(m))}</td>
+                            <td className="px-3 py-2">{fmtDate(m.aangemaakt_op || m.gemeld_op || m.created_at)}</td>
+                            <td className="px-3 py-2"><div className="font-black" style={{ color: "#ff4d00" }}>{naamVan(m)}</div><div className="text-[11px] uppercase opacity-70">{typeVan(m)}{m.va_nummer ? ` · VA ${m.va_nummer}` : ""}</div></td>
+                            <td className="px-3 py-2">{m.categorie || "-"}</td>
+                            <td className="px-3 py-2"><span className="border border-orange-500/40 bg-orange-950/30 px-2 py-1 text-[10px] font-black uppercase text-orange-200">{m.ernst || "-"}</span></td>
+                            <td className="px-3 py-2"><span className={`border px-2 py-1 text-[10px] font-black uppercase ${statusClass(m.status)}`}>{m.status || "open"}</span></td>
+                            <td className="px-3 py-2"><div className="font-bold">{melderNaamVan(m)}</div><div className="text-[11px] opacity-70">{melderEmailVan(m) || melderRolVan(m) || "-"}</div></td>
+                            <td className="px-3 py-2"><div className="font-black" style={{ color: "#ff4d00" }}>{bondteamVan(m) || "Geen bondteam"}</div><div className="text-[11px] uppercase opacity-70">{bronVan(m) || "-"}</div></td>
+                            <td className="max-w-xl px-3 py-2">{tekstVan(m)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
-          <div className="grid gap-2 p-3 md:grid-cols-6">
-            <div className="border border-zinc-600/70 bg-black/35 p-2"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Bondteam</div><div className="mt-1 text-sm font-black text-orange-300">{myBondteam || "-"}</div></div>
-            <div className="border border-zinc-600/70 bg-black/35 p-2"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Rol</div><div className="mt-1 text-sm font-black text-orange-300">{myRole || roles?.join(", ") || "-"}</div></div>
-            <div className="border border-zinc-600/70 bg-black/35 p-2"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Totaal</div><div className="mt-1 text-sm font-black text-orange-300">{items.length}</div></div>
-            <div className="border border-zinc-600/70 bg-black/35 p-2"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Gefilterd</div><div className="mt-1 text-sm font-black text-white">{filtered.length}</div></div>
-            <div className="border border-zinc-600/70 bg-black/35 p-2"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Open/actief</div><div className="mt-1 text-sm font-black text-zinc-200">{openCount}</div></div>
-            <div className="border border-zinc-600/70 bg-black/35 p-2"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Hoog/ernstig</div><div className="mt-1 text-sm font-black text-zinc-200">{ernstigCount}</div></div>
-          </div>
-        </header>
-
-        {error ? <div className="no-print mb-3 flex items-center gap-2 border border-red-400/50 bg-red-950/40 p-3 text-sm font-bold text-red-100"><AlertTriangle size={16} /> {error}</div> : null}
-
-        <div className="no-print mb-3 flex items-center gap-2 border border-zinc-600 bg-black/40 px-3 py-1">
-          <Search size={15} className="text-orange-300" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoeken op naam, VA, categorie, status, melder..." className="w-full bg-transparent p-2 text-xs font-semibold text-white outline-none placeholder:text-zinc-500" />
         </div>
-
-        <section className="no-print overflow-hidden border border-orange-500/35 bg-[#211f1d] shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-xs">
-              <thead className="bg-black/60 text-[10px] uppercase tracking-wider text-orange-300">
-                <tr>
-                  <th className="border-b border-zinc-700 p-2 text-left">Datum</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Ingediend</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Betrokkene</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Categorie</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Ernst</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Status</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Melder</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Bondteam/bron</th>
-                  <th className="border-b border-zinc-700 p-2 text-left">Omschrijving</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={9} className="p-5 text-center font-bold text-zinc-300">Meldingen laden...</td></tr>
-                ) : filtered.length === 0 ? (
-                  <tr><td colSpan={9} className="p-5 text-center font-bold text-zinc-300">Geen meldingen gevonden.</td></tr>
-                ) : filtered.map((m) => (
-                  <tr key={m.id} className="border-b border-zinc-800 bg-black/20 hover:bg-black/35">
-                    <td className="p-2 font-black text-white">{fmtDate(datumOvertredingVan(m))}</td>
-                    <td className="p-2 text-zinc-300">{fmtDate(m.aangemaakt_op || m.gemeld_op || m.created_at)}</td>
-                    <td className="p-2"><div className="font-black text-white">{naamVan(m)}</div><div className="text-[10px] uppercase text-zinc-400">{typeVan(m)}{m.va_nummer ? ` · VA ${m.va_nummer}` : ""}</div></td>
-                    <td className="p-2 text-zinc-200">{m.categorie || "-"}</td>
-                    <td className="p-2"><span className="border border-orange-500/40 bg-orange-950/30 px-2 py-1 text-[10px] font-black uppercase text-orange-200">{m.ernst || "-"}</span></td>
-                    <td className="p-2"><span className={`border px-2 py-1 text-[10px] font-black uppercase ${statusClass(m.status)}`}>{m.status || "open"}</span></td>
-                    <td className="p-2"><div className="font-bold text-zinc-100">{melderNaamVan(m)}</div><div className="text-[10px] text-zinc-400">{melderEmailVan(m) || melderRolVan(m) || "-"}</div></td>
-                    <td className="p-2"><div className="font-black text-orange-200">{bondteamVan(m) || "Geen bondteam"}</div><div className="text-[10px] uppercase text-zinc-400">{bronVan(m) || "-"}</div></td>
-                    <td className="max-w-xl p-2 text-zinc-300">{tekstVan(m)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
     </main>
   );

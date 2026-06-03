@@ -11,13 +11,15 @@ const supabaseAdmin = createClient(
 );
 
 const KNOWN_ROLES = [
-  "Matchmaker",
-  "Official",
-  "Hoofdofficial",
-  "Admin",
-  "Promotor",
-  "Sportschool",
-  "Superadmin",
+  "superadmin",
+  "admin",
+  "promotor",
+  "matchmaker",
+  "official",
+  "hoofdofficial",
+  "dispensatie_admin",
+  "trainer",
+  "sportschool",
 ];
 
 function jsonError(message: string, status = 400) {
@@ -34,9 +36,15 @@ function normalizeEmail(v: unknown) {
 }
 
 function normalizeRole(value: unknown) {
-  const raw = String(value ?? "").trim();
-  const match = KNOWN_ROLES.find((r) => r.toLowerCase() === raw.toLowerCase());
-  return match ?? raw;
+  const raw = String(value ?? "").trim().toLowerCase();
+  return KNOWN_ROLES.includes(raw) ? raw : raw;
+}
+
+function normalizeRoles(value: unknown): string[] {
+  const input = Array.isArray(value) ? value : value ? [value] : [];
+  return Array.from(
+    new Set(input.map((r) => normalizeRole(r)).filter((r) => KNOWN_ROLES.includes(r)))
+  );
 }
 
 function getBaseUrl(req: Request) {
@@ -80,15 +88,25 @@ async function findAuthUserByEmail(email: string) {
   return null;
 }
 
-async function syncAuthMetadata(userId: string, profile: { full_name: string | null; role: string | null; bondteam: string | null }) {
+async function syncAuthMetadata(
+  userId: string,
+  profile: {
+    full_name: string | null;
+    role: string | null;
+    roles: string[];
+    bondteam: string | null;
+  }
+) {
   const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
     user_metadata: {
       full_name: profile.full_name,
       role: profile.role,
+      roles: profile.roles,
       bondteam: profile.bondteam,
     },
     app_metadata: {
       role: profile.role,
+      roles: profile.roles,
       bondteam: profile.bondteam,
     },
   });
@@ -96,38 +114,102 @@ async function syncAuthMetadata(userId: string, profile: { full_name: string | n
   if (error) throw error;
 }
 
-async function bestEffortSyncSingleRole(userId: string, role: string | null) {
-  // user_profiles.role is leidend. Deze sync is alleen voor oude code die nog via roles/user_roles kijkt.
-  // Fouten hier blokkeren de hoofdflow niet, zolang user_profiles goed staat.
-  try {
-    await supabaseAdmin.from("user_roles").delete().eq("user_id", userId);
+async function getRoleRowsByNames(roleNames: string[]) {
+  if (roleNames.length === 0) return [];
 
-    if (!role) return;
+  const { data, error } = await supabaseAdmin
+    .from("roles")
+    .select("id,name")
+    .in("name", roleNames);
 
-    const { data: roleRow, error: roleErr } = await supabaseAdmin
+  if (error) throw error;
+  return data ?? [];
+}
+
+async function getUserRoleNames(userId: string): Promise<string[]> {
+  const { data: userRoles, error: userRolesError } = await supabaseAdmin
+    .from("user_roles")
+    .select("role_id,role")
+    .eq("user_id", userId);
+
+  if (userRolesError) throw userRolesError;
+
+  const directRoles = (userRoles ?? [])
+    .map((r: any) => normalizeRole(r.role))
+    .filter((r) => KNOWN_ROLES.includes(r));
+
+  const roleIds = Array.from(
+    new Set(
+      (userRoles ?? [])
+        .map((r: any) => r.role_id)
+        .filter((id: any) => id !== null && id !== undefined)
+    )
+  );
+
+  let roleNamesFromIds: string[] = [];
+
+  if (roleIds.length > 0) {
+    const { data: roles, error: rolesError } = await supabaseAdmin
       .from("roles")
       .select("id,name")
-      .ilike("name", role)
-      .maybeSingle();
+      .in("id", roleIds);
 
-    if (roleErr || !roleRow?.id) return;
+    if (rolesError) throw rolesError;
 
-    await supabaseAdmin.from("user_roles").insert({
-      user_id: userId,
-      role_id: roleRow.id,
-    });
-  } catch (e) {
-    console.warn("bestEffortSyncSingleRole skipped:", e);
+    roleNamesFromIds = (roles ?? [])
+      .map((r: any) => normalizeRole(r.name))
+      .filter((r) => KNOWN_ROLES.includes(r));
   }
+
+  return Array.from(new Set([...roleNamesFromIds, ...directRoles]));
+}
+
+async function syncUserRoles(userId: string, roleNames: string[]) {
+  const cleanRoles = normalizeRoles(roleNames);
+
+  const { error: deleteError } = await supabaseAdmin
+    .from("user_roles")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteError) throw deleteError;
+
+  if (cleanRoles.length === 0) return [];
+
+  const roleRows = await getRoleRowsByNames(cleanRoles);
+  const foundNames = roleRows.map((r: any) => normalizeRole(r.name));
+  const missing = cleanRoles.filter((r) => !foundNames.includes(r));
+
+  if (missing.length > 0) {
+    throw new Error(`Onbekende rol(len): ${missing.join(", ")}`);
+  }
+
+  const inserts = roleRows.map((r: any) => ({
+    user_id: userId,
+    role_id: r.id,
+  }));
+
+  if (inserts.length > 0) {
+    const { error: insertError } = await supabaseAdmin
+      .from("user_roles")
+      .insert(inserts);
+
+    if (insertError) throw insertError;
+  }
+
+  return cleanRoles;
 }
 
 async function upsertProfile(input: {
   userId: string;
   email: string;
   full_name: string | null;
-  role: string;
+  roles: string[];
   bondteam: string | null;
 }) {
+  const roles = normalizeRoles(input.roles);
+  const primaryRole = roles[0] ?? "matchmaker";
+
   const { data, error } = await supabaseAdmin
     .from("user_profiles")
     .upsert(
@@ -135,24 +217,27 @@ async function upsertProfile(input: {
         id: input.userId,
         email: input.email,
         full_name: input.full_name,
-        role: input.role,
+        role: primaryRole,
+        active_role: primaryRole,
         bondteam: input.bondteam,
       },
       { onConflict: "id" }
     )
-    .select("id,email,full_name,role,bondteam,created_at")
+    .select("id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at")
     .single();
 
   if (error) throw error;
 
-  await bestEffortSyncSingleRole(input.userId, input.role);
+  const syncedRoles = await syncUserRoles(input.userId, roles);
+
   await syncAuthMetadata(input.userId, {
     full_name: input.full_name,
-    role: input.role,
+    role: primaryRole,
+    roles: syncedRoles,
     bondteam: input.bondteam,
   });
 
-  return data;
+  return { ...data, roles: syncedRoles };
 }
 
 export async function GET(req: Request) {
@@ -161,11 +246,27 @@ export async function GET(req: Request) {
   try {
     const { data, error } = await supabaseAdmin
       .from("user_profiles")
-      .select("id,email,full_name,role,bondteam,created_at")
+      .select("id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at")
       .order("email", { ascending: true });
 
     if (error) return jsonError(error.message, 500);
-    return NextResponse.json({ users: data ?? [] });
+
+    const rows = data ?? [];
+    const users = await Promise.all(
+      rows.map(async (u: any) => {
+        const roles = await getUserRoleNames(u.id).catch(() => []);
+        const fallbackRole = normalizeRole(u.role);
+        const finalRoles = roles.length > 0 ? roles : fallbackRole ? [fallbackRole] : [];
+        return {
+          ...u,
+          roles: finalRoles,
+          role: fallbackRole,
+          active_role: normalizeRole(u.active_role),
+        };
+      })
+    );
+
+    return NextResponse.json({ users });
   } catch (e: any) {
     if (e instanceof Response) return e;
     return jsonError(e?.message ?? "Server error", 500);
@@ -179,11 +280,12 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => null);
     const email = normalizeEmail(body?.email);
     const full_name = cleanString(body?.full_name);
-    const role = normalizeRole(body?.role || "Matchmaker");
+    const roles = normalizeRoles(body?.roles ?? body?.role ?? "matchmaker");
+    const role = roles[0] ?? "matchmaker";
     const bondteam = cleanString(body?.bondteam);
 
     if (!email) return jsonError("Email is verplicht", 400);
-    if (!role) return jsonError("Rol is verplicht", 400);
+    if (roles.length === 0) return jsonError("Minimaal één rol is verplicht", 400);
 
     const redirectTo = `${getBaseUrl(req)}/login/set`;
     let authUser = await findAuthUserByEmail(email);
@@ -193,7 +295,7 @@ export async function POST(req: Request) {
       const { data: invite, error: inviteErr } =
         await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
           redirectTo,
-          data: { full_name, role, bondteam },
+          data: { full_name, role, roles, bondteam },
         });
 
       if (inviteErr) return jsonError(inviteErr.message, 500);
@@ -207,7 +309,7 @@ export async function POST(req: Request) {
       userId: authUser.id,
       email,
       full_name,
-      role,
+      roles,
       bondteam,
     });
 
@@ -233,12 +335,27 @@ export async function PATCH(req: Request) {
     const id = cleanString(body?.id);
     if (!id) return jsonError("Missing id", 400);
 
+    const existingRoles = await getUserRoleNames(id);
+    const roles = "roles" in body ? normalizeRoles(body.roles) : existingRoles;
+    const primaryRole = roles[0] ?? normalizeRole(body?.role) ?? "matchmaker";
+
+    if ("roles" in body && roles.length === 0) {
+      return jsonError("Minimaal één rol is verplicht", 400);
+    }
+
     const patch: Record<string, any> = {};
     if ("full_name" in body) patch.full_name = cleanString(body.full_name);
-    if ("role" in body) patch.role = normalizeRole(body.role);
     if ("bondteam" in body) patch.bondteam = cleanString(body.bondteam);
+    if ("active_sportschool_id" in body) patch.active_sportschool_id = cleanString(body.active_sportschool_id);
+    if ("meekijk_sportschool_id" in body) patch.meekijk_sportschool_id = cleanString(body.meekijk_sportschool_id);
+    if ("roles" in body || "role" in body) {
+      patch.role = primaryRole;
+      patch.active_role = roles.includes(normalizeRole(body?.active_role))
+        ? normalizeRole(body.active_role)
+        : primaryRole;
+    }
 
-    if (Object.keys(patch).length === 0) {
+    if (Object.keys(patch).length === 0 && !("roles" in body)) {
       return jsonError("Geen wijzigingen ontvangen", 400);
     }
 
@@ -246,19 +363,21 @@ export async function PATCH(req: Request) {
       .from("user_profiles")
       .update(patch)
       .eq("id", id)
-      .select("id,email,full_name,role,bondteam,created_at")
+      .select("id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at")
       .single();
 
     if (error) return jsonError(error.message, 500);
 
-    await bestEffortSyncSingleRole(id, data.role ?? null);
+    const syncedRoles = "roles" in body ? await syncUserRoles(id, roles) : roles;
+
     await syncAuthMetadata(id, {
       full_name: data.full_name ?? null,
       role: data.role ?? null,
+      roles: syncedRoles,
       bondteam: data.bondteam ?? null,
     });
 
-    return NextResponse.json({ user: data });
+    return NextResponse.json({ user: { ...data, roles: syncedRoles } });
   } catch (e: any) {
     if (e instanceof Response) return e;
     return jsonError(e?.message ?? "Server error", 500);
@@ -278,8 +397,8 @@ export async function DELETE(req: Request) {
       const code = String(error?.code ?? "").toLowerCase();
 
       return (
-        code === "42p01" || // undefined_table
-        code === "42703" || // undefined_column
+        code === "42p01" ||
+        code === "42703" ||
         code === "pgrst204" ||
         msg.includes("does not exist") ||
         msg.includes("could not find") ||
@@ -297,7 +416,6 @@ export async function DELETE(req: Request) {
 
     const email = normalizeEmail(profileBeforeDelete?.email ?? body?.email);
 
-    // 1) Koppeltabel opruimen. Deze hoort te bestaan; fout hier wel tonen.
     const { error: roleErr } = await supabaseAdmin
       .from("user_roles")
       .delete()
@@ -309,17 +427,13 @@ export async function DELETE(req: Request) {
 
     if (roleErr) cleanupWarnings.push(`user_roles overgeslagen: ${roleErr.message}`);
 
-    // 2) Legacy public.users opruimen. In sommige versies heet de sleutel id,
-    // in andere user_id, en soms bestaat de tabel niet meer. Daarom best-effort.
     const legacyDeletes = [
       supabaseAdmin.from("users").delete().eq("id", id),
       supabaseAdmin.from("users").delete().eq("user_id", id),
     ];
 
     if (email) {
-      legacyDeletes.push(
-        supabaseAdmin.from("users").delete().eq("email", email)
-      );
+      legacyDeletes.push(supabaseAdmin.from("users").delete().eq("email", email));
     }
 
     for (const legacyDelete of legacyDeletes) {
@@ -330,7 +444,6 @@ export async function DELETE(req: Request) {
       }
     }
 
-    // 3) Profiel verwijderen. Deze hoort te bestaan; fout hier wel tonen.
     const { error: profileErr } = await supabaseAdmin
       .from("user_profiles")
       .delete()
@@ -340,11 +453,19 @@ export async function DELETE(req: Request) {
       return jsonError(`user_profiles verwijderen mislukt: ${profileErr.message}`, 500);
     }
 
-    // 4) Auth user verwijderen. Als die al weg is, is dat geen blocker.
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(id);
 
-    if (authErr && !String(authErr.message ?? "").toLowerCase().includes("not found")) {
-      return jsonError(`Auth user verwijderen mislukt: ${authErr.message}`, 500);
+    // Supabase Auth kan soms nog "Database error deleting user" teruggeven
+    // nadat de public-tabellen al netjes zijn opgeruimd. In dat geval willen we
+    // niet alsnog een 500 naar de UI sturen, want de beheeractie is praktisch
+    // afgerond. We geven de melding als warning terug zodat je hem nog kunt zien.
+    if (authErr) {
+      const authMessage = String(authErr.message ?? "");
+      const authMessageLower = authMessage.toLowerCase();
+
+      if (!authMessageLower.includes("not found")) {
+        cleanupWarnings.push(`Auth user cleanup melding: ${authMessage}`);
+      }
     }
 
     return NextResponse.json({

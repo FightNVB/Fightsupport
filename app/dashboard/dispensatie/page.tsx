@@ -4,7 +4,14 @@ import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { ArrowLeft, RefreshCcw, ShieldCheck, ClipboardList, Trash2, Scale } from "lucide-react";
+import {
+  ArrowLeft,
+  RefreshCcw,
+  ShieldCheck,
+  ClipboardList,
+  Trash2,
+  Scale,
+} from "lucide-react";
 
 const NVB_ORANGE = "#ff4d00";
 
@@ -25,7 +32,9 @@ function safeText(v: unknown) {
 }
 
 function normStatus(s: any) {
-  const x = String(s ?? "").trim().toLowerCase();
+  const x = String(s ?? "")
+    .trim()
+    .toLowerCase();
   if (x === "open") return "nieuw";
   if (x === "pending") return "pending";
   if (x === "afgehandeld") return "afgehandeld";
@@ -95,90 +104,118 @@ function isDispensatieRow(r: RequestRow) {
 
   if (exactBlockedCodes.has(code)) return false;
 
-  if (code === "DISPENSATIE_NODIG" || code === "GOEDGEKEURD_MET_DISPENSATIE" || code === "DISPENSATIE") {
+  if (
+    code === "DISPENSATIE_NODIG" ||
+    code === "GOEDGEKEURD_MET_DISPENSATIE" ||
+    code === "DISPENSATIE"
+  ) {
     return true;
   }
 
   return combined.includes("dispensatie");
 }
 
-const pageBg: CSSProperties = {
-  minHeight: "100vh",
-  background:
-    "linear-gradient(180deg, #2b2b2b 0%, #202020 100%)",
-  color: "#fff",
-};
+function Badge({
+  children,
+  type = "default",
+}: {
+  children: React.ReactNode;
+  type?: string;
+}) {
+  const cls =
+    type === "ok"
+      ? "border-green-500/50 bg-green-500/10 text-green-300"
+      : type === "bad"
+        ? "border-red-500/50 bg-red-500/10 text-red-300"
+        : type === "warn"
+          ? "border-[#ff4d00]/70 bg-[#ff4d00]/10 text-[#ff7a33]"
+          : "border-zinc-600 bg-[#242424] text-zinc-200";
 
-const topShell: CSSProperties = {
-  border: "1px solid rgba(205,205,215,0.35)",
-  borderRadius: 0,
-  overflow: "hidden",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
-  boxShadow: "0 18px 40px rgba(0,0,0,0.34)",
-};
+  return (
+    <span
+      className={`inline-flex items-center border px-2.5 py-1 text-xs font-black uppercase tracking-wide ${cls}`}
+    >
+      {children}
+    </span>
+  );
+}
 
-const darkHeader: CSSProperties = {
-  background:
-    "linear-gradient(90deg, rgba(44,46,53,0.98) 0%, rgba(61,63,72,0.96) 26%, rgba(36,38,45,0.98) 50%, rgba(61,63,72,0.96) 74%, rgba(44,46,53,0.98) 100%)",
-  borderBottom: `2px solid ${NVB_ORANGE}`,
-};
+function statusType(status: string) {
+  if (status === "afgehandeld") return "ok";
+  if (status === "pending") return "warn";
+  if (status === "nieuw" || status === "open") return "warn";
+  return "default";
+}
 
-const silverButton: CSSProperties = {
-  background:
-    "linear-gradient(180deg, #f7f7f8 0%, #cacbd0 18%, #f2f2f3 48%, #9c9ea6 78%, #d8d9dd 100%)",
-  border: "1px solid rgba(88,91,100,0.9)",
-  color: "#16181d",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 3px 8px rgba(0,0,0,0.18)",
-};
+function SilverButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
 
-const orangeButton: CSSProperties = {
-  background: "linear-gradient(180deg, #ff6a00 0%, #ff4d00 58%, #bc3800 100%)",
-  border: "1px solid rgba(255,200,160,0.35)",
-  color: "#fff",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 14px rgba(255,77,0,0.22)",
-};
+function OrangeButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
 
-const contentShell: CSSProperties = {
-  marginTop: 14,
-  borderRadius: 0,
-  overflow: "hidden",
-  background: "#121212",
-  border: "1px solid rgba(115,118,128,0.6)",
-  boxShadow: "0 16px 34px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.75)",
-};
+function MiniLink({
+  href,
+  label,
+  dark,
+}: {
+  href: string;
+  label: string;
+  dark?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`inline-block border px-3 py-1 text-xs font-black uppercase ${
+        dark
+          ? "border-zinc-300 bg-white !text-black"
+          : "border-zinc-400 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 !text-black"
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
 
-const lightHeaderCard: CSSProperties = {
-  borderRadius: 0,
-  border: "1px solid rgba(122,124,132,0.45)",
-  background: "#1c1c1c",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.78)",
-};
-
-const statCard: CSSProperties = {
-  borderRadius: 0,
-  background: "linear-gradient(180deg, #11171e 0%, #070b11 100%)",
-  border: "1px solid rgba(176,180,190,0.14)",
-  boxShadow: "0 8px 18px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.05)",
-};
-
-const iconBox: CSSProperties = {
-  width: 48,
-  height: 48,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  borderRadius: 0,
-  background: "linear-gradient(180deg, #ff6a00 0%, #ff4d00 58%, #b73900 100%)",
-  color: "#fff",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22), 0 6px 12px rgba(255,77,0,0.18)",
-};
-
-const tableShell: CSSProperties = {
-  borderRadius: 0,
-  overflow: "hidden",
-  border: "1px solid rgba(86,89,97,0.8)",
-  boxShadow: "0 16px 32px rgba(0,0,0,0.12)",
-};
+function csvCell(v: unknown) {
+  const s = String(v ?? "").replaceAll('"', '""');
+  return `"${s}"`;
+}
 
 export default function DispensatiePage() {
   const router = useRouter();
@@ -195,15 +232,26 @@ export default function DispensatiePage() {
       const uid = auth?.user?.id ?? null;
       if (!uid) return setMyRole(null);
 
-      const { data: ur } = await supabase.from("user_roles").select("role_id").eq("user_id", uid);
-      const roleIds = (ur ?? []).map((r: any) => Number(r.role_id)).filter(Number.isFinite);
+      const { data: ur } = await supabase
+        .from("user_roles")
+        .select("role_id")
+        .eq("user_id", uid);
+      const roleIds = (ur ?? [])
+        .map((r: any) => Number(r.role_id))
+        .filter(Number.isFinite);
       if (!roleIds.length) return setMyRole(null);
 
-      const { data: roles } = await supabase.from("roles").select("id,name").in("id", roleIds);
-      const names = (roles ?? []).map((r: any) => String(r.name ?? "").toLowerCase());
+      const { data: roles } = await supabase
+        .from("roles")
+        .select("id,name")
+        .in("id", roleIds);
+      const names = (roles ?? []).map((r: any) =>
+        String(r.name ?? "").toLowerCase(),
+      );
 
       if (names.includes("superadmin")) return setMyRole("superadmin");
-      if (names.includes("dispensatie_admin")) return setMyRole("dispensatie_admin");
+      if (names.includes("dispensatie_admin"))
+        return setMyRole("dispensatie_admin");
       if (names.includes("admin")) return setMyRole("admin");
       return setMyRole(names[0] ?? null);
     } catch {
@@ -247,7 +295,9 @@ export default function DispensatiePage() {
       setError(null);
       if (!canDelete) throw new Error("Geen rechten om te verwijderen.");
 
-      const ok = window.confirm("Dispensatie verwijderen? Dit kan niet ongedaan worden gemaakt.");
+      const ok = window.confirm(
+        "Dispensatie verwijderen? Dit kan niet ongedaan worden gemaakt.",
+      );
       if (!ok) return;
 
       const { data: sess } = await supabase.auth.getSession();
@@ -271,6 +321,29 @@ export default function DispensatiePage() {
     }
   }
 
+  function downloadCsv() {
+    const header = ["Status", "Evenement", "Datum", "Partij", "Rule / reden"];
+    const lines = rows.map((r) =>
+      [
+        statusLabel(r.status),
+        r.evenement_naam,
+        fmtDateNL(r.evenement_datum),
+        r.partij_nr,
+        ruleLabel(r),
+      ]
+        .map(csvCell)
+        .join(";"),
+    );
+    const csv = ["sep=;", header.map(csvCell).join(";"), ...lines].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "dispensatie-overzicht.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   useEffect(() => {
     getUserRole();
     load();
@@ -279,7 +352,12 @@ export default function DispensatiePage() {
   const rows = useMemo(() => allRows.filter(isDispensatieRow), [allRows]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { nieuw: 0, open: 0, pending: 0, afgehandeld: 0 };
+    const c: Record<string, number> = {
+      nieuw: 0,
+      open: 0,
+      pending: 0,
+      afgehandeld: 0,
+    };
     for (const r of rows) {
       const key = normStatus(r.status);
       c[key] = (c[key] ?? 0) + 1;
@@ -288,228 +366,181 @@ export default function DispensatiePage() {
   }, [rows]);
 
   return (
-    <main style={pageBg}><style>{`.disp-silver-btn, .disp-silver-btn *{color:#000!important;}`}</style>
-      <div className="mx-auto max-w-[1600px] px-4 py-3 md:px-5 md:py-4">
-        <div style={topShell}>
-          <div style={darkHeader} className="px-4 py-4 md:px-6 md:py-5">
-            <div className="grid items-center gap-3 md:grid-cols-[1fr_auto_1fr]">
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => router.push("/dashboard")}
-                  className="disp-silver-btn inline-flex h-[38px] items-center gap-2 border border-zinc-300 px-4 text-sm font-black uppercase !text-black"
-                  style={silverButton}
-                >
-                  <ArrowLeft size={16} strokeWidth={2.4} />
-                  Terug naar Menu
-                </button>
-                <button
-                  type="button"
-                  onClick={load}
-                  className="inline-flex h-[38px] items-center gap-2 border border-[#ff4d00] px-4 text-sm font-black uppercase !text-black"
-                  style={orangeButton}
-                >
-                  <RefreshCcw size={16} strokeWidth={2.4} />
-                  Ververs
-                </button>
-              </div>
+    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
+      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
+        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#ff4d00]">
+                FightSupport Admin / Dispensatie
+              </p>
+              <h1 className="text-2xl font-black uppercase">
+                Dispensatie overzicht
+              </h1>
+              <p className="mt-1 text-sm text-zinc-300">
+                Echte dispensatie-aanvragen vanuit de controleflow.
+              </p>
+            </div>
 
-              <div className="flex justify-center">
-                <div className="text-xs font-black uppercase tracking-[0.25em] text-[#ff4d00]">FightSupport Admin</div>
-              </div>
-
-              <div className="hidden md:block" />
+            <div className="flex flex-wrap gap-2">
+              <SilverButton onClick={() => router.push("/dashboard")}>
+                ← Terug naar menu
+              </SilverButton>
+              <OrangeButton onClick={load} disabled={loading}>
+                {loading ? "Laden..." : "Ververs"}
+              </OrangeButton>
+              <SilverButton onClick={downloadCsv} disabled={rows.length === 0}>
+                Excel download
+              </SilverButton>
             </div>
           </div>
+        </header>
 
-          <div style={contentShell}>
-            <div className="p-4 md:p-5">
-              <div style={lightHeaderCard} className="px-4 py-4 md:px-5 md:py-5">
-                <div className="grid items-center gap-3 xl:grid-cols-[1fr_auto]">
-                  <div>
-                    <h1 className="text-2xl font-extrabold md:text-4xl" style={{ color: NVB_ORANGE }}>
-                      Dispensatie Overzicht
-                    </h1>
-                    <div className="mt-1 text-sm text-[#334155]">Echte dispensatie-aanvragen vanuit controle</div>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    <StatCard icon={<ClipboardList size={20} strokeWidth={2.4} />} label="Nieuw" value={counts.nieuw + counts.open} />
-                    <StatCard icon={<ShieldCheck size={20} strokeWidth={2.4} />} label="Pending" value={counts.pending} />
-                    <StatCard icon={<Scale size={20} strokeWidth={2.4} />} label="Afgehandeld" value={counts.afgehandeld} />
-                    <StatCard icon={<ShieldCheck size={20} strokeWidth={2.4} />} label="Rol" value={myRole ?? "-"} />
-                  </div>
-                </div>
-              </div>
-
-              {error ? (
-                <div className="mt-4 rounded-[14px] border border-red-200/60 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
-                  {error}
-                </div>
-              ) : null}
-
-              <div className="mt-4" style={tableShell}>
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[linear-gradient(180deg,#131920_0%,#080c11_100%)] px-4 py-3 text-white">
-                  <div className="flex items-center gap-3">
-                    <div style={iconBox}>
-                      <ShieldCheck size={22} strokeWidth={2.4} />
-                    </div>
-                    <div>
-                      <div className="text-lg font-extrabold">Aanvragen</div>
-                      <div className="text-xs text-white/68">Compact overzicht met rustige zebra en subtiele zilveren randen</div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={load}
-                    className="disp-silver-btn inline-flex h-[38px] items-center gap-2 border border-zinc-300 px-4 text-sm font-black uppercase !text-black"
-                    style={silverButton}
-                  >
-                    <RefreshCcw size={14} strokeWidth={2.5} />
-                    Ververs lijst
-                  </button>
-                </div>
-
-                <div className="overflow-x-auto bg-white">
-                  <table className="min-w-[1020px] w-full border-collapse">
-                    <thead>
-                      <tr style={{ background: "linear-gradient(180deg, #ff6200 0%, #ff4d00 100%)" }}>
-                        <HeadCell>Status</HeadCell>
-                        <HeadCell>Evenement</HeadCell>
-                        <HeadCell>Datum</HeadCell>
-                        <HeadCell>Partij</HeadCell>
-                        <HeadCell>Rule / reden</HeadCell>
-                        <HeadCell>Acties</HeadCell>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loading ? (
-                        <tr>
-                          <BodyCell colSpan={6} muted>Laden...</BodyCell>
-                        </tr>
-                      ) : rows.length === 0 ? (
-                        <tr>
-                          <BodyCell colSpan={6} muted>Geen dispensatie-aanvragen.</BodyCell>
-                        </tr>
-                      ) : (
-                        rows.map((r, idx) => {
-                          const dark = idx % 2 === 1;
-                          return (
-                            <tr key={r.id} style={{ background: dark ? "#080808" : "#f3f3f5", color: dark ? "#fff" : "#111" }}>
-                              <BodyCell dark={dark}><StatusBadge status={normStatus(r.status)}>{statusLabel(r.status)}</StatusBadge></BodyCell>
-                              <BodyCell dark={dark}>{r.evenement_naam ?? "-"}</BodyCell>
-                              <BodyCell dark={dark}>{fmtDateNL(r.evenement_datum)}</BodyCell>
-                              <BodyCell dark={dark}>{r.partij_nr ?? "-"}</BodyCell>
-                              <BodyCell dark={dark}>{ruleLabel(r)}</BodyCell>
-                              <BodyCell dark={dark}>
-                                <div className="flex flex-wrap gap-2">
-                                  <MiniLink href={`/dashboard/dispensatie/${r.id}`} label="Stemmen" dark={dark} />
-                                  {r.matchmaking_id && r.partij_nr != null ? (
-                                    <MiniLink href={`/dashboard/matchmaker/matchmaking/${r.matchmaking_id}/partij/${r.partij_nr}`} label="Partij detail" dark={dark} />
-                                  ) : null}
-                                  {r.matchmaking_id ? (
-                                    <MiniLink href={`/dashboard/admin/controle/${r.matchmaking_id}`} label="Controle" dark={dark} />
-                                  ) : null}
-                                  {canDelete ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => deleteRequest(r.id)}
-                                      className="inline-flex h-[32px] items-center gap-2 border px-3 text-xs font-black uppercase"
-                                      style={dark ? { ...orangeButton, height: 36 } : { ...silverButton, height: 36, color: "#8c140c" }}
-                                    >
-                                      <Trash2 size={14} strokeWidth={2.4} />
-                                      Verwijder
-                                    </button>
-                                  ) : null}
-                                </div>
-                              </BodyCell>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="pt-4 text-center text-[11px] tracking-[0.22em] text-[#6b7280]">© FIGHTSUPPORT</div>
-            </div>
-          </div>
+        <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-4">
+          <Stat
+            title="Nieuw"
+            value={(counts.nieuw || 0) + (counts.open || 0)}
+            tone="warn"
+          />
+          <Stat title="Pending" value={counts.pending || 0} tone="warn" />
+          <Stat title="Afgehandeld" value={counts.afgehandeld || 0} tone="ok" />
+          <Stat title="Rol" value={myRole ?? "-"} tone="default" />
         </div>
-      </div>
+
+        {error && (
+          <div className="m-4 border border-red-500 bg-red-950/60 p-3 text-sm font-bold text-red-200">
+            {error}
+          </div>
+        )}
+
+        <div className="overflow-x-auto p-4">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-[#252525] text-left text-xs uppercase text-zinc-300">
+              <tr>
+                <th className="border border-zinc-700 p-2">Status</th>
+                <th className="border border-zinc-700 p-2">Evenement</th>
+                <th className="border border-zinc-700 p-2">Datum</th>
+                <th className="border border-zinc-700 p-2">Partij</th>
+                <th className="border border-zinc-700 p-2">Rule / reden</th>
+                <th className="border border-zinc-700 p-2 text-right">
+                  Acties
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {loading ? (
+                <tr className="bg-[#171717]">
+                  <td
+                    colSpan={6}
+                    className="border border-zinc-800 p-4 text-zinc-300"
+                  >
+                    Laden...
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr className="bg-[#171717]">
+                  <td
+                    colSpan={6}
+                    className="border border-zinc-800 p-4 text-zinc-300"
+                  >
+                    Geen dispensatie-aanvragen gevonden.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r, index) => {
+                  const dark = index % 2 === 1;
+                  const st = normStatus(r.status);
+                  return (
+                    <tr
+                      key={r.id}
+                      style={{
+                        backgroundColor: dark ? "#171717" : "#ffffff",
+                        color: dark ? "#ffffff" : "#000000",
+                      }}
+                    >
+                      <td className="border border-zinc-800 p-2">
+                        <Badge type={statusType(st)}>
+                          {statusLabel(r.status)}
+                        </Badge>
+                      </td>
+                      <td className="border border-zinc-800 p-2">
+                        <b style={{ color: NVB_ORANGE }}>
+                          {r.evenement_naam ?? "-"}
+                        </b>
+                      </td>
+                      <td className="border border-zinc-800 p-2">
+                        {fmtDateNL(r.evenement_datum)}
+                      </td>
+                      <td className="border border-zinc-800 p-2 font-bold">
+                        {r.partij_nr ?? "-"}
+                      </td>
+                      <td className="border border-zinc-800 p-2">
+                        {ruleLabel(r)}
+                      </td>
+                      <td className="border border-zinc-800 p-2 text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <MiniLink
+                            href={`/dashboard/dispensatie/${r.id}`}
+                            label="Stemmen"
+                            dark={dark}
+                          />
+                          {r.matchmaking_id && r.partij_nr != null ? (
+                            <MiniLink
+                              href={`/dashboard/matchmaker/matchmaking/${r.matchmaking_id}/partij/${r.partij_nr}`}
+                              label="Partij detail"
+                              dark={dark}
+                            />
+                          ) : null}
+                          {r.matchmaking_id ? (
+                            <MiniLink
+                              href={`/dashboard/admin/controle/${r.matchmaking_id}`}
+                              label="Controle"
+                              dark={dark}
+                            />
+                          ) : null}
+                          {canDelete ? (
+                            <button
+                              type="button"
+                              onClick={() => deleteRequest(r.id)}
+                              className="inline-flex border border-red-400 bg-red-900 px-3 py-1 text-xs font-black uppercase text-white"
+                            >
+                              <Trash2 size={14} /> Verwijder
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   );
 }
 
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
+function Stat({
+  title,
+  value,
+  tone,
+}: {
+  title: string;
+  value: React.ReactNode;
+  tone: "ok" | "warn" | "default";
+}) {
+  const color =
+    tone === "ok"
+      ? "text-green-300"
+      : tone === "warn"
+        ? "text-[#ff4d00]"
+        : "text-zinc-200";
   return (
-    <div style={statCard} className="min-w-[170px] p-3">
-      <div className="flex items-center gap-3">
-        <div style={iconBox}>{icon}</div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-white/65">{label}</div>
-          <div className="mt-1 truncate text-2xl font-extrabold text-white">{value}</div>
-        </div>
-      </div>
+    <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+      <b className={`block truncate text-xl ${color}`}>{value}</b>
+      <p className="text-xs uppercase text-zinc-400">{title}</p>
     </div>
-  );
-}
-
-function HeadCell({ children }: { children: React.ReactNode }) {
-  return (
-    <th className="px-4 py-3 text-left text-sm font-extrabold text-white" style={{ borderRight: "1px solid rgba(255,255,255,0.24)" }}>
-      {children}
-    </th>
-  );
-}
-
-function BodyCell({ children, colSpan, muted = false, dark = false }: { children: React.ReactNode; colSpan?: number; muted?: boolean; dark?: boolean }) {
-  return (
-    <td
-      colSpan={colSpan}
-      className="px-4 py-3 align-middle text-sm"
-      style={{
-        borderTop: dark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(0,0,0,0.08)",
-        borderRight: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.08)",
-        color: muted ? (dark ? "rgba(255,255,255,0.68)" : "#6b7280") : undefined,
-      }}
-    >
-      {children}
-    </td>
-  );
-}
-
-function MiniLink({ href, label, dark = false }: { href: string; label: string; dark?: boolean }) {
-  return (
-    <Link
-      href={href}
-      className="disp-silver-btn inline-flex h-[32px] items-center border border-zinc-300 px-3 text-xs font-black uppercase !text-black"
-      style={
-        dark
-          ? { background: "#ffffff", border: "1px solid rgba(255,255,255,0.92)", color: "#111" }
-          : { background: "#ffffff", border: "1px solid rgba(125,128,138,0.8)", color: "#111" }
-      }
-    >
-      {label}
-    </Link>
-  );
-}
-
-function StatusBadge({ status, children }: { status: string; children: React.ReactNode }) {
-  let style: CSSProperties = { background: "#eceff3", border: "1px solid #c4c9d1", color: "#d4d4d8" };
-
-  if (status === "nieuw" || status === "open") {
-    style = { background: "#ffedd5", border: "1px solid #fdba74", color: "#c2410c" };
-  } else if (status === "pending") {
-    style = { background: "#fef3c7", border: "1px solid #fcd34d", color: "#92400e" };
-  } else if (status === "afgehandeld") {
-    style = { background: "#dcfce7", border: "1px solid #86efac", color: "#166534" };
-  }
-
-  return (
-    <span className="inline-flex min-h-[24px] items-center border px-2 text-[11px] font-black uppercase tracking-[0.08em]" style={style}>
-      {children}
-    </span>
   );
 }

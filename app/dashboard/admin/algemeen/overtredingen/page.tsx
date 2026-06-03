@@ -1,8 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, BadgeCheck, Gavel, Inbox, Plus, Search, ShieldAlert, UserRound } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode, type FormEvent } from "react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  BadgeCheck,
+  Gavel,
+  Inbox,
+  Plus,
+  Search,
+  ShieldAlert,
+  UserRound,
+} from "lucide-react";
 
 type DisciplineCase = {
   [key: string]: any;
@@ -41,19 +51,13 @@ type DisciplineCase = {
   gemeld_op?: string | null;
 };
 
+const NVB_ORANGE = "#ff4d00";
 const BETROKKENEN = ["matchmaker", "vechter", "official", "sportschool", "bondteam", "anders"];
 const TYPES = ["overtreding", "waarschuwing", "notitie", "maatregel"];
 const ERNST = ["laag", "middel", "hoog", "ernstig"];
 
 function cls(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
-}
-
-function badgeClass(value: string) {
-  if (["ernstig", "hoog", "open"].includes(value)) return "border-red-400/40 bg-red-950/50 text-red-100";
-  if (["middel", "in_behandeling"].includes(value)) return "border-orange-400/50 bg-orange-950/40 text-orange-100";
-  if (["afgerond", "laag"].includes(value)) return "border-emerald-400/40 bg-emerald-950/40 text-emerald-100";
-  return "border-zinc-500/50 bg-zinc-900 text-zinc-200";
 }
 
 function clean(v: unknown) {
@@ -77,15 +81,27 @@ function bronVan(item: DisciplineCase) {
 }
 
 function melderRolVan(item: DisciplineCase) {
-  return norm(pick(item, [
-    "gemeld_door_role", "gemeld_door_rol", "melder_rol", "melder_role",
-    "aangemaakt_door_role", "aangemaakt_door_rol", "MELDER_ROL", "MELDER_ROLE",
-    "GEMELD_DOOR_ROLE", "GEMELD_DOOR_ROL"
-  ]));
+  return norm(
+    pick(item, [
+      "gemeld_door_role",
+      "gemeld_door_rol",
+      "melder_rol",
+      "melder_role",
+      "aangemaakt_door_role",
+      "aangemaakt_door_rol",
+      "MELDER_ROL",
+      "MELDER_ROLE",
+      "GEMELD_DOOR_ROLE",
+      "GEMELD_DOOR_ROL",
+    ])
+  );
 }
 
 function melderNaamVan(item: DisciplineCase) {
-  return clean(pick(item, ["gemeld_door_naam", "melder_naam", "aangemaakt_door_naam", "MELDER_NAAM", "GEMELD_DOOR_NAAM"])) || "Official";
+  return (
+    clean(pick(item, ["gemeld_door_naam", "melder_naam", "aangemaakt_door_naam", "MELDER_NAAM", "GEMELD_DOOR_NAAM"])) ||
+    "Official"
+  );
 }
 
 function melderEmailVan(item: DisciplineCase) {
@@ -93,26 +109,29 @@ function melderEmailVan(item: DisciplineCase) {
 }
 
 function melderBondteamVan(item: DisciplineCase) {
-  return clean(pick(item, ["gemeld_door_bondteam", "melder_bondteam", "aangemaakt_door_bondteam", "MELDER_BONDTEAM", "GEMELD_DOOR_BONDTEAM"]));
+  return clean(
+    pick(item, ["gemeld_door_bondteam", "melder_bondteam", "aangemaakt_door_bondteam", "MELDER_BONDTEAM", "GEMELD_DOOR_BONDTEAM"])
+  );
 }
 
 function officialMetaText(item: DisciplineCase) {
-  return norm([
-    bronVan(item),
-    melderRolVan(item),
-    pick(item, ["gemeld_door_user_id", "GEMELD_DOOR_USER_ID"]),
-    pick(item, ["gemeld_door_naam", "melder_naam", "MELDER_NAAM"]),
-    pick(item, ["gemeld_door_email", "melder_email", "MELDER_EMAIL"]),
-    item.interne_notitie,
-    item.omschrijving,
-  ].join(" "));
+  return norm(
+    [
+      bronVan(item),
+      melderRolVan(item),
+      pick(item, ["gemeld_door_user_id", "GEMELD_DOOR_USER_ID"]),
+      pick(item, ["gemeld_door_naam", "melder_naam", "MELDER_NAAM"]),
+      pick(item, ["gemeld_door_email", "melder_email", "MELDER_EMAIL"]),
+      item.interne_notitie,
+      item.omschrijving,
+    ].join(" ")
+  );
 }
 
 function isOfficialMelding(item: DisciplineCase) {
   const bron = bronVan(item);
   const rol = melderRolVan(item);
   const meta = officialMetaText(item);
-
   return (
     bron === "official" ||
     bron === "official_melding" ||
@@ -131,7 +150,6 @@ function isMatchmakerMelding(item: DisciplineCase) {
   const bron = bronVan(item);
   const rol = melderRolVan(item);
   const meta = officialMetaText(item);
-
   return (
     bron === "matchmaker" ||
     bron === "matchmaker_melding" ||
@@ -147,8 +165,86 @@ function isAdminDossier(item: DisciplineCase) {
   return !isOfficialMelding(item) && !isMatchmakerMelding(item);
 }
 
-const silverButton =
-  "inline-flex items-center justify-center gap-2 border border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 px-4 py-3 text-sm font-black uppercase !text-[#11100f] shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_10px_24px_rgba(0,0,0,0.35)] hover:from-white hover:via-zinc-200 hover:to-zinc-400 disabled:cursor-not-allowed disabled:opacity-60";
+function fmtDate(v: string | null | undefined) {
+  if (!v) return "-";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString("nl-NL");
+}
+
+function badgeTone(value: string) {
+  const v = String(value ?? "").toLowerCase();
+  if (["ernstig", "hoog", "open"].includes(v)) return "bad";
+  if (["middel", "in_behandeling"].includes(v)) return "warn";
+  if (["afgerond", "laag"].includes(v)) return "ok";
+  return "default";
+}
+
+function StatusBadge({ value }: { value: string }) {
+  const tone = badgeTone(value);
+  const clsName =
+    tone === "bad"
+      ? "border-red-500/60 bg-red-500/15 text-red-300"
+      : tone === "warn"
+        ? "border-[#ff4d00]/70 bg-[#ff4d00]/10 text-[#ff7a33]"
+        : tone === "ok"
+          ? "border-green-500/50 bg-green-500/10 text-green-300"
+          : "border-zinc-600 bg-zinc-800 text-zinc-200";
+  return <span className={`inline-flex border px-2 py-0.5 text-[11px] font-black uppercase ${clsName}`}>{value || "-"}</span>;
+}
+
+function StatBox({ label, value, active, onClick }: { label: string; value: number; active?: boolean; onClick?: () => void }) {
+  const inner = (
+    <div
+      className={cls(
+        "border p-3 text-left shadow-sm",
+        active ? "border-[#ff4d00] bg-[#ff4d00]/10" : "border-zinc-600 bg-[#1c1c1c]"
+      )}
+    >
+      <b className="text-2xl text-[#ff4d00]">{value}</b>
+      <p className="mt-1 text-xs font-black uppercase tracking-wide text-zinc-400">{label}</p>
+    </div>
+  );
+  if (!onClick) return inner;
+  return <button type="button" onClick={onClick} className="block w-full">{inner}</button>;
+}
+
+function SilverLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center justify-center gap-2 border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110"
+    >
+      {children}
+    </Link>
+  );
+}
+
+function SilverButton({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center gap-2 border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+function OrangeButton({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center gap-2 border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
 
 export default function OvertredingenPage() {
   const [cases, setCases] = useState<DisciplineCase[]>([]);
@@ -175,9 +271,6 @@ export default function OvertredingenPage() {
   });
 
   async function enrichCaseDetail(item: DisciplineCase): Promise<DisciplineCase> {
-    // De lijst-API geeft bij sommige dossiers niet alle melder/bron-velden terug,
-    // terwijl de detailpagina ze wel toont. Daarom halen we per dossier veilig de detail op
-    // en mergen we die metadata terug voor de juiste tab-indeling.
     try {
       const res = await fetch(`/api/admin/discipline/cases/${item.id}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
@@ -193,20 +286,23 @@ export default function OvertredingenPage() {
     setLoading(true);
     setError("");
     const params = new URLSearchParams();
-    // Bron-filter doen we client-side, omdat oude en nieuwe meldingen verschillende velden gebruiken:
-    // bron=official, bron_type=official_melding, melder_rol=Official of gemeld_door_*.
     params.set("status", status);
     params.set("betrokkene_type", betrokkeneType);
     if (q.trim()) params.set("q", q.trim());
 
-    const res = await fetch(`/api/admin/discipline/cases?${params.toString()}`, { cache: "no-store" });
-    const json = await res.json();
-    if (!json.ok) setError(json.error || "Kon dossiers niet laden.");
-
-    const baseCases: DisciplineCase[] = json.cases || [];
-    const enriched = await Promise.all(baseCases.map((item) => enrichCaseDetail(item)));
-    setCases(enriched);
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/admin/discipline/cases?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!json.ok) setError(json.error || "Kon dossiers niet laden.");
+      const baseCases: DisciplineCase[] = json.cases || [];
+      const enriched = await Promise.all(baseCases.map((item) => enrichCaseDetail(item)));
+      setCases(enriched);
+    } catch (e: any) {
+      setError(e?.message ?? "Kon dossiers niet laden.");
+      setCases([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -231,283 +327,224 @@ export default function OvertredingenPage() {
     return cases;
   }, [cases, bronFilter]);
 
-  async function createCase(e: React.FormEvent) {
+  async function createCase(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError("");
-
-    const res = await fetch("/api/admin/discipline/cases", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...form,
-        va_nummer: form.va_nummer || null,
-        matchmaking_id: form.matchmaking_id || null,
-        event_id: form.event_id || null,
-        bout_id: form.bout_id || null,
-      }),
-    });
-    const json = await res.json();
-    setSaving(false);
-
-    if (!json.ok) {
-      setError(json.error || "Opslaan mislukt.");
-      return;
+    try {
+      const res = await fetch("/api/admin/discipline/cases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          va_nummer: form.va_nummer || null,
+          matchmaking_id: form.matchmaking_id || null,
+          event_id: form.event_id || null,
+          bout_id: form.bout_id || null,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!json.ok) {
+        setError(json.error || "Opslaan mislukt.");
+        return;
+      }
+      setShowForm(false);
+      setForm({
+        type: "overtreding",
+        betrokkene_type: "matchmaker",
+        naam: "",
+        va_nummer: "",
+        categorie: "",
+        ernst: "laag",
+        omschrijving: "",
+        interne_notitie: "",
+        matchmaking_id: "",
+        event_id: "",
+        bout_id: "",
+      });
+      await load();
+    } finally {
+      setSaving(false);
     }
-
-    setShowForm(false);
-    setForm({
-      type: "overtreding",
-      betrokkene_type: "matchmaker",
-      naam: "",
-      va_nummer: "",
-      categorie: "",
-      ernst: "laag",
-      omschrijving: "",
-      interne_notitie: "",
-      matchmaking_id: "",
-      event_id: "",
-      bout_id: "",
-    });
-    await load();
   }
 
   return (
-    <main className="min-h-screen bg-[#171514] text-zinc-100">
-      <div className="mx-auto max-w-7xl px-5 py-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <Link href="/dashboard/admin/beheer" className={silverButton}>
-            <ArrowLeft size={16} /> Terug naar admin/beheer
-          </Link>
-          <Link href="/dashboard/admin/algemeen" className="inline-flex items-center justify-center gap-2 border border-zinc-500 bg-[#211f1d] px-4 py-3 text-sm font-black uppercase text-zinc-200 hover:border-orange-400">
-            Terug naar admin/algemeen
-          </Link>
-        </div>
-
-        <header className="mb-6 overflow-hidden border border-zinc-500/40 bg-gradient-to-br from-[#2a2724] via-[#161514] to-black shadow-2xl">
-          <div className="border-b border-orange-500/40 px-6 py-5">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <div className="mb-2 inline-flex items-center gap-2 border border-orange-500/50 bg-black/40 px-3 py-1 text-xs font-black uppercase tracking-[0.24em] text-orange-300">
-                  <ShieldAlert size={15} /> FightSupport Admin
-                </div>
-                <h1 className="text-3xl font-black uppercase tracking-wide text-white">Dossiers & Sancties</h1>
-                <p className="mt-2 max-w-3xl text-sm text-zinc-300">
-                  Registreer overtredingen, waarschuwingen, notities, sancties en vervolgstappen voor matchmakers, vechters en officials.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowForm((v) => !v)}
-                className="inline-flex items-center gap-2 border border-zinc-300 bg-gradient-to-b from-zinc-100 to-zinc-500 px-4 py-3 text-sm font-black uppercase text-black shadow-lg hover:from-white hover:to-zinc-400"
-              >
-                <Plus size={18} /> Nieuw dossier
-              </button>
+    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
+      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
+        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#ff4d00]">
+                FightSupport Admin / Discipline
+              </p>
+              <h1 className="text-2xl font-black uppercase">Dossiers & Sancties</h1>
+              <p className="mt-1 text-sm text-zinc-300">Overtredingen, meldingen, waarschuwingen en vervolgstappen.</p>
             </div>
-          </div>
-
-          <div className="grid gap-3 p-4 md:grid-cols-5">
-            <div className="border border-zinc-600/70 bg-black/35 p-4">
-              <div className="text-xs font-bold uppercase tracking-wider text-zinc-400">Open dossiers</div>
-              <div className="mt-1 text-3xl font-black text-orange-300">{stats.open}</div>
+            <div className="flex flex-wrap gap-2">
+              <SilverLink href="/dashboard/admin/beheer"><ArrowLeft size={16} /> Beheer</SilverLink>
+              <SilverLink href="/dashboard/admin/algemeen">Admin algemeen</SilverLink>
+              <OrangeButton onClick={() => setShowForm((v) => !v)}><Plus size={17} /> Nieuw dossier</OrangeButton>
             </div>
-            <div className="border border-zinc-600/70 bg-black/35 p-4">
-              <div className="text-xs font-bold uppercase tracking-wider text-zinc-400">Actieve vervolgstappen</div>
-              <div className="mt-1 text-3xl font-black text-white">{stats.active}</div>
-            </div>
-            <div className="border border-zinc-600/70 bg-black/35 p-4">
-              <div className="text-xs font-bold uppercase tracking-wider text-zinc-400">Minpunten totaal</div>
-              <div className="mt-1 text-3xl font-black text-zinc-200">{stats.points}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setBronFilter((v) => v === "official_melding" ? "alle" : "official_melding")}
-              className={cls(
-                "border p-4 text-left transition",
-                bronFilter === "official_melding"
-                  ? "border-orange-400 bg-orange-950/40"
-                  : "border-zinc-600/70 bg-black/35 hover:border-orange-400/60"
-              )}
-            >
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400"><Inbox size={15} /> Meldingen officials</div>
-              <div className="mt-1 text-3xl font-black text-orange-300">{stats.officialMeldingen}</div>
-              <div className="mt-1 text-[10px] font-black uppercase tracking-wider text-zinc-500">Admin gemaakt: {stats.adminDossiers}</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setBronFilter((v) => v === "matchmaker_melding" ? "alle" : "matchmaker_melding")}
-              className={cls(
-                "border p-4 text-left transition",
-                bronFilter === "matchmaker_melding"
-                  ? "border-orange-400 bg-orange-950/40"
-                  : "border-zinc-600/70 bg-black/35 hover:border-orange-400/60"
-              )}
-            >
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400"><Inbox size={15} /> Meldingen matchmakers</div>
-              <div className="mt-1 text-3xl font-black text-orange-300">{stats.matchmakerMeldingen}</div>
-              <div className="mt-1 text-[10px] font-black uppercase tracking-wider text-zinc-500">Ontvangen van matchmaker</div>
-            </button>
           </div>
         </header>
 
-        {showForm && (
-          <form onSubmit={createCase} className="mb-6 border border-orange-500/40 bg-[#211f1d] p-5 shadow-2xl">
-            <h2 className="mb-4 flex items-center gap-2 text-xl font-black uppercase text-orange-300"><Gavel size={20} /> Nieuw dossier</h2>
+        <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-6">
+          <StatBox label="Open dossiers" value={stats.open} />
+          <StatBox label="Actieve stappen" value={stats.active} />
+          <StatBox label="Minpunten totaal" value={stats.points} />
+          <StatBox label="Officials" value={stats.officialMeldingen} active={bronFilter === "official_melding"} onClick={() => setBronFilter((v) => (v === "official_melding" ? "alle" : "official_melding"))} />
+          <StatBox label="Matchmakers" value={stats.matchmakerMeldingen} active={bronFilter === "matchmaker_melding"} onClick={() => setBronFilter((v) => (v === "matchmaker_melding" ? "alle" : "matchmaker_melding"))} />
+          <StatBox label="Admin dossiers" value={stats.adminDossiers} active={bronFilter === "admin_dossier"} onClick={() => setBronFilter((v) => (v === "admin_dossier" ? "alle" : "admin_dossier"))} />
+        </div>
+
+        {showForm ? (
+          <form onSubmit={createCase} className="m-4 border border-[#ff4d00]/60 bg-[#1c1c1c] p-4">
+            <h2 className="mb-4 flex items-center gap-2 text-lg font-black uppercase text-[#ff4d00]"><Gavel size={20} /> Nieuw dossier</h2>
             <div className="grid gap-3 md:grid-cols-4">
-              <label className="block text-xs font-bold uppercase text-zinc-400">Type
-                <select className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                  {TYPES.map((x) => <option key={x}>{x}</option>)}
-                </select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Betrokkene
-                <select className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.betrokkene_type} onChange={(e) => setForm({ ...form, betrokkene_type: e.target.value })}>
-                  {BETROKKENEN.map((x) => <option key={x}>{x}</option>)}
-                </select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Naam
-                <input required className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.naam} onChange={(e) => setForm({ ...form, naam: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">VA nummer
-                <input className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.va_nummer} onChange={(e) => setForm({ ...form, va_nummer: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Categorie
-                <input required placeholder="bijv. verlopen keurmerk, no-show, foutieve uitslag" className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.categorie} onChange={(e) => setForm({ ...form, categorie: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Ernst
-                <select className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.ernst} onChange={(e) => setForm({ ...form, ernst: e.target.value })}>
-                  {ERNST.map((x) => <option key={x}>{x}</option>)}
-                </select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Matchmaking ID
-                <input className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.matchmaking_id} onChange={(e) => setForm({ ...form, matchmaking_id: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Omschrijving
-                <textarea required rows={4} className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.omschrijving} onChange={(e) => setForm({ ...form, omschrijving: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Interne notitie
-                <textarea rows={4} className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white" value={form.interne_notitie} onChange={(e) => setForm({ ...form, interne_notitie: e.target.value })} />
-              </label>
+              <Field label="Type"><Select value={form.type} onChange={(v) => setForm({ ...form, type: v })} options={TYPES} /></Field>
+              <Field label="Betrokkene"><Select value={form.betrokkene_type} onChange={(v) => setForm({ ...form, betrokkene_type: v })} options={BETROKKENEN} /></Field>
+              <Field label="Naam"><Input required value={form.naam} onChange={(v) => setForm({ ...form, naam: v })} /></Field>
+              <Field label="VA nummer"><Input value={form.va_nummer} onChange={(v) => setForm({ ...form, va_nummer: v })} /></Field>
+              <Field label="Categorie" className="md:col-span-2"><Input required placeholder="bijv. no-show" value={form.categorie} onChange={(v) => setForm({ ...form, categorie: v })} /></Field>
+              <Field label="Ernst"><Select value={form.ernst} onChange={(v) => setForm({ ...form, ernst: v })} options={ERNST} /></Field>
+              <Field label="Matchmaking ID"><Input value={form.matchmaking_id} onChange={(v) => setForm({ ...form, matchmaking_id: v })} /></Field>
+              <Field label="Omschrijving" className="md:col-span-2"><Textarea required rows={4} value={form.omschrijving} onChange={(v) => setForm({ ...form, omschrijving: v })} /></Field>
+              <Field label="Interne notitie" className="md:col-span-2"><Textarea rows={4} value={form.interne_notitie} onChange={(v) => setForm({ ...form, interne_notitie: v })} /></Field>
             </div>
-            <div className="mt-4 flex justify-end gap-3">
-              <button type="button" onClick={() => setShowForm(false)} className="border border-zinc-600 px-4 py-3 text-sm font-black uppercase text-zinc-200">Annuleren</button>
-              <button disabled={saving} className="border border-orange-400 bg-orange-600 px-4 py-3 text-sm font-black uppercase text-white disabled:opacity-60">{saving ? "Opslaan..." : "Dossier opslaan"}</button>
+            <div className="mt-4 flex justify-end gap-2">
+              <SilverButton onClick={() => setShowForm(false)}>Annuleren</SilverButton>
+              <button disabled={saving} className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black disabled:opacity-60">
+                {saving ? "Opslaan..." : "Dossier opslaan"}
+              </button>
             </div>
           </form>
-        )}
+        ) : null}
 
-        <section className="mb-4 border border-zinc-600/60 bg-[#211f1d] p-4">
+        <div className="border-b border-zinc-700 p-4">
           <div className="grid gap-3 md:grid-cols-[1fr_180px_220px_auto]">
             <div className="relative">
               <Search className="absolute left-3 top-3.5 text-zinc-500" size={18} />
-              <input className="w-full border border-zinc-600 bg-black py-3 pl-10 pr-3 text-white" placeholder="Zoek op naam, categorie of omschrijving" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
+              <input
+                className="h-11 w-full border border-zinc-700 bg-[#171717] py-3 pl-10 pr-3 text-white outline-none focus:border-[#ff4d00]"
+                placeholder="Zoek op naam, categorie of omschrijving"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && load()}
+              />
             </div>
-            <select className="border border-zinc-600 bg-black p-3 text-white" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <select className="h-11 border border-zinc-700 bg-[#171717] px-3 text-white outline-none" value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="open">open</option><option value="in_behandeling">in behandeling</option><option value="afgerond">afgerond</option><option value="alle">alle</option>
             </select>
-            <select className="border border-zinc-600 bg-black p-3 text-white" value={betrokkeneType} onChange={(e) => setBetrokkeneType(e.target.value)}>
+            <select className="h-11 border border-zinc-700 bg-[#171717] px-3 text-white outline-none" value={betrokkeneType} onChange={(e) => setBetrokkeneType(e.target.value)}>
               <option value="alle">alle betrokkenen</option>{BETROKKENEN.map((x) => <option key={x}>{x}</option>)}
             </select>
-            <button onClick={load} className="border border-zinc-300 bg-zinc-200 px-4 py-3 font-black uppercase text-black">Zoeken</button>
+            <SilverButton onClick={load}>Zoeken</SilverButton>
           </div>
-        </section>
-
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setBronFilter("alle")}
-            className={cls(
-              "inline-flex items-center gap-2 border px-4 py-2 text-xs font-black uppercase",
-              bronFilter === "alle"
-                ? "border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 text-black"
-                : "border-zinc-600 bg-[#211f1d] text-zinc-200 hover:border-orange-400"
-            )}
-          >
-            Alle dossiers
-          </button>
-          <button
-            type="button"
-            onClick={() => setBronFilter("official_melding")}
-            className={cls(
-              "inline-flex items-center gap-2 border px-4 py-2 text-xs font-black uppercase",
-              bronFilter === "official_melding"
-                ? "border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 text-black"
-                : "border-orange-500/50 bg-orange-950/30 text-orange-200 hover:border-orange-400"
-            )}
-          >
-            <Inbox size={15} /> Binnengekomen meldingen officials ({stats.officialMeldingen})
-          </button>
-          <button
-            type="button"
-            onClick={() => setBronFilter("matchmaker_melding")}
-            className={cls(
-              "inline-flex items-center gap-2 border px-4 py-2 text-xs font-black uppercase",
-              bronFilter === "matchmaker_melding"
-                ? "border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 text-black"
-                : "border-orange-500/50 bg-orange-950/30 text-orange-200 hover:border-orange-400"
-            )}
-          >
-            <Inbox size={15} /> Ontvangen van matchmaker ({stats.matchmakerMeldingen})
-          </button>
-          <button
-            type="button"
-            onClick={() => setBronFilter("admin_dossier")}
-            className={cls(
-              "inline-flex items-center gap-2 border px-4 py-2 text-xs font-black uppercase",
-              bronFilter === "admin_dossier"
-                ? "border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 text-black"
-                : "border-zinc-600 bg-[#211f1d] text-zinc-200 hover:border-orange-400"
-            )}
-          >
-            <Gavel size={15} /> Gemaakt door admin ({stats.adminDossiers})
-          </button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <FilterButton active={bronFilter === "alle"} onClick={() => setBronFilter("alle")}>Alle dossiers</FilterButton>
+            <FilterButton active={bronFilter === "official_melding"} onClick={() => setBronFilter("official_melding")}><Inbox size={15} /> Officials</FilterButton>
+            <FilterButton active={bronFilter === "matchmaker_melding"} onClick={() => setBronFilter("matchmaker_melding")}><Inbox size={15} /> Matchmakers</FilterButton>
+            <FilterButton active={bronFilter === "admin_dossier"} onClick={() => setBronFilter("admin_dossier")}><Gavel size={15} /> Admin</FilterButton>
+          </div>
         </div>
 
-        {error && <div className="mb-4 border border-red-400/50 bg-red-950/40 p-4 font-bold text-red-100">{error}</div>}
-        {loading ? <div className="border border-zinc-600 bg-black/50 p-8 text-center font-bold text-zinc-300">Dossiers laden...</div> : null}
+        {error ? <div className="m-4 border border-red-500 bg-red-950/60 p-3 text-sm font-bold text-red-200">{error}</div> : null}
+        {loading ? <div className="m-4 border border-zinc-700 bg-[#171717] p-8 text-center font-bold text-zinc-300">Dossiers laden...</div> : null}
 
-        <div className="grid gap-3">
-          {!loading && visibleCases.length === 0 && <div className="border border-zinc-600 bg-black/50 p-8 text-center font-bold text-zinc-300">{bronFilter === "official_melding" ? "Geen binnengekomen official-meldingen gevonden." : bronFilter === "matchmaker_melding" ? "Geen ontvangen matchmaker-meldingen gevonden." : bronFilter === "admin_dossier" ? "Geen door admin gemaakte dossiers gevonden." : "Geen dossiers gevonden."}</div>}
-          {visibleCases.map((item) => (
-            <Link key={item.id} href={`/dashboard/admin/algemeen/overtredingen/${item.id}`} className="group border border-zinc-600/70 bg-gradient-to-r from-[#24211f] to-[#111] p-4 shadow-xl hover:border-orange-400/70">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xl font-black uppercase text-white group-hover:text-orange-200">{item.naam}</span>
-                    {item.va_nummer ? <span className="border border-zinc-600 bg-black px-2 py-1 text-xs font-black text-zinc-300">VA {item.va_nummer}</span> : null}
-                    <span className="border border-orange-500/50 bg-orange-950/30 px-2 py-1 text-xs font-black uppercase text-orange-200">{item.betrokkene_type}</span>
-                    {isOfficialMelding(item) ? (
-                      <span className="inline-flex items-center gap-1 border border-orange-400/70 bg-orange-950/50 px-2 py-1 text-xs font-black uppercase text-orange-100">
-                        <Inbox size={13} /> Melding official
-                      </span>
-                    ) : null}
-                    {isMatchmakerMelding(item) ? (
-                      <span className="inline-flex items-center gap-1 border border-orange-400/70 bg-orange-950/50 px-2 py-1 text-xs font-black uppercase text-orange-100">
-                        <Inbox size={13} /> Melding matchmaker
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="text-sm font-bold text-zinc-300">{item.categorie}</div>
-                  {(isOfficialMelding(item) || isMatchmakerMelding(item)) ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 border border-zinc-600/80 bg-black/35 px-3 py-2 text-xs font-bold text-zinc-200">
-                      <span className="inline-flex items-center gap-1 text-orange-200"><UserRound size={13} /> Gemeld door:</span>
-                      <span>{melderNaamVan(item) || "Onbekende melder"}</span>
-                      {melderRolVan(item) ? <span className="text-zinc-500">· {melderRolVan(item)}</span> : null}
-                      {melderBondteamVan(item) ? <span className="border border-zinc-500 bg-[#111] px-2 py-0.5 text-zinc-100">Bondteam {melderBondteamVan(item)}</span> : null}
-                      {melderEmailVan(item) ? <span className="text-zinc-400">· {melderEmailVan(item)}</span> : null}
-                      {item.gemeld_op ? <span className="text-zinc-500">· {new Date(item.gemeld_op).toLocaleDateString("nl-NL")}</span> : null}
-                    </div>
-                  ) : null}
-                  <p className="mt-2 line-clamp-2 max-w-4xl text-sm text-zinc-400">{item.omschrijving}</p>
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <span className={cls("border px-2 py-1 text-xs font-black uppercase", badgeClass(item.status))}>{item.status}</span>
-                  <span className={cls("border px-2 py-1 text-xs font-black uppercase", badgeClass(item.ernst))}>{item.ernst}</span>
-                  {Number(item.actieve_acties || 0) > 0 ? <span className="border border-orange-400/50 bg-orange-950/50 px-2 py-1 text-xs font-black text-orange-100"><AlertTriangle size={13} className="inline" /> {item.actieve_acties} actief</span> : <span className="border border-emerald-400/40 bg-emerald-950/40 px-2 py-1 text-xs font-black text-emerald-100"><BadgeCheck size={13} className="inline" /> geen actief</span>}
-                </div>
-              </div>
-            </Link>
-          ))}
+        <div className="overflow-x-auto p-4">
+          <table className="w-full min-w-[1120px] border-collapse text-sm">
+            <thead className="bg-[#252525] text-left text-xs uppercase text-zinc-300">
+              <tr>
+                <th className="border border-zinc-700 p-2">Naam</th>
+                <th className="border border-zinc-700 p-2">Bron</th>
+                <th className="border border-zinc-700 p-2">Categorie</th>
+                <th className="border border-zinc-700 p-2">Betrokkene</th>
+                <th className="border border-zinc-700 p-2">Status</th>
+                <th className="border border-zinc-700 p-2">Ernst</th>
+                <th className="border border-zinc-700 p-2">Acties</th>
+                <th className="border border-zinc-700 p-2 text-right">Open</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && visibleCases.length === 0 ? (
+                <tr className="bg-[#171717]"><td colSpan={8} className="border border-zinc-800 p-4 text-zinc-300">Geen dossiers gevonden.</td></tr>
+              ) : null}
+              {visibleCases.map((item, index) => {
+                const zebra = index % 2 === 0;
+                const source = isOfficialMelding(item) ? "Official" : isMatchmakerMelding(item) ? "Matchmaker" : "Admin";
+                return (
+                  <tr key={item.id} style={{ backgroundColor: zebra ? "#ffffff" : "#171717", color: zebra ? "#000000" : "#ffffff" }}>
+                    <td className="border border-zinc-800 p-2">
+                      <b style={{ color: "#ff4d00" }}>{item.naam || "-"}</b>
+                      {item.va_nummer ? <div className="text-xs opacity-75">VA {item.va_nummer}</div> : null}
+                      <p className="mt-1 line-clamp-2 text-xs opacity-75">{item.omschrijving}</p>
+                    </td>
+                    <td className="border border-zinc-800 p-2">
+                      <div className="font-bold">{source}</div>
+                      {source !== "Admin" ? (
+                        <div className="mt-1 text-xs opacity-75">
+                          <UserRound size={12} className="inline" /> {melderNaamVan(item)} {melderEmailVan(item) ? `· ${melderEmailVan(item)}` : ""}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="border border-zinc-800 p-2 font-bold">{item.categorie || "-"}</td>
+                    <td className="border border-zinc-800 p-2"><StatusBadge value={item.betrokkene_type} /></td>
+                    <td className="border border-zinc-800 p-2"><StatusBadge value={item.status} /></td>
+                    <td className="border border-zinc-800 p-2"><StatusBadge value={item.ernst} /></td>
+                    <td className="border border-zinc-800 p-2">
+                      {Number(item.actieve_acties || 0) > 0 ? (
+                        <span className="font-black" style={{ color: "#ff4d00" }}><AlertTriangle size={13} className="inline" /> {item.actieve_acties} actief</span>
+                      ) : (
+                        <span style={{ color: zebra ? "#111827" : "#bbf7d0" }}><BadgeCheck size={13} className="inline" /> geen actief</span>
+                      )}
+                    </td>
+                    <td className="border border-zinc-800 p-2 text-right">
+                      <Link className="inline-block border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black uppercase !text-black" href={`/dashboard/admin/algemeen/overtredingen/${item.id}`}>
+                        Detail
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      </div>
+      </section>
     </main>
+  );
+}
+
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cls(
+        "inline-flex items-center gap-2 border px-4 py-2 text-xs font-black uppercase",
+        active ? "border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 text-black" : "border-zinc-600 bg-[#211f1d] text-zinc-200 hover:border-[#ff4d00]"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+  return <label className={cls("block text-xs font-bold uppercase text-zinc-400", className)}>{label}{children}</label>;
+}
+
+function Input({ value, onChange, required, placeholder = "" }: { value: string; onChange: (v: string) => void; required?: boolean; placeholder?: string }) {
+  return <input required={required} placeholder={placeholder} className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white outline-none focus:border-[#ff4d00]" value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
+function Textarea({ value, onChange, required, rows }: { value: string; onChange: (v: string) => void; required?: boolean; rows: number }) {
+  return <textarea required={required} rows={rows} className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white outline-none focus:border-[#ff4d00]" value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
+function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
+  return (
+    <select className="mt-1 w-full border border-zinc-600 bg-black p-3 text-white outline-none focus:border-[#ff4d00]" value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map((x) => <option key={x}>{x}</option>)}
+    </select>
   );
 }

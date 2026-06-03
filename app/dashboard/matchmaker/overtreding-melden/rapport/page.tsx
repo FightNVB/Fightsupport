@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabaseClient";
 import Image from "next/image";
 import {
   ArrowLeft,
@@ -97,13 +97,8 @@ export default function MatchmakersOvertredingenRapportPage() {
 
     let token = "";
     try {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (url && anon) {
-        const supabase = createClient(url, anon);
-        const { data } = await supabase.auth.getSession();
-        token = data.session?.access_token || "";
-      }
+      const { data } = await supabase.auth.getSession();
+      token = data.session?.access_token || "";
     } catch {
       // De API geeft zelf een nette lege lijst/waarschuwing als er geen sessie is.
     }
@@ -154,7 +149,7 @@ export default function MatchmakersOvertredingenRapportPage() {
   const reportDate = new Date().toLocaleDateString("nl-NL");
 
   return (
-    <main className="min-h-screen bg-[#171514] px-5 py-6 text-zinc-100 print:bg-white print:px-0 print:py-0 print:text-black">
+    <main className="min-h-screen px-4 py-6 print:bg-white print:px-0 print:py-0" style={{ background: "#eef0f3" }}>
       <style jsx global>{`
         @media print {
           .no-print { display: none !important; }
@@ -163,41 +158,35 @@ export default function MatchmakersOvertredingenRapportPage() {
         }
       `}</style>
 
-      <div className="mx-auto max-w-7xl print:max-w-none">
-        <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-3">
-            <Link href="/dashboard/matchmaker/overtreding-melden/overzicht" className={silverButton()}>
-              <ArrowLeft size={16} /> Terug naar overzicht
-            </Link>
-            <Link href="/dashboard/matchmaker" className={darkButton()}>
-              <ShieldAlert size={16} /> Matchmakers
-            </Link>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <button onClick={() => window.print()} className={silverButton()}>
-              <Printer size={16} /> Print rapport
-            </button>
-            <button onClick={load} disabled={loading} className={darkButton()}>
-              <RefreshCw size={16} /> Verversen
-            </button>
+      <div className="mx-auto w-full max-w-[1650px] print:max-w-none">
+        <div className="no-print mb-4 rounded-[32px] p-[6px]" style={{ background: "linear-gradient(180deg, #f8f8f8 0%, #d8d8d8 22%, #8f8f8f 55%, #f0f0f0 100%)", boxShadow: "0 0 0 1px rgba(255,255,255,0.7), 0 22px 70px rgba(0,0,0,0.9)" }}>
+          <div className="overflow-hidden rounded-[28px]" style={{ background: "linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)", border: "3px solid rgba(63,63,70,0.35)" }}>
+            <header className="px-6 py-5" style={{ background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)", borderBottom: "3px solid rgba(255,77,0,0.55)" }}>
+              <div className="grid grid-cols-1 items-center gap-4 xl:grid-cols-[1fr_auto_1fr]">
+                <div>
+                  <div className="font-extrabold uppercase" style={{ fontSize: 28, letterSpacing: "0.04em", color: "#ff4d00" }}>Rapport meldingen matchmakers</div>
+                  <div className="mt-1 text-sm text-white/85">Gegenereerd op {reportDate} · selectie: {filtered.length} melding(en)</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link href="/dashboard/matchmaker/overtreding-melden/overzicht" className={silverButton()}><ArrowLeft size={16} /> Terug naar overzicht</Link>
+                    <Link href="/dashboard/matchmaker" className={darkButton()}><ShieldAlert size={16} /> Matchmakers</Link>
+                  </div>
+                </div>
+                <div className="justify-self-center"><div className="relative h-[90px] w-[260px]"><Image src={LOGO} alt="FightSupport" fill className="object-contain" sizes="260px" /></div></div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button onClick={() => window.print()} className={silverButton()}><Printer size={16} /> Print rapport</button>
+                  <button onClick={load} disabled={loading} className={darkButton()}><RefreshCw size={16} /> Verversen</button>
+                </div>
+              </div>
+            </header>
+            <div className="px-6 py-5">
+              <div className="flex items-center gap-2 rounded-2xl border border-zinc-300 bg-white px-3 py-2">
+                <Search size={17} className="text-[#ff4d00]" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rapport filteren op naam, VA, categorie, status, melder..." className="w-full bg-transparent p-2 text-sm font-semibold text-zinc-950 outline-none placeholder:text-zinc-500" />
+              </div>
+              {error ? <div className="mt-4 flex items-center gap-2 rounded-2xl border border-red-400/50 bg-red-950/90 p-4 font-bold text-red-100"><AlertTriangle size={18} /> {error}</div> : null}
+            </div>
           </div>
         </div>
-
-        <div className="no-print mb-4 flex items-center gap-2 border border-zinc-600 bg-black/40 px-3 py-2">
-          <Search size={17} className="text-orange-300" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Rapport filteren op naam, VA, categorie, status, melder..."
-            className="w-full bg-transparent p-2 text-sm font-semibold text-white outline-none placeholder:text-zinc-500"
-          />
-        </div>
-
-        {error ? (
-          <div className="no-print mb-4 flex items-center gap-2 border border-red-400/50 bg-red-950/40 p-4 font-bold text-red-100">
-            <AlertTriangle size={18} /> {error}
-          </div>
-        ) : null}
 
         <section className="border border-zinc-500/50 bg-[#f6f3ee] p-5 text-black shadow-2xl print:border-0 print:bg-white print:p-0 print:shadow-none">
           <div className="mb-4 flex items-start justify-between gap-4 border-b-4 border-[#ff4d00] pb-4">
@@ -206,34 +195,29 @@ export default function MatchmakersOvertredingenRapportPage() {
                 <FileText size={14} /> FightSupport rapport
               </div>
               <h1 className="text-3xl font-black uppercase tracking-wide text-black">Rapport meldingen matchmakers</h1>
-              <p className="mt-1 text-sm font-bold text-zinc-700">
-                Gegenereerd op {reportDate} · selectie: {filtered.length} melding(en)
-              </p>
+              <p className="mt-1 text-sm font-bold text-zinc-700">Gegenereerd op {reportDate} · selectie: {filtered.length} melding(en)</p>
             </div>
-            <div className="relative h-14 w-48 print:hidden">
-              <Image src={LOGO} alt="FightSupport" fill className="object-contain" sizes="192px" />
-            </div>
+            <div className="relative h-14 w-48 print:hidden"><Image src={LOGO} alt="FightSupport" fill className="object-contain" sizes="192px" /></div>
           </div>
 
           <div className="mb-4 grid gap-3 md:grid-cols-4 print:grid-cols-4">
-            <div className="border-2 border-zinc-800 bg-white p-3"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-600">Totaal selectie</div><div className="text-2xl font-black">{filtered.length}</div></div>
-            <div className="border-2 border-zinc-800 bg-white p-3"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-600">Open/actief</div><div className="text-2xl font-black">{openCount}</div></div>
-            <div className="border-2 border-zinc-800 bg-white p-3"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-600">Hoog/ernstig</div><div className="text-2xl font-black">{ernstigCount}</div></div>
-            <div className="border-2 border-zinc-800 bg-white p-3"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-600">Bron</div><div className="text-2xl font-black">Matchmakers</div></div>
+            {[["Totaal selectie", filtered.length], ["Open/actief", openCount], ["Hoog/ernstig", ernstigCount], ["Bron", "Matchmakers"]].map(([label, value]) => (
+              <div key={String(label)} className="border-2 border-zinc-800 bg-white p-3"><div className="text-[10px] font-black uppercase tracking-wider text-zinc-600">{label}</div><div className="text-2xl font-black">{value}</div></div>
+            ))}
           </div>
 
           <div className="overflow-x-auto border-2 border-zinc-900 bg-white">
             <table className="min-w-full border-collapse text-[12px] print:text-[10px]">
               <thead>
-                <tr className="bg-zinc-950 text-left uppercase tracking-wider text-white print:bg-white print:text-black">
-                  <th className="border border-zinc-800 p-2">Datum overtreding</th>
-                  <th className="border border-zinc-800 p-2">Ingediend</th>
-                  <th className="border border-zinc-800 p-2">Betrokkene</th>
-                  <th className="border border-zinc-800 p-2">Categorie</th>
-                  <th className="border border-zinc-800 p-2">Ernst</th>
-                  <th className="border border-zinc-800 p-2">Status</th>
-                  <th className="border border-zinc-800 p-2">Melder</th>
-                  <th className="border border-zinc-800 p-2">Omschrijving</th>
+                <tr style={{ background: "linear-gradient(180deg, #ff6a00 0%, #ff5400 100%)", color: "#fff" }}>
+                  <th className="border border-zinc-800 p-2 text-left">Datum overtreding</th>
+                  <th className="border border-zinc-800 p-2 text-left">Ingediend</th>
+                  <th className="border border-zinc-800 p-2 text-left">Betrokkene</th>
+                  <th className="border border-zinc-800 p-2 text-left">Categorie</th>
+                  <th className="border border-zinc-800 p-2 text-left">Ernst</th>
+                  <th className="border border-zinc-800 p-2 text-left">Status</th>
+                  <th className="border border-zinc-800 p-2 text-left">Melder</th>
+                  <th className="border border-zinc-800 p-2 text-left">Omschrijving</th>
                 </tr>
               </thead>
               <tbody>
@@ -242,14 +226,14 @@ export default function MatchmakersOvertredingenRapportPage() {
                 ) : filtered.length === 0 ? (
                   <tr><td colSpan={8} className="p-5 text-center font-bold">Geen meldingen in deze selectie.</td></tr>
                 ) : filtered.map((m, idx) => (
-                  <tr key={`rapport-${m.id}`} className={idx % 2 === 0 ? "bg-white" : "bg-zinc-100"}>
+                  <tr key={`rapport-${m.id}`} style={{ backgroundColor: idx % 2 === 0 ? "#ffffff" : "#171717", color: idx % 2 === 0 ? "#000000" : "#ffffff" }}>
                     <td className="border border-zinc-400 p-2 font-bold">{fmtDate(datumOvertredingVan(m))}</td>
                     <td className="border border-zinc-400 p-2">{fmtDate(m.aangemaakt_op || m.gemeld_op || m.created_at)}</td>
-                    <td className="border border-zinc-400 p-2"><div className="font-black">{naamVan(m)}</div><div className="text-[10px] uppercase text-zinc-600">{typeVan(m)}{m.va_nummer ? ` · VA ${m.va_nummer}` : ""}</div></td>
+                    <td className="border border-zinc-400 p-2"><div className="font-black" style={{ color: "#ff4d00" }}>{naamVan(m)}</div><div className="text-[10px] uppercase opacity-70">{typeVan(m)}{m.va_nummer ? ` · VA ${m.va_nummer}` : ""}</div></td>
                     <td className="border border-zinc-400 p-2">{m.categorie || "-"}</td>
                     <td className="border border-zinc-400 p-2 font-bold uppercase">{m.ernst || "-"}</td>
                     <td className="border border-zinc-400 p-2 font-bold uppercase">{m.status || "open"}</td>
-                    <td className="border border-zinc-400 p-2"><div className="font-bold">{m.melder_naam || m.aangemaakt_door_naam || "Matchmaker"}</div><div className="text-[10px] text-zinc-600">{m.melder_bondteam || m.melder_email || m.aangemaakt_door_email || "-"}</div></td>
+                    <td className="border border-zinc-400 p-2"><div className="font-bold">{m.melder_naam || m.aangemaakt_door_naam || "Matchmaker"}</div><div className="text-[10px] opacity-70">{m.melder_bondteam || m.melder_email || m.aangemaakt_door_email || "-"}</div></td>
                     <td className="border border-zinc-400 p-2">{tekstVan(m)}</td>
                   </tr>
                 ))}

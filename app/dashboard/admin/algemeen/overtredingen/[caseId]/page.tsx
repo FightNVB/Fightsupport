@@ -1,8 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileText, Gavel, History, Pencil, Plus, Save, ShieldAlert, Trash2, X } from "lucide-react";
+import { use, useEffect, useState, type ReactNode, type FormEvent } from "react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  FileText,
+  Gavel,
+  History,
+  Pencil,
+  Plus,
+  Save,
+  ShieldAlert,
+  Trash2,
+  X,
+} from "lucide-react";
 
 type Dossier = any;
 type Action = any;
@@ -33,26 +46,53 @@ function cls(...parts: Array<string | false | null | undefined>) {
 }
 
 const silverButton =
-  "inline-flex items-center justify-center gap-2 border border-zinc-200 bg-gradient-to-b from-white via-zinc-300 to-zinc-500 px-4 py-3 text-sm font-black uppercase !text-[#11100f] shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_10px_24px_rgba(0,0,0,0.35)] hover:from-white hover:via-zinc-200 hover:to-zinc-400 disabled:cursor-not-allowed disabled:opacity-60";
-const fieldClass = "mt-1 w-full border border-zinc-500/80 bg-[#11100f] p-3 text-white outline-none focus:border-orange-400";
+  "inline-flex items-center justify-center gap-2 border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50";
+const orangeButton =
+  "inline-flex items-center justify-center gap-2 border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50";
+const fieldClass = "mt-1 w-full border border-zinc-600 bg-black p-3 text-white outline-none focus:border-[#ff4d00]";
 
-function badge(value: string) {
+function badgeTone(value: string) {
   const red = ["ernstig", "hoog", "open", "SCHORSING", "STARTVERBOD", "UITSLUITING"];
   const orange = ["middel", "in_behandeling", "VERSCHERPT_TOEZICHT", "EXTRA_CONTROLE", "MIN_PUNTEN", "LAATSTE_WAARSCHUWING"];
   const green = ["laag", "afgerond", "GEEN_ACTIE", "MONDELING", "HERSTELACTIE"];
-  const cn = red.includes(value)
-    ? "border-red-400/40 bg-red-950/50 text-red-100"
-    : orange.includes(value)
-    ? "border-orange-400/60 bg-orange-950/40 text-orange-100"
-    : green.includes(value)
-    ? "border-emerald-400/40 bg-emerald-950/40 text-emerald-100"
-    : "border-zinc-500/50 bg-[#151312] text-zinc-200";
-  return <span className={`border px-2 py-1 text-xs font-black uppercase ${cn}`}>{value}</span>;
+  if (red.includes(value)) return "bad";
+  if (orange.includes(value)) return "warn";
+  if (green.includes(value)) return "ok";
+  return "default";
+}
+
+function Badge({ value }: { value: string }) {
+  const tone = badgeTone(value);
+  const clsName =
+    tone === "bad"
+      ? "border-red-500/60 bg-red-500/15 text-red-300"
+      : tone === "warn"
+        ? "border-[#ff4d00]/70 bg-[#ff4d00]/10 text-[#ff7a33]"
+        : tone === "ok"
+          ? "border-green-500/50 bg-green-500/10 text-green-300"
+          : "border-zinc-600 bg-zinc-800 text-zinc-200";
+  return <span className={`inline-flex border px-2 py-0.5 text-[11px] font-black uppercase ${clsName}`}>{value || "-"}</span>;
 }
 
 function toDateValue(value: string | null | undefined) {
   if (!value) return "";
   return String(value).slice(0, 10);
+}
+
+function fmtDate(value: string | null | undefined) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("nl-NL");
+}
+
+function InfoBox({ label, value, orange = false }: { label: string; value: ReactNode; orange?: boolean }) {
+  return (
+    <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+      <div className="text-xs font-black uppercase tracking-wide text-zinc-400">{label}</div>
+      <div className={cls("mt-1 truncate text-lg font-black", orange ? "text-[#ff4d00]" : "text-white")}>{value}</div>
+    </div>
+  );
 }
 
 export default function DossierDetailPage({ params }: { params: Promise<{ caseId: string }> }) {
@@ -120,14 +160,22 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
   async function load() {
     setLoading(true);
     setError("");
-    const res = await fetch(`/api/admin/discipline/cases/${caseId}`, { cache: "no-store" });
-    const json = await res.json();
-    if (!json.ok) setError(json.error || "Kon dossier niet laden.");
-    setDossier(json.dossier || null);
-    setActions(json.actions || []);
-    setRelatedCases(json.related_cases || []);
-    if (json.dossier) fillEditForm(json.dossier);
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/admin/discipline/cases/${caseId}`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!json.ok) setError(json.error || "Kon dossier niet laden.");
+      setDossier(json.dossier || null);
+      setActions(json.actions || []);
+      setRelatedCases(json.related_cases || []);
+      if (json.dossier) fillEditForm(json.dossier);
+    } catch (e: any) {
+      setError(e?.message ?? "Kon dossier niet laden.");
+      setDossier(null);
+      setActions([]);
+      setRelatedCases([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -135,42 +183,40 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
 
-  async function saveEdit(e: React.FormEvent) {
+  async function saveEdit(e: FormEvent) {
     e.preventDefault();
     setSavingEdit(true);
     setError("");
-    const res = await fetch(`/api/admin/discipline/cases/${caseId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...editForm,
-        va_nummer: editForm.va_nummer || null,
-        matchmaking_id: editForm.matchmaking_id || null,
-        event_id: editForm.event_id || null,
-        bout_id: editForm.bout_id || null,
-        datum_overtreding: editForm.datum_overtreding || null,
-      }),
-    });
-    const json = await res.json();
-    setSavingEdit(false);
-    if (!json.ok) {
-      setError(json.error || "Bewerken mislukt.");
-      return;
+    try {
+      const res = await fetch(`/api/admin/discipline/cases/${caseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...editForm,
+          va_nummer: editForm.va_nummer || null,
+          matchmaking_id: editForm.matchmaking_id || null,
+          event_id: editForm.event_id || null,
+          bout_id: editForm.bout_id || null,
+          datum_overtreding: editForm.datum_overtreding || null,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!json.ok) {
+        setError(json.error || "Bewerken mislukt.");
+        return;
+      }
+      setDossier(json.dossier || null);
+      if (json.dossier) fillEditForm(json.dossier);
+      setEditing(false);
+      await load();
+    } finally {
+      setSavingEdit(false);
     }
-    setDossier(json.dossier || null);
-    if (json.dossier) fillEditForm(json.dossier);
-    setEditing(false);
-    await load();
   }
 
-  async function addAction(e: React.FormEvent) {
+  async function addAction(e: FormEvent) {
     e.preventDefault();
-
-    // Belangrijk:
-    // Een vervolgstap/sanctie mag het dossier NOOIT automatisch afronden.
-    // De dossierstatus wordt alleen aangepast via "Dossier bewerken" of de knop "Afronden".
     const huidigeDossierStatus = dossier?.status || "open";
-
     setSaving(true);
     setError("");
 
@@ -181,9 +227,6 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
         ...action,
         status: action.status || "open",
         punten: Number(action.punten || 0),
-
-        // Extra flags voor routes die dit ondersteunen.
-        // Routes die dit niet kennen negeren deze velden gewoon.
         close_case: false,
         afgerond: false,
         update_case_status: false,
@@ -191,8 +234,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
         dossier_status: huidigeDossierStatus,
       }),
     });
-
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
 
     if (!json.ok) {
       setSaving(false);
@@ -200,27 +242,16 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
       return;
     }
 
-    // Veiligheidsnet:
-    // Als de API-route na het toevoegen van een actie tóch het dossier op "afgerond" zet,
-    // herstellen we direct de originele dossierstatus. Zo beslist de gebruiker zelf wanneer
-    // het dossier echt afgerond is.
     if (huidigeDossierStatus !== "afgerond") {
       const herstelRes = await fetch(`/api/admin/discipline/cases/${caseId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: huidigeDossierStatus,
-          afgerond_op: null,
-        }),
+        body: JSON.stringify({ status: huidigeDossierStatus, afgerond_op: null }),
       });
-
       const herstelJson = await herstelRes.json().catch(() => null);
       if (!herstelRes.ok || (herstelJson && herstelJson.ok === false)) {
         setSaving(false);
-        setError(
-          herstelJson?.error ||
-            "Vervolgstap is opgeslagen, maar dossierstatus kon niet worden hersteld. Controleer de PATCH-route."
-        );
+        setError(herstelJson?.error || "Vervolgstap is opgeslagen, maar dossierstatus kon niet worden hersteld.");
         await load();
         return;
       }
@@ -244,19 +275,18 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     });
   }
 
-  async function saveActionEdit(e: React.FormEvent) {
+  async function saveActionEdit(e: FormEvent) {
     e.preventDefault();
     if (!editingActionId) return;
     setSaving(true);
     setError("");
-
     const huidigeDossierStatus = dossier?.status || "in_behandeling";
     const res = await fetch(`/api/admin/discipline/cases/${caseId}/actions/${editingActionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...editAction, punten: Number(editAction.punten || 0) }),
     });
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
 
     if (json.ok && huidigeDossierStatus !== "afgerond") {
       await fetch(`/api/admin/discipline/cases/${caseId}`, {
@@ -278,7 +308,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
   async function closeCase() {
     if (!confirm("Dossier afronden?")) return;
     const res = await fetch(`/api/admin/discipline/cases/${caseId}/close`, { method: "POST" });
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
     if (!json.ok) setError(json.error || "Afronden mislukt.");
     await load();
   }
@@ -286,7 +316,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
   async function deleteCase() {
     if (!confirm("Dossier verwijderen? Dit kan niet ongedaan gemaakt worden.")) return;
     const res = await fetch(`/api/admin/discipline/cases/${caseId}`, { method: "DELETE" });
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
     if (!json.ok) {
       setError(json.error || "Verwijderen mislukt.");
       return;
@@ -294,255 +324,213 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     window.location.href = "/dashboard/admin/algemeen/overtredingen";
   }
 
-  if (loading) return <main className="min-h-screen bg-[#24211f] p-8 text-zinc-200">Dossier laden...</main>;
-  if (!dossier) return <main className="min-h-screen bg-[#24211f] p-8 text-zinc-200">Dossier niet gevonden.</main>;
+  if (loading) return <main className="min-h-screen bg-[#2b2b2b] p-8 text-zinc-200">Dossier laden...</main>;
+  if (!dossier) return <main className="min-h-screen bg-[#2b2b2b] p-8 text-zinc-200">Dossier niet gevonden.</main>;
 
   return (
-    <main className="min-h-screen bg-[#24211f] text-zinc-100">
-      <div className="mx-auto max-w-6xl px-5 py-6">
-        <Link href="/dashboard/admin/algemeen/overtredingen" className={cls(silverButton, "mb-4 px-3 py-2")}>
-          <ArrowLeft size={16} /> Terug naar dossiers
-        </Link>
-
-        <header className="mb-5 border border-zinc-400/50 bg-gradient-to-br from-[#302b27] via-[#1f1d1b] to-[#151312] shadow-2xl">
-          <div className="border-b border-orange-500/50 p-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="mb-3 flex flex-wrap items-center gap-4">
-                  <img src="/branding/fightsupport/fightsupport1.png" alt="FightSupport" className="h-14 w-auto object-contain" />
-                  <div className="inline-flex items-center gap-2 border border-orange-500/60 bg-[#11100f]/70 px-3 py-1 text-xs font-black uppercase tracking-[0.24em] text-orange-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
-                    <ShieldAlert size={15} /> Discipline dossier
-                  </div>
-                </div>
-                <h1 className="text-3xl font-black uppercase text-white">{dossier.naam}</h1>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {badge(dossier.betrokkene_type)}
-                  {badge(dossier.status)}
-                  {badge(dossier.ernst)}
-                  {dossier.va_nummer ? badge(`VA ${dossier.va_nummer}`) : null}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <a href={`/api/admin/discipline/reports/case/${caseId}`} target="_blank" rel="noreferrer" className={silverButton}>
-                  <FileText size={17} /> Rapport dossier
-                </a>
-                <a href={`/api/admin/discipline/reports/offender?betrokkene_type=${encodeURIComponent(dossier.betrokkene_type || "")}&naam=${encodeURIComponent(dossier.naam || "")}&va_nummer=${encodeURIComponent(dossier.va_nummer || "")}`} target="_blank" rel="noreferrer" className={silverButton}>
-                  <FileText size={17} /> Rapport overtreder
-                </a>
-                <button onClick={() => { fillEditForm(dossier); setEditing((v) => !v); }} className={silverButton}>
-                  {editing ? <X size={17} /> : <Pencil size={17} />} {editing ? "Sluiten" : "Bewerk"}
-                </button>
-                <button onClick={() => setShowAction((v) => !v)} className={silverButton}>
-                  <Plus size={17} /> Vervolgstap
-                </button>
-                <button onClick={closeCase} className={silverButton}>
-                  <CheckCircle2 size={17} /> Afronden
-                </button>
-                <button onClick={deleteCase} className={silverButton}>
-                  <Trash2 size={17} /> Verwijderen
-                </button>
+    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
+      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
+        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#ff4d00]">
+                FightSupport Admin / Discipline dossier
+              </p>
+              <h1 className="text-2xl font-black uppercase">{dossier.naam}</h1>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge value={dossier.betrokkene_type} />
+                <Badge value={dossier.status} />
+                <Badge value={dossier.ernst} />
+                {dossier.va_nummer ? <Badge value={`VA ${dossier.va_nummer}`} /> : null}
               </div>
             </div>
-          </div>
-
-          <div className="grid gap-3 p-5 md:grid-cols-5">
-            <div className="border border-zinc-500/70 bg-[#11100f]/65 p-3"><div className="text-xs font-bold uppercase text-zinc-400">Categorie</div><div className="mt-1 font-black text-orange-200">{dossier.categorie}</div></div>
-            <div className="border border-zinc-500/70 bg-[#11100f]/65 p-3"><div className="text-xs font-bold uppercase text-zinc-400">Datum overtreding</div><div className="mt-1 font-black text-white">{dossier.datum_overtreding ? new Date(dossier.datum_overtreding).toLocaleDateString("nl-NL") : "-"}</div></div>
-            <div className="border border-zinc-500/70 bg-[#11100f]/65 p-3"><div className="text-xs font-bold uppercase text-zinc-400">Type</div><div className="mt-1 font-black text-white">{dossier.type}</div></div>
-            <div className="border border-zinc-500/70 bg-[#11100f]/65 p-3"><div className="text-xs font-bold uppercase text-zinc-400">Actieve acties</div><div className="mt-1 font-black text-white">{dossier.actieve_acties || 0}</div></div>
-            <div className="border border-zinc-500/70 bg-[#11100f]/65 p-3"><div className="text-xs font-bold uppercase text-zinc-400">Minpunten</div><div className="mt-1 font-black text-white">{dossier.punten_totaal || 0}</div></div>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/dashboard/admin/algemeen/overtredingen" className={silverButton}><ArrowLeft size={16} /> Terug</Link>
+              <a href={`/api/admin/discipline/reports/case/${caseId}`} target="_blank" rel="noreferrer" className={silverButton}><FileText size={16} /> Rapport dossier</a>
+              <a href={`/api/admin/discipline/reports/offender?betrokkene_type=${encodeURIComponent(dossier.betrokkene_type || "")}&naam=${encodeURIComponent(dossier.naam || "")}&va_nummer=${encodeURIComponent(dossier.va_nummer || "")}`} target="_blank" rel="noreferrer" className={silverButton}><FileText size={16} /> Rapport overtreder</a>
+              <button onClick={() => { fillEditForm(dossier); setEditing((v) => !v); }} className={silverButton}>{editing ? <X size={16} /> : <Pencil size={16} />} {editing ? "Sluiten" : "Bewerk"}</button>
+              <button onClick={() => setShowAction((v) => !v)} className={orangeButton}><Plus size={16} /> Vervolgstap</button>
+              <button onClick={closeCase} className={silverButton}><CheckCircle2 size={16} /> Afronden</button>
+              <button onClick={deleteCase} className={silverButton}><Trash2 size={16} /> Verwijderen</button>
+            </div>
           </div>
         </header>
 
-        {error && <div className="mb-4 border border-red-400/50 bg-red-950/40 p-4 font-bold text-red-100">{error}</div>}
+        <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-5">
+          <InfoBox label="Categorie" value={dossier.categorie || "-"} orange />
+          <InfoBox label="Datum overtreding" value={fmtDate(dossier.datum_overtreding)} />
+          <InfoBox label="Type" value={dossier.type || "-"} />
+          <InfoBox label="Actieve acties" value={dossier.actieve_acties || 0} />
+          <InfoBox label="Minpunten" value={dossier.punten_totaal || 0} />
+        </div>
 
-        {relatedCases.length > 0 && (
-          <section className="mb-5 border border-orange-500/50 bg-[#1b1917] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
+        {error ? <div className="m-4 border border-red-500 bg-red-950/60 p-3 text-sm font-bold text-red-200">{error}</div> : null}
+
+        {relatedCases.length > 0 ? (
+          <section className="m-4 border border-[#ff4d00]/60 bg-[#1c1c1c] p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="flex items-center gap-2 text-lg font-black uppercase text-orange-300">
-                <History size={19} /> Eerdere dossiers zelfde betrokkene
-              </h2>
-              <div className="border border-orange-400/60 bg-orange-950/40 px-3 py-1 text-xs font-black uppercase text-orange-100">
-                {relatedCases.length} eerder(e) dossier(s)
-              </div>
+              <h2 className="flex items-center gap-2 text-lg font-black uppercase text-[#ff4d00]"><History size={18} /> Eerdere dossiers zelfde betrokkene</h2>
+              <Badge value={`${relatedCases.length} eerder`} />
             </div>
             <div className="mb-3 flex items-start gap-2 border border-red-400/40 bg-red-950/30 p-3 text-sm font-bold text-red-100">
               <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-              <span>
-                Controleer bij dezelfde categorie of hetzelfde probleem of de sanctie zwaarder moet worden, bijvoorbeeld laatste waarschuwing, verscherpt toezicht, schorsing of uitsluiting.
-              </span>
+              Controleer of de sanctie zwaarder moet worden bij herhaling.
             </div>
-            <div className="grid gap-2">
-              {relatedCases.map((c) => (
-                <Link key={c.id} href={`/dashboard/admin/algemeen/overtredingen/${c.id}`} className="border border-zinc-600/80 bg-[#11100f]/70 p-3 hover:border-orange-400/80">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="font-black uppercase text-white">{c.categorie}</div>
-                      <div className="mt-1 text-xs font-bold text-zinc-400">
-                        Overtreding: {c.datum_overtreding ? new Date(c.datum_overtreding).toLocaleDateString("nl-NL") : "geen datum"} · aangemaakt {new Date(c.aangemaakt_op).toLocaleDateString("nl-NL")} · status {c.status} · ernst {c.ernst}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {badge(c.status)}
-                      {badge(c.ernst)}
-                    </div>
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-sm text-zinc-300">{c.omschrijving}</p>
-                </Link>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[800px] border-collapse text-sm">
+                <thead className="bg-[#252525] text-left text-xs uppercase text-zinc-300">
+                  <tr><th className="border border-zinc-700 p-2">Categorie</th><th className="border border-zinc-700 p-2">Datum</th><th className="border border-zinc-700 p-2">Status</th><th className="border border-zinc-700 p-2">Ernst</th><th className="border border-zinc-700 p-2 text-right">Open</th></tr>
+                </thead>
+                <tbody>
+                  {relatedCases.map((c, i) => {
+                    const zebra = i % 2 === 0;
+                    return (
+                      <tr key={c.id} style={{ backgroundColor: zebra ? "#ffffff" : "#171717", color: zebra ? "#000" : "#fff" }}>
+                        <td className="border border-zinc-800 p-2"><b style={{ color: "#ff4d00" }}>{c.categorie}</b><p className="line-clamp-1 text-xs opacity-75">{c.omschrijving}</p></td>
+                        <td className="border border-zinc-800 p-2">{fmtDate(c.datum_overtreding || c.aangemaakt_op)}</td>
+                        <td className="border border-zinc-800 p-2"><Badge value={c.status} /></td>
+                        <td className="border border-zinc-800 p-2"><Badge value={c.ernst} /></td>
+                        <td className="border border-zinc-800 p-2 text-right"><Link href={`/dashboard/admin/algemeen/overtredingen/${c.id}`} className="inline-block border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black uppercase !text-black">Detail</Link></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </section>
-        )}
+        ) : null}
 
-        {editing && (
-          <form onSubmit={saveEdit} className="mb-5 border border-orange-500/50 bg-[#1b1917] p-5 shadow-2xl">
-            <h2 className="mb-4 flex items-center gap-2 text-xl font-black uppercase text-orange-300"><Pencil size={20} /> Dossier bewerken</h2>
-            <div className="grid gap-3 md:grid-cols-4">
-              <label className="block text-xs font-bold uppercase text-zinc-400">Type
-                <select className={fieldClass} value={editForm.type} onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}>{TYPES.map((x) => <option key={x}>{x}</option>)}</select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Status
-                <select className={fieldClass} value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>{STATUSSEN.map((x) => <option key={x}>{x}</option>)}</select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Betrokkene
-                <select className={fieldClass} value={editForm.betrokkene_type} onChange={(e) => setEditForm({ ...editForm, betrokkene_type: e.target.value })}>{BETROKKENEN.map((x) => <option key={x}>{x}</option>)}</select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Ernst
-                <select className={fieldClass} value={editForm.ernst} onChange={(e) => setEditForm({ ...editForm, ernst: e.target.value })}>{ERNST.map((x) => <option key={x}>{x}</option>)}</select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Naam
-                <input required className={fieldClass} value={editForm.naam} onChange={(e) => setEditForm({ ...editForm, naam: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">VA nummer
-                <input className={fieldClass} value={editForm.va_nummer} onChange={(e) => setEditForm({ ...editForm, va_nummer: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Datum overtreding
-                <input type="date" className={fieldClass} value={editForm.datum_overtreding} onChange={(e) => setEditForm({ ...editForm, datum_overtreding: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Matchmaking ID
-                <input className={fieldClass} value={editForm.matchmaking_id} onChange={(e) => setEditForm({ ...editForm, matchmaking_id: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-4">Categorie
-                <input required className={fieldClass} value={editForm.categorie} onChange={(e) => setEditForm({ ...editForm, categorie: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Omschrijving
-                <textarea required rows={5} className={fieldClass} value={editForm.omschrijving} onChange={(e) => setEditForm({ ...editForm, omschrijving: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Interne notitie
-                <textarea rows={5} className={fieldClass} value={editForm.interne_notitie} onChange={(e) => setEditForm({ ...editForm, interne_notitie: e.target.value })} />
-              </label>
-            </div>
-            <div className="mt-4 flex justify-end gap-3">
-              <button type="button" onClick={() => { fillEditForm(dossier); setEditing(false); }} className={silverButton}><X size={17} /> Annuleren</button>
-              <button disabled={savingEdit} className={silverButton}><Save size={17} /> {savingEdit ? "Opslaan..." : "Wijzigingen opslaan"}</button>
+        {editing ? (
+          <form onSubmit={saveEdit} className="m-4 border border-[#ff4d00]/60 bg-[#1c1c1c] p-4">
+            <h2 className="mb-4 flex items-center gap-2 text-lg font-black uppercase text-[#ff4d00]"><Pencil size={20} /> Dossier bewerken</h2>
+            <DossierForm form={editForm} setForm={setEditForm} />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => { fillEditForm(dossier); setEditing(false); }} className={silverButton}><X size={16} /> Annuleren</button>
+              <button disabled={savingEdit} className={silverButton}><Save size={16} /> {savingEdit ? "Opslaan..." : "Wijzigingen opslaan"}</button>
             </div>
           </form>
-        )}
+        ) : null}
 
-        {showAction && (
-          <form onSubmit={addAction} className="mb-5 border border-orange-500/50 bg-[#1b1917] p-5 shadow-2xl">
-            <h2 className="mb-2 flex items-center gap-2 text-xl font-black uppercase text-orange-300"><Gavel size={20} /> Sanctie of vervolgstap toevoegen</h2>
-            <p className="mb-4 border border-zinc-600/70 bg-[#11100f]/70 p-3 text-sm font-bold text-zinc-300">
-              Een vervolgstap sluit het dossier niet af. Je kunt meerdere stappen toevoegen en sluit het dossier pas zelf af met de knop Afronden.
-            </p>
-            <div className="grid gap-3 md:grid-cols-5">
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Actie
-                <select className={fieldClass} value={action.actie_type} onChange={(e) => setAction({ ...action, actie_type: e.target.value })}>{ACTIES.map((x) => <option key={x}>{x}</option>)}</select>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Status vervolgstap
-                <select className={fieldClass} value={action.status} onChange={(e) => setAction({ ...action, status: e.target.value })}>
-                  <option value="open">open</option><option value="actief">actief</option><option value="afgerond">afgerond</option><option value="ingetrokken">ingetrokken</option>
-                </select>
-                <span className="mt-1 block text-[11px] normal-case text-zinc-500">
-                  Dit is alleen de status van deze vervolgstap, niet van het dossier.
-                </span>
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Start
-                <input type="date" className={fieldClass} value={toDateValue(action.start_datum)} onChange={(e) => setAction({ ...action, start_datum: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Einde
-                <input type="date" className={fieldClass} value={toDateValue(action.eind_datum)} onChange={(e) => setAction({ ...action, eind_datum: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400">Punten
-                <input type="number" className={fieldClass} value={action.punten} onChange={(e) => setAction({ ...action, punten: e.target.value })} />
-              </label>
-              <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-4">Omschrijving
-                <textarea required rows={4} className={fieldClass} value={action.omschrijving} onChange={(e) => setAction({ ...action, omschrijving: e.target.value })} />
-              </label>
-            </div>
-            <div className="mt-4 flex justify-end gap-3">
+        {showAction ? (
+          <form onSubmit={addAction} className="m-4 border border-[#ff4d00]/60 bg-[#1c1c1c] p-4">
+            <h2 className="mb-2 flex items-center gap-2 text-lg font-black uppercase text-[#ff4d00]"><Gavel size={20} /> Sanctie of vervolgstap toevoegen</h2>
+            <p className="mb-4 border border-zinc-700 bg-[#111] p-3 text-sm font-bold text-zinc-300">Een vervolgstap sluit het dossier niet af. Je sluit het dossier zelf af met de knop Afronden.</p>
+            <ActionForm action={action} setAction={setAction} />
+            <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setShowAction(false)} className={silverButton}>Annuleren</button>
-              <button disabled={saving} className={silverButton}>{saving ? "Opslaan..." : "Vervolgstap opslaan"}</button>
+              <button disabled={saving} className={orangeButton}>{saving ? "Opslaan..." : "Vervolgstap opslaan"}</button>
             </div>
           </form>
-        )}
+        ) : null}
 
-        <section className="mb-5 grid gap-4 md:grid-cols-2">
-          <div className="border border-zinc-500/70 bg-[#1b1917] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
-            <h2 className="mb-3 text-lg font-black uppercase text-orange-300">Omschrijving</h2>
+        <div className="grid gap-4 p-4 md:grid-cols-2">
+          <section className="border border-zinc-700 bg-[#1c1c1c] p-4">
+            <h2 className="mb-3 text-lg font-black uppercase text-[#ff4d00]">Omschrijving</h2>
             <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-200">{dossier.omschrijving}</p>
-          </div>
-          <div className="border border-zinc-500/70 bg-[#1b1917] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
-            <h2 className="mb-3 text-lg font-black uppercase text-orange-300">Interne notitie</h2>
+          </section>
+          <section className="border border-zinc-700 bg-[#1c1c1c] p-4">
+            <h2 className="mb-3 text-lg font-black uppercase text-[#ff4d00]">Interne notitie</h2>
             <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-300">{dossier.interne_notitie || "Geen interne notitie."}</p>
-          </div>
-        </section>
+          </section>
+        </div>
 
-        <section className="border border-zinc-500/70 bg-[#1b1917] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
-          <h2 className="mb-4 text-lg font-black uppercase text-white">Sancties & vervolgstappen</h2>
-          <div className="grid gap-3">
-            {actions.length === 0 && <div className="border border-zinc-600/80 bg-[#11100f]/70 p-5 text-center font-bold text-zinc-400">Nog geen vervolgacties.</div>}
-            {actions.map((a) => (
-              <div key={a.id} className="border border-zinc-500/70 bg-[#11100f]/70 p-4">
-                {editingActionId === a.id ? (
-                  <form onSubmit={saveActionEdit}>
-                    <div className="grid gap-3 md:grid-cols-5">
-                      <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-2">Actie
-                        <select className={fieldClass} value={editAction.actie_type} onChange={(e) => setEditAction({ ...editAction, actie_type: e.target.value })}>{ACTIES.map((x) => <option key={x}>{x}</option>)}</select>
-                      </label>
-                      <label className="block text-xs font-bold uppercase text-zinc-400">Status
-                        <select className={fieldClass} value={editAction.status} onChange={(e) => setEditAction({ ...editAction, status: e.target.value })}>
-                          <option value="open">open</option><option value="actief">actief</option><option value="afgerond">afgerond</option><option value="ingetrokken">ingetrokken</option><option value="vervallen">vervallen</option>
-                        </select>
-                      </label>
-                      <label className="block text-xs font-bold uppercase text-zinc-400">Start
-                        <input type="date" className={fieldClass} value={toDateValue(editAction.start_datum)} onChange={(e) => setEditAction({ ...editAction, start_datum: e.target.value })} />
-                      </label>
-                      <label className="block text-xs font-bold uppercase text-zinc-400">Einde
-                        <input type="date" className={fieldClass} value={toDateValue(editAction.eind_datum)} onChange={(e) => setEditAction({ ...editAction, eind_datum: e.target.value })} />
-                      </label>
-                      <label className="block text-xs font-bold uppercase text-zinc-400">Punten
-                        <input type="number" className={fieldClass} value={editAction.punten} onChange={(e) => setEditAction({ ...editAction, punten: e.target.value })} />
-                      </label>
-                      <label className="block text-xs font-bold uppercase text-zinc-400 md:col-span-4">Omschrijving
-                        <textarea required rows={4} className={fieldClass} value={editAction.omschrijving} onChange={(e) => setEditAction({ ...editAction, omschrijving: e.target.value })} />
-                      </label>
-                    </div>
-                    <div className="mt-4 flex justify-end gap-3">
-                      <button type="button" onClick={() => setEditingActionId(null)} className={silverButton}><X size={17} /> Annuleren</button>
-                      <button disabled={saving} className={silverButton}><Save size={17} /> {saving ? "Opslaan..." : "Vervolgstap bijwerken"}</button>
-                    </div>
-                  </form>
-                ) : (
-                  <>
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap gap-2">{badge(a.actie_type)}{badge(a.status)}{Number(a.punten) !== 0 ? badge(`${a.punten} punten`) : null}</div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-xs font-bold text-zinc-500">{new Date(a.aangemaakt_op).toLocaleDateString("nl-NL")}</div>
-                        <button type="button" onClick={() => startEditAction(a)} className={cls(silverButton, "px-3 py-2 text-xs")}>
-                          <Pencil size={14} /> Bewerk
-                        </button>
-                      </div>
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-200">{a.omschrijving}</p>
-                    {(a.start_datum || a.eind_datum) && <div className="mt-3 text-xs font-bold uppercase text-zinc-400">Periode: {a.start_datum || "-"} t/m {a.eind_datum || "-"}</div>}
-                  </>
-                )}
-              </div>
-            ))}
+        <section className="m-4 mt-0 border border-zinc-700 bg-[#1c1c1c]">
+          <div className="border-b border-zinc-700 bg-[#252525] p-3">
+            <h2 className="text-lg font-black uppercase text-white">Sancties & vervolgstappen</h2>
+          </div>
+          <div className="overflow-x-auto p-4">
+            <table className="w-full min-w-[980px] border-collapse text-sm">
+              <thead className="bg-[#252525] text-left text-xs uppercase text-zinc-300">
+                <tr><th className="border border-zinc-700 p-2">Actie</th><th className="border border-zinc-700 p-2">Status</th><th className="border border-zinc-700 p-2">Periode</th><th className="border border-zinc-700 p-2">Punten</th><th className="border border-zinc-700 p-2">Omschrijving</th><th className="border border-zinc-700 p-2 text-right">Bewerk</th></tr>
+              </thead>
+              <tbody>
+                {actions.length === 0 ? (
+                  <tr className="bg-[#171717]"><td colSpan={6} className="border border-zinc-800 p-4 text-center text-zinc-300">Nog geen vervolgacties.</td></tr>
+                ) : null}
+                {actions.map((a, index) => {
+                  const zebra = index % 2 === 0;
+                  const editingThisAction = editingActionId === a.id;
+                  return (
+                    <tr key={a.id} style={{ backgroundColor: zebra ? "#ffffff" : "#171717", color: zebra ? "#000" : "#fff" }}>
+                      {editingThisAction ? (
+                        <td colSpan={6} className="border border-zinc-800 p-3">
+                          <form onSubmit={saveActionEdit}>
+                            <ActionForm action={editAction} setAction={setEditAction} />
+                            <div className="mt-4 flex justify-end gap-2">
+                              <button type="button" onClick={() => setEditingActionId(null)} className={silverButton}><X size={16} /> Annuleren</button>
+                              <button disabled={saving} className={orangeButton}><Save size={16} /> {saving ? "Opslaan..." : "Vervolgstap bijwerken"}</button>
+                            </div>
+                          </form>
+                        </td>
+                      ) : (
+                        <>
+                          <td className="border border-zinc-800 p-2"><Badge value={a.actie_type} /></td>
+                          <td className="border border-zinc-800 p-2"><Badge value={a.status} /></td>
+                          <td className="border border-zinc-800 p-2">{a.start_datum || "-"} t/m {a.eind_datum || "-"}</td>
+                          <td className="border border-zinc-800 p-2 font-bold">{Number(a.punten ?? 0)}</td>
+                          <td className="border border-zinc-800 p-2">{a.omschrijving || "-"}<div className="text-xs opacity-70">{fmtDate(a.aangemaakt_op)}</div></td>
+                          <td className="border border-zinc-800 p-2 text-right"><button type="button" onClick={() => startEditAction(a)} className="inline-flex items-center gap-1 border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black uppercase !text-black"><Pencil size={14} /> Bewerk</button></td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
-      </div>
+      </section>
     </main>
+  );
+}
+
+function DossierForm({ form, setForm }: { form: any; setForm: (v: any) => void }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-4">
+      <Field label="Type"><Select value={form.type} onChange={(v) => setForm({ ...form, type: v })} options={TYPES} /></Field>
+      <Field label="Status"><Select value={form.status} onChange={(v) => setForm({ ...form, status: v })} options={STATUSSEN} /></Field>
+      <Field label="Betrokkene"><Select value={form.betrokkene_type} onChange={(v) => setForm({ ...form, betrokkene_type: v })} options={BETROKKENEN} /></Field>
+      <Field label="Ernst"><Select value={form.ernst} onChange={(v) => setForm({ ...form, ernst: v })} options={ERNST} /></Field>
+      <Field label="Naam" className="md:col-span-2"><Input required value={form.naam} onChange={(v) => setForm({ ...form, naam: v })} /></Field>
+      <Field label="VA nummer"><Input value={form.va_nummer} onChange={(v) => setForm({ ...form, va_nummer: v })} /></Field>
+      <Field label="Datum overtreding"><Input type="date" value={form.datum_overtreding} onChange={(v) => setForm({ ...form, datum_overtreding: v })} /></Field>
+      <Field label="Matchmaking ID"><Input value={form.matchmaking_id} onChange={(v) => setForm({ ...form, matchmaking_id: v })} /></Field>
+      <Field label="Categorie" className="md:col-span-3"><Input required value={form.categorie} onChange={(v) => setForm({ ...form, categorie: v })} /></Field>
+      <Field label="Omschrijving" className="md:col-span-2"><Textarea required rows={5} value={form.omschrijving} onChange={(v) => setForm({ ...form, omschrijving: v })} /></Field>
+      <Field label="Interne notitie" className="md:col-span-2"><Textarea rows={5} value={form.interne_notitie} onChange={(v) => setForm({ ...form, interne_notitie: v })} /></Field>
+    </div>
+  );
+}
+
+function ActionForm({ action, setAction }: { action: any; setAction: (v: any) => void }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-5">
+      <Field label="Actie" className="md:col-span-2"><Select value={action.actie_type} onChange={(v) => setAction({ ...action, actie_type: v })} options={ACTIES} /></Field>
+      <Field label="Status vervolgstap"><Select value={action.status} onChange={(v) => setAction({ ...action, status: v })} options={["open", "actief", "afgerond", "ingetrokken", "vervallen"]} /></Field>
+      <Field label="Start"><Input type="date" value={toDateValue(action.start_datum)} onChange={(v) => setAction({ ...action, start_datum: v })} /></Field>
+      <Field label="Einde"><Input type="date" value={toDateValue(action.eind_datum)} onChange={(v) => setAction({ ...action, eind_datum: v })} /></Field>
+      <Field label="Punten"><Input type="number" value={action.punten} onChange={(v) => setAction({ ...action, punten: v })} /></Field>
+      <Field label="Omschrijving" className="md:col-span-4"><Textarea required rows={4} value={action.omschrijving} onChange={(v) => setAction({ ...action, omschrijving: v })} /></Field>
+    </div>
+  );
+}
+
+function Field({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+  return <label className={cls("block text-xs font-bold uppercase text-zinc-400", className)}>{label}{children}</label>;
+}
+
+function Input({ value, onChange, required, type = "text" }: { value: string; onChange: (v: string) => void; required?: boolean; type?: string }) {
+  return <input type={type} required={required} className={fieldClass} value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
+function Textarea({ value, onChange, required, rows }: { value: string; onChange: (v: string) => void; required?: boolean; rows: number }) {
+  return <textarea required={required} rows={rows} className={fieldClass} value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
+function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
+  return (
+    <select className={fieldClass} value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map((x) => <option key={x}>{x}</option>)}
+    </select>
   );
 }

@@ -31,6 +31,9 @@ type PortalAction = {
 
 type UserProfileRow = {
   role: string | null;
+  active_role?: string | null;
+  default_role?: string | null;
+  available_roles?: string[] | null;
   bondteam: string | null;
 };
 
@@ -43,6 +46,30 @@ function normalizeBondteam(value: unknown): string {
   if (value === null || value === undefined) return "";
   const normalized = String(value).trim().toUpperCase();
   return normalized === "NULL" ? "" : normalized;
+}
+
+function prettyRole(value: unknown): string {
+  const role = normalizeRole(value);
+  switch (role) {
+    case "superadmin":
+      return "Superadmin";
+    case "admin":
+      return "Admin";
+    case "matchmaker":
+      return "Matchmaker";
+    case "official":
+      return "Official";
+    case "hoofdofficial":
+      return "Hoofdofficial";
+    case "dispensatie_admin":
+      return "Dispensatie admin";
+    case "trainer":
+      return "Trainer";
+    case "sportschool":
+      return "Sportschool";
+    default:
+      return role || "Geen rol";
+  }
 }
 
 async function fetchUserProfile(): Promise<UserProfileRow | null> {
@@ -194,6 +221,8 @@ export default function DashboardPage() {
   const { user, loading, logout } = useAuth();
   const [profile, setProfile] = useState<UserProfileRow | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleError, setRoleError] = useState("");
 
   useEffect(() => {
     if (!loading && !user) {
@@ -260,9 +289,48 @@ export default function DashboardPage() {
     );
   }
 
+  async function changeActiveRole(nextRole: string) {
+    const normalized = normalizeRole(nextRole);
+    const availableRoles = (profile?.available_roles ?? []).map(normalizeRole);
+    if (!normalized || !availableRoles.includes(normalized)) return;
+
+    setRoleSaving(true);
+    setRoleError("");
+    try {
+      const response = await authedFetch("/api/me/profile", {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ active_role: normalized }),
+      });
+
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(json?.error || "Rol wisselen mislukt.");
+      }
+
+      setProfile(json as UserProfileRow);
+    } catch (error: any) {
+      setRoleError(String(error?.message ?? error));
+    } finally {
+      setRoleSaving(false);
+    }
+  }
+
   if (!user) return null;
 
-  const role = normalizeRole(profile?.role);
+  const role = normalizeRole(
+    profile?.active_role ?? profile?.role ?? profile?.available_roles?.[0],
+  );
+  const availableRoles = Array.from(
+    new Set(
+      [role, profile?.role, ...(profile?.available_roles ?? [])]
+        .map(normalizeRole)
+        .filter(Boolean),
+    ),
+  );
   const bondteam = normalizeBondteam(profile?.bondteam);
   const isNvbOrNoBondteam = bondteam === "" || bondteam === "NVB";
 
@@ -485,6 +553,11 @@ export default function DashboardPage() {
       <TopLogoBand />
       <TitleBand
         email={user.email ?? ""}
+        activeRole={role}
+        availableRoles={availableRoles}
+        roleSaving={roleSaving}
+        roleError={roleError}
+        onRoleChange={changeActiveRole}
         actionLabel="Uitloggen"
         actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
         onAction={async () => {
@@ -601,11 +674,21 @@ function TopLogoBand() {
 
 function TitleBand({
   email,
+  activeRole,
+  availableRoles,
+  roleSaving,
+  roleError,
+  onRoleChange,
   actionLabel,
   actionIcon,
   onAction,
 }: {
   email: string;
+  activeRole: string;
+  availableRoles: string[];
+  roleSaving: boolean;
+  roleError: string;
+  onRoleChange: (role: string) => void;
   actionLabel: string;
   actionIcon?: ReactNode;
   onAction: () => void | Promise<void>;
@@ -713,6 +796,66 @@ function TitleBand({
           >
             Ingelogd als{" "}
             <span style={{ color: "#ffffff", fontWeight: 700 }}>{email}</span>
+          </div>
+
+          <div
+            style={{
+              marginTop: 9,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 9,
+              flexWrap: "wrap",
+              fontSize: 11,
+              color: "rgba(255,255,255,0.70)",
+            }}
+          >
+            <span
+              style={{
+                fontWeight: 900,
+                letterSpacing: 1.3,
+                textTransform: "uppercase",
+                color: NVB_ORANGE,
+              }}
+            >
+              Actieve rol
+            </span>
+
+            <select
+              value={activeRole}
+              disabled={roleSaving || availableRoles.length === 0}
+              onChange={(event) => onRoleChange(event.target.value)}
+              style={{
+                height: 30,
+                minWidth: 190,
+                border: "1px solid rgba(185,185,185,0.95)",
+                background:
+                  "linear-gradient(180deg, #ffffff 0%, #d7d7d7 34%, #f5f5f5 55%, #a8a8a8 100%)",
+                color: "#121212",
+                fontSize: 12,
+                fontWeight: 900,
+                padding: "0 10px",
+                outline: "none",
+                cursor: roleSaving ? "not-allowed" : "pointer",
+              }}
+            >
+              {availableRoles.length === 0 ? (
+                <option value={activeRole}>{prettyRole(activeRole)}</option>
+              ) : (
+                availableRoles.map((role) => (
+                  <option key={role} value={role}>
+                    {prettyRole(role)}
+                  </option>
+                ))
+              )}
+            </select>
+
+            {roleSaving ? <span>Opslaan...</span> : null}
+            {roleError ? (
+              <span style={{ color: "#ff9b72", fontWeight: 800 }}>
+                {roleError}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

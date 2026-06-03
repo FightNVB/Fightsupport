@@ -10,6 +10,8 @@ import {
   Users,
   Trophy,
   ArrowLeft,
+  FileText,
+  Award,
 } from "lucide-react";
 
 type MenuAction = {
@@ -206,6 +208,18 @@ export default function MatchmakerDashboardPage() {
       icon: Trophy as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
+      label: "Dispensatie aanvragen",
+      subtitle: "Open het NVB dispensatieformulier",
+      external: "https://form.jotform.com/252374582262055",
+      icon: FileText as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
+    },
+    {
+      label: "Licentie verlengen",
+      subtitle: "Vraag verlenging Matchmaker licentie aan",
+      external: "https://form.jotform.com/253623147570355",
+      icon: Award as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
+    },
+    {
       label: "Belgische clubs",
       subtitle: "Controleer clubs en keurmerken in België",
       external: "https://www.bkbmo.be/clubs-in-belgie",
@@ -237,7 +251,7 @@ export default function MatchmakerDashboardPage() {
           className="dashboard-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
             gap: 20,
           }}
         >
@@ -355,7 +369,13 @@ function SharedStyles() {
         }
       }
 
-      @media (max-width: 980px) {
+      @media (max-width: 1180px) {
+        .dashboard-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        }
+      }
+
+      @media (max-width: 760px) {
         .dashboard-grid {
           grid-template-columns: 1fr !important;
         }

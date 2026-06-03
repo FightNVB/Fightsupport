@@ -470,7 +470,7 @@ export default function ControleOverzichtPage() {
           "FightPassport wacht op de 7-cijferige code uit je e-mail."
         );
         setScrapeOverlaySub(
-          "De scraper blijft wachten en probeert niet opnieuw in te loggen. Open de sessiepagina, vul de code in en zet vertrouwd apparaat aan."
+          "De robotjes blijft wachten en probeert niet opnieuw in te loggen. Open de sessiepagina, vul de code in en zet vertrouwd apparaat aan."
         );
       }
 
@@ -725,7 +725,7 @@ export default function ControleOverzichtPage() {
           "De server gaf geen bevestiging binnen de wachttijd. Vernieuw de pagina of check de logs."
         );
         setScrapeOverlaySub(
-          "Dit betekent niet automatisch dat de scraper mislukt is; de resultaten kunnen al opgeslagen zijn."
+          "Dit betekent niet automatisch dat de controle mislukt is; de resultaten kunnen al opgeslagen zijn."
         );
         return;
       }
@@ -761,7 +761,7 @@ export default function ControleOverzichtPage() {
         "De server gaf geen bevestiging binnen de wachttijd. Vernieuw de pagina of check de logs."
       );
       setScrapeOverlaySub(
-        "Dit betekent niet automatisch dat de scraper mislukt is; de resultaten kunnen al opgeslagen zijn."
+        "Dit betekent niet automatisch dat de controle mislukt is; de resultaten kunnen al opgeslagen zijn."
       );
     } finally {
       setBusyId(null);
@@ -1139,15 +1139,24 @@ export default function ControleOverzichtPage() {
                 </div>
 
                 <div className="flex min-w-[240px] flex-col items-end gap-2 justify-self-end">
-                  <button
-                    onClick={runSportscholen}
-                    disabled={sportsBusy}
-                    className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-2 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
-                    title="Update sportscholen tabel (keurmerk data)"
-                  >
-                    {sportsBusy ? "Sportscholen…" : "Sportscholen sync"}
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      onClick={runSportscholen}
+                      disabled={sportsBusy}
+                      className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-2 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
+                      title="Update sportscholen tabel (keurmerk data)"
+                    >
+                      {sportsBusy ? "Sportscholen…" : "Sportscholen sync"}
+                    </button>
 
+                    <button
+                      onClick={() => (window.location.href = "/dashboard/admin/controle/yoc")}
+                      className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-2 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                      title="Open YOC controle"
+                    >
+                      Controle YOC
+                    </button>
+                  </div>
 
                   {sportsMsg ? (
                     <span className="text-xs" style={{ color: "var(--brand-orange)" }}>

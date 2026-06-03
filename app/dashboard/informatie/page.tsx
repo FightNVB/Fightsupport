@@ -159,7 +159,7 @@ export default function InformatiePage() {
     {
       label: "Matchmaker Reglement",
       subtitle: "Bekijk het NVB matchmaker reglement",
-      external: "/nvb_Matchmaker_reglement.pdf",
+      external: "/nvb_matchmaker_reglement.pdf",
       icon: Users,
     },
     {
@@ -187,9 +187,9 @@ export default function InformatiePage() {
       icon: Users,
     },
     {
-      label: "Beslisboom Talentstatus",
-      subtitle: "Talentstatus hoofdcontact beslisboom",
-      external: "/Beslisboom talentstatus hoofdcontact (3).pdf",
+      label: "Aanvraag Talentstatus",
+      subtitle: "Talentstatus vanaf 16 jaar",
+      external: "https://form.jotform.com/252374009578059",
       icon: Scale,
     },
     {

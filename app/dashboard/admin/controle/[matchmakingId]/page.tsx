@@ -2160,7 +2160,7 @@ export default function ControleMatchmakingPage() {
       }
 
       setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar bond.");
-      router.replace("/dashboard/controle");
+      router.replace("/dashboard/admin/controle");
     });
   }
 
