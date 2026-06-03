@@ -72,10 +72,16 @@ export default function AdminSportschoolMeldingenPage() {
   const [error, setError] = useState("");
   const [opmerkingen, setOpmerkingen] = useState<Record<string, string>>({});
 
-  async function tokenHeaders() {
+  async function tokenHeaders(): Promise<Record<string, string>> {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
-    return token ? { Authorization: `Bearer ${token}` } : {};
+
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return headers;
   }
 
   async function load() {
