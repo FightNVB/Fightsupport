@@ -467,6 +467,7 @@ function BruteHeaderA({
   onPrev,
   onNext,
   onBack,
+  onBackToMatchmaking,
 }: {
   evenementNaam: string | null;
   evenementDatum: string | null;
@@ -480,6 +481,7 @@ function BruteHeaderA({
   onPrev?: () => void;
   onNext?: () => void;
   onBack?: () => void;
+  onBackToMatchmaking?: () => void;
 }) {
   const logo = useLogoFallback([
     "/branding/fightsupport/logo-dark.png",
@@ -691,6 +693,20 @@ function BruteHeaderA({
                 title="Terug"
               >
                 ←
+              </button>
+              <button
+                onClick={() => onBackToMatchmaking?.()}
+                className="px-3 py-2 rounded font-semibold text-white transition active:scale-95"
+                style={{
+                  background:
+                    "linear-gradient(180deg, #ff6200 0%, #cc3d00 100%)",
+                  border: "1px solid rgba(0,0,0,0.6)",
+                  boxShadow:
+                    "inset 0 1px 0 rgba(255,255,255,0.3), 0 6px 14px rgba(0,0,0,0.5)",
+                }}
+                title="Terug naar matchmaking"
+              >
+                Matchmaking
               </button>
               <SilverButton
                 disabled={!navPrev}
@@ -2515,6 +2531,7 @@ export default function PartijDetailPage() {
           matchmakingId={matchmakingId}
           runStatus={run?.status ?? null}
           onBack={() => router.back()}
+          onBackToMatchmaking={() => router.push(`/dashboard/admin/controle/${matchmakingId}`)}
           navPrev={nav.prev ?? null}
           navNext={nav.next ?? null}
           onPrev={() =>
