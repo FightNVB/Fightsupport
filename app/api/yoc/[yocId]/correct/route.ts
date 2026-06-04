@@ -106,17 +106,15 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!oldFighter) return NextResponse.json({ ok: false, error: "YOC-vechter niet gevonden." }, { status: 404 });
 
   const incomingVa = firstProvided(body, ["va_nummer", "va_nummer_mm", "va", "fighter_id"]);
-  const va = normalizeVa(incomingVa ?? oldFighter?.va_nummer_mm ?? oldFighter?.va_nummer ?? oldFighter?.va ?? oldFighter?.fighter_id);
+  const va = normalizeVa(incomingVa ?? oldFighter?.va_nummer_mm);
   if (!va) return NextResponse.json({ ok: false, error: "Geen geldig VA nummer." }, { status: 400 });
 
-  const oldVa = normalizeVa(oldFighter?.va_nummer_mm ?? oldFighter?.va_nummer ?? oldFighter?.va ?? oldFighter?.fighter_id);
+  const oldVa = normalizeVa(oldFighter?.va_nummer_mm);
   const patch: AnyRow = { updated_at: new Date().toISOString() };
 
-  // Alleen velden aanpassen die de page echt meestuurt. Geen bestaande waarden per ongeluk naar null zetten.
+  // Alleen kolommen gebruiken die echt bestaan in yoc_fighters.
+  // yoc_fighters heeft va_nummer_mm, geen va_nummer/va/fighter_id.
   patch.va_nummer_mm = va;
-  patch.va_nummer = va;
-  patch.va = va;
-  patch.fighter_id = va;
 
   const textFields: Array<[string, string[]]> = [
     ["naam_mm", ["naam", "naam_mm"]],
@@ -135,7 +133,6 @@ export async function POST(req: NextRequest, { params }: Params) {
   const gewichtValue = firstProvided(body, ["gewicht", "gewicht_mm", "kg"]);
   if (gewichtValue !== undefined) {
     patch.gewicht_mm = toNumberOrNull(gewichtValue);
-    patch.gewicht = toNumberOrNull(gewichtValue);
   }
 
   const { data: updated, error: updateErr } = await supabase
