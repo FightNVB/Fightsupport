@@ -158,27 +158,91 @@ export async function saveYocFighterContexts(params: { supabase: SupabaseLike; y
   return { data: data ?? [], error };
 }
 
+function reviewKey(row: AnyRow): string {
+  return [
+    s(row?.fighter_raw_id),
+    s(row?.rule_code ?? row?.rule).toUpperCase(),
+    s(row?.boodschap),
+  ].join("|");
+}
+
 export async function saveYocFighterRules(params: { supabase: SupabaseLike; yocEventId: string; yocRunId?: string | null; hits: AnyRow[] }) {
   const { supabase, yocEventId, yocRunId = null, hits } = params;
   if (!hits?.length) return { data: [], error: null };
 
-  let del = supabase.from("yoc_resultaten").delete().eq("yoc_event_id", yocEventId);
-  if (yocRunId) del = del.eq("yoc_run_id", yocRunId);
-  await del;
+  const fighterRawIds = Array.from(
+    new Set(hits.map((hit) => s(hit?.fighter_raw_id)).filter(Boolean)),
+  );
 
-  const rows = hits.map((hit) => ({
-    yoc_event_id: yocEventId,
-    yoc_run_id: yocRunId ?? hit.yoc_run_id ?? null,
-    // yoc_resultaten koppelt bewust alleen via fighter_raw_id.
-    // De tabel heeft geen yoc_fighter_id en geen va_nummer kolom.
-    fighter_raw_id: hit.fighter_raw_id ?? null,
-    rule: hit.rule ?? hit.rule_code ?? null,
-    rule_code: hit.rule_code ?? hit.rule ?? null,
-    resultaat: hit.resultaat ?? null,
-    severity: hit.severity ?? null,
-    boodschap: hit.boodschap ?? null,
-    created_at: new Date().toISOString(),
-  }));
+  // Full run en single fighter rescrape kunnen allebei via deze functie.
+  // We verwijderen alleen resultaten van de betrokken fighter_raw_id's.
+  // Daardoor raakt een herscrape van 1 vechter nooit de meldingen van andere vechters.
+  let existingReviews: AnyRow[] = [];
+  if (fighterRawIds.length) {
+    const { data: oldRows, error: oldErr } = await supabase
+      .from("yoc_resultaten")
+      .select("fighter_raw_id,rule,rule_code,boodschap,review_status,reviewed_by,reviewed_at,original_resultaat,aantekeningen")
+      .eq("yoc_event_id", yocEventId)
+      .in("fighter_raw_id", fighterRawIds);
+
+    if (oldErr) return { data: [], error: oldErr };
+    existingReviews = oldRows ?? [];
+
+    const { error: delErr } = await supabase
+      .from("yoc_resultaten")
+      .delete()
+      .eq("yoc_event_id", yocEventId)
+      .in("fighter_raw_id", fighterRawIds);
+
+    if (delErr) return { data: [], error: delErr };
+  } else {
+    // Fallback voor oude/onvolledige hits zonder fighter_raw_id.
+    // Dit blijft beperkt tot de run als yocRunId bekend is.
+    let del = supabase.from("yoc_resultaten").delete().eq("yoc_event_id", yocEventId);
+    if (yocRunId) del = del.eq("yoc_run_id", yocRunId);
+    const { error: delErr } = await del;
+    if (delErr) return { data: [], error: delErr };
+  }
+
+  const reviewByKey = new Map<string, AnyRow>();
+  for (const oldRow of existingReviews) {
+    const status = s(oldRow?.review_status).toLowerCase();
+    if (!status || status === "open") continue;
+    reviewByKey.set(reviewKey(oldRow), oldRow);
+  }
+
+  const rows = hits.map((hit) => {
+    const base = {
+      yoc_event_id: yocEventId,
+      yoc_run_id: yocRunId ?? hit.yoc_run_id ?? null,
+      // yoc_resultaten koppelt bewust alleen via fighter_raw_id.
+      // De tabel heeft geen yoc_fighter_id en geen va_nummer kolom.
+      fighter_raw_id: hit.fighter_raw_id ?? null,
+      rule: hit.rule ?? hit.rule_code ?? null,
+      rule_code: hit.rule_code ?? hit.rule ?? null,
+      resultaat: hit.resultaat ?? null,
+      severity: hit.severity ?? null,
+      boodschap: hit.boodschap ?? null,
+      created_at: new Date().toISOString(),
+    };
+
+    // Als dezelfde melding na herscrape terugkomt, behoud dan de review.
+    const oldReview = reviewByKey.get(reviewKey(base));
+    if (!oldReview) return base;
+
+    return {
+      ...base,
+      review_status: oldReview.review_status ?? null,
+      reviewed_by: oldReview.reviewed_by ?? null,
+      reviewed_at: oldReview.reviewed_at ?? null,
+      original_resultaat: oldReview.original_resultaat ?? hit.resultaat ?? null,
+      aantekeningen: oldReview.aantekeningen ?? null,
+      resultaat:
+        s(oldReview.review_status).toLowerCase() === "goedgekeurd"
+          ? "ok"
+          : base.resultaat,
+    };
+  });
 
   const { data, error } = await safeInsert(supabase, "yoc_resultaten", rows);
   return { data: data ?? [], error };

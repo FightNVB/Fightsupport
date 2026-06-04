@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 type FilterTab = "all" | "actie" | "afkeur" | "geen_licentie" | "geen_keurmerk" | "startverbod";
@@ -141,6 +142,7 @@ export default function YocDetailPage({
   params: Promise<{ yocId: string }>;
 }) {
   const { yocId } = use(params);
+  const router = useRouter();
   const [fighters, setFighters] = useState<any[]>([]);
   const [contexts, setContexts] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
@@ -259,6 +261,17 @@ export default function YocDetailPage({
         : null) ||
       []
     );
+  }
+
+  function fighterDetailHref(f: any) {
+    const ctx = contextFor(f);
+    const fighterId = String(f?.id ?? ctx?.yoc_fighter_id ?? "").trim();
+    if (!fighterId) return `/dashboard/admin/controle/yoc/${yocId}`;
+    return `/dashboard/admin/controle/yoc/${yocId}/fighter/${fighterId}`;
+  }
+
+  function openFighterDetail(f: any) {
+    router.push(fighterDetailHref(f));
   }
 
   function statusFor(f: any) {
@@ -603,7 +616,7 @@ export default function YocDetailPage({
                       </td>
                       <td className="border border-zinc-800 p-2">
                         <a
-                          href={`/dashboard/admin/controle/yoc/${yocId}/fighter/${f.id}`}
+                          href={fighterDetailHref(f)}
                           className="font-black underline decoration-[#ff4d00]/50 underline-offset-4"
                           style={{ color: "#ff4d00" }}
                         >
@@ -665,7 +678,7 @@ export default function YocDetailPage({
                         <div className="flex justify-end gap-2">
                           <a
                             className="inline-block border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black uppercase !text-black"
-                            href={`/dashboard/admin/controle/yoc/${yocId}/fighter/${f.id}`}
+                            href={fighterDetailHref(f)}
                           >
                             Detail
                           </a>
