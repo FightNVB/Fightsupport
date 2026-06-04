@@ -1,16 +1,7 @@
-// app/api/control-engine/correct-bout/route.ts
+// app/api/control-engine/review/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import {
-  buildControleBoutContext,
-  buildToernooiContext,
-} from "@/lib/control/buildControleBoutContext";
-import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
-import { rulesEngine } from "@/lib/rulesEngine";
-import {
-  assertCanAccessMatchmaking,
-  requireUserWithRole,
-} from "@/app/api/_utils/authz";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -20,639 +11,254 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
-function normalizeVa(input: unknown): string | null {
-  if (input === null || input === undefined) return null;
-  const s = String(input).trim();
-  if (!s) return null;
-  const digits = s.replace(/\D+/g, "");
-  const noLeadingZeros = digits.replace(/^0+/, "");
-  return noLeadingZeros ? noLeadingZeros : null;
+type Decision = "approve" | "reject";
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function normalizeText(input: unknown): string | null {
-  if (input === null || input === undefined) return null;
-  const s = String(input).trim();
-  return s ? s : null;
+type NormalizedResultaat = "ok" | "info" | "actie" | "afgekeurd" | "dispensatie";
+
+function normalizeResultaat(v: any): NormalizedResultaat {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (s === "ok" || s === "goedgekeurd") return "ok";
+  if (s === "info" || s === "let op" || s === "let_op") return "info";
+  if (s === "dispensatie") return "dispensatie";
+  if (s === "afkeur" || s === "afgekeurd" || s === "afkeuren") return "afgekeurd";
+  return "actie";
 }
 
-function unwrapUuid(v: any): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  if (!s || s === "[object Object]") return null;
-  return s;
+function normalizeRole(v: any): string {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
 }
 
-function hasOwn(obj: any, key: string) {
-  return Object.prototype.hasOwnProperty.call(obj ?? {}, key);
+function isVerbodMelding(hay: string): boolean {
+  // Startverbod en ieder ander "verbod" mag alleen door superadmin worden gereviewd.
+  return hay.includes("verbod");
 }
 
-async function getLatestControleRunId(matchmaking_id: string): Promise<string | null> {
-  const { data: ctxRows, error: ctxErr } = await supabase
-    .from("controle_bout_context")
-    .select("controle_run_id, created_at")
-    .eq("matchmaking_id", matchmaking_id)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (ctxErr) throw ctxErr;
-
-  const fromCtx = ctxRows?.[0]?.controle_run_id ?? null;
-  if (fromCtx) return String(fromCtx);
-
-  const { data: tRows, error: tErr } = await supabase
-    .from("controle_toernooi_context")
-    .select("controle_run_id, created_at")
-    .eq("matchmaking_id", matchmaking_id)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (tErr) throw tErr;
-
-  const fromToernooi = tRows?.[0]?.controle_run_id ?? null;
-  if (fromToernooi) return String(fromToernooi);
-
-  const { data: resRows, error: resErr } = await supabase
-    .from("controle_resultaten")
-    .select("controle_run_id, created_at")
-    .eq("matchmaking_id", matchmaking_id)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (resErr) throw resErr;
-
-  const fromRes = resRows?.[0]?.controle_run_id ?? null;
-  return fromRes ? String(fromRes) : null;
+function normalizeVa(v: any): string | null {
+  const digits = String(v ?? "").replace(/\D+/g, "").replace(/^0+/, "");
+  return digits || null;
 }
 
-async function getBoutRow(matchmaking_id: string, partij_nr: number) {
-  const { data, error } = await supabase
-    .from("matchmaking_bouts_raw")
-    .select("*")
-    .eq("matchmaking_id", matchmaking_id)
-    .eq("partij_nr", partij_nr)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data ?? null;
+function cleanText(v: any): string | null {
+  const s = String(v ?? "").trim();
+  return s || null;
 }
 
-async function getBoutContextRow(
-  matchmaking_id: string,
-  controle_run_id: string,
-  partij_nr: number
-) {
-  const { data, error } = await supabase
-    .from("controle_bout_context")
-    .select("*")
-    .eq("matchmaking_id", matchmaking_id)
-    .eq("controle_run_id", controle_run_id)
-    .eq("partij_nr", partij_nr)
-    .maybeSingle();
+async function resolveControleResultaatRow(body: any) {
+  const controle_resultaat_id = cleanText(body?.controle_resultaat_id ?? body?.id);
 
-  if (error) throw error;
-  return data ?? null;
-}
+  if (controle_resultaat_id) {
+    const { data, error } = await supabase
+      .from("controle_resultaten")
+      .select("*")
+      .eq("id", controle_resultaat_id)
+      .single();
 
-async function getToernooiBoutRow(opts: {
-  matchmaking_id: string;
-  toernooi_code: string;
-  va_nummer: string;
-}) {
-  const { matchmaking_id, toernooi_code, va_nummer } = opts;
+    if (error || !data) return { row: null, error: "Controle-regel niet gevonden" };
+    return { row: data, error: null };
+  }
 
-  const { data, error } = await supabase
-    .from("matchmaking_bouts_raw")
-    .select("*")
-    .eq("matchmaking_id", matchmaking_id)
-    .eq("toernooi_code", toernooi_code)
-    .or(`va_rood.eq.${va_nummer},va_blauw.eq.${va_nummer}`)
-    .order("created_at", { ascending: false })
-    .limit(1);
+  const matchmaking_id = cleanText(body?.matchmaking_id);
+  const controle_run_id = cleanText(body?.controle_run_id);
+  const toernooi_code = cleanText(body?.toernooi_code ?? body?.toernooiCode)?.toUpperCase() ?? null;
+  const va = normalizeVa(body?.toernooi_va_nummer ?? body?.va_nummer ?? body?.fighter_id ?? body?.fighterId ?? body?.va);
+  const rule_code = cleanText(body?.rule_code);
+  const rule = cleanText(body?.rule);
+  const boodschap = cleanText(body?.boodschap);
 
-  if (error) throw error;
-  return data?.[0] ?? null;
-}
+  if (!matchmaking_id) {
+    return { row: null, error: "controle_resultaat_id of matchmaking_id ontbreekt" };
+  }
 
-async function getToernooiContextRow(opts: {
-  matchmaking_id: string;
-  controle_run_id?: string | null;
-  toernooi_code: string;
-  va_nummer: string;
-}) {
-  const { matchmaking_id, controle_run_id, toernooi_code, va_nummer } = opts;
+  if (!toernooi_code || !va) {
+    return {
+      row: null,
+      error: "controle_resultaat_id ontbreekt. Gebruik anders matchmaking_id + toernooi_code + va_nummer.",
+    };
+  }
 
   let q = supabase
-    .from("controle_toernooi_context")
+    .from("controle_resultaten")
     .select("*")
     .eq("matchmaking_id", matchmaking_id)
     .eq("toernooi_code", toernooi_code)
-    .eq("va_nummer", va_nummer)
-    .order("updated_at", { ascending: false })
-    .limit(1);
+    .eq("toernooi_va_nummer", va)
+    .order("created_at", { ascending: false })
+    .limit(2);
 
   if (controle_run_id) q = q.eq("controle_run_id", controle_run_id);
+  if (rule_code) q = q.eq("rule_code", rule_code);
+  if (rule) q = q.eq("rule", rule);
+  if (boodschap) q = q.eq("boodschap", boodschap);
 
   const { data, error } = await q;
   if (error) throw error;
-  return data?.[0] ?? null;
-}
 
-function readToernooiInput(body: any) {
-  const toernooi_code = String(body?.toernooi_code ?? body?.toernooiCode ?? "")
-    .trim()
-    .toUpperCase();
-
-  const oldVa = normalizeVa(
-    body?.va_nummer ??
-      body?.fighter_id ??
-      body?.fighterId ??
-      body?.old_va_nummer ??
-      body?.old_va
-  );
-
-  const newVa = normalizeVa(
-    hasOwn(body, "new_va_nummer")
-      ? body.new_va_nummer
-      : hasOwn(body, "new_va")
-        ? body.new_va
-        : oldVa
-  );
-
-  const newNaam = normalizeText(
-    hasOwn(body, "new_naam")
-      ? body.new_naam
-      : hasOwn(body, "naam")
-        ? body.naam
-        : undefined
-  );
-
-  const newGym = normalizeText(
-    hasOwn(body, "new_gym")
-      ? body.new_gym
-      : hasOwn(body, "sportschool")
-        ? body.sportschool
-        : hasOwn(body, "gym")
-          ? body.gym
-          : undefined
-  );
-
-  const newDiscipline = normalizeText(
-    hasOwn(body, "new_discipline")
-      ? body.new_discipline
-      : hasOwn(body, "discipline")
-        ? body.discipline
-        : undefined
-  );
-
-  const newKlasse = normalizeText(
-    hasOwn(body, "new_klasse")
-      ? body.new_klasse
-      : hasOwn(body, "klasse")
-        ? body.klasse
-        : undefined
-  );
-
-  return { toernooi_code, oldVa, newVa, newNaam, newGym, newDiscipline, newKlasse };
-}
-
-async function correctToernooiFighter(opts: {
-  body: any;
-  matchmaking_id: string;
-  controle_run_id: string | null;
-}) {
-  const { body, matchmaking_id } = opts;
-  let controle_run_id = opts.controle_run_id;
-
-  const {
-    toernooi_code,
-    oldVa,
-    newVa,
-    newNaam,
-    newGym,
-    newDiscipline,
-    newKlasse,
-  } = readToernooiInput(body);
-
-  if (!toernooi_code) {
-    return NextResponse.json({ error: "toernooi_code ontbreekt" }, { status: 400 });
+  if (!data?.length) {
+    return { row: null, error: "Controle-regel niet gevonden op toernooi_code + VA" };
   }
 
-  if (!oldVa) {
-    return NextResponse.json({ error: "va_nummer/fighter_id ontbreekt voor toernooi-correctie" }, { status: 400 });
-  }
-
-  const oldCtx = await getToernooiContextRow({
-    matchmaking_id,
-    controle_run_id,
-    toernooi_code,
-    va_nummer: oldVa,
-  });
-
-  const rawBout = await getToernooiBoutRow({
-    matchmaking_id,
-    toernooi_code,
-    va_nummer: oldVa,
-  });
-
-  if (!oldCtx && !rawBout) {
-    return NextResponse.json(
-      { error: `Toernooi-vechter niet gevonden voor ${toernooi_code} / VA ${oldVa}` },
-      { status: 404 }
-    );
-  }
-
-  const sourceVa = newVa ?? oldVa;
-  const isRood =
-    normalizeVa(rawBout?.va_rood ?? rawBout?.rood_va ?? rawBout?.rood_va_mm) === oldVa;
-  const isBlauw =
-    normalizeVa(rawBout?.va_blauw ?? rawBout?.blauw_va ?? rawBout?.blauw_va_mm) === oldVa;
-
-  // 1) Bron aanpassen: buildToernooiContext gebruikt matchmaking_bouts_raw.
-  //    Als we alleen controle_toernooi_context aanpassen, overschrijft build/rules de wijziging later weer.
-  if (rawBout) {
-    const boutPatch: Record<string, any> = {
-      laatste_bewerking_op: new Date().toISOString(),
+  if (data.length > 1 && !rule_code && !rule && !boodschap) {
+    return {
+      row: null,
+      error: "Meerdere meldingen gevonden. Stuur controle_resultaat_id of rule_code mee.",
     };
-
-    if (newDiscipline !== null) boutPatch.discipline = newDiscipline;
-    if (newKlasse !== null) boutPatch.klasse = newKlasse;
-
-    if (isRood) {
-      if (sourceVa) boutPatch.va_rood = sourceVa;
-      if (newNaam !== null) boutPatch.rood_naam = newNaam;
-      if (newGym !== null) boutPatch.rood_gym = newGym;
-
-      if (sourceVa !== oldVa) {
-        boutPatch.rood_va_changed = true;
-        boutPatch.rood_va_is_gewijzigd = true;
-        boutPatch.rood_va_changed_at = new Date().toISOString();
-        boutPatch.rood_va_was = oldVa;
-        if (!rawBout?.rood_va_mm_prev) boutPatch.rood_va_mm_prev = oldVa;
-      }
-    } else if (isBlauw) {
-      if (sourceVa) boutPatch.va_blauw = sourceVa;
-      if (newNaam !== null) boutPatch.blauw_naam = newNaam;
-      if (newGym !== null) boutPatch.blauw_gym = newGym;
-
-      if (sourceVa !== oldVa) {
-        boutPatch.blauw_va_changed = true;
-        boutPatch.blauw_va_is_gewijzigd = true;
-        boutPatch.blauw_va_changed_at = new Date().toISOString();
-        boutPatch.blauw_va_was = oldVa;
-        if (!rawBout?.blauw_va_mm_prev) boutPatch.blauw_va_mm_prev = oldVa;
-      }
-    }
-
-    // Alleen update, nooit upsert: jouw tabel heeft id NOT NULL zonder default.
-    const { error: rawErr } = await supabase
-      .from("matchmaking_bouts_raw")
-      .update(boutPatch)
-      .eq("id", rawBout.id);
-
-    if (rawErr) throw rawErr;
   }
 
-  // 2) Bestaande context ook direct aanpassen, zodat de pagina meteen klopt.
-  //    Alleen update, geen upsert/insert, anders krijg je "null value in column id".
-  if (oldCtx) {
-    const ctxPatch: Record<string, any> = {
-      updated_at: new Date().toISOString(),
-      bijgewerkt_op: new Date().toISOString().slice(0, 10),
-    };
-
-    if (sourceVa) {
-      ctxPatch.va_nummer = sourceVa;
-      ctxPatch.fighter_id = sourceVa;
-    }
-
-    if (newNaam !== null) {
-      ctxPatch.naam_mm = newNaam;
-      ctxPatch.naam = newNaam;
-    }
-
-    if (newGym !== null) {
-      ctxPatch.sportschool_mm = newGym;
-      ctxPatch.sportschool = newGym;
-    }
-
-    if (newDiscipline !== null) ctxPatch.discipline = newDiscipline;
-    if (newKlasse !== null) {
-      ctxPatch.klasse_mm = newKlasse;
-      ctxPatch.klasse = newKlasse;
-    }
-
-    const { error: ctxErr } = await supabase
-      .from("controle_toernooi_context")
-      .update(ctxPatch)
-      .eq("id", oldCtx.id);
-
-    if (ctxErr) throw ctxErr;
-  }
-
-  if (!controle_run_id) {
-    controle_run_id = await getLatestControleRunId(matchmaking_id);
-  }
-
-  if (!controle_run_id) {
-    return NextResponse.json({
-      ok: true,
-      message:
-        "Toernooi-vechter bijgewerkt, maar geen controle_run gevonden om rules te herbouwen.",
-      type: "toernooi_fighter",
-      matchmaking_id,
-      toernooi_code,
-      old_va_nummer: oldVa,
-      new_va_nummer: sourceVa,
-    });
-  }
-
-  // 3) Nu opnieuw bouwen. Daarna nog een tweede kleine override op context,
-  //    omdat buildToernooiContext scraped FP-waarden kan terugzetten.
-  await buildToernooiContext(matchmaking_id, controle_run_id, {
-    toernooi_code,
-    fighter_id: sourceVa,
-  });
-
-  const rebuiltCtx = await getToernooiContextRow({
-    matchmaking_id,
-    controle_run_id,
-    toernooi_code,
-    va_nummer: sourceVa,
-  });
-
-  if (rebuiltCtx) {
-    const finalPatch: Record<string, any> = {
-      updated_at: new Date().toISOString(),
-      bijgewerkt_op: new Date().toISOString().slice(0, 10),
-    };
-
-    if (newNaam !== null) {
-      finalPatch.naam_mm = newNaam;
-      finalPatch.naam = newNaam;
-    }
-    if (newGym !== null) {
-      finalPatch.sportschool_mm = newGym;
-      finalPatch.sportschool = newGym;
-    }
-    if (newDiscipline !== null) finalPatch.discipline = newDiscipline;
-    if (newKlasse !== null) {
-      finalPatch.klasse_mm = newKlasse;
-      finalPatch.klasse = newKlasse;
-    }
-    if (sourceVa) {
-      finalPatch.va_nummer = sourceVa;
-      finalPatch.fighter_id = sourceVa;
-    }
-
-    const { error: finalErr } = await supabase
-      .from("controle_toernooi_context")
-      .update(finalPatch)
-      .eq("id", rebuiltCtx.id);
-
-    if (finalErr) throw finalErr;
-  }
-
-  // 4) Regels opnieuw draaien voor deze toernooi-vechter.
-  //    rulesEngine gebruikt ctxRows uit controle_bout_context voor normale partijen;
-  //    voor toernooi draait hij meestal op DB-context. Daarom geven we lege ctxRows mee.
-  await rulesEngine({
-    matchmaking_id,
-    controle_run_id,
-    ctxRows: [],
-  });
-
-  return NextResponse.json({
-    ok: true,
-    message: "Toernooi-vechter bijgewerkt + toernooi-controle opnieuw opgebouwd",
-    type: "toernooi_fighter",
-    matchmaking_id,
-    controle_run_id,
-    toernooi_code,
-    old_va_nummer: oldVa,
-    new_va_nummer: sourceVa,
-    raw_bout_id: rawBout?.id ?? null,
-    controle_toernooi_context_id: rebuiltCtx?.id ?? oldCtx?.id ?? null,
-  });
+  return { row: data[0], error: null };
 }
 
 export async function POST(req: Request) {
   try {
     const { userId, role } = await requireUserWithRole(req);
+
     const body = await req.json().catch(() => ({}));
+    const decision = String(body?.decision ?? "").trim() as Decision;
+    const note = String(body?.note ?? "").trim() || null;
 
-    const matchmaking_id = String(body?.matchmaking_id ?? "").trim();
-    const partij_nr =
-      body?.partij_nr !== undefined && body?.partij_nr !== null && body?.partij_nr !== ""
-        ? Number(body.partij_nr)
-        : NaN;
-    const controle_run_id_in = body?.controle_run_id ? String(body.controle_run_id) : null;
-    const toernooi_code = String(body?.toernooi_code ?? body?.toernooiCode ?? "").trim();
+    if (decision !== "approve" && decision !== "reject") {
+      return NextResponse.json({ error: "Ongeldige decision (gebruik approve/reject)" }, { status: 400 });
+    }
 
-    if (!matchmaking_id) {
+    const resolved = await resolveControleResultaatRow(body);
+    if (resolved.error || !resolved.row) {
+      return NextResponse.json({ error: resolved.error || "Controle-regel niet gevonden" }, { status: 404 });
+    }
+
+    const row: any = resolved.row;
+    const huidig = normalizeResultaat(row.resultaat);
+
+    const code = String(row?.rule_code ?? "").toLowerCase();
+    const ruleName = String(row?.rule ?? "").toLowerCase();
+    const msg = String(row?.boodschap ?? "").toLowerCase();
+    const hay = `${code} ${ruleName} ${msg}`;
+
+    const roleKey = normalizeRole(role);
+    const isSuperadmin = roleKey === "superadmin";
+    const isAdmin = roleKey === "admin";
+    const isMatchmaker = roleKey === "matchmaker";
+    const isOfficial = roleKey === "official" || roleKey === "officials";
+    const isHoofdofficial =
+      roleKey === "hoofdofficial" ||
+      roleKey === "headofficial" ||
+      roleKey === "hoofd official".replace(/\s+/g, "");
+
+    const isVerbod = isVerbodMelding(hay);
+
+    if (huidig === "ok") {
+      return NextResponse.json({ error: "Deze melding is al OK/goedgekeurd." }, { status: 400 });
+    }
+
+    // VERBOD: alleen superadmin mag goed- of afkeuren.
+    if (isVerbod && !isSuperadmin) {
       return NextResponse.json(
-        { error: "matchmaking_id ontbreekt" },
+        { error: "Alleen superadmin mag een verbod goed- of afkeuren." },
+        { status: 403 }
+      );
+    }
+
+    // DISPENSATIE: normaal via dispensatie-module,
+    // maar superadmin mag direct goed/afkeuren vanuit de controle-detailpagina.
+    if (huidig === "dispensatie" && !isSuperadmin) {
+      return NextResponse.json(
+        { error: "Dispensatie kan niet via review API (gebruik dispensatie-module)." },
         { status: 400 }
       );
     }
 
-    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
-
-    // Toernooi-flow: geen partij_nr, maar wel toernooi_code + VA.
-    if (toernooi_code && !Number.isFinite(partij_nr)) {
-      return await correctToernooiFighter({
-        body,
-        matchmaking_id,
-        controle_run_id: controle_run_id_in,
-      });
+    if (decision === "reject" && !note) {
+      return NextResponse.json({ error: "Aantekeningen verplicht bij afkeuren." }, { status: 400 });
     }
 
-    if (!Number.isFinite(partij_nr)) {
-      return NextResponse.json(
-        { error: "partij_nr ontbreekt of ongeldig. Voor toernooi is toernooi_code + va_nummer verplicht." },
-        { status: 400 }
-      );
+    const reviewed_at = nowIso();
+
+    const mmId = String(row?.matchmaking_id ?? body?.matchmaking_id ?? "").trim();
+    if (mmId) {
+      await assertCanAccessMatchmaking({ matchmaking_id: mmId, userId, role });
+    } else if (!(isAdmin || isHoofdofficial || isSuperadmin)) {
+      return NextResponse.json({ error: "Geen rechten" }, { status: 403 });
     }
 
-    const existingBout = await getBoutRow(matchmaking_id, partij_nr);
-    if (!existingBout) {
-      return NextResponse.json(
-        { error: "Bout niet gevonden" },
-        { status: 404 }
-      );
-    }
+    const isInfoOfActie = huidig === "info" || huidig === "actie";
+    const isAfkeur = huidig === "afgekeurd";
 
-    const oldVaRood =
-      existingBout?.va_rood != null && String(existingBout.va_rood).trim()
-        ? String(existingBout.va_rood).trim()
-        : null;
-
-    const oldVaBlauw =
-      existingBout?.va_blauw != null && String(existingBout.va_blauw).trim()
-        ? String(existingBout.va_blauw).trim()
-        : null;
-
-    const patch: Record<string, any> = {};
-
-    const hasNewVaRood = hasOwn(body, "new_va_rood");
-    const hasNewVaBlauw = hasOwn(body, "new_va_blauw");
-
-    if (hasNewVaRood) {
-      patch.va_rood = normalizeVa(body.new_va_rood);
-    }
-
-    if (hasNewVaBlauw) {
-      patch.va_blauw = normalizeVa(body.new_va_blauw);
-    }
-
-    const canEditNames =
-      role === "admin" || role === "superadmin" || role === "matchmaker";
-
-    if (canEditNames) {
-      if (hasOwn(body, "new_rood_naam")) {
-        patch.rood_naam = String(body.new_rood_naam ?? "").trim() || null;
-      }
-      if (hasOwn(body, "new_blauw_naam")) {
-        patch.blauw_naam = String(body.new_blauw_naam ?? "").trim() || null;
-      }
-    }
-
-    if (hasOwn(body, "new_rood_gym")) {
-      patch.rood_gym = String(body.new_rood_gym ?? "").trim() || null;
-    }
-
-    if (hasOwn(body, "new_blauw_gym")) {
-      patch.blauw_gym = String(body.new_blauw_gym ?? "").trim() || null;
-    }
-
-    const hasNewDiscipline = hasOwn(body, "new_discipline");
-    const hasDiscipline = hasOwn(body, "discipline");
-    const hasNewKlasse = hasOwn(body, "new_klasse");
-    const hasKlasse = hasOwn(body, "klasse");
-
-    if (hasNewDiscipline || hasDiscipline) {
-      patch.discipline = normalizeText(hasNewDiscipline ? body.new_discipline : body.discipline);
-    }
-
-    if (hasNewKlasse || hasKlasse) {
-      patch.klasse = normalizeText(hasNewKlasse ? body.new_klasse : body.klasse);
-    }
-
-    const newVaRood = hasNewVaRood ? (patch.va_rood ?? null) : oldVaRood;
-    const newVaBlauw = hasNewVaBlauw ? (patch.va_blauw ?? null) : oldVaBlauw;
-
-    const roodVaChanged = hasNewVaRood && newVaRood !== oldVaRood;
-    const blauwVaChanged = hasNewVaBlauw && newVaBlauw !== oldVaBlauw;
-
-    if (roodVaChanged) {
-      const prevExisting =
-        existingBout?.rood_va_mm_prev != null &&
-        String(existingBout.rood_va_mm_prev).trim()
-          ? String(existingBout.rood_va_mm_prev).trim()
-          : null;
-
-      if (!prevExisting) patch.rood_va_mm_prev = oldVaRood;
-
-      patch.rood_va_changed = true;
-      patch.rood_va_is_gewijzigd = true;
-      patch.rood_va_changed_at = new Date().toISOString();
-      patch.rood_va_was = oldVaRood;
-    }
-
-    if (blauwVaChanged) {
-      const prevExisting =
-        existingBout?.blauw_va_mm_prev != null &&
-        String(existingBout.blauw_va_mm_prev).trim()
-          ? String(existingBout.blauw_va_mm_prev).trim()
-          : null;
-
-      if (!prevExisting) patch.blauw_va_mm_prev = oldVaBlauw;
-
-      patch.blauw_va_changed = true;
-      patch.blauw_va_is_gewijzigd = true;
-      patch.blauw_va_changed_at = new Date().toISOString();
-      patch.blauw_va_was = oldVaBlauw;
-    }
-
-    if (Object.keys(patch).length > 0) {
-      const { error: upErr } = await supabase
-        .from("matchmaking_bouts_raw")
-        .update(patch)
-        .eq("matchmaking_id", matchmaking_id)
-        .eq("partij_nr", partij_nr);
-
-      if (upErr) {
-        console.error("DB update fout:", upErr);
+    // Matchmaker + official: alleen INFO/ACTIE goedkeuren. Niet afkeuren.
+    if (isMatchmaker || isOfficial) {
+      if (decision !== "approve") {
         return NextResponse.json(
-          { error: upErr.message ?? "Kon bout niet updaten" },
-          { status: 500 }
+          { error: "Matchmakers en officials kunnen alleen INFO/ACTIE goedkeuren." },
+          { status: 403 }
+        );
+      }
+
+      if (!isInfoOfActie) {
+        return NextResponse.json(
+          { error: "Matchmakers en officials mogen alleen INFO/ACTIE meldingen goedkeuren." },
+          { status: 403 }
         );
       }
     }
 
-    const controle_run_id =
-      controle_run_id_in ?? (await getLatestControleRunId(matchmaking_id));
-
-    if (!controle_run_id) {
-      return NextResponse.json({
-        ok: true,
-        message:
-          "Bout bijgewerkt, maar geen controle_run gevonden om context/rules te herbouwen.",
-        matchmaking_id,
-        partij_nr,
-      });
+    // Hoofdofficial + admin: INFO/ACTIE/AFKEUR goed- of afkeuren.
+    // Superadmin: alles, inclusief dispensatie en verbod.
+    if (isHoofdofficial || isAdmin) {
+      if (!(isInfoOfActie || isAfkeur)) {
+        return NextResponse.json(
+          { error: "Hoofdofficial en admin mogen alleen INFO, ACTIE en AFKEUR goed- of afkeuren." },
+          { status: 403 }
+        );
+      }
     }
 
-    await buildControleBoutContext(matchmaking_id, controle_run_id, { partij_nr });
-
-    const ctxAfterBuild = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
-    const scopedBoutId =
-      unwrapUuid(ctxAfterBuild?.bout_id) ??
-      unwrapUuid(existingBout?.bout_uid) ??
-      unwrapUuid(existingBout?.bout_id) ??
-      null;
-
-    await enrichControleBoutContext(matchmaking_id, controle_run_id, {
-      partij_nr,
-      bout_id: scopedBoutId,
-    });
-
-    const ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
-    const ctxRows = ctxFinal ? [ctxFinal] : [];
-
-    if (ctxRows.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        message:
-          "Bout bijgewerkt, maar geen controle_bout_context gevonden voor deze partij.",
-        matchmaking_id,
-        partij_nr,
-        controle_run_id,
-      });
+    if (!(isMatchmaker || isOfficial || isHoofdofficial || isAdmin || isSuperadmin)) {
+      return NextResponse.json({ error: "Geen rechten voor review." }, { status: 403 });
     }
 
-    await rulesEngine({
-      matchmaking_id,
-      controle_run_id,
-      ctxRows,
-      scoped_partij_nr: partij_nr,
-      scoped_bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
-    });
+    if (decision === "approve") {
+      const update = {
+        resultaat: "ok",
+        review_status: "goedgekeurd",
+        reviewed_by: userId,
+        reviewed_at,
+        original_resultaat: row.original_resultaat ?? row.resultaat,
+        aantekeningen: note ?? row.aantekeningen,
+      };
 
-    return NextResponse.json({
-      ok: true,
-      message: "Bout bijgewerkt + alleen deze partij opnieuw opgebouwd",
-      type: "partij",
-      matchmaking_id,
-      partij_nr,
-      controle_run_id,
-      ctx_rows: ctxRows.length,
-      bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
-    });
+      const { error: updErr } = await supabase
+        .from("controle_resultaten")
+        .update(update)
+        .eq("id", row.id);
+
+      if (updErr) throw updErr;
+
+      return NextResponse.json({ ok: true, row: { ...row, ...update } });
+    }
+
+    const update = {
+      resultaat: "afgekeurd",
+      review_status: "afgekeurd",
+      reviewed_by: userId,
+      reviewed_at,
+      original_resultaat: row.original_resultaat ?? row.resultaat,
+      aantekeningen: note,
+    };
+
+    const { error: updErr } = await supabase
+      .from("controle_resultaten")
+      .update(update)
+      .eq("id", row.id);
+
+    if (updErr) throw updErr;
+
+    return NextResponse.json({ ok: true, row: { ...row, ...update } });
   } catch (e: any) {
-    console.error("correct-bout error:", e);
-    return NextResponse.json(
-      { error: e?.message ?? "Onbekende fout" },
-      { status: 500 }
-    );
+    console.error("[review API]", e);
+    return NextResponse.json({ error: e?.message ?? "Onbekende fout" }, { status: 500 });
   }
 }

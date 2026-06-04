@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-type FilterTab = "all" | "afkeur" | "geen_licentie" | "geen_keurmerk" | "startverbod";
+type FilterTab = "all" | "actie" | "afkeur" | "geen_licentie" | "geen_keurmerk" | "startverbod";
 
 function Badge({
   children,
@@ -354,6 +354,14 @@ export default function YocDetailPage({
     });
   }
 
+  function hasOpenActie(f: any) {
+    return resultRowsFor(f).some((r) => {
+      const resultaat = String(r.resultaat ?? "").trim().toLowerCase();
+      const reviewStatus = String(r.review_status ?? "").trim().toLowerCase();
+      return resultaat === "actie" && !["goedgekeurd", "approved", "ok", "closed", "gesloten"].includes(reviewStatus);
+    });
+  }
+
   const counts = fighters.reduce(
     (acc, f) => {
       const st = statusFor(f);
@@ -365,6 +373,7 @@ export default function YocDetailPage({
 
   const tabCounts = {
     all: fighters.length,
+    actie: fighters.filter((f) => hasOpenActie(f)).length,
     afkeur: fighters.filter((f) => hasOnlyRealAfkeur(f)).length,
     geen_licentie: fighters.filter((f) => !hasLicentieOk(f)).length,
     geen_keurmerk: fighters.filter((f) => !hasKeurmerkOk(f)).length,
@@ -372,6 +381,7 @@ export default function YocDetailPage({
   };
 
   const filteredFighters = fighters.filter((f) => {
+    if (activeTab === "actie") return hasOpenActie(f);
     if (activeTab === "afkeur") return hasOnlyRealAfkeur(f);
     if (activeTab === "geen_licentie") return !hasLicentieOk(f);
     if (activeTab === "geen_keurmerk") return !hasKeurmerkOk(f);
@@ -467,6 +477,12 @@ export default function YocDetailPage({
                 label: "Alle deelnemers",
                 count: tabCounts.all,
                 cls: "border-zinc-500 text-zinc-100",
+              },
+              {
+                key: "actie" as FilterTab,
+                label: "Actie",
+                count: tabCounts.actie,
+                cls: "border-[#ff4d00] text-[#ff7a33]",
               },
               {
                 key: "afkeur" as FilterTab,

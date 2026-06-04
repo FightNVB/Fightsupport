@@ -50,6 +50,9 @@ type FighterRuleResultRow = {
   severity?: string | null;
   boodschap?: string | null;
   review_status?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
 };
 
 type YocHeader = {
@@ -281,6 +284,7 @@ export default function YocFighterDetailPage() {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [savingCorrectie, setSavingCorrectie] = useState(false);
+  const [reviewingId, setReviewingId] = useState<string | number | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [correctForm, setCorrectForm] = useState<CorrectFighterForm>({
     va_nummer: "",
@@ -533,6 +537,41 @@ export default function YocFighterDetailPage() {
       alert(err?.message || "Controle mislukt.");
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function reviewMelding(resultaatId: string | number, status: "approved" | "open") {
+    if (!resultaatId) return;
+
+    setReviewingId(resultaatId);
+    try {
+      const res = await authedFetch(`/api/yoc/${yocId}/resultaten/${resultaatId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          review_status: status,
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) throw new Error(json?.error || "Review opslaan mislukt.");
+
+      setMeldingen((prev) =>
+        prev.map((m) =>
+          String(m.id) === String(resultaatId)
+            ? {
+                ...m,
+                review_status: json.resultaat?.review_status ?? status,
+                reviewed_at: json.resultaat?.reviewed_at ?? new Date().toISOString(),
+                reviewed_by: json.resultaat?.reviewed_by ?? m.reviewed_by ?? null,
+              }
+            : m,
+        ),
+      );
+    } catch (err: any) {
+      alert(err?.message || "Review opslaan mislukt.");
+    } finally {
+      setReviewingId(null);
     }
   }
 
@@ -888,8 +927,35 @@ export default function YocFighterDetailPage() {
                           <div>
                             <div className="font-black uppercase tracking-[0.08em]">{ruleLabel(m.rule, m.rule_code)}</div>
                             <div className="mt-1 text-sm font-semibold">{safe(m.boodschap, "Geen toelichting.")}</div>
-                            <div className="mt-2 text-xs font-black opacity-80">{safe(m.resultaat)} {m.review_status ? `• review: ${m.review_status}` : ""}</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-black opacity-90">
+                              <span>{safe(m.resultaat)}</span>
+                              {m.review_status === "approved" ? (
+                                <span className="rounded-full border border-green-400/60 bg-green-950/60 px-2 py-0.5 text-green-100">Goedgekeurd</span>
+                              ) : m.review_status ? (
+                                <span className="rounded-full border border-white/25 bg-black/30 px-2 py-0.5">review: {m.review_status}</span>
+                              ) : (
+                                <span className="rounded-full border border-[#ff7a3d]/60 bg-black/30 px-2 py-0.5 text-[#ffd2bd]">Nog niet beoordeeld</span>
+                              )}
+                            </div>
                           </div>
+
+                          {m.id && String(m.review_status ?? "").toLowerCase() !== "approved" ? (
+                            <button
+                              onClick={() => reviewMelding(m.id!, "approved")}
+                              disabled={reviewingId === m.id}
+                              className="ml-auto shrink-0 border-2 border-green-400/80 bg-[linear-gradient(180deg,#22c55e,#166534)] px-3 py-2 text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.32),0_4px_0_#132416] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {reviewingId === m.id ? "Opslaan..." : "Goedkeuren"}
+                            </button>
+                          ) : m.id ? (
+                            <button
+                              onClick={() => reviewMelding(m.id!, "open")}
+                              disabled={reviewingId === m.id}
+                              className="ml-auto shrink-0 border-2 border-[#d7d4ce] bg-[linear-gradient(180deg,#ffffff,#adadad_44%,#eeeeee_52%,#6f6f6f)] px-3 py-2 text-xs font-black text-black shadow-[inset_0_1px_0_#fff,0_4px_0_#28140c] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {reviewingId === m.id ? "Opslaan..." : "Heropen"}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     );
