@@ -561,6 +561,208 @@ async function loadCookiesIfAny(page, session) {
   }
 }
 
+
+function safeDebugPart(v) {
+  return String(v ?? "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .slice(0, 80) || "unknown";
+}
+
+async function dumpMatchmakerLoginDebug(page, label = "login") {
+  try {
+    const dir = path.join(ROOT, "utils", "debug");
+    fs.mkdirSync(dir, { recursive: true });
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const base = path.join(dir, `fp_matchmaker_${safeDebugPart(label)}_${stamp}`);
+
+    const state = await page.evaluate(() => {
+      const inputs = Array.from(document.querySelectorAll("input")).map((el) => {
+        const style = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return {
+          type: el.getAttribute("type") || "",
+          name: el.getAttribute("name") || "",
+          className: el.getAttribute("class") || "",
+          placeholder: el.getAttribute("placeholder") || "",
+          valueLength: String(el.value || "").length,
+          visible:
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            style.opacity !== "0" &&
+            r.width > 0 &&
+            r.height > 0 &&
+            el.offsetParent !== null,
+        };
+      });
+
+      const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a"))
+        .map((el) => String(el.innerText || el.value || el.textContent || "").trim())
+        .filter(Boolean)
+        .slice(0, 30);
+
+      return {
+        url: location.href,
+        hash: location.hash,
+        title: document.title,
+        hasLogin: !!document.querySelector("input.gebruikersnaam"),
+        hasPassword: !!document.querySelector("input.wachtwoord"),
+        hasPincode: !!document.querySelector("input.pincode"),
+        koptekst1: document.querySelector(".koptekst1")?.innerText?.slice(0, 300) || "",
+        text: String(document.body?.innerText || "").slice(0, 2500),
+        inputs,
+        buttons,
+      };
+    });
+
+    fs.writeFileSync(`${base}.json`, JSON.stringify(state, null, 2), "utf8");
+    fs.writeFileSync(`${base}.html`, await page.content(), "utf8");
+    await page.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => {});
+
+    console.log("🧪 Matchmaker login debug opgeslagen:", `${base}.json`);
+    return state;
+  } catch (e) {
+    console.log("⚠️ Kon matchmaker login debug niet opslaan:", e?.message ?? e);
+    return null;
+  }
+}
+
+async function fillLoginFormAndSubmit(page, username, password) {
+  const result = await page.evaluate(
+    ({ username, password }) => {
+      function isVisible(el) {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0" &&
+          r.width > 0 &&
+          r.height > 0 &&
+          el.offsetParent !== null
+        );
+      }
+
+      function setNativeValue(el, value) {
+        const proto = Object.getPrototypeOf(el);
+        const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+        if (descriptor?.set) descriptor.set.call(el, value);
+        else el.value = value;
+
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { key: "Tab", bubbles: true }));
+      }
+
+      const user =
+        document.querySelector("input.gebruikersnaam") ||
+        document.querySelector("input[name*='gebruikersnaam' i]") ||
+        document.querySelector("input[name*='user' i]") ||
+        Array.from(document.querySelectorAll("input")).find((el) => {
+          const type = String(el.getAttribute("type") || "").toLowerCase();
+          return isVisible(el) && (type === "text" || type === "email" || type === "");
+        });
+
+      const pass =
+        document.querySelector("input.wachtwoord") ||
+        document.querySelector("input[type='password']") ||
+        document.querySelector("input[name*='wachtwoord' i]") ||
+        document.querySelector("input[name*='password' i]");
+
+      if (!user || !isVisible(user)) {
+        return { ok: false, reason: "gebruikersnaam veld niet gevonden of niet zichtbaar" };
+      }
+
+      if (!pass || !isVisible(pass)) {
+        return { ok: false, reason: "wachtwoord veld niet gevonden of niet zichtbaar" };
+      }
+
+      user.focus();
+      setNativeValue(user, "");
+      setNativeValue(user, username);
+      user.blur?.();
+
+      pass.focus();
+      setNativeValue(pass, "");
+      setNativeValue(pass, password);
+      pass.blur?.();
+
+      const userValueLength = String(user.value || "").length;
+      const passValueLength = String(pass.value || "").length;
+
+      if (!userValueLength || !passValueLength) {
+        return {
+          ok: false,
+          reason: "velden blijven leeg na invullen",
+          userValueLength,
+          passValueLength,
+        };
+      }
+
+      const clickables = Array.from(
+        document.querySelectorAll("button, input[type='submit'], input[type='button'], a")
+      ).filter(isVisible);
+
+      const btn =
+        document.querySelector("button.volgende") ||
+        clickables.find((el) =>
+          String(el.innerText || el.value || el.textContent || "")
+            .trim()
+            .toLowerCase()
+            .includes("volgende")
+        ) ||
+        clickables.find((el) =>
+          String(el.innerText || el.value || el.textContent || "")
+            .trim()
+            .toLowerCase()
+            .includes("aanmelden")
+        );
+
+      if (!btn || !isVisible(btn)) {
+        pass.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+        pass.dispatchEvent(new KeyboardEvent("keypress", { key: "Enter", code: "Enter", bubbles: true }));
+        pass.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true }));
+
+        return {
+          ok: true,
+          clicked: false,
+          buttonText: "ENTER",
+          userValueLength,
+          passValueLength,
+          reason: "geen knop gevonden; Enter gestuurd",
+        };
+      }
+
+      const buttonText = String(btn.innerText || btn.value || btn.textContent || "").trim();
+      btn.click?.();
+
+      return {
+        ok: true,
+        clicked: true,
+        buttonText,
+        userValueLength,
+        passValueLength,
+        reason: "",
+      };
+    },
+    { username, password }
+  );
+
+  if (!result?.ok) {
+    throw new Error("LOGIN_FORM_FILL_FAILED: " + JSON.stringify(result ?? {}));
+  }
+
+  console.log(
+    `➡️ Loginvelden gevuld (${result.userValueLength} / ${result.passValueLength}) en ${
+      result.clicked ? "knop geklikt" : "Enter gestuurd"
+    }: ${result.buttonText || result.reason || "zonder tekst"}`
+  );
+
+  return result;
+}
+
 async function waitForLoggedIn(page, timeoutMs, opts = {}, session = null, saveCookiesToDisk = true) {
   const started = Date.now();
   const unlockCode = resolveUnlockCode(opts);
@@ -617,48 +819,23 @@ async function performNormalLogin(page, username, password, timeoutMs, session, 
     throw new Error("Login form niet zichtbaar en ook niet ingelogd (onbekende FP state)");
   }
 
-  // Dit is bewust exact jouw oude stabiele invulmethode.
-  await page.evaluate(
-    (u, p) => {
-      const user = document.querySelector("input.gebruikersnaam");
-      const pass = document.querySelector("input.wachtwoord");
-      const btn = document.querySelector("button.volgende");
-
-      if (user) {
-        user.focus();
-        user.value = "";
-        user.dispatchEvent(new Event("input", { bubbles: true }));
-        user.value = u;
-        user.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-
-      if (pass) {
-        pass.focus();
-        pass.value = "";
-        pass.dispatchEvent(new Event("input", { bubbles: true }));
-        pass.value = p;
-        pass.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-
-      btn?.click?.();
-    },
-    username,
-    password
-  );
+  await fillLoginFormAndSubmit(page, username, password);
 
   console.log("➡️ Login verzonden…");
+  await sleep(1200);
+
+  if (await unlockPageVisible(page)) {
+    const unlockCode = await getUnlockCodeOrWait(opts);
+    await submitUnlockCode(page, unlockCode, resolveTrustDevice(opts));
+    const okAfterUnlock = await waitAfterUnlockSubmit(page, Math.max(timeoutMs, 70000));
+    if (okAfterUnlock) return;
+  }
 
   const ok = await waitForLoggedIn(page, timeoutMs, opts, session, saveCookiesToDisk);
 
   if (!ok) {
-    const dbg = await page.evaluate(() => ({
-      url: location.href,
-      hash: location.hash,
-      hasLogin: !!document.querySelector("input.gebruikersnaam"),
-      hasPassword: !!document.querySelector("input.wachtwoord"),
-      koptekst1: document.querySelector(".koptekst1")?.innerText?.slice(0, 120) || "",
-    }));
-    throw new Error("Login timeout: niet ingelogd binnen timeout. debug=" + JSON.stringify(dbg));
+    const dbg = await dumpMatchmakerLoginDebug(page, "login_timeout");
+    throw new Error("Login timeout: niet ingelogd binnen timeout. debug=" + JSON.stringify(dbg ?? {}));
   }
 
   console.log("🟢 SUCCESVOL ingelogd");
