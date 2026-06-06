@@ -165,7 +165,7 @@ export default function InformatiePage() {
     {
       label: "Promotor Beleid",
       subtitle: "Open beleid en afspraken voor promotors",
-      external: "/nvb_Promotor_beleid.pdf",
+      external: "/nvb_promotor_beleid.pdf",
       icon: Scale,
     },
     {
@@ -177,7 +177,7 @@ export default function InformatiePage() {
     {
       label: "Sparring Evenementen",
       subtitle: "Lees de richtlijnen voor sparring evenementen",
-      external: "/Sparring_evenementen.pdf",
+      external: "/sparring_evenementen.pdf",
       icon: ClipboardList,
     },
     {

@@ -1,10 +1,10 @@
-// app/api/matchmaker/submit-matchmaking/route.ts
+// app/api/matchmaker/submit-matchmaking/herupload/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
-import { parseExcelToBouts } from "./parse_matchmaking";
-import { getUserBondteam, requireAnyRole, RoleName } from "../../_utils/authz";
-import { ensureLifecycleRecord } from "../../_utils/matchmakingLifecycle";
+import { parseExcelToBouts } from "../parse_matchmaking";
+import { getUserBondteam, requireAnyRole, RoleName } from "../../../_utils/authz";
+import { ensureLifecycleRecord } from "../../../_utils/matchmakingLifecycle";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -176,21 +176,35 @@ function boutFingerprint(opts: {
   return `${pair}||${d}||${k}${t}${tcPart}`;
 }
 
-async function fetchExistingBoutUidIndex(matchmaking_id: string) {
-  const index = new Map<string, string[]>();
+type ExistingBoutIndexRow = {
+  id: number | string;
+  bout_uid: string | null;
+  va_rood: string | null;
+  va_blauw: string | null;
+  discipline: string | null;
+  klasse: string | null;
+  is_toernooi: boolean | null;
+  toernooi_code: string | null;
+  verwijderd?: boolean | null;
+};
+
+async function fetchExistingBoutIndex(matchmaking_id: string) {
+  const index = new Map<string, ExistingBoutIndexRow[]>();
+  const all: ExistingBoutIndexRow[] = [];
 
   const { data, error } = await supabaseAdmin
     .from("matchmaking_bouts_raw")
     .select(
-      "bout_uid,va_rood,va_blauw,discipline,klasse,is_toernooi,toernooi_code"
+      "id,bout_uid,va_rood,va_blauw,discipline,klasse,is_toernooi,toernooi_code,verwijderd"
     )
     .eq("matchmaking_id", matchmaking_id);
 
   if (error) throw error;
 
-  for (const r of data ?? []) {
-    const uid = String((r as any)?.bout_uid ?? "").trim();
-    if (!uid) continue;
+  for (const r of (data ?? []) as ExistingBoutIndexRow[]) {
+    all.push(r);
+
+    if ((r as any)?.verwijderd === true) continue;
 
     const vaR = toVaStrict((r as any)?.va_rood);
     const vaB = toVaStrict((r as any)?.va_blauw);
@@ -207,10 +221,10 @@ async function fetchExistingBoutUidIndex(matchmaking_id: string) {
     if (!fp) continue;
 
     if (!index.has(fp)) index.set(fp, []);
-    index.get(fp)!.push(uid);
+    index.get(fp)!.push(r);
   }
 
-  return index;
+  return { index, all };
 }
 
 const ALLOWED_BONDTEAMS = new Set([
@@ -243,21 +257,11 @@ function roleLower(r: any): RoleName {
   return "unknown";
 }
 
-function isNvbOrEmptyBondteam(v: any): boolean {
-  const s = String(v ?? "").trim().toUpperCase();
-  return !s || s === "NVB";
-}
-
 function resolveLifecycleBronType(role: RoleName): string {
   if (role === "matchmaker") return "matchmaker_upload";
-
-  // Superadmin en admin uploaden altijd via de admin-flow,
-  // ook wanneer zij een specifiek bondteam selecteren.
-  if (role === "superadmin" || role === "admin") return "admin_upload";
-
+  if (role === "admin" || role === "superadmin") return "admin_upload";
   return "official_upload";
 }
-
 
 type UploadUserProfile = {
   id: string;
@@ -268,76 +272,34 @@ type UploadUserProfile = {
 };
 
 async function findUserProfileForUpload(auth: any): Promise<UploadUserProfile> {
-  const authProfileId = String(
-    auth?.profile?.id ?? auth?.userProfile?.id ?? auth?.profileId ?? ""
-  ).trim();
-  const authEmail = String(
-    auth?.profile?.email ?? auth?.userProfile?.email ?? auth?.email ?? auth?.user?.email ?? ""
-  )
-    .trim()
-    .toLowerCase();
-  const fallbackAuthUserId = String(auth?.userId ?? auth?.id ?? auth?.user?.id ?? "").trim();
+  const authUserId = String(auth?.userId ?? auth?.id ?? "").trim();
+  const authEmail = String(auth?.email ?? auth?.user?.email ?? "").trim().toLowerCase();
 
-  // Voor FightSupport is public.user_profiles leidend voor applicatie-login:
-  // id + role + bondteam komen uit user_profiles. uploaded_by verwijst ook naar user_profiles(id).
-  // Daarom zoeken we eerst op profiel-id als authz die meegeeft, anders op e-mail.
-  let query = supabaseAdmin
-    .from("user_profiles")
-    .select("id, full_name, email, bondteam, role");
+  if (authUserId) {
+    const { data, error } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, full_name, email, bondteam, role")
+      .eq("id", authUserId)
+      .maybeSingle();
 
-  if (authProfileId) {
-    query = query.eq("id", authProfileId);
-  } else if (authEmail) {
-    query = query.ilike("email", authEmail);
-  } else if (fallbackAuthUserId) {
-    query = query.eq("id", fallbackAuthUserId);
-  } else {
-    throw new Error("Geen ingelogde gebruiker gevonden voor deze upload.");
+    if (error) throw new Error(`User profile zoeken mislukt: ${error.message}`);
+    if (data?.id) return data as UploadUserProfile;
   }
 
-  const { data, error } = await query.maybeSingle();
+  if (authEmail) {
+    const { data, error } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, full_name, email, bondteam, role")
+      .eq("email", authEmail)
+      .maybeSingle();
 
-  if (error) {
-    throw new Error(`Ingelogde gebruiker zoeken in public.user_profiles mislukt: ${error.message}`);
+    if (error) throw new Error(`User profile zoeken op email mislukt: ${error.message}`);
+    if (data?.id) return data as UploadUserProfile;
   }
 
-  if (!data?.id) {
-    throw new Error(
-      "Ingelogde gebruiker bestaat niet in public.user_profiles. " +
-        `Gezocht met profileId=${authProfileId || "-"}, email=${authEmail || "-"}, fallbackUserId=${fallbackAuthUserId || "-"}. ` +
-        "Voor uploads moet de ingelogde gebruiker als rij in public.user_profiles bestaan."
-    );
-  }
-
-  return data as UploadUserProfile;
-}
-
-
-async function assertPublicUserProfileId(profileId: string): Promise<UploadUserProfile> {
-  const id = String(profileId ?? "").trim();
-  if (!id) {
-    throw new Error("Geen public.user_profiles.id bepaald voor matchmaking_uploads.uploaded_by.");
-  }
-
-  const { data, error } = await supabaseAdmin
-    .from("user_profiles")
-    .select("id, full_name, email, bondteam, role")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Controle uploaded_by in public.user_profiles mislukt: ${error.message}`);
-  }
-
-  if (!data?.id) {
-    throw new Error(
-      `Ongeldige uploaded_by voor matchmaking_uploads: ${id}. ` +
-        "Deze waarde bestaat niet in public.user_profiles.id. " +
-        "Gebruik de profiel-id uit public.user_profiles, niet auth.users.id."
-    );
-  }
-
-  return data as UploadUserProfile;
+  throw new Error(
+    "Geen rij gevonden in user_profiles voor deze ingelogde gebruiker. Upload is gestopt om fk_upload_user te voorkomen."
+  );
 }
 
 /* =========================================================
@@ -347,10 +309,9 @@ export async function POST(req: Request) {
   try {
     const auth = await requireAnyRole(req, ["matchmaker"]);
     const authUserId = String((auth as any)?.userId ?? "").trim();
-    const authRole = roleLower((auth as any)?.role);
-    let profileForUpload: UploadUserProfile | null = null;
-    let userId = "";
-    let role: RoleName = authRole;
+    const profileForUpload = await findUserProfileForUpload(auth);
+    const userId = String(profileForUpload.id).trim();
+    const role = roleLower(auth.role ?? profileForUpload.role);
 
     let evenement_naam = "";
     let evenement_datum = "";
@@ -361,7 +322,7 @@ export async function POST(req: Request) {
     let hoofdofficial: string | null = null;
     let promotor: string | null = null;
 
-    let uploaded_by = "";
+    const uploaded_by: string = userId;
 
     let matchmaking_id: string | null = null;
     let force_new = false;
@@ -372,10 +333,9 @@ export async function POST(req: Request) {
     let lifecycleBronType: string | null = null;
     let raw_filename: string | null = null;
 
-    let requestedLifecycleMode: string | null = null;
-    let requestedKeepOwner: string | null = null;
-
     let bouts: any[] = [];
+
+    lifecycleBronType = resolveLifecycleBronType(role);
 
     if (isJson(req)) {
       const body = await req.json();
@@ -404,13 +364,6 @@ export async function POST(req: Request) {
         ? String(body.matchmaking_id).trim()
         : null;
       force_new = Boolean(body.force_new ?? false);
-
-      requestedLifecycleMode = body.lifecycle_mode
-        ? String(body.lifecycle_mode).trim().toLowerCase()
-        : null;
-      requestedKeepOwner = body.keep_owner
-        ? String(body.keep_owner).trim().toLowerCase()
-        : null;
 
       event_id = body.event_id ? String(body.event_id).trim() : null;
 
@@ -445,11 +398,6 @@ export async function POST(req: Request) {
       matchmaking_id = String(form.get("matchmaking_id") ?? "").trim() || null;
       force_new = String(form.get("force_new") ?? "false") === "true";
 
-      requestedLifecycleMode =
-        String(form.get("lifecycle_mode") ?? "").trim().toLowerCase() || null;
-      requestedKeepOwner =
-        String(form.get("keep_owner") ?? "").trim().toLowerCase() || null;
-
       event_id = String(form.get("event_id") ?? "").trim() || null;
 
       if (!file) {
@@ -474,36 +422,6 @@ export async function POST(req: Request) {
       );
     }
 
-    profileForUpload = await findUserProfileForUpload(auth);
-
-    console.log("[submit-matchmaking] ingelogde user_profiles gebruiker", {
-      id: profileForUpload.id,
-      email: profileForUpload.email,
-      role: profileForUpload.role,
-      bondteam: profileForUpload.bondteam,
-      authUserId,
-    });
-
-    // BELANGRIJK VOOR fk_upload_user:
-    // matchmaking_uploads.uploaded_by verwijst naar public.user_profiles(id).
-    // Gebruik hier dus nooit auth.users.id. Controleer dit hard voordat we insert doen.
-    profileForUpload = await assertPublicUserProfileId(profileForUpload.id);
-    userId = String(profileForUpload.id).trim();
-    uploaded_by = userId;
-
-    role = "matchmaker" as RoleName;
-
-    if (!matchmaker && role === "matchmaker") {
-      matchmaker = profileForUpload.full_name || profileForUpload.email || null;
-    }
-
-    if (!bondteam && profileForUpload.bondteam) {
-      const profileBondteam = String(profileForUpload.bondteam).trim().toUpperCase();
-      if (ALLOWED_BONDTEAMS.has(profileBondteam)) bondteam = profileBondteam;
-    }
-
-    lifecycleBronType = resolveLifecycleBronType(role);
-
     if (!evenement_naam || !evenement_datum) {
       return bad("Vul verplicht in: evenement_naam en evenement_datum.");
     }
@@ -517,11 +435,7 @@ export async function POST(req: Request) {
     if (role === "official" || role === "hoofdofficial") {
       const userBond = await getUserBondteam(userId);
       if (!userBond) return bad("Je profiel mist bondteam.", 403);
-
-      const normalizedUserBond = String(userBond).trim().toUpperCase();
-      const normalizedUploadBond = String(bondteam).trim().toUpperCase();
-
-      if (normalizedUserBond !== normalizedUploadBond) {
+      if (String(userBond) !== String(bondteam)) {
         return bad(
           "Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.",
           403
@@ -535,14 +449,52 @@ export async function POST(req: Request) {
       }
     } else {
       const mm = String(matchmaker ?? "").trim();
-      if (!mm) {
+      const existingUploadTarget = !force_new && String(matchmaking_id ?? "").trim();
+      if (!mm && !existingUploadTarget) {
         return bad("Matchmaker is verplicht.", 400);
       }
     }
 
     const now = new Date().toISOString();
 
+    const incomingMatchmakingId = !force_new && matchmaking_id
+      ? String(matchmaking_id).trim()
+      : "";
+
+    let existingMatchmakingForReuse: any = null;
+    if (incomingMatchmakingId) {
+      const { data: existingMatchmaking, error: existingMatchmakingErr } =
+        await supabaseAdmin
+          .from("matchmakings")
+          .select("id,event_id,matchmaker_id,maker_type,maker_user_id,bron_type,status,stadium,final_status,huidige_eigenaar_type,huidige_eigenaar_user_id,huidige_eigenaar_bondteam")
+          .eq("id", incomingMatchmakingId)
+          .maybeSingle();
+
+      if (existingMatchmakingErr) {
+        return NextResponse.json(
+          { error: existingMatchmakingErr.message },
+          { status: 500 }
+        );
+      }
+
+      if (!existingMatchmaking) {
+        return NextResponse.json(
+          { error: "De opgegeven matchmaking_id bestaat niet." },
+          { status: 400 }
+        );
+      }
+
+      existingMatchmakingForReuse = existingMatchmaking;
+      if (existingMatchmakingForReuse?.bron_type) {
+        lifecycleBronType = String(existingMatchmakingForReuse.bron_type);
+      }
+    }
+
     let evId = event_id ? String(event_id).trim() : "";
+    if (!evId && existingMatchmakingForReuse?.event_id) {
+      evId = String(existingMatchmakingForReuse.event_id).trim();
+    }
+
     if (!evId) {
       const { data: ev, error: evErr } = await supabaseAdmin
         .from("events")
@@ -583,67 +535,33 @@ export async function POST(req: Request) {
 
     let mmId = "";
 
-    const isOfficialUpload =
-      role === "official" ||
-      role === "hoofdofficial";
-
-    // Belangrijk:
-    // - uploaded_by moet altijd public.user_profiles.id zijn, niet auth.users.id.
-    // - Een hoofdofficial/official uploadt namens het eigen bondteam en houdt de MM daar om hem zelf te controleren.
-    // - Superadmin/admin uploads blijven altijd in de admin-flow.
-    // - Alleen matchmaker-uploads met submit gaan automatisch naar admin-controle.
     const makerType =
-      role === "matchmaker"
-        ? "matchmaker"
-        : isOfficialUpload
-          ? role
-          : role === "admin" || role === "superadmin"
-            ? "admin"
-            : null;
+      existingMatchmakingForReuse?.maker_type ??
+      (role === "matchmaker" ? "matchmaker" : null);
+    const makerUserId =
+      existingMatchmakingForReuse?.maker_user_id ??
+      (role === "matchmaker" ? userId : null);
+    const matchmakerIdForRow =
+      existingMatchmakingForReuse?.matchmaker_id ??
+      (role === "matchmaker" ? userId : null);
 
-    const makerUserId = userId;
+const existingStage =
+      existingMatchmakingForReuse?.stadium ??
+      existingMatchmakingForReuse?.status ??
+      null;
 
-    // matchmaker_id alleen vullen als de ingelogde maker echt matchmaker is.
-    // Bij hoofdofficial/admin uploads is er vaak alleen een tekstveld matchmaker/promotor.
-    const matchmakerIdForRow = role === "matchmaker" ? userId : null;
+    // Herupload door matchmaker blijft bij matchmaker zolang hij niet opnieuw indient.
+    // Als admin hem terugstuurt als review, behouden we die stage; anders concept.
+    const lifecycleStage =
+      existingStage === "review" ? "review" : ("concept_matchmaking" as const);
 
-    // Matchmaker-upload blijft ALTIJD eerst bij de matchmaker.
-    // Pas /api/matchmaker/send-to-admin zet hem op ingediend_admin.
-    const lifecycleStage = "concept_matchmaking" as const;
     const lifecycleOwnerType = "matchmaker" as const;
     const lifecycleOwnerUserId = userId;
     const lifecycleOwnerBondteam = null;
     const submittedToAdminAt = null;
 
-    if (!force_new && matchmaking_id) {
-      const s = String(matchmaking_id).trim();
-      if (!s) {
-        return NextResponse.json(
-          { error: "matchmaking_id is leeg." },
-          { status: 400 }
-        );
-      }
-
-      const { data: existingMatchmaking, error: existingMatchmakingErr } =
-        await supabaseAdmin
-          .from("matchmakings")
-          .select("id")
-          .eq("id", s)
-          .maybeSingle();
-
-      if (existingMatchmakingErr) {
-        return NextResponse.json(
-          { error: existingMatchmakingErr.message },
-          { status: 500 }
-        );
-      }
-
-      if (!existingMatchmaking) {
-        return NextResponse.json(
-          { error: "De opgegeven matchmaking_id bestaat niet." },
-          { status: 400 }
-        );
-      }
+    if (incomingMatchmakingId) {
+      const s = incomingMatchmakingId;
 
       const { error: updateMmErr } = await supabaseAdmin
         .from("matchmakings")
@@ -725,20 +643,13 @@ export async function POST(req: Request) {
       }
     }
 
-    const lifecycleMakerType =
-      makerType === "matchmaker"
-        ? "matchmaker"
-        : makerType === "official" || makerType === "hoofdofficial"
-          ? "official"
-          : "admin";
-
     await ensureLifecycleRecord({
       matchmakingId: String(mmId),
       naam: evenement_naam || null,
       datum: evenement_datum || null,
       locatie: locatie || null,
-      matchmakerId: role === "matchmaker" ? makerUserId : null,
-      makerType: lifecycleMakerType,
+      matchmakerId: makerUserId,
+      makerType,
       makerUserId,
       bondteam: bondteam || null,
       eventId: evId || null,
@@ -750,22 +661,14 @@ export async function POST(req: Request) {
       actorUserId: userId,
       actorRole: role,
       metadata: {
-        route: "app/api/matchmaker/submit-matchmaking/route.ts",
+        route: "app/api/matchmaker/submit-matchmaking/herupload/route.ts",
         auth_user_id: authUserId,
-        requested_lifecycle_mode: requestedLifecycleMode,
-        requested_keep_owner: requestedKeepOwner,
-        matchmaker_upload_kept_local: true,
-        maker_type: makerType,
-        lifecycle_maker_type: lifecycleMakerType,
+        preserved_bron_type: lifecycleBronType,
+        matchmaker_herupload_kept_local: true,
       },
     });
 
     const lifecycleBondteam = bondteam;
-
-    // Laatste beveiliging tegen FK-fout: uploaded_by moet exact public.user_profiles.id zijn.
-    // Dit voorkomt dat auth.users.id zoals e43d7b0c-... per ongeluk wordt opgeslagen.
-    uploaded_by = userId;
-    await assertPublicUserProfileId(uploaded_by);
 
     const { data: uploadRow, error: uploadErr } = await supabaseAdmin
       .from("matchmaking_uploads")
@@ -789,30 +692,23 @@ export async function POST(req: Request) {
       .single();
 
     if (uploadErr) {
-      console.error("[submit-matchmaking] matchmaking_uploads insert mislukt", {
-        error: uploadErr.message,
-        code: (uploadErr as any)?.code,
-        details: (uploadErr as any)?.details,
-        hint: (uploadErr as any)?.hint,
-        matchmaking_id: mmId,
-        event_id: evId,
-        uploaded_by,
-        role,
-        makerType,
-        bondteam,
-      });
       return NextResponse.json({ error: uploadErr.message }, { status: 500 });
     }
 
     const uploadIdFinal = String((uploadRow as any)?.id ?? "").trim();
 
-    const existingIndex = await fetchExistingBoutUidIndex(mmId);
+    const { index: existingIndex, all: existingBouts } = await fetchExistingBoutIndex(mmId);
+    const isHerupload = Boolean(incomingMatchmakingId);
 
+    let updated = 0;
     let reused = 0;
     let ambiguous = 0;
     let created = 0;
+    let removed = 0;
 
     const rows: any[] = [];
+    const updates: Array<{ id: string | number; values: any }> = [];
+    const touchedExistingIds = new Set<string>();
 
     for (const b of bouts ?? []) {
       const vaR = toVaStrict(
@@ -844,29 +740,13 @@ export async function POST(req: Request) {
         toernooi_code,
       });
 
-      let bout_uid = (b as any)?.bout_uid
+      const insertBoutUid = (b as any)?.bout_uid
         ? String((b as any).bout_uid).trim()
         : randomUUID();
 
-      if (fp) {
-        const list = existingIndex.get(fp) ?? [];
-        if (list.length === 1) {
-          bout_uid = list[0];
-          reused++;
-        } else if (list.length > 1) {
-          ambiguous++;
-          bout_uid = randomUUID();
-        } else {
-          created++;
-        }
-      } else {
-        created++;
-      }
-
-      rows.push({
+      const baseValues = {
         upload_id: uploadIdFinal,
         matchmaking_id: mmId,
-        bout_uid,
 
         partij_nr: (b as any)?.partij_nr ?? null,
 
@@ -903,10 +783,60 @@ export async function POST(req: Request) {
           ...((b as any)?.extra ?? {}),
           toernooi_code:
             toernooi_code ?? (b as any)?.extra?.toernooi_code ?? null,
+          herupload_upload_id: isHerupload ? uploadIdFinal : null,
         },
 
+        verwijderd: false,
+        verwijderd_op: null,
+        laatste_bewerking_op: now,
+      };
+
+      if (fp) {
+        const list = existingIndex.get(fp) ?? [];
+        if (list.length === 1) {
+          const existing = list[0];
+          const existingId = (existing as any).id;
+          const existingBoutUid = String((existing as any).bout_uid ?? "").trim();
+
+          touchedExistingIds.add(String(existingId));
+          reused++;
+          updated++;
+
+          updates.push({
+            id: existingId,
+            values: {
+              ...baseValues,
+              bout_uid: existingBoutUid || insertBoutUid,
+            },
+          });
+          continue;
+        }
+
+        if (list.length > 1) {
+          ambiguous++;
+        }
+      }
+
+      created++;
+      rows.push({
+        ...baseValues,
+        bout_uid: insertBoutUid,
         created_at: now,
       });
+    }
+
+    for (const u of updates) {
+      const { error: updateBoutErr } = await supabaseAdmin
+        .from("matchmaking_bouts_raw")
+        .update(u.values)
+        .eq("id", u.id);
+
+      if (updateBoutErr) {
+        return NextResponse.json(
+          { error: updateBoutErr.message },
+          { status: 500 }
+        );
+      }
     }
 
     if (rows.length) {
@@ -915,18 +845,37 @@ export async function POST(req: Request) {
         .insert(rows);
 
       if (boutErr) {
-        console.error("[submit-matchmaking] matchmaking_bouts_raw insert mislukt", {
-          error: boutErr.message,
-          code: (boutErr as any)?.code,
-          details: (boutErr as any)?.details,
-          hint: (boutErr as any)?.hint,
-          matchmaking_id: mmId,
-          upload_id: uploadIdFinal,
-          rows: rows.length,
-        });
         return NextResponse.json({ error: boutErr.message }, { status: 500 });
       }
     }
+
+    if (isHerupload) {
+      const idsToSoftDelete = existingBouts
+        .filter((r) => (r as any)?.verwijderd !== true)
+        .map((r) => (r as any)?.id)
+        .filter((id) => id != null && !touchedExistingIds.has(String(id)));
+
+      if (idsToSoftDelete.length) {
+        const { error: removeErr } = await supabaseAdmin
+          .from("matchmaking_bouts_raw")
+          .update({
+            verwijderd: true,
+            verwijderd_op: now,
+            laatste_bewerking_op: now,
+          })
+          .in("id", idsToSoftDelete);
+
+        if (removeErr) {
+          return NextResponse.json(
+            { error: removeErr.message },
+            { status: 500 }
+          );
+        }
+
+        removed = idsToSoftDelete.length;
+      }
+    }
+
 
     return NextResponse.json({
       ok: true,
@@ -938,16 +887,20 @@ export async function POST(req: Request) {
         bron_type: lifecycleBronType,
         stadium: lifecycleStage,
         eigenaar_type: lifecycleOwnerType,
-        eigenaar_type: lifecycleOwnerType,
         eigenaar_user_id: lifecycleOwnerUserId,
         eigenaar_bondteam: lifecycleBondteam,
       },
       stats: {
-        total: rows.length,
+        total: rows.length + updates.length,
+        inserted: rows.length,
+        updated,
+        removed,
         reused,
         ambiguous,
         created,
-        toernooi_rows: rows.filter((r) => r.is_toernooi === true).length,
+        toernooi_rows:
+          rows.filter((r) => r.is_toernooi === true).length +
+          updates.filter((u) => u.values?.is_toernooi === true).length,
       },
     });
   } catch (e: any) {

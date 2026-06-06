@@ -67,6 +67,15 @@ interface MatchmakingRow {
   entered_control_at?: string | null;
   sent_to_officials_at?: string | null;
   final_status?: string | null;
+
+  upload_id?: string | null;
+  upload_raw_filename?: string | null;
+  controle_status?: string | null;
+  upload_flow_status?: string | null;
+  nvb_controle_ingestuurd?: boolean | null;
+  nvb_controle_ingestuurd_op?: string | null;
+  upload_uploaded_at?: string | null;
+
   laatste_run: ControleRun | null;
 }
 
@@ -128,6 +137,59 @@ function formatStatusLabel(status: string | null | undefined) {
   return status ?? "Concept";
 }
 
+function formatControleStatusLabel(row: MatchmakingRow) {
+  if (row.nvb_controle_ingestuurd) return "🟠 Ingestuurd naar NVB/admin";
+
+  const controleStatus = normalizeStatus(row.controle_status);
+  const flowStatus = normalizeStatus(row.upload_flow_status);
+  const runStatus = normalizeStatus(row.laatste_run?.status);
+
+  const s = controleStatus !== "concept" ? controleStatus : flowStatus !== "concept" ? flowStatus : runStatus;
+
+  if (!s || s === "concept" || s === "nog_niet" || s === "niet_gestart") {
+    return "⚪ Nog niet gecontroleerd";
+  }
+
+  if (s === "running" || s === "bezig" || s === "in_progress") {
+    return "🔵 Controle draait";
+  }
+
+  if (s === "klaar" || s === "done" || s === "completed" || s === "ok") {
+    return "🟢 Controle gereed";
+  }
+
+  if (s === "unlock_required" || s === "fp_unlock_required") {
+    return "🟠 Wacht op admin (unlock vereist)";
+  }
+
+  if (s === "admin_required" || s === "wacht_op_admin_unlock") {
+    return "🟠 Wacht op admin";
+  }
+
+  if (s === "failed" || s === "mislukt" || s === "error") {
+    return "🔴 Controle mislukt";
+  }
+
+  return row.controle_status ?? row.upload_flow_status ?? row.laatste_run?.status ?? "Nog niet gecontroleerd";
+}
+
+function getControleStatusTitle(row: MatchmakingRow) {
+  if (row.nvb_controle_ingestuurd) {
+    return "Deze matchmaking is naar NVB/admin gestuurd.";
+  }
+
+  const s = normalizeStatus(row.controle_status);
+  if (s === "unlock_required" || s === "fp_unlock_required") {
+    return "FightPassport vroeg om een unlock-code. De matchmaking moet door admin gecontroleerd worden.";
+  }
+
+  if (s === "nog_niet" || !row.controle_status) {
+    return "Deze upload is opgeslagen, maar de autocheck is nog niet gestart.";
+  }
+
+  return row.controle_status ?? "Controle status";
+}
+
 function effectiveStatus(row: MatchmakingRow) {
   const status = normalizeStatus(row.status);
   const stadium = normalizeStatus(row.stadium);
@@ -167,6 +229,140 @@ function Small({
   return (
     <div style={{ transform: "scale(0.85)", transformOrigin: origin }}>
       {children}
+    </div>
+  );
+}
+
+
+function ActionSquare({
+  title,
+  children,
+  onClick,
+  disabled,
+  color,
+  borderColor,
+}: {
+  title: string;
+  children: ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  color: string;
+  borderColor?: string;
+}) {
+  const style: CSSProperties = {
+    width: 34,
+    height: 34,
+    minWidth: 34,
+    borderRadius: 8,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: color,
+    color: "#fff",
+    border: `1px solid ${borderColor ?? "rgba(255,255,255,0.22)"}`,
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.22), 0 6px 14px rgba(0,0,0,0.22)",
+    fontSize: 15,
+    fontWeight: 900,
+    lineHeight: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+  };
+
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      style={style}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ActionFileSquare({
+  title,
+  children,
+  disabled = false,
+  color,
+  onFile,
+}: {
+  title: string;
+  children: ReactNode;
+  disabled?: boolean;
+  color: string;
+  onFile: (file: File | null) => void;
+}) {
+  const style: CSSProperties = {
+    width: 34,
+    height: 34,
+    minWidth: 34,
+    borderRadius: 8,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: color,
+    color: "#fff",
+    border: "1px solid rgba(255,255,255,0.22)",
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.22), 0 6px 14px rgba(0,0,0,0.22)",
+    fontSize: 15,
+    fontWeight: 900,
+    lineHeight: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+  };
+
+  return (
+    <label title={title} aria-label={title} style={style}>
+      {children}
+      <input
+        type="file"
+        accept=".xlsx,.xls"
+        disabled={disabled}
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null;
+          onFile(file);
+          e.currentTarget.value = "";
+        }}
+        className="hidden"
+      />
+    </label>
+  );
+}
+
+const ACTION_COLORS = {
+  matchmaking: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
+  controle: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
+  admin: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
+  herupload: "linear-gradient(180deg, #ff8a1f 0%, #d94700 100%)",
+  verwijderen: "linear-gradient(180deg, #c53636 0%, #7a1717 100%)",
+  aanmeldingen: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
+  matchen: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
+};
+
+function ActionLegend() {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-700/30 bg-[#242428] px-3 py-2 text-xs font-semibold text-white shadow-inner">
+      <span className="mr-1 text-zinc-300">Legenda acties:</span>
+      <span className="inline-flex items-center gap-1">
+        <span className="h-3 w-3 rounded-sm bg-[#238a3b]" /> Matchmaking / upload
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Start controle / matchen
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <span className="h-3 w-3 rounded-sm bg-[#8b4ab8]" /> Aanmeldingen / naar admin
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <span className="h-3 w-3 rounded-sm bg-[#ff8a1f]" /> Herupload
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <span className="h-3 w-3 rounded-sm bg-[#c53636]" /> Verwijderen
+      </span>
     </div>
   );
 }
@@ -256,8 +452,10 @@ function isAangebodenAanNvb(row: MatchmakingRow) {
 function isVisibleForMatchmakerOverview(row: MatchmakingRow, userId: string) {
   if (!isOwnMatchmaking(row, userId)) return false;
 
-  // Matchmakers moeten ook uploads kunnen zien die al naar NVB/admin zijn gestuurd.
-  // Die komen in een aparte controle-tab zonder link naar de matchmaking.
+  // Als een matchmaking naar admin/NVB is gestuurd, verdwijnt hij uit dit overzicht
+  // tot admin hem retour zet. Zo kan de matchmaker hem niet meer aanpassen.
+  if (isAangebodenAanNvb(row) && !isRetourVanNvb(row)) return false;
+
   return true;
 }
 
@@ -369,7 +567,7 @@ function MatchmakingPageContent() {
     if (!sentToNvb) return;
 
     setSuccessMsg(
-      "✅ Matchmaking is succesvol verwerkt. Als hij aan NVB/admin is aangeboden, verdwijnt hij uit dit overzicht tot hij retour komt.",
+      "✅ Matchmaking is succesvol verwerkt. Je ziet de status bij Controle status.",
     );
     setViewTab("zelf");
 
@@ -600,7 +798,7 @@ function MatchmakingPageContent() {
 
       setUploadMsg("Complete matchmaking uploaden...");
 
-      const res = await authedFetch("/api/submit-matchmaking", {
+      const res = await authedFetch("/api/matchmaker/submit-matchmaking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -615,8 +813,6 @@ function MatchmakingPageContent() {
           hoofdofficial: null,
           force_new: true,
           bron_type: "matchmaker_upload",
-          lifecycle_mode: "submitted_to_admin",
-          keep_owner: "admin",
           start_control: false,
         }),
       });
@@ -639,7 +835,7 @@ function MatchmakingPageContent() {
       setShowUpload(false);
       resetUploadForm(profile);
       setSuccessMsg(
-        "✅ Upload is gelukt en naar NVB/admin controle gestuurd. Je blijft op deze pagina. De matchmaking is pas weer te openen zodra admin hem retour stuurt.",
+        "✅ Upload is gelukt. Controleer de upload en gebruik daarna Start controle of Stuur naar admin.",
       );
       setViewTab("uploads");
       await load();
@@ -648,7 +844,88 @@ function MatchmakingPageContent() {
       setUploadMsg("❌ Onverwachte fout bij upload.");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function startControle(row: MatchmakingRow) {
+    const ok = window.confirm(
+      "Start controle voor deze upload?\n\nAls FightPassport om een unlock-code vraagt, wordt de matchmaking automatisch naar admin gestuurd.",
+    );
+    if (!ok) return;
+
+    try {
+      setBusyId(row.id);
+      setSuccessMsg("");
+
+      const res = await authedFetch("/api/control-engine/matchmaker/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: row.id,
+          do_scrape: true,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok || payload?.ok === false) {
+        if (payload?.code === "FP_UNLOCK_REQUIRED" || payload?.unlock_required) {
+          setSuccessMsg(
+            "⚠️ FightPassport vraagt om een unlock-code. De matchmaking is automatisch doorgestuurd naar admin.",
+          );
+          await load();
+          return;
+        }
+
+        console.error("start controle failed:", res.status, payload);
+        alert(payload?.error || "Start controle mislukt.");
+        return;
       }
+
+      setSuccessMsg("✅ Controle is gestart/uitgevoerd. Bekijk de resultaten in de matchmaking.");
+      setViewTab("uploads");
+      await load();
+    } catch (e) {
+      console.error(e);
+      alert("Onverwachte fout bij start controle.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function stuurNaarAdmin(row: MatchmakingRow) {
+    const ok = window.confirm(
+      "Weet je zeker dat je deze matchmaking naar admin wilt sturen?\n\nDaarna verdwijnt hij uit je upload-overzicht tot admin hem retour zet.",
+    );
+    if (!ok) return;
+
+    try {
+      setBusyId(row.id);
+      setSuccessMsg("");
+
+      const res = await authedFetch("/api/matchmaker/send-to-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmaking_id: row.id }),
+      });
+
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok || payload?.ok === false) {
+        console.error("send-to-admin failed:", res.status, payload);
+        alert(payload?.error || "Stuur naar admin mislukt.");
+        return;
+      }
+
+      setSuccessMsg("✅ Matchmaking is doorgestuurd naar admin.");
+      setViewTab("uploads");
+      await load();
+    } catch (e) {
+      console.error(e);
+      alert("Onverwachte fout bij sturen naar admin.");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function reuploadMM(row: MatchmakingRow, file: File | null) {
@@ -680,7 +957,7 @@ function MatchmakingPageContent() {
         return;
       }
 
-      const res = await authedFetch("/api/submit-matchmaking/herupload", {
+      const res = await authedFetch("/api/matchmaker/submit-matchmaking/herupload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -717,27 +994,33 @@ function MatchmakingPageContent() {
 
   async function deleteMM(matchmakingId: string) {
     const ok = window.confirm(
-      "Weet je zeker dat je deze matchmaking wilt verwijderen?\n\nDit kan niet ongedaan gemaakt worden.",
+      "Weet je zeker dat je deze matchmaking wilt verwijderen?\n\nAlle uploads, partijen, controles en resultaten worden verwijderd. Dit kan niet ongedaan gemaakt worden.",
     );
     if (!ok) return;
 
     try {
       setBusyId(matchmakingId);
+      setSuccessMsg("");
 
-      const res = await authedFetch("/api/matchmaker/delete-matchmaking", {
+      const res = await authedFetch("/api/control-engine/delete-matchmaking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ matchmaking_id: matchmakingId }),
       });
 
-      if (!res.ok) {
-        const t = await res.text();
-        console.error("Delete failed:", res.status, t);
-        alert("Verwijderen mislukt.");
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok || payload?.ok === false) {
+        console.error("Delete failed:", res.status, payload);
+        alert(payload?.error || "Verwijderen mislukt.");
         return;
       }
 
+      setSuccessMsg("✅ Matchmaking verwijderd.");
       await load();
+    } catch (e) {
+      console.error(e);
+      alert("Onverwachte fout bij verwijderen.");
     } finally {
       setBusyId(null);
     }
@@ -1033,9 +1316,7 @@ function MatchmakingPageContent() {
                             Complete matchmaking uploaden
                           </div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            Na uploaden wordt de matchmaking als aangeboden
-                            voor NVB/admin controle geregistreerd. Je blijft op
-                            deze pagina en kunt hem niet openen tot hij retour komt.
+                            Na uploaden blijft de matchmaking eerst bij jou. Je kunt hem controleren, heruploaden, Start controle draaien of daarna naar admin sturen.
                           </div>
                         </div>
 
@@ -1233,14 +1514,16 @@ function MatchmakingPageContent() {
                     {loading ? (
                       <p className="mt-6 text-center text-gray-500">Laden…</p>
                     ) : (
-                      <div className="mt-5 overflow-hidden rounded-2xl border-2">
+                      <>
+                        <ActionLegend />
+                        <div className="mt-3 overflow-hidden rounded-2xl border-2">
                         <div
                           className="h-[3px]"
                           style={{ background: "rgba(255,77,0,0.75)" }}
                         />
 
                         <div className="overflow-x-auto">
-                          <table className="min-w-full border-collapse">
+                          <table className="w-full border-collapse text-sm">
                             <thead
                               style={{
                                 background:
@@ -1249,24 +1532,15 @@ function MatchmakingPageContent() {
                               }}
                             >
                               <tr>
-                                <th className="px-4 py-3 text-left">Datum evenement</th>
-                                <th className="px-4 py-3 text-left">Naam evenement</th>
-                                <th className="px-4 py-3 text-left">Type</th>
-                                <th className="px-4 py-3 text-left">Locatie</th>
-                                <th className="px-4 py-3 text-left">
-                                  Promotor
-                                </th>
-                                <th className="px-4 py-3 text-left">
-                                  Bond
-                                </th>
-                                <th className="px-4 py-3 text-left">Status</th>
-                                <th className="px-4 py-3 text-left">
-                                  Laatste run
-                                </th>
-                                <th className="px-4 py-3 text-left">
-                                  Datum indienen
-                                </th>
-                                <th className="px-4 py-3 text-left">Acties</th>
+                                <th className="px-2 py-2 text-left">Datum</th>
+                                <th className="px-2 py-2 text-left">Evenement</th>
+                                <th className="px-2 py-2 text-left">Type</th>
+                                <th className="px-2 py-2 text-left">Bond</th>
+                                <th className="px-2 py-2 text-left">Status</th>
+                                <th className="px-2 py-2 text-left">Controle</th>
+                                <th className="px-2 py-2 text-left">Run</th>
+                                <th className="px-2 py-2 text-left">Datum</th>
+                                <th className="px-2 py-2 text-left">Acties</th>
                               </tr>
                             </thead>
 
@@ -1274,7 +1548,7 @@ function MatchmakingPageContent() {
                               {filteredRows.length === 0 ? (
                                 <tr>
                                   <td
-                                    colSpan={10}
+                                    colSpan={9}
                                     className="bg-white px-4 py-8 text-center text-sm text-zinc-600"
                                   >
                                     Geen matchmakings gevonden binnen deze tab.
@@ -1297,15 +1571,15 @@ function MatchmakingPageContent() {
                                         color: zebra ? "#000" : "#fff",
                                       }}
                                     >
-                                      <td className="px-4 py-3">
+                                      <td className="px-2 py-2">
                                         {formatDate(r.datum)}
                                       </td>
-                                      <td className="px-4 py-3 font-semibold">
+                                      <td className="px-2 py-2 font-semibold max-w-[180px] truncate" title={r.naam ?? "-"}>
                                         {r.naam ?? "-"}
                                       </td>
-                                      <td className="px-4 py-3">
+                                      <td className="px-2 py-2">
                                         <span
-                                          className="inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.08em]"
+                                          className="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.06em]"
                                           style={{
                                             borderColor:
                                               mmType === "upload"
@@ -1321,49 +1595,73 @@ function MatchmakingPageContent() {
                                           {formatTypeLabel(r)}
                                         </span>
                                       </td>
-                                      <td className="px-4 py-3">
-                                        {r.locatie ?? "-"}
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        {r.promotor ?? "-"}
-                                      </td>
-                                      <td className="px-4 py-3">
+                                      <td className="px-2 py-2">
                                         {r.bondteam ?? "-"}
                                       </td>
-                                      <td className="px-4 py-3 italic">
+                                      <td className="px-2 py-2 italic">
                                         {formatStatusLabel(
                                           r.stadium ?? r.status,
                                         )}
                                       </td>
-                                      <td className="px-4 py-3 italic">
+                                      <td className="px-2 py-2 text-sm font-semibold" title={getControleStatusTitle(r)}>
+                                        {formatControleStatusLabel(r)}
+                                      </td>
+                                      <td className="px-2 py-2 italic">
                                         {formatStatusLabel(effectiveStatus(r))}
                                       </td>
-                                      <td className="px-4 py-3 text-sm">
+                                      <td className="px-2 py-2 text-sm">
                                         {formatDateTime(getLogDate(r))}
                                       </td>
-                                      <td className="px-4 py-3">
-                                        {rowType === "uploads" ? (
-                                          <div className="flex flex-wrap items-center gap-3">
-                                            <label className="cursor-pointer rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black">
-                                              {reuploadingId === r.id
-                                                ? "Bezig…"
-                                                : "Herupload MM"}
-                                              <input
-                                                type="file"
-                                                accept=".xlsx,.xls"
-                                                disabled={reuploadingId === r.id}
-                                                onChange={(e) => {
-                                                  const file = e.target.files?.[0] ?? null;
-                                                  void reuploadMM(r, file);
-                                                  e.currentTarget.value = "";
-                                                }}
-                                                className="hidden"
-                                              />
-                                            </label>
+                                      <td className="px-2 py-2">
+                                        {rowType === "uploads" || rowType === "retour" ? (
+                                          <div className="flex flex-nowrap items-center gap-2">
+                                            <ActionSquare
+                                              title="Matchmaking / upload openen"
+                                              onClick={() => goToMatchmaking(r.id)}
+                                              color={ACTION_COLORS.matchmaking}
+                                            >
+                                              M
+                                            </ActionSquare>
+
+                                            <ActionSquare
+                                              title={busyId === r.id ? "Controle bezig" : "Start controle"}
+                                              onClick={() => startControle(r)}
+                                              disabled={busyId === r.id}
+                                              color={ACTION_COLORS.controle}
+                                            >
+                                              {busyId === r.id ? "…" : "▶"}
+                                            </ActionSquare>
+
+                                            <ActionSquare
+                                              title="Stuur naar admin"
+                                              onClick={() => stuurNaarAdmin(r)}
+                                              disabled={busyId === r.id}
+                                              color={ACTION_COLORS.admin}
+                                            >
+                                              ⇧
+                                            </ActionSquare>
+
+                                            <ActionFileSquare
+                                              title={reuploadingId === r.id ? "Herupload bezig" : "Herupload MM"}
+                                              disabled={reuploadingId === r.id}
+                                              color={ACTION_COLORS.herupload}
+                                              onFile={(file) => void reuploadMM(r, file)}
+                                            >
+                                              {reuploadingId === r.id ? "…" : "⬆"}
+                                            </ActionFileSquare>
+
+                                            <ActionSquare
+                                              title={rowBusy ? "Verwijderen bezig" : "Verwijderen"}
+                                              onClick={() => deleteMM(r.id)}
+                                              disabled={rowBusy}
+                                              color={ACTION_COLORS.verwijderen}
+                                            >
+                                              {rowBusy ? "…" : "🗑"}
+                                            </ActionSquare>
                                           </div>
                                         ) : isAangebodenAanNvb(r) ? (
                                           <span
-                                            className="inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.08em]"
+                                            className="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.06em]"
                                             style={{
                                               borderColor:
                                                 "rgba(255,77,0,0.65)",
@@ -1374,44 +1672,41 @@ function MatchmakingPageContent() {
                                             Ter controle bij NVB
                                           </span>
                                         ) : (
-                                          <div className="flex flex-wrap items-center gap-3">
-                                            <button
-                                              type="button"
+                                          <div className="flex flex-nowrap items-center gap-2">
+                                            <ActionSquare
+                                              title="Matchmaking"
                                               onClick={() => goToMatchmaking(r.id)}
-                                              className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black"
+                                              color={ACTION_COLORS.matchmaking}
                                             >
-                                              Matchmaking
-                                            </button>
+                                              M
+                                            </ActionSquare>
 
-                                            <button
-                                              type="button"
+                                            <ActionSquare
+                                              title="Aanmeldingen"
                                               onClick={() => goToAanmeldingen(r.id)}
-                                              className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                              color={ACTION_COLORS.aanmeldingen}
                                             >
-                                              Aanmeldingen
-                                            </button>
+                                              A
+                                            </ActionSquare>
 
-                                            <button
-                                              type="button"
+                                            <ActionSquare
+                                              title="Matchen"
                                               onClick={() => goToMatchen(r.id)}
-                                              className="rounded border border-zinc-300 bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-white hover:text-black"
+                                              color={ACTION_COLORS.matchen}
                                             >
-                                              Ga naar matchen
-                                            </button>
+                                              ⚔
+                                            </ActionSquare>
 
-                                            <button
-                                              type="button"
+                                            <ActionSquare
+                                              title={rowBusy ? "Verwijderen bezig" : "Verwijderen"}
                                               onClick={() => deleteMM(r.id)}
                                               disabled={rowBusy}
-                                              className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
+                                              color={ACTION_COLORS.verwijderen}
                                             >
-                                              {rowBusy
-                                                ? "Bezig…"
-                                                : "Verwijderen"}
-                                            </button>
+                                              {rowBusy ? "…" : "🗑"}
+                                            </ActionSquare>
                                           </div>
-                                        )}
-                                      </td>
+                                        )}</td>
                                     </tr>
                                   );
                                 })
@@ -1419,7 +1714,8 @@ function MatchmakingPageContent() {
                             </tbody>
                           </table>
                         </div>
-                      </div>
+                        </div>
+                      </>
                     )}
 
                     <p className="mt-7 text-center text-xs text-zinc-500">
@@ -1449,6 +1745,7 @@ function MatchmakingPageContent() {
               border-color: rgba(255, 77, 0, 0.75);
               box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.18);
             }
+
           `}</style>
         </div>
       </main>

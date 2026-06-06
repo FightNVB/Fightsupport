@@ -29,9 +29,8 @@ export async function POST(req: NextRequest) {
   try {
     const { userId, role } = await requireAnyRole(req, [
       "admin",
+      "superadmin",
       "matchmaker",
-      "hoofdofficial",
-      "official",
     ]);
 
     const body = await req.json().catch(() => ({}));
@@ -79,7 +78,10 @@ export async function POST(req: NextRequest) {
       return jsonError("Matchmaking niet gevonden.", 404);
     }
 
-    const ownerTypeFromDb = s((mm as any)?.huidige_eigenaar_type);
+    const ownerTypeRaw = s((mm as any)?.huidige_eigenaar_type);
+    // DB check constraint accepteert "matchmaker_upload" niet als eigenaar.
+    // Oude/lege waarden normaliseren we naar "matchmaker"; bron_type mag wel matchmaker_upload blijven.
+    const ownerTypeFromDb = ownerTypeRaw === "matchmaker_upload" ? "matchmaker" : ownerTypeRaw;
     const currentStage =
       s((mm as any)?.stadium) ||
       s((mm as any)?.status) ||
@@ -89,13 +91,12 @@ export async function POST(req: NextRequest) {
       ownerTypeFromDb ||
       (role === "matchmaker"
         ? "matchmaker"
-        : role === "admin"
+        : role === "admin" || role === "superadmin"
         ? "admin"
         : "bondteam");
 
     const currentOwnerUserId =
-      currentOwnerType === "matchmaker" ||
-      currentOwnerType === "matchmaker_upload"
+      currentOwnerType === "matchmaker"
         ? s((mm as any)?.huidige_eigenaar_user_id) ||
           s((mm as any)?.matchmaker_id) ||
           userId
@@ -110,11 +111,9 @@ export async function POST(req: NextRequest) {
 
     const bronType =
       s((mm as any)?.bron_type) ||
-      (currentOwnerType === "matchmaker_upload"
+      (role === "matchmaker"
         ? "matchmaker_upload"
-        : role === "matchmaker"
-        ? "matchmaker_app"
-        : role === "admin"
+        : role === "admin" || role === "superadmin"
         ? "admin_upload"
         : "official_upload");
 
@@ -164,6 +163,7 @@ export async function POST(req: NextRequest) {
       .update({
         stadium: "ingediend_admin",
         status: "ingediend_admin",
+        final_status: "ingediend_admin",
 
         vorige_eigenaar_type: currentOwnerType,
         vorige_eigenaar_user_id: currentOwnerUserId,

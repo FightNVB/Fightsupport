@@ -19,6 +19,18 @@ type ControleRun = {
   run_type: string | null;
 };
 
+type UploadInfo = {
+  id: string;
+  matchmaking_id: string;
+  raw_filename: string | null;
+  controle_status: string | null;
+  flow_status: string | null;
+  nvb_controle_ingestuurd: boolean | null;
+  nvb_controle_ingestuurd_op: string | null;
+  uploaded_at: string | null;
+  created_at: string | null;
+};
+
 function getUserIdFromAuth(auth: any) {
   return String(
     auth?.user?.id ??
@@ -42,7 +54,6 @@ function inferTab(row: any): "app" | "uploads" | "retour" {
   const stadium = lower(row?.stadium);
   const status = lower(row?.status);
   const bron = lower(row?.bron_type);
-  const eigenaarType = lower(row?.huidige_eigenaar_type);
 
   const isRetour =
     stadium === "retour_naar_eigenaar" ||
@@ -56,7 +67,6 @@ function inferTab(row: any): "app" | "uploads" | "retour" {
 
   if (
     bron === "matchmaker_upload" ||
-    eigenaarType === "matchmaker_upload" ||
     bron === "admin_upload" ||
     bron === "upload" ||
     bron.includes("upload")
@@ -105,9 +115,8 @@ function isMatchmakerVisibleRow(row: any, userId: string) {
   const uploadedBy = norm(row?.uploaded_by);
 
   const isRetour = isRetourRow(row);
-  const eigenaarType = lower(row?.huidige_eigenaar_type);
-  const isAdminUpload = bronType === "admin_upload" && eigenaarType !== "matchmaker_upload";
-  const isMatchmakerUpload = bronType === "matchmaker_upload" || eigenaarType === "matchmaker_upload";
+  const isAdminUpload = bronType === "admin_upload";
+  const isMatchmakerUpload = bronType === "matchmaker_upload";
   const isAangebodenAanNvb = isAangebodenAanNvbRow(row);
 
   // Hard filter op gebruiker-id. Rollen kunnen dubbel zijn; de id bepaalt of de
@@ -124,8 +133,8 @@ function isMatchmakerVisibleRow(row: any, userId: string) {
   // uit het matchmaker-overzicht. Hij komt pas terug als NVB hem retour zet.
   if (isAangebodenAanNvb && !isRetour) return false;
 
-  // Matchmaker-upload blijft eerst bij de matchmaker, zodat hij de MM kan controleren
-  // en pas daarna met "Stuur naar admin" naar NVB controle kan sturen.
+  // Matchmaker-upload herkennen we voortaan op bron_type.
+  // huidige_eigenaar_type blijft "matchmaker" vanwege de database-check constraint.
   if (isMatchmakerUpload) return true;
 
   // Admin uploads blijven normaal uit het matchmaker-overzicht, behalve als NVB hem
@@ -272,6 +281,51 @@ export async function GET(req: Request) {
       }
     }
 
+    const { data: uploads, error: uploadsError } = matchmakingIds.length
+      ? await supabaseAdmin
+          .from("matchmaking_uploads")
+          .select(
+            "id, matchmaking_id, raw_filename, controle_status, flow_status, nvb_controle_ingestuurd, nvb_controle_ingestuurd_op, uploaded_at, created_at",
+          )
+          .in("matchmaking_id", matchmakingIds)
+      : { data: [] as any[], error: null as any };
+
+    if (uploadsError) {
+      console.error(
+        "[matchmaker/matchmakings-overzicht] matchmaking_uploads error:",
+        uploadsError,
+      );
+    }
+
+    const latestUploadMap = new Map<string, UploadInfo>();
+
+    for (const upload of uploads ?? []) {
+      const mmId = norm(upload.matchmaking_id);
+      if (!mmId) continue;
+
+      const existing = latestUploadMap.get(mmId);
+      const uploadTime = new Date(
+        upload.uploaded_at ?? upload.created_at ?? 0,
+      ).getTime();
+      const existingTime = new Date(
+        existing?.uploaded_at ?? existing?.created_at ?? 0,
+      ).getTime();
+
+      if (!existing || uploadTime > existingTime) {
+        latestUploadMap.set(mmId, {
+          id: String(upload.id),
+          matchmaking_id: mmId,
+          raw_filename: upload.raw_filename ?? null,
+          controle_status: upload.controle_status ?? null,
+          flow_status: upload.flow_status ?? null,
+          nvb_controle_ingestuurd: upload.nvb_controle_ingestuurd ?? null,
+          nvb_controle_ingestuurd_op: upload.nvb_controle_ingestuurd_op ?? null,
+          uploaded_at: upload.uploaded_at ?? null,
+          created_at: upload.created_at ?? null,
+        });
+      }
+    }
+
     const rows = matchmakings.map((r: any) => ({
       id: String(r.id),
       naam: r.naam ?? null,
@@ -313,6 +367,20 @@ export async function GET(req: Request) {
 
       tab: inferTab(r),
       laatste_run: latestRunMap.get(String(r.id)) ?? null,
+
+      upload_id: latestUploadMap.get(String(r.id))?.id ?? null,
+      upload_raw_filename:
+        latestUploadMap.get(String(r.id))?.raw_filename ?? null,
+      controle_status:
+        latestUploadMap.get(String(r.id))?.controle_status ?? null,
+      upload_flow_status:
+        latestUploadMap.get(String(r.id))?.flow_status ?? null,
+      nvb_controle_ingestuurd:
+        latestUploadMap.get(String(r.id))?.nvb_controle_ingestuurd ?? false,
+      nvb_controle_ingestuurd_op:
+        latestUploadMap.get(String(r.id))?.nvb_controle_ingestuurd_op ?? null,
+      upload_uploaded_at:
+        latestUploadMap.get(String(r.id))?.uploaded_at ?? null,
     }));
 
     return NextResponse.json({

@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabaseClient";
 import {
   ArrowLeft,
   Ban,
+  Download,
   Eye,
   RefreshCw,
   Search,
@@ -452,10 +453,10 @@ function totaalPartijenSortValue(f: Fighter) {
   return total > 0 ? total : Number.POSITIVE_INFINITY;
 }
 function sortFightersInTab(a: Fighter, b: Fighter) {
-  const gewichtDiff = gewichtSortValue(a) - gewichtSortValue(b);
-  if (gewichtDiff !== 0) return gewichtDiff;
   const leeftijdDiff = leeftijdSortValue(a) - leeftijdSortValue(b);
   if (leeftijdDiff !== 0) return leeftijdDiff;
+  const gewichtDiff = gewichtSortValue(a) - gewichtSortValue(b);
+  if (gewichtDiff !== 0) return gewichtDiff;
   const partijenDiff = totaalPartijenSortValue(a) - totaalPartijenSortValue(b);
   if (partijenDiff !== 0) return partijenDiff;
   return name(a).localeCompare(name(b), "nl");
@@ -1388,6 +1389,48 @@ export default function FightersPage() {
     );
   }
 
+  async function downloadCheckedExcel() {
+    if (!matchmakingId || busyId) return;
+
+    setBusyId("download-excel");
+    setBusyText("Excel export maken...");
+    setMsg("");
+    try {
+      const res = await authedFetch(
+        `/api/matchmaker/${matchmakingId}/gecontroleerde-aanmeldingen/excel`,
+      );
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || "Excel export maken mislukt");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const cd = res.headers.get("content-disposition") || "";
+      const filenameMatch = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+      const filename = decodeURIComponent(
+        filenameMatch?.[1] ||
+          filenameMatch?.[2] ||
+          `gecontroleerde-aanmeldingen-${matchmakingId}.xlsx`,
+      );
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setMsg("Excel export is gedownload.");
+    } catch (e: any) {
+      setMsg(e?.message || "Excel export maken mislukt");
+    } finally {
+      setBusyId(null);
+      setBusyText("");
+    }
+  }
+
   async function herscrapeSelected() {
     const selectedFighters = fighters.filter(
       (f) => selected.includes(rowKeyOf(f)) && !isBlockedFromMatching(f),
@@ -1563,6 +1606,15 @@ export default function FightersPage() {
               <RefreshCw size={16} />
               Herscrape geselecteerden{" "}
               {selected.length ? `(${selected.length})` : ""}
+            </button>
+            <button
+              className="fs-dark-btn fs-strong-btn"
+              onClick={downloadCheckedExcel}
+              disabled={!!busyId || loading || !fighters.length}
+              title="Download gecontroleerde aanmeldingen als Excel"
+            >
+              <Download size={16} />
+              Download Excel
             </button>
             <button className="fs-dark-btn" onClick={() => load()} disabled={loading}>
               <RefreshCw size={16} />
