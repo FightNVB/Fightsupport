@@ -17,7 +17,7 @@ const LOGO_PATH = path.join(process.cwd(), "public", "branding", "fightsupport",
 type AnyRow = Record<string, any>;
 
 type Params = {
-  params: Promise<{ matchmakingId: string }> | { matchmakingId: string };
+  params: Promise<{ matchmakingid: string }> | { matchmakingid: string };
 };
 
 function txt(v: unknown) {
@@ -358,7 +358,8 @@ function addResultsSheet(workbook: ExcelJS.Workbook, rows: AnyRow[], fighters: A
 
 export async function GET(req: NextRequest, ctx: Params) {
   try {
-    const { matchmakingId } = await ctx.params;
+    const { matchmakingid } = await ctx.params;
+    const matchmakingId = txt(matchmakingid);
     if (!matchmakingId) return NextResponse.json({ ok: false, error: "matchmakingId ontbreekt" }, { status: 400 });
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
