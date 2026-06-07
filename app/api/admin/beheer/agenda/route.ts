@@ -69,9 +69,11 @@ async function requireAdmin(req: Request) {
     ? auth.slice(7).trim()
     : "";
 
-  if (!token) return { ok: false as const, error: "Niet ingelogd", status: 401 };
+  if (!token)
+    return { ok: false as const, error: "Niet ingelogd", status: 401 };
 
-  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+  const { data: userData, error: userError } =
+    await supabaseAdmin.auth.getUser(token);
   const user = userData?.user;
 
   if (userError || !user) {
@@ -85,7 +87,9 @@ async function requireAdmin(req: Request) {
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from("user_profiles")
-    .select("id, email, full_name, role, active_role, bondteam, active_sportschool_id, meekijk_sportschool_id")
+    .select(
+      "id, email, full_name, role, active_role, bondteam, active_sportschool_id, meekijk_sportschool_id",
+    )
     .eq("id", user.id)
     .maybeSingle();
 
@@ -101,27 +105,113 @@ async function requireAdmin(req: Request) {
   const roles = await getUserRoleNames(user.id).catch(() => []);
   const activeRole = normalizeRole(profile?.active_role || profile?.role);
   const fallbackRole = normalizeRole(profile?.role);
-  const allRoles = Array.from(new Set([activeRole, fallbackRole, ...roles].filter(Boolean)));
+  const allRoles = Array.from(
+    new Set([activeRole, fallbackRole, ...roles].filter(Boolean)),
+  );
 
   const allowed = allRoles.includes("admin") || allRoles.includes("superadmin");
 
-  if (!allowed) return { ok: false as const, error: "Geen toegang", status: 403 };
+  if (!allowed)
+    return { ok: false as const, error: "Geen toegang", status: 403 };
 
   return { ok: true as const, user, profile, roles: allRoles };
 }
 
 function dateValue(row: AnyRow) {
-  return s(row.datum ?? row.event_datum ?? row.start_datum ?? row.start_date ?? row.date);
+  return s(
+    row.datum ??
+      row.event_datum ??
+      row.start_datum ??
+      row.start_date ??
+      row.date,
+  );
 }
 
 function nameValue(row: AnyRow) {
   return s(row.naam ?? row.event_naam ?? row.titel ?? row.title ?? row.name);
 }
 
+function isSchemaCacheError(error: any) {
+  const msg = s(error?.message).toLowerCase();
+  const code = s(error?.code).toUpperCase();
+  return (
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    code === "42P01" ||
+    code === "42703" ||
+    msg.includes("could not find the table") ||
+    msg.includes("could not find the column") ||
+    msg.includes("schema cache") ||
+    msg.includes("does not exist")
+  );
+}
+
+async function safeDeleteWhere(
+  table: string,
+  column: string,
+  value: string,
+  stats: Record<string, number>,
+) {
+  if (!value) return;
+
+  const { count, error } = await supabaseAdmin
+    .from(table)
+    .delete({ count: "exact" })
+    .eq(column, value);
+
+  if (error) {
+    if (isSchemaCacheError(error)) return;
+    throw new Error(`${table}.${column}: ${error.message}`);
+  }
+
+  if (count && count > 0) stats[table] = (stats[table] ?? 0) + count;
+}
+
+async function safeDeleteIn(
+  table: string,
+  column: string,
+  values: string[],
+  stats: Record<string, number>,
+) {
+  const clean = Array.from(new Set(values.map(s).filter(Boolean)));
+  if (!clean.length) return;
+
+  const { count, error } = await supabaseAdmin
+    .from(table)
+    .delete({ count: "exact" })
+    .in(column, clean);
+
+  if (error) {
+    if (isSchemaCacheError(error)) return;
+    throw new Error(`${table}.${column}: ${error.message}`);
+  }
+
+  if (count && count > 0) stats[table] = (stats[table] ?? 0) + count;
+}
+
+async function safeSelectIds(table: string, column: string, value: string) {
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select("id")
+    .eq(column, value);
+
+  if (error) {
+    if (isSchemaCacheError(error)) return [] as string[];
+    throw new Error(`${table}.${column}: ${error.message}`);
+  }
+
+  return (data ?? []).map((row: any) => s(row.id)).filter(Boolean);
+}
+
 export async function GET(req: Request) {
   try {
     const auth = await requireAdmin(req);
-    if (!auth.ok) return bad(auth.error, auth.status, "extra" in auth ? auth.extra : undefined);
+    if (!auth.ok)
+      return bad(
+        auth.error,
+        auth.status,
+        "extra" in auth ? auth.extra : undefined,
+      );
 
     const { searchParams } = new URL(req.url);
     const q = s(searchParams.get("q")).toLowerCase();
@@ -151,7 +241,12 @@ export async function GET(req: Request) {
         .join(" ");
 
       if (q && !haystack.includes(q)) return false;
-      if (status && status !== "alles" && s(event.status).toLowerCase() !== status) return false;
+      if (
+        status &&
+        status !== "alles" &&
+        s(event.status).toLowerCase() !== status
+      )
+        return false;
       return true;
     });
 
@@ -164,7 +259,12 @@ export async function GET(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const auth = await requireAdmin(req);
-    if (!auth.ok) return bad(auth.error, auth.status, "extra" in auth ? auth.extra : undefined);
+    if (!auth.ok)
+      return bad(
+        auth.error,
+        auth.status,
+        "extra" in auth ? auth.extra : undefined,
+      );
 
     const { searchParams } = new URL(req.url);
     const id = s(searchParams.get("id"));
@@ -173,21 +273,170 @@ export async function DELETE(req: Request) {
 
     const { data: event, error: loadError } = await supabaseAdmin
       .from("events")
-      .select("id, naam, event_naam, datum, event_datum")
+      .select("*")
       .eq("id", id)
       .maybeSingle();
 
-    if (loadError) return bad("Evenement laden mislukt", 500, loadError.message);
+    if (loadError)
+      return bad("Evenement laden mislukt", 500, loadError.message);
     if (!event) return bad("Evenement niet gevonden", 404);
 
-    const { error } = await supabaseAdmin
+    const stats: Record<string, number> = {};
+    const matchmakingIds = await safeSelectIds("matchmakings", "event_id", id);
+
+    // Verwijder eerst gekoppelde records. De helpers slaan tabellen/kolommen over
+    // die in een oudere database niet bestaan, maar geven echte delete-fouten wel terug.
+    for (const matchmakingId of matchmakingIds) {
+      await safeDeleteWhere(
+        "weigh_in_audit",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "weigh_in_bouts",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "uitslagen_bouts",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "uitslagen_runs",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "controle_resultaten",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "controle_uitslagen",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "controle_bout_context",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "controle_toernooi_context",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "controle_runs",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "matchmaker_fighter_resultaten",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "matchmaker_fighter_context",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "matchmaker_fighters_raw",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "matchmaker_uitslagen_raw",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "matchmaking_bouts_raw",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "aanmeldingen",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+      await safeDeleteWhere(
+        "matchmaking_uploads",
+        "matchmaking_id",
+        matchmakingId,
+        stats,
+      );
+    }
+
+    // Directe event-koppelingen, ook voor modules die geen matchmakings gebruiken.
+    for (const table of [
+      "weigh_in_audit",
+      "weigh_in_bouts",
+      "uitslagen_bouts",
+      "uitslagen_runs",
+      "controle_resultaten",
+      "controle_uitslagen",
+      "controle_bout_context",
+      "controle_toernooi_context",
+      "controle_runs",
+      "matchmaker_fighter_resultaten",
+      "matchmaker_fighter_context",
+      "matchmaker_fighters_raw",
+      "matchmaker_uitslagen_raw",
+      "matchmaking_bouts_raw",
+      "aanmeldingen",
+      "matchmaking_uploads",
+      "matchmakings",
+    ]) {
+      await safeDeleteWhere(table, "event_id", id, stats);
+    }
+
+    for (const table of [
+      "yoc_resultaten",
+      "yoc_fighter_context",
+      "yoc_fighters_raw",
+      "yoc_fighters",
+      "yoc_runs",
+      "yoc_uploads",
+    ]) {
+      await safeDeleteWhere(table, "yoc_event_id", id, stats);
+    }
+
+    if (matchmakingIds.length) {
+      await safeDeleteIn("matchmakings", "id", matchmakingIds, stats);
+    }
+
+    const { count, error } = await supabaseAdmin
       .from("events")
-      .delete()
+      .delete({ count: "exact" })
       .eq("id", id);
 
     if (error) return bad("Evenement verwijderen mislukt", 500, error.message);
+    if (!count) return bad("Evenement niet gevonden of al verwijderd", 404);
 
-    return NextResponse.json({ ok: true, deleted: event });
+    return NextResponse.json({
+      ok: true,
+      deleted: event,
+      linked_matchmakings: matchmakingIds.length,
+      deleted_counts: stats,
+    });
   } catch (e: any) {
     return bad(e?.message || "Server fout", 500);
   }

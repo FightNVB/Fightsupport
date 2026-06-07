@@ -463,86 +463,106 @@ export default function SportschoolPage() {
     keurmerkDays !== null && keurmerkDays >= 0 && keurmerkDays <= 62;
 
   return (
-    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
-      <style>{`.sportschool-silver-btn, .sportschool-silver-btn *{color:#000!important;}`}</style>
-      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
-        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] shadow-2xl">
-          <div className="relative px-4 py-4 sm:px-5">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(255,77,0,0.16),transparent_30%),linear-gradient(180deg,#050505_0%,#111_38%,#020202_100%)] p-4 text-white sm:p-6">
+      <style>{`
+        .sportschool-silver-btn, .sportschool-silver-btn *{color:#050505!important;}
+        .fs-metal-btn{transition:filter .12s ease, transform .12s ease;}
+        .fs-metal-btn:hover{filter:brightness(1.08); transform:translateY(-1px);}
+        .fs-panel{
+          border:1px solid rgba(255,255,255,.18);
+          background:linear-gradient(135deg,rgba(255,255,255,.13),rgba(255,255,255,.045) 34%,rgba(0,0,0,.36)),linear-gradient(180deg,#171717 0%,#080808 100%);
+          box-shadow:0 22px 60px rgba(0,0,0,.58), inset 0 1px 0 rgba(255,255,255,.20), inset 0 -1px 0 rgba(255,255,255,.06);
+        }
+        .fs-steel{
+          border:1px solid rgba(255,255,255,.34);
+          background:linear-gradient(145deg,#fff 0%,#d8d8d8 10%,#777 20%,#f5f5f5 34%,#aaa 46%,#4e4e4e 60%,#fdfdfd 78%,#b8b8b8 100%);
+          box-shadow:0 12px 28px rgba(0,0,0,.55), inset 0 2px 1px rgba(255,255,255,.86), inset 0 -2px 2px rgba(0,0,0,.70);
+          padding:3px;
+        }
+        .fs-steel-inner{
+          border:1px solid rgba(255,255,255,.11);
+          background:linear-gradient(180deg,#1c1c1c 0%,#090909 100%);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+        }
+      `}</style>
 
-            <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-              <div className="min-w-0 text-center">
-                <div className="text-[11px] font-black uppercase tracking-[0.26em] text-[#ff8a4c]">
+      <section className="mx-auto max-w-7xl space-y-4">
+        <header className="fs-steel">
+          <div className="fs-steel-inner p-4 sm:p-5">
+            <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+              <div className="min-w-0 text-center lg:text-left">
+                <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#ff4d00]">
                   Sportschool
-                </div>
-                <div className="mt-0.5 truncate text-2xl font-black leading-tight text-white">
+                </p>
+                <h1 className="mt-1 truncate text-3xl font-black uppercase leading-none tracking-tight text-white sm:text-4xl">
                   {safe(sportschool?.naam, "Gekoppelde sportschool")}
-                </div>
-                <div className="text-sm text-[#d1c3b7]">
-                  {[sportschool?.plaats, sportschool?.land]
-                    .filter(Boolean)
-                    .join(" • ")}
-                </div>
+                </h1>
+                <p className="mt-2 text-sm font-bold text-zinc-300">
+                  {[sportschool?.plaats, sportschool?.land].filter(Boolean).join(" • ") || "Fightcrew beheer"}
+                </p>
               </div>
 
-              <div className="flex justify-center lg:px-6">
+              <div className="flex justify-center">
                 <img
                   src="/branding/fightsupport/fightsupport1.png"
                   alt="FightSupport"
-                  className="h-16 w-auto max-w-[310px] object-contain sm:h-20 lg:h-24 lg:max-w-[390px]"
+                  className="h-20 w-auto max-w-[360px] object-contain drop-shadow-[0_16px_24px_rgba(0,0,0,.65)] sm:h-24"
                 />
               </div>
 
-              <div className="text-left lg:text-right">
-                <div className="text-[11px] font-black uppercase tracking-[0.32em] text-[#ff6a2a]">
-                  FightSupport
+              <div className="flex flex-col items-center gap-3 lg:items-end">
+                <div className="text-center lg:text-right">
+                  <p className="text-[11px] font-black uppercase tracking-[0.28em] text-[#ff4d00]">
+                    FightSupport
+                  </p>
+                  <h2 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">
+                    Fightcrew
+                  </h2>
+                  <p className="mt-2 text-sm font-bold text-zinc-300">
+                    Vechters, licenties, nulmeting en startverboden.
+                  </p>
                 </div>
-                <h1 className="mt-0.5 text-3xl font-black tracking-tight text-white sm:text-4xl">
-                  Fightcrew
-                </h1>
-                <p className="mt-0.5 text-sm text-[#d1c3b7]">
-                  Vechters, licenties, nulmeting en startverboden.
-                </p>
-              </div>
-            </div>
-
-            
-            <div className="mt-4 grid items-center gap-3 border-t border-[#b8afa6]/45 pt-3 lg:grid-cols-[1fr_auto_1fr]">
-              <div className="hidden lg:block" />
-
-              <div className="flex items-center justify-center gap-3 rounded-2xl bg-[#151210] px-6 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#ff7a3d]/55 bg-[#24170f] text-[#ff7a3d]">
-                  <Trophy size={22} />
-                </div>
-                <div className="min-w-0 text-center">
-                  <div className="text-[12px] font-black uppercase tracking-[0.24em] text-[#d1c3b7]">
-                    Keurmerk sportschool
-                  </div>
-                  <div className="truncate text-lg font-black">
-                    <span className="text-[#ff6a2a]">Einde keurmerk:</span>{" "}
-                    <span className="text-[#ff6a2a]">
-                      {formatDate(sportschool?.keurmerk_einde)}
-                    </span>
-                  </div>
-                  <div className="text-sm text-[#b8aaa0]">
-                    Start: {formatDate(sportschool?.keurmerk_start)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-center lg:justify-end">
                 <button
                   type="button"
                   onClick={() => router.push("/dashboard")}
-                  className="sportschool-silver-btn inline-flex items-center justify-center gap-2 border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black"
+                  className="sportschool-silver-btn fs-metal-btn inline-flex min-h-10 items-center justify-center gap-2 border border-zinc-300 bg-[linear-gradient(180deg,#ffffff,#eeeeee_18%,#bdbdbd_55%,#f8f8f8)] px-5 text-xs font-black uppercase tracking-[0.18em] text-black shadow-lg shadow-black/40"
                 >
-                  <ArrowLeft size={17} />
+                  <ArrowLeft size={16} />
                   Terug
                 </button>
               </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 border-t border-white/15 pt-4 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+              <div />
+              <div className="fs-panel px-5 py-3 text-center">
+                <div className="flex items-center justify-center gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center border border-[#ff4d00]/60 bg-[#241008] text-[#ff4d00]">
+                    <Trophy size={22} />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.22em] text-zinc-400">
+                      Keurmerk sportschool
+                    </p>
+                    <p className="text-lg font-black text-white">
+                      <span className="text-[#ff4d00]">Einde:</span>{" "}
+                      {formatDate(sportschool?.keurmerk_einde)}
+                    </p>
+                    <p className="text-xs font-bold text-zinc-400">
+                      Start: {formatDate(sportschool?.keurmerk_start)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div />
 
               {(keurmerkExpired || keurmerkSoon) && (
                 <div
-                  className={`lg:col-span-3 mx-auto max-w-[680px] rounded-2xl border-2 px-4 py-3 text-center text-sm font-bold shadow-lg shadow-black/40 ${keurmerkExpired ? "border-red-500/70 bg-[#260d0d] text-red-200" : "border-[#ff7a3d]/70 bg-[#24170f] text-[#ffd2bd]"}`}
+                  className={`lg:col-span-3 mx-auto max-w-[760px] border px-4 py-3 text-center text-sm font-black shadow-lg shadow-black/40 ${
+                    keurmerkExpired
+                      ? "border-red-500/70 bg-[#260d0d] text-red-200"
+                      : "border-[#ff4d00]/70 bg-[#241008] text-[#ffd2bd]"
+                  }`}
                 >
                   {keurmerkExpired
                     ? "Keurmerk is verlopen. Vraag verlenging aan."
@@ -550,64 +570,37 @@ export default function SportschoolPage() {
                 </div>
               )}
             </div>
-          </div>
 
-          <div className="grid gap-2 border-t border-[#b8afa6]/45 p-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Stat
-              label="Totaal"
-              value={stats.total}
-              icon={<Users size={17} />}
-            />
-            <Stat
-              label="Gecontroleerd"
-              value={stats.gecontroleerd}
-              icon={<CheckCircle2 size={17} />}
-              good
-            />
-            <Stat
-              label="Mislukt"
-              value={stats.mislukt}
-              icon={<XCircle size={17} />}
-              bad
-            />
-            <Stat
-              label="Startverbod"
-              value={stats.startverbod}
-              icon={<ShieldAlert size={17} />}
-              warn
-            />
-            <Stat
-              label="Zonder licentie"
-              value={stats.zonderLicentie}
-              icon={<AlertTriangle size={17} />}
-              bad
-            />
+            <div className="mt-4 grid gap-2 border-t border-white/15 pt-4 sm:grid-cols-2 lg:grid-cols-5">
+              <Stat label="Totaal" value={stats.total} icon={<Users size={17} />} />
+              <Stat label="Gecontroleerd" value={stats.gecontroleerd} icon={<CheckCircle2 size={17} />} good />
+              <Stat label="Mislukt" value={stats.mislukt} icon={<XCircle size={17} />} bad />
+              <Stat label="Startverbod" value={stats.startverbod} icon={<ShieldAlert size={17} />} warn />
+              <Stat label="Zonder licentie" value={stats.zonderLicentie} icon={<AlertTriangle size={17} />} bad />
+            </div>
           </div>
         </header>
 
-        <section className="border-b border-zinc-700 bg-[#181818] p-4">
+        <section className="fs-panel p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex min-h-11 flex-1 items-center gap-3 rounded-2xl border-[3px] border-[#a59b92] bg-[#110f0e] px-4">
-              <Search size={18} className="text-[#ff9a66]" />
+            <div className="flex min-h-11 flex-1 items-center gap-3 border border-white/20 bg-black/45 px-4 shadow-[inset_0_1px_0_rgba(255,255,255,.08)]">
+              <Search size={18} className="text-[#ff4d00]" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Zoek vechter op naam, VA, discipline, klasse, status of licentie..."
-                className="w-full bg-transparent py-2.5 text-sm text-white outline-none placeholder:text-[#9f948c]"
+                className="w-full bg-transparent py-2.5 text-sm font-bold text-white outline-none placeholder:text-zinc-500"
               />
             </div>
+
             <div className="flex flex-col gap-2 sm:flex-row">
               <button
                 type="button"
                 onClick={downloadFightcrewExcel}
                 disabled={exportLoading || loading || fighters.length === 0}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border-2 border-[#d8d3cc] bg-[linear-gradient(180deg,#ffffff,#d7d7d7_42%,#8f8f8f)] px-5 text-sm font-black uppercase tracking-[0.14em] text-black shadow-lg shadow-black/40 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                className="sportschool-silver-btn fs-metal-btn inline-flex min-h-11 items-center justify-center gap-2 border border-zinc-300 bg-[linear-gradient(180deg,#ffffff,#eeeeee_18%,#bdbdbd_55%,#f8f8f8)] px-5 text-xs font-black uppercase tracking-[0.16em] text-black shadow-lg shadow-black/40 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {exportLoading ? (
-                  <RefreshCw size={17} className="animate-spin" />
-                ) : (
-                  <Download size={17} />
-                )}
+                {exportLoading ? <RefreshCw size={17} className="animate-spin" /> : <Download size={17} />}
                 Excel
               </button>
 
@@ -615,7 +608,7 @@ export default function SportschoolPage() {
                 type="button"
                 onClick={load}
                 disabled={loading}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border-2 border-[#ffb082]/55 bg-[linear-gradient(180deg,#ff7a2f,#b9360c)] px-5 text-sm font-black uppercase tracking-[0.14em] text-white shadow-lg shadow-orange-950/40 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                className="fs-metal-btn inline-flex min-h-11 items-center justify-center gap-2 border border-[#ff4d00]/70 bg-[linear-gradient(180deg,#ff7a2f,#ff4d00_48%,#8f2800)] px-5 text-xs font-black uppercase tracking-[0.16em] text-white shadow-lg shadow-orange-950/40 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={17} className={loading ? "animate-spin" : ""} />
                 Vernieuwen
@@ -624,173 +617,137 @@ export default function SportschoolPage() {
           </div>
 
           {error && (
-            <div className="mt-3 flex items-start gap-3 rounded-2xl border-2 border-red-500/60 bg-[#260d0d] p-3 text-sm text-red-200">
+            <div className="mt-3 flex items-start gap-3 border border-red-500/60 bg-[#260d0d] p-3 text-sm font-bold text-red-200">
               <AlertTriangle className="mt-0.5 shrink-0" size={18} />
               <div>
-                <div className="font-bold">
-                  Vechters konden niet geladen worden.
-                </div>
+                <div className="font-black">Vechters konden niet geladen worden.</div>
                 <div className="mt-1 text-red-200/80">{error}</div>
               </div>
             </div>
           )}
         </section>
 
-        <section className="p-4 pt-0">
-          <div className="overflow-hidden border border-zinc-600 bg-[#111] shadow-2xl">
-          <div className="border-b border-zinc-700 bg-[#252525] px-5 py-3">
-            <div className="text-lg font-black text-white">Vechters</div>
-            <div className="text-xs text-[#d1c3b7]">
-              Duidelijk overzicht voor trainers: VA, nulmeting, licentie en
-              controle.
+        <section className="fs-steel">
+          <div className="fs-steel-inner">
+            <div className="border-b border-white/15 bg-[linear-gradient(180deg,rgba(255,255,255,.12),rgba(0,0,0,.12))] px-5 py-3">
+              <div className="text-lg font-black uppercase tracking-wide text-white">Vechters</div>
+              <div className="text-xs font-bold text-zinc-400">
+                Duidelijk overzicht voor trainers: VA, nulmeting, licentie en controle.
+              </div>
             </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] table-fixed text-sm">
-              <thead>
-                <tr className="bg-[#252525] text-xs uppercase text-zinc-300">
-                  <th className="w-[26%] px-3 py-3 text-left">Vechter</th>
-                  <th className="w-[10%] px-3 py-3 text-left">VA</th>
-                  <th className="w-[18%] px-3 py-3 text-left">Nulmeting</th>
-                  <th className="w-[12%] px-3 py-3 text-left">Record</th>
-                  <th className="w-[14%] px-3 py-3 text-left">Licentie</th>
-                  <th className="w-[14%] px-3 py-3 text-left">Controle</th>
-                  <th className="w-[6%] px-3 py-3 text-right">Open</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-14 text-center text-zinc-300"
-                    >
-                      <RefreshCw className="mx-auto mb-3 animate-spin text-[#ff6a2a]" />
-                      Vechters laden...
-                    </td>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
+                <thead>
+                  <tr className="bg-[linear-gradient(180deg,#ffffff,#d7d7d7_24%,#777_68%,#202020)] text-xs uppercase tracking-[0.13em] text-black">
+                    <th className="w-[26%] border-r border-black/25 px-3 py-3 text-left font-black">Vechter</th>
+                    <th className="w-[10%] border-r border-black/25 px-3 py-3 text-left font-black">VA</th>
+                    <th className="w-[18%] border-r border-black/25 px-3 py-3 text-left font-black">Nulmeting</th>
+                    <th className="w-[12%] border-r border-black/25 px-3 py-3 text-left font-black">Record</th>
+                    <th className="w-[14%] border-r border-black/25 px-3 py-3 text-left font-black">Licentie</th>
+                    <th className="w-[14%] border-r border-black/25 px-3 py-3 text-left font-black">Controle</th>
+                    <th className="w-[6%] px-3 py-3 text-right font-black">Open</th>
                   </tr>
-                )}
+                </thead>
+                <tbody>
+                  {loading && (
+                    <tr className="bg-[#111]">
+                      <td colSpan={7} className="px-4 py-14 text-center font-bold text-zinc-300">
+                        <RefreshCw className="mx-auto mb-3 animate-spin text-[#ff4d00]" />
+                        Vechters laden...
+                      </td>
+                    </tr>
+                  )}
 
-                {!loading &&
-                  filtered.map((f, idx) => {
-                    const raw = parseRaw(f.raw);
-                    const lic = licenseValue(f);
-                    const licOk = yes(lic);
-                    const startverbod = hasStartverbod(f);
-                    const nulKlasse = safe(
-                      f.nulmeting_klasse ?? raw?.nulmeting?.klasse,
-                    );
-                    const nulTotaal = safe(
-                      f.nulmeting_totaal ?? raw?.nulmeting?.totaal,
-                      "0",
-                    );
+                  {!loading &&
+                    filtered.map((f, idx) => {
+                      const raw = parseRaw(f.raw);
+                      const lic = licenseValue(f);
+                      const licOk = yes(lic);
+                      const startverbod = hasStartverbod(f);
+                      const nulKlasse = safe(f.nulmeting_klasse ?? raw?.nulmeting?.klasse);
+                      const nulTotaal = safe(f.nulmeting_totaal ?? raw?.nulmeting?.totaal, "0");
 
-                    return (
-                      <tr
-                        key={
-                          f.id || `${f.sportschool_id}-${f.va_nummer}-${idx}`
-                        }
-                        className="border border-zinc-800 bg-[#171717] hover:bg-[#202020]"
-                      >
-                        <td className="px-3 py-2.5 align-middle">
-                          <div className="truncate font-black text-[#ff6a2a]">
-                            {fighterName(f)}
-                          </div>
-                          <div className="mt-0.5 truncate text-xs text-[#c8bdb3]">
-                            {formatDate(dob(f))} • {safe(f.geslacht)}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 align-middle">
-                          <span className="rounded-xl border border-[#8f857d] bg-[#100e0c] px-2.5 py-1 font-mono text-xs font-black text-white shadow-sm shadow-black/40">
-                            {safe(f.va_nummer)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 align-middle text-zinc-200">
-                          <div className="truncate font-black">{nulKlasse}</div>
-                          <div className="text-xs text-[#9f948c]">
-                            Totaal nulmeting: {nulTotaal}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 align-middle">
-                          <div className="font-black text-white">
-                            {recordLabelFromUitslagen(uitslagenByVa[normalizeVa(f.va_nummer)] ?? [])}
-                          </div>
-                          <div className="text-xs text-[#9f948c]">
-                            {(uitslagenByVa[normalizeVa(f.va_nummer)] ?? []).length || 0} partijen
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 align-middle">
-                          {licOk ? (
-                            <Badge
-                              icon={<ShieldCheck size={15} />}
-                              label="OK"
-                              tone="good"
-                            />
-                          ) : (
-                            <Badge
-                              icon={<ShieldAlert size={15} />}
-                              label="Geen licentie"
-                              tone="bad"
-                            />
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 align-middle">
-                          {startverbod ? (
-                            <Badge
-                              icon={<AlertTriangle size={15} />}
-                              label="Startverbod"
-                              tone="bad"
-                            />
-                          ) : (
-                            <span
-                              className={`inline-flex items-center gap-2 rounded-xl border px-2.5 py-1 text-xs font-black ${statusClass(f)}`}
-                            >
-                              {statusLabel(f)}
-                            </span>
-                          )}
-                          {f.scrape_error && (
-                            <div className="mt-1 max-w-[180px] truncate text-[11px] text-red-300">
-                              {f.scrape_error}
+                      return (
+                        <tr
+                          key={f.id || `${f.sportschool_id}-${f.va_nummer}-${idx}`}
+                          className="border-t border-white/10 bg-[#111] text-white"
+                        >
+                          <td className="px-3 py-2.5 align-middle">
+                            <div className="truncate font-black uppercase tracking-[0.02em] text-[#ff4d00]">
+                              {fighterName(f)}
                             </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-right align-middle">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              router.push(
-                                `/dashboard/sportscholen/vechters/${f.id}`,
-                              )
-                            }
-                            className="sportschool-silver-btn inline-flex h-9 w-9 items-center justify-center border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 font-black !text-black transition hover:brightness-110"
-                            title="Open profiel"
-                          >
-                            <Eye size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
-
-          </div>
-
-          {!loading && filtered.length === 0 && (
-            <div className="px-6 py-14 text-center">
-              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-3xl border border-white/20 bg-black/50 text-[#ffb28a]">
-                <Users size={24} />
-              </div>
-              <div className="text-lg font-black text-white">
-                Geen vechters gevonden
-              </div>
-              <div className="mt-1 text-sm text-[#c8bdb3]">
-                Er zijn nog geen vechters geladen voor deze sportschool of je
-                zoekopdracht geeft geen resultaat.
-              </div>
+                            <div className="mt-0.5 truncate text-xs font-bold text-white">
+                              {formatDate(dob(f))} • {safe(f.geslacht)}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle text-white">
+                            <span className="border border-white/25 bg-black/45 px-2.5 py-1 font-mono text-xs font-black text-white shadow-sm shadow-black/40">
+                              {safe(f.va_nummer)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle text-white">
+                            <div className="truncate font-black text-white">{nulKlasse}</div>
+                            <div className="text-xs font-bold text-white">Totaal nulmeting: {nulTotaal}</div>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle text-white">
+                            <div className="font-black text-white">
+                              {recordLabelFromUitslagen(uitslagenByVa[normalizeVa(f.va_nummer)] ?? [])}
+                            </div>
+                            <div className="text-xs font-bold text-white">
+                              {(uitslagenByVa[normalizeVa(f.va_nummer)] ?? []).length || 0} partijen
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle text-white">
+                            {licOk ? (
+                              <Badge icon={<ShieldCheck size={15} />} label="OK" tone="good" />
+                            ) : (
+                              <Badge icon={<ShieldAlert size={15} />} label="Geen licentie" tone="bad" />
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 align-middle text-white">
+                            {startverbod ? (
+                              <Badge icon={<AlertTriangle size={15} />} label="Startverbod" tone="bad" />
+                            ) : (
+                              <span className={`inline-flex items-center gap-2 border px-2.5 py-1 text-xs font-black ${statusClass(f)}`}>
+                                {statusLabel(f)}
+                              </span>
+                            )}
+                            {f.scrape_error && (
+                              <div className="mt-1 max-w-[180px] truncate text-[11px] font-bold text-red-300">
+                                {f.scrape_error}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right align-middle">
+                            <button
+                              type="button"
+                              onClick={() => router.push(`/dashboard/sportscholen/vechters/${f.id}`)}
+                              className="sportschool-silver-btn fs-metal-btn inline-flex h-9 w-9 items-center justify-center border border-zinc-300 bg-[linear-gradient(180deg,#ffffff,#eeeeee_18%,#bdbdbd_55%,#f8f8f8)] font-black text-black shadow-lg shadow-black/30"
+                              title="Open profiel"
+                            >
+                              <Eye size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
             </div>
-          )}
+
+            {!loading && filtered.length === 0 && (
+              <div className="px-6 py-14 text-center">
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center border border-white/20 bg-black/50 text-[#ff4d00]">
+                  <Users size={24} />
+                </div>
+                <div className="text-lg font-black text-white">Geen vechters gevonden</div>
+                <div className="mt-1 text-sm font-bold text-zinc-300">
+                  Er zijn nog geen vechters geladen voor deze sportschool of je zoekopdracht geeft geen resultaat.
+                </div>
+              </div>
+            )}
+          </div>
         </section>
       </section>
     </main>
@@ -812,18 +769,19 @@ function Stat({
   bad?: boolean;
   warn?: boolean;
 }) {
-  const cls = good
-    ? "border-emerald-400/60 bg-[#10261b] text-emerald-100"
+  const tone = good ? "text-emerald-200" : bad ? "text-red-200" : warn ? "text-[#ffd2bd]" : "text-white";
+  const glow = good
+    ? "border-emerald-400/45"
     : bad
-      ? "border-red-500/60 bg-[#2a1111] text-red-200"
+      ? "border-red-500/45"
       : warn
-        ? "border-[#ff7a3d]/60 bg-[#2a1c14] text-[#ffd2bd]"
-        : "border-[#8f857d] bg-[#11100f] text-zinc-100";
+        ? "border-[#ff4d00]/55"
+        : "border-white/20";
 
   return (
-    <div className={`rounded-2xl border-2 p-3 ${cls}`}>
-      <div className="flex items-center justify-between text-current/80">
-        <span className="text-xs font-black uppercase tracking-[0.22em]">
+    <div className={`border ${glow} bg-[linear-gradient(135deg,rgba(255,255,255,.12),rgba(0,0,0,.35))] p-3 shadow-lg shadow-black/35`}>
+      <div className={`flex items-center justify-between ${tone}`}>
+        <span className="text-[11px] font-black uppercase tracking-[0.22em]">
           {label}
         </span>
         {icon}
@@ -849,9 +807,7 @@ function Badge({
       ? "border-emerald-400/60 bg-[#10261b] text-emerald-200"
       : "border-red-500/60 bg-[#2a1111] text-red-200";
   return (
-    <span
-      className={`inline-flex items-center gap-2 rounded-xl border px-2.5 py-1 text-xs font-bold ${cls}`}
-    >
+    <span className={`inline-flex items-center gap-2 border px-2.5 py-1 text-xs font-black ${cls}`}>
       {icon}
       {label}
     </span>

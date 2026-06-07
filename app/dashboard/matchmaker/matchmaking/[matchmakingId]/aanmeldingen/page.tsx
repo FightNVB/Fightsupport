@@ -961,7 +961,131 @@ export default function AanmeldingenPage() {
   }
 
   return (
-    <main style={pageShell}>
+    <main style={pageShell} className="fs-page315">
+
+      <style>{`
+        .fs-page315, .fs-page315 * { box-sizing: border-box; }
+        .fs-page315 {
+          min-height: 100vh !important;
+          background: #2b2b2b !important;
+          color: #ffffff !important;
+          padding: 24px !important;
+        }
+        .fs-page315 section {
+          border: 1px solid #71717a !important;
+          border-radius: 0 !important;
+          background: #121212 !important;
+          box-shadow: 0 24px 70px rgba(0,0,0,.62) !important;
+        }
+        .fs-page315 header {
+          border-bottom: 1px solid #52525b !important;
+          border-radius: 0 !important;
+          background: linear-gradient(90deg,#1d1d1d,#303030,#151515) !important;
+          min-height: 96px !important;
+        }
+        .fs-page315 h1,
+        .fs-page315 h2,
+        .fs-page315 h3 {
+          text-transform: uppercase !important;
+          font-weight: 950 !important;
+          letter-spacing: .02em !important;
+        }
+        .fs-page315 h1,
+        .fs-page315 b,
+        .fs-page315 strong {
+          color: #ff4d00 !important;
+        }
+        .fs-page315 a,
+        .fs-page315 button {
+          border-radius: 0 !important;
+          font-weight: 950 !important;
+          text-transform: uppercase !important;
+        }
+        .fs-page315 input,
+        .fs-page315 select,
+        .fs-page315 textarea {
+          border-radius: 0 !important;
+          border: 1px solid #52525b !important;
+          background: #111111 !important;
+          color: #ffffff !important;
+          box-shadow: none !important;
+        }
+        .fs-page315 input::placeholder,
+        .fs-page315 textarea::placeholder { color: #a1a1aa !important; }
+        .fs-page315 table {
+          border-collapse: collapse !important;
+          background: #121212 !important;
+        }
+        .fs-page315 thead,
+        .fs-page315 thead tr,
+        .fs-page315 th {
+          background: #252525 !important;
+          color: #d4d4d8 !important;
+          border: 1px solid #3f3f46 !important;
+          text-transform: uppercase !important;
+        }
+        .fs-page315 td {
+          border: 1px solid #27272a !important;
+        }
+        .fs-page315 tbody tr:nth-child(odd) {
+          background: #171717 !important;
+          color: #ffffff !important;
+        }
+        .fs-page315 tbody tr:nth-child(even) {
+          background: #202020 !important;
+          color: #ffffff !important;
+        }
+        .fs-page315 tbody tr:hover {
+          background: #242424 !important;
+          outline: 1px solid rgba(255,77,0,.35) !important;
+          outline-offset: -1px !important;
+        }
+        .fs-page315 .fs-silver-btn,
+        .fs-page315 .fs-back-button {
+          border: 1px solid #d4d4d8 !important;
+          background: linear-gradient(to bottom,#ffffff,#e4e4e7,#71717a) !important;
+          color: #000000 !important;
+          box-shadow: 0 10px 22px rgba(0,0,0,.30) !important;
+        }
+        .fs-page315 .fs-orange-btn {
+          border: 1px solid #ff4d00 !important;
+          background: #ff4d00 !important;
+          color: #000000 !important;
+          box-shadow: 0 10px 22px rgba(0,0,0,.30) !important;
+        }
+        .fs-page315 .fs-green-btn,
+        .fs-page315 .fs-blue-btn {
+          border: 1px solid #d4d4d8 !important;
+          background: linear-gradient(to bottom,#ffffff,#e4e4e7,#71717a) !important;
+          color: #000000 !important;
+          box-shadow: 0 10px 22px rgba(0,0,0,.30) !important;
+        }
+        .fs-page315 .fs-red-btn {
+          border: 1px solid #ef4444 !important;
+          background: #991b1b !important;
+          color: #ffffff !important;
+          box-shadow: 0 10px 22px rgba(0,0,0,.30) !important;
+        }
+        .fs-page315 .fs-status {
+          border-radius: 0 !important;
+          border: 1px solid #52525b !important;
+          background: #242424 !important;
+          color: #ffffff !important;
+        }
+        .fs-page315 .fs-status.gescrapt { border-color: rgba(34,197,94,.55) !important; color: #bbf7d0 !important; }
+        .fs-page315 .fs-status.scrape_mislukt { border-color: rgba(239,68,68,.65) !important; color: #fecaca !important; }
+        .fs-page315 .fs-status.controle_bezig { border-color: rgba(59,130,246,.65) !important; color: #bfdbfe !important; }
+        .fs-page315 .fs-status.rauw { border-color: rgba(255,77,0,.75) !important; color: #ff4d00 !important; }
+        .fs-page315 .fs-zebra-row:nth-child(odd),
+        .fs-page315 .fs-zebra-row:nth-child(even) {
+          background: transparent !important;
+          color: inherit !important;
+        }
+        @media (max-width: 900px) {
+          .fs-page315 { padding: 14px !important; }
+          .fs-page315 header { grid-template-columns: 1fr !important; text-align: center !important; }
+        }
+      `}</style>
       {busyMode === "controle" && (
         <WaitScreen
           mode={busyMode}

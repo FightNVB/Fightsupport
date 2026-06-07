@@ -851,7 +851,23 @@ export async function POST(req: Request) {
       );
     }
 
-    // Pas NU markeren als controle_bezig: we hebben een matchmaker, sessie en scriptpad.
+    const fpStatus = String((fpSession as any)?.status ?? "").toLowerCase();
+
+    if (fpStatus !== "active") {
+      return NextResponse.json(
+        {
+          ok: false,
+          needs_fightpassport_connect: true,
+          fp_matchmaker_id: fpMatchmakerId,
+          fp_status: (fpSession as any)?.status ?? null,
+          error:
+            "De FightPassport koppeling van deze matchmaker is niet actief. Laat de matchmaker opnieuw koppelen.",
+        },
+        { status: 409 }
+      );
+    }
+
+    // Pas NU markeren als controle_bezig: we hebben een matchmaker, actieve sessie en scriptpad.
     // Vanaf dit punt wordt Puppeteer daadwerkelijk gestart.
     await safeUpdateByIds(
       "aanmeldingen",

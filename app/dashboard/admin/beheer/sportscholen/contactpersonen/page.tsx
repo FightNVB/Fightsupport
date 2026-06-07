@@ -90,7 +90,7 @@ type Fighter = {
 };
 
 const ORANGE = "#ff4d00";
-const LOGO_SRC = "/branding/fightsupport/fightsupport1.png";
+const LOGO_SRC = "/branding/fightsupport/excel-logo.png";
 
 function clean(v: unknown, fallback = "—") {
   const s = String(v ?? "").trim();
@@ -165,39 +165,39 @@ const bg: CSSProperties = {
   minHeight: "100vh",
   color: "#fff",
   background:
-    "radial-gradient(circle at 50% -10%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 10% 4%, rgba(255,77,0,.18), transparent 26%), radial-gradient(circle at 92% 12%, rgba(255,255,255,.10), transparent 23%), linear-gradient(180deg,#030405 0%,#090c10 42%,#010203 100%)",
+    "radial-gradient(circle at 50% -4%, rgba(255,255,255,.22), transparent 18%), radial-gradient(circle at 8% 8%, rgba(255,77,0,.16), transparent 24%), radial-gradient(circle at 92% 10%, rgba(255,255,255,.10), transparent 20%), linear-gradient(180deg,#d7d9dc 0%,#777b80 2%,#111417 9%,#050607 42%,#000 100%)",
 };
 
 const wrap: CSSProperties = {
-  maxWidth: 1380,
+  maxWidth: 1680,
   margin: "0 auto",
-  padding: "22px 22px 34px",
+  padding: "14px 16px 26px",
 };
 
 const metalCard: CSSProperties = {
-  border: "1px solid rgba(255,255,255,.18)",
-  borderRadius: 24,
+  border: "1px solid rgba(255,255,255,.42)",
+  borderRadius: 4,
   background:
-    "linear-gradient(135deg,rgba(255,255,255,.16),rgba(255,255,255,.045) 34%,rgba(0,0,0,.35)), linear-gradient(180deg,#151b23 0%,#07090d 100%)",
+    "linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.025) 12%,rgba(0,0,0,.30)), linear-gradient(180deg,#151719 0%,#080909 100%)",
   boxShadow:
-    "0 24px 64px rgba(0,0,0,.58), inset 0 1px 0 rgba(255,255,255,.20), inset 0 -1px 0 rgba(255,255,255,.06)",
+    "0 18px 42px rgba(0,0,0,.68), inset 0 1px 0 rgba(255,255,255,.32), inset 0 -1px 0 rgba(0,0,0,.86)",
   overflow: "hidden",
 };
 
 const lightMetal: CSSProperties = {
-  border: "1px solid rgba(255,255,255,.28)",
-  borderRadius: 22,
+  border: "1px solid rgba(255,255,255,.30)",
+  borderRadius: 3,
   background:
-    "linear-gradient(135deg,rgba(255,255,255,.30),rgba(190,198,207,.12) 38%,rgba(0,0,0,.20)), linear-gradient(180deg,#2a313a 0%,#12171e 100%)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,.34), 0 14px 34px rgba(0,0,0,.38)",
+    "linear-gradient(180deg,#2d3034 0%,#141618 100%)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.22), 0 10px 22px rgba(0,0,0,.42)",
 };
 
 const buttonBase: CSSProperties = {
-  border: "1px solid rgba(255,255,255,.25)",
-  borderRadius: 15,
+  border: "1px solid rgba(255,255,255,.60)",
+  borderRadius: 2,
   background:
-    "linear-gradient(180deg,#ffffff 0%,#d9dde0 39%,#8b939b 70%,#2e343b 100%)",
-  color: "#090d12",
+    "linear-gradient(180deg,#ffffff 0%,#d5d7da 42%,#8a8e94 72%,#2c3036 100%)",
+  color: "#050607",
   fontWeight: 1000,
   padding: "10px 14px",
   cursor: "pointer",
@@ -205,32 +205,37 @@ const buttonBase: CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   gap: 8,
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,.80), 0 10px 26px rgba(0,0,0,.34)",
+  textTransform: "uppercase",
+  letterSpacing: .3,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(0,0,0,.55), 0 8px 18px rgba(0,0,0,.44)",
 };
 
 const orangeButton: CSSProperties = {
   ...buttonBase,
-  background: `linear-gradient(180deg,#fff6f2 0%,#ffd9cb 38%,${ORANGE} 100%)`,
-  color: "#170600",
+  border: `1px solid ${ORANGE}`,
+  background: `linear-gradient(180deg,#ff7a2b 0%,${ORANGE} 52%,#9e2600 100%)`,
+  color: "#110400",
   boxShadow:
-    "inset 0 1px 0 rgba(255,255,255,.82), 0 10px 26px rgba(255,77,0,.20)",
+    "inset 0 1px 0 rgba(255,255,255,.35), inset 0 -1px 0 rgba(0,0,0,.48), 0 10px 24px rgba(255,77,0,.24)",
 };
 
 const darkButton: CSSProperties = {
   ...buttonBase,
   color: "#f8fbff",
-  background: "linear-gradient(180deg,#303844,#111821 100%)",
+  border: "1px solid rgba(255,255,255,.38)",
+  background: "linear-gradient(180deg,#34383d 0%,#16191d 48%,#090a0c 100%)",
 };
 
 const inputStyle: CSSProperties = {
   width: "100%",
-  borderRadius: 15,
-  border: "1px solid rgba(255,255,255,.18)",
-  background: "linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.36))",
+  borderRadius: 2,
+  border: "1px solid rgba(255,255,255,.32)",
+  background: "linear-gradient(180deg,#111315,#050606)",
   color: "#fff",
   padding: "12px 14px",
   outline: "none",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,.08)",
+  fontWeight: 800,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.10)",
 };
 
 const waitOverlay: CSSProperties = {
@@ -274,19 +279,43 @@ const labelStyle: CSSProperties = {
 };
 
 const th: CSSProperties = {
-  padding: "13px 14px",
+  padding: "14px 16px",
   textAlign: "left",
-  fontSize: 11,
+  fontSize: 12,
   textTransform: "uppercase",
-  letterSpacing: 1.35,
-  color: "#e9eef5",
+  letterSpacing: .8,
+  color: "#ffffff",
+  textShadow: "0 1px 0 rgba(0,0,0,.95)",
   whiteSpace: "nowrap",
+  borderRight: "1px solid rgba(255,255,255,.24)",
 };
 
 const td: CSSProperties = {
-  padding: "13px 14px",
-  borderTop: "1px solid rgba(255,255,255,.075)",
+  padding: "14px 16px",
+  borderTop: "1px solid rgba(255,255,255,.16)",
+  borderRight: "1px solid rgba(255,255,255,.13)",
   verticalAlign: "middle",
+  color: "#ffffff",
+  fontWeight: 900,
+  textShadow: "0 1px 0 rgba(0,0,0,.85)",
+};
+
+const primaryTd: CSSProperties = {
+  ...td,
+  color: ORANGE,
+  fontWeight: 1000,
+  textTransform: "uppercase",
+  letterSpacing: 0.25,
+};
+
+const tableHeadRow: CSSProperties = {
+  background:
+    "linear-gradient(180deg,#f7f7f7 0%,#c7c9cc 18%,#666a70 52%,#1b1d20 100%)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.92), inset 0 -1px 0 rgba(0,0,0,.82)",
+};
+
+const tableRow: CSSProperties = {
+  background: "linear-gradient(180deg,#141719 0%,#0b0d0e 100%)",
 };
 
 function Badge({ value }: { value?: string | null }) {
@@ -942,7 +971,8 @@ export default function ContactpersonenFightcrewPage() {
 
   return (
     <main style={bg}>
-      <style>{spinKeyframes}</style>
+      <style>{`${spinKeyframes}
+input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#111827;}`}</style>
       {waitMessage ? (
         <div style={waitOverlay}>
           <div style={waitBox}>
@@ -1050,21 +1080,51 @@ export default function ContactpersonenFightcrewPage() {
         </div>
       ) : null}
       <div style={wrap}>
-        <button
-          style={darkButton}
-          onClick={() => router.push("/dashboard/admin/beheer")}
+        <section
+          style={{
+            ...metalCard,
+            marginBottom: 14,
+            padding: 10,
+            display: "grid",
+            gridTemplateColumns: "auto 1fr auto",
+            alignItems: "center",
+            gap: 14,
+            background:
+              "linear-gradient(180deg,#dfe1e3 0%,#8d9298 8%,#24282d 28%,#08090a 100%)",
+          }}
         >
-          <ArrowLeft size={17} /> Terug naar beheer
-        </button>
+          <button
+            style={buttonBase}
+            onClick={() => router.push("/dashboard/admin/beheer")}
+          >
+            <ArrowLeft size={17} /> Terug naar beheer
+          </button>
+
+          <img
+            src={LOGO_SRC}
+            alt="FightSupport"
+            style={{
+              width: 330,
+              maxWidth: "42vw",
+              height: "auto",
+              justifySelf: "center",
+              objectFit: "contain",
+              filter: "drop-shadow(0 14px 18px rgba(0,0,0,.75))",
+            }}
+          />
+
+          <button style={buttonBase} onClick={() => selected ? loadFighters(selected.sportschool_id) : searchSchools()}>
+            <RefreshCw size={17} /> Ververs
+          </button>
+        </section>
 
         <section
           style={{
             ...metalCard,
-            marginTop: 18,
-            marginBottom: 18,
-            padding: 18,
+            marginBottom: 14,
+            padding: 16,
             display: "grid",
-            gridTemplateColumns: "1fr auto 1fr",
+            gridTemplateColumns: "1fr auto",
             alignItems: "center",
             gap: 18,
           }}
@@ -1104,19 +1164,6 @@ export default function ContactpersonenFightcrewPage() {
               gevonden VA-nummers beperkt en verstuur je pas de trainer-login.
             </p>
           </div>
-
-          <img
-            src={LOGO_SRC}
-            alt="FightSupport"
-            style={{
-              width: 260,
-              maxWidth: "30vw",
-              height: "auto",
-              display: "block",
-              objectFit: "contain",
-              filter: "drop-shadow(0 18px 28px rgba(0,0,0,.55))",
-            }}
-          />
 
           <div style={{ justifySelf: "end", textAlign: "right" }}>
             <div
@@ -1702,12 +1749,7 @@ export default function ContactpersonenFightcrewPage() {
                 }}
               >
                 <thead>
-                  <tr
-                    style={{
-                      background:
-                        "linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.035))",
-                    }}
-                  >
+                  <tr style={tableHeadRow}>
                     <th style={th}>Sportschool</th>
                     <th style={th}>Contact</th>
                     <th style={th}>Email</th>
@@ -1722,14 +1764,9 @@ export default function ContactpersonenFightcrewPage() {
                     selectedContacts.map((c, i) => (
                       <tr
                         key={c.id}
-                        style={{
-                          background:
-                            i % 2
-                              ? "rgba(255,255,255,.045)"
-                              : "rgba(0,0,0,.20)",
-                        }}
+                        style={tableRow}
                       >
-                        <td style={{ ...td, fontWeight: 1000 }}>
+                        <td style={primaryTd}>
                           {clean(
                             c.sportschool?.naam,
                             selected?.naam || String(c.sportschool_id ?? ""),
@@ -1827,12 +1864,7 @@ export default function ContactpersonenFightcrewPage() {
               }}
             >
               <thead>
-                <tr
-                  style={{
-                    background:
-                      "linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.035))",
-                  }}
-                >
+                <tr style={tableHeadRow}>
                   <th style={th}>Naam</th>
                   <th style={th}>VA</th>
                   <th style={th}>Geslacht</th>
@@ -1862,12 +1894,9 @@ export default function ContactpersonenFightcrewPage() {
                   fighters.map((f, i) => (
                     <tr
                       key={`${f.va_nummer}-${i}`}
-                      style={{
-                        background:
-                          i % 2 ? "rgba(255,255,255,.045)" : "rgba(0,0,0,.20)",
-                      }}
+                      style={tableRow}
                     >
-                      <td style={{ ...td, fontWeight: 1000 }}>
+                      <td style={primaryTd}>
                         {clean(f.naam)}
                       </td>
                       <td style={td}>{clean(f.va_nummer)}</td>

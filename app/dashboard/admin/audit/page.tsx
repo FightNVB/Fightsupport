@@ -198,125 +198,38 @@ function getSnapshotData(row: AuditRow) {
 const pageBackground: CSSProperties = {
   minHeight: "100vh",
   color: "#fff",
-  background: `
-    radial-gradient(circle at 50% 0%, rgba(255,104,20,0.10) 0%, rgba(255,104,20,0.03) 10%, rgba(0,0,0,0) 22%),
-    radial-gradient(circle at 50% 100%, rgba(255,104,20,0.08) 0%, rgba(255,104,20,0.02) 12%, rgba(0,0,0,0) 24%),
-    radial-gradient(circle at 16% 20%, rgba(255,120,20,0.05) 0%, rgba(255,120,20,0) 16%),
-    radial-gradient(circle at 84% 22%, rgba(255,120,20,0.05) 0%, rgba(255,120,20,0) 16%),
-    linear-gradient(180deg, #010203 0%, #020406 16%, #000000 100%)
-  `,
+  background: "#2b2b2b",
 };
 
-const sectionRule = (top = false): CSSProperties => ({
-  position: "relative",
-  borderTop: top ? "1px solid rgba(255,255,255,0.05)" : undefined,
-  borderBottom: "1px solid rgba(255,255,255,0.04)",
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.04),
-    inset 0 -1px 0 rgba(0,0,0,0.82)
-  `,
+const sectionRule = (_top = false): CSSProperties => ({
+  borderBottom: "1px solid #52525b",
+  background: "linear-gradient(90deg,#1d1d1d,#303030,#151515)",
 });
 
 const steelFrameOuter: CSSProperties = {
-  position: "relative",
-  padding: 6,
-  background: `
-    linear-gradient(145deg,
-      #ffffff 0%,
-      #d3d3d3 6%,
-      #727272 12%,
-      #fcfcfc 19%,
-      #999999 27%,
-      #424242 36%,
-      #f0f0f0 47%,
-      #a7a7a7 58%,
-      #4a4a4a 69%,
-      #ffffff 80%,
-      #bfbfbf 90%,
-      #f9f9f9 100%)
-  `,
-  border: "1px solid rgba(255,255,255,0.65)",
-  boxShadow: `
-    0 8px 18px rgba(0,0,0,0.54),
-    inset 0 2px 1px rgba(255,255,255,0.98),
-    inset 0 -2px 2px rgba(0,0,0,0.86),
-    inset 2px 0 2px rgba(255,255,255,0.48),
-    inset -2px 0 2px rgba(0,0,0,0.58)
-  `,
+  border: "1px solid #71717a",
+  background: "#121212",
+  boxShadow: "0 24px 60px rgba(0,0,0,.45)",
 };
 
 const steelFrameMid: CSSProperties = {
-  position: "relative",
-  padding: 3,
-  background: `
-    linear-gradient(135deg,
-      rgba(255,255,255,0.98) 0%,
-      rgba(218,218,218,0.96) 14%,
-      rgba(70,70,70,0.98) 28%,
-      rgba(248,248,248,0.95) 48%,
-      rgba(100,100,100,0.98) 68%,
-      rgba(238,238,238,0.97) 100%)
-  `,
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.82),
-    inset 0 -1px 0 rgba(0,0,0,0.62)
-  `,
+  background: "transparent",
 };
 
 const steelFrameChannel: CSSProperties = {
-  position: "relative",
-  padding: 4,
-  background: `
-    linear-gradient(180deg,
-      #2c2c2c 0%,
-      #090909 18%,
-      #525252 34%,
-      #0d0d0d 52%,
-      #474747 72%,
-      #090909 100%)
-  `,
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.18),
-    inset 0 -1px 0 rgba(0,0,0,0.88)
-  `,
+  background: "transparent",
 };
 
 const steelFrameInner: CSSProperties = {
-  position: "relative",
-  padding: 2,
-  background: `
-    linear-gradient(135deg,
-      #fbfbfb 0%,
-      #d8d8d8 10%,
-      #6f6f6f 22%,
-      #f5f5f5 34%,
-      #b7b7b7 46%,
-      #555555 60%,
-      #fdfdfd 78%,
-      #b7b7b7 100%)
-  `,
-  border: "1px solid rgba(255,255,255,0.20)",
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.70),
-    inset 0 -1px 0 rgba(0,0,0,0.55)
-  `,
+  background: "transparent",
 };
 
 const darkPlate: CSSProperties = {
   position: "relative",
   overflow: "hidden",
-  border: "1px solid #060606",
-  background: `
-    radial-gradient(circle at 14% 84%, rgba(255,110,0,0.08), transparent 14%),
-    radial-gradient(circle at 86% 14%, rgba(255,255,255,0.04), transparent 12%),
-    linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 15%, rgba(0,0,0,0.14) 100%),
-    linear-gradient(135deg, #171b21 0%, #06090e 46%, #141920 100%)
-  `,
-  boxShadow: `
-    inset 0 2px 4px rgba(0,0,0,0.94),
-    inset 0 -2px 6px rgba(255,255,255,0.04),
-    inset 0 0 20px rgba(255,120,0,0.03)
-  `,
+  border: "1px solid #3f3f46",
+  background: "#1c1c1c",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.06)",
 };
 
 export default function AdminAuditPage() {
@@ -616,7 +529,7 @@ export default function AdminAuditPage() {
       <TopLogoBand />
       <TitleBand />
 
-      <div style={{ maxWidth: 1380, margin: "0 auto", padding: "12px 16px 16px" }}>
+      <div style={{ maxWidth: 1380, margin: "0 auto", padding: "14px 16px 24px" }}>
         <div
           className="audit-stats-grid"
           style={{
@@ -1000,131 +913,77 @@ export default function AdminAuditPage() {
 }
 
 function TopLogoBand() {
-  return (
-    <div
-      style={{
-        ...sectionRule(true),
-        position: "relative",
-        display: "flex",
-        justifyContent: "center",
-        paddingTop: 0,
-        paddingBottom: 0,
-        background: `
-          radial-gradient(circle at 50% 50%, rgba(255,115,20,0.10) 0%, rgba(255,115,20,0.03) 16%, rgba(0,0,0,0) 34%),
-          linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%)
-        `,
-      }}
-    >
-      <div
-        style={{
-          position: "relative",
-          width: 1120,
-          height: 86,
-          maxWidth: "96vw",
-          filter:
-            "drop-shadow(0 10px 18px rgba(0,0,0,0.72)) drop-shadow(0 0 14px rgba(255,95,0,0.12))",
-        }}
-      >
-        <Image
-          src={logoSrc}
-          alt="FightSupport"
-          fill
-          priority
-          className="object-contain"
-          style={{
-            objectFit: "contain",
-            transform: "scaleX(1.34)",
-          }}
-        />
-      </div>
-    </div>
-  );
+  return null;
 }
+
 
 function TitleBand() {
   return (
-    <div
+    <header
       style={{
-        ...sectionRule(),
-        position: "relative",
-        background: `
-          linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.015) 10%, rgba(0,0,0,0.04) 100%),
-          linear-gradient(180deg, #171b21 0%, #0a0d12 50%, #161a20 100%)
-        `,
+        maxWidth: 1380,
+        margin: "0 auto",
+        border: "1px solid #71717a",
+        borderBottom: "1px solid #52525b",
+        background: "linear-gradient(90deg,#1d1d1d,#303030,#151515)",
+        padding: 20,
+        boxShadow: "0 24px 60px rgba(0,0,0,.45)",
       }}
     >
       <div
-        className="title-row"
         style={{
-          position: "relative",
-          maxWidth: 1480,
-          margin: "0 auto",
-          padding: "8px 18px",
-          minHeight: 72,
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
         }}
       >
-        <div
-          className="title-actions-wrap"
-          style={{
-            position: "absolute",
-            right: 18,
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 2,
-          }}
-        >
-          <Link href="/dashboard/admin/beheer" style={{ textDecoration: "none" }}>
-            <HeaderSilverButton
-              label="Beheer"
-              icon={<ArrowLeft size={14} strokeWidth={2.8} />}
-            />
-          </Link>
-        </div>
-
-        <div className="title-center" style={{ textAlign: "center" }}>
+        <div>
           <div
             style={{
-              fontSize: 22,
-              fontWeight: 900,
-              letterSpacing: 1,
-              lineHeight: 1,
-              color: "#ececec",
-              textTransform: "uppercase",
-            }}
-          >
-            Audit / Logboek
-          </div>
-
-          <div
-            style={{
-              marginTop: 5,
-              fontSize: 9,
-              letterSpacing: 2.2,
               color: ORANGE,
+              fontSize: 12,
+              fontWeight: 900,
+              letterSpacing: "0.25em",
               textTransform: "uppercase",
             }}
           >
-            Filters werken direct
+            FightSupport Admin / Beheer
           </div>
+          <h1 style={{ margin: "6px 0 2px", fontSize: 26, fontWeight: 1000, textTransform: "uppercase" }}>
+            Audit / Logboek
+          </h1>
+          <p style={{ margin: 0, color: "#d4d4d8", fontSize: 14 }}>
+            Compact overzicht van wijzigingen, snapshots en handelingen.
+          </p>
         </div>
+        <Link href="/dashboard/admin/beheer" style={{ textDecoration: "none" }}>
+          <HeaderSilverButton
+            label="Terug naar beheer"
+            icon={<ArrowLeft size={14} strokeWidth={2.8} />}
+          />
+        </Link>
       </div>
-    </div>
+    </header>
   );
 }
+
 
 function SteelFrame({ children }: { children: ReactNode }) {
   return (
-    <div>
-      <div style={steelFrameOuter}>
-        <div style={steelFrameMid}>
-          <div style={steelFrameChannel}>
-            <div style={steelFrameInner}>{children}</div>
-          </div>
-        </div>
-      </div>
+    <div
+      style={{
+        border: "1px solid #71717a",
+        background: "#121212",
+        boxShadow: "0 18px 42px rgba(0,0,0,.40)",
+      }}
+    >
+      {children}
     </div>
   );
 }
+
 
 function SmallStatCard({
   icon,
