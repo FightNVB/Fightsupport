@@ -36,7 +36,9 @@ function pickFirst(...vals: any[]) {
 }
 
 function onlyDigits(v: unknown) {
-  return s(v).replace(/[^0-9]/g, "").replace(/^0+/, "");
+  return s(v)
+    .replace(/[^0-9]/g, "")
+    .replace(/^0+/, "");
 }
 
 function obj(v: any) {
@@ -64,12 +66,48 @@ function getPath(source: any, pathName: string) {
 function normalizeStatus(raw: unknown) {
   const status = lower(raw);
 
-  if (["gescrapt", "gescraped", "scraped", "gecontroleerd", "checked", "verwerkt", "processed", "klaar", "done"].includes(status)) return "gescrapt";
-  if (["scrape_mislukt", "mislukt", "failed", "error", "fout"].includes(status)) return "scrape_mislukt";
-  if (["controle_bezig", "bezig", "running", "scraping", "processing", "in_progress"].includes(status)) return "controle_bezig";
+  if (
+    [
+      "gescrapt",
+      "gescraped",
+      "scraped",
+      "gecontroleerd",
+      "checked",
+      "verwerkt",
+      "processed",
+      "klaar",
+      "done",
+    ].includes(status)
+  )
+    return "gescrapt";
+  if (["scrape_mislukt", "mislukt", "failed", "error", "fout"].includes(status))
+    return "scrape_mislukt";
+  if (
+    [
+      "controle_bezig",
+      "bezig",
+      "running",
+      "scraping",
+      "processing",
+      "in_progress",
+    ].includes(status)
+  )
+    return "controle_bezig";
   if (["gematcht", "matched"].includes(status)) return "gematcht";
   if (["afgemeld", "cancelled", "canceled"].includes(status)) return "afgemeld";
-  if (["nieuw", "rauw", "raw", "open", "aangemeld", "uploaded", "upload", ""].includes(status)) return "rauw";
+  if (
+    [
+      "nieuw",
+      "rauw",
+      "raw",
+      "open",
+      "aangemeld",
+      "uploaded",
+      "upload",
+      "",
+    ].includes(status)
+  )
+    return "rauw";
 
   return status || "rauw";
 }
@@ -152,20 +190,26 @@ function displayStatusOf(f: Row) {
 }
 
 function nameOf(f: Row) {
-  return s(pickFirst(
-    f.naam,
-    f.fp_naam,
-    f.naam_fp,
-    f.naam_input,
-    f.fighter_naam,
-    f.vechter_naam,
-    [f.voornaam, f.achternaam].map(s).filter(Boolean).join(" "),
-    getPath(f, "extra.raw.aanmelding.naam"),
-  )) || "Onbekend";
+  return (
+    s(
+      pickFirst(
+        f.naam,
+        f.fp_naam,
+        f.naam_fp,
+        f.naam_input,
+        f.fighter_naam,
+        f.vechter_naam,
+        [f.voornaam, f.achternaam].map(s).filter(Boolean).join(" "),
+        getPath(f, "extra.raw.aanmelding.naam"),
+      ),
+    ) || "Onbekend"
+  );
 }
 
 function vaOf(f: Row) {
-  return onlyDigits(pickFirst(f.va_nummer, f.va, f.fighter_id, f.fightpaspoort_nummer));
+  return onlyDigits(
+    pickFirst(f.va_nummer, f.va, f.fighter_id, f.fightpaspoort_nummer),
+  );
 }
 
 function inschrijvingIdOf(f: Row) {
@@ -173,33 +217,101 @@ function inschrijvingIdOf(f: Row) {
 }
 
 function gymOf(f: Row) {
-  return s(pickFirst(f.fp_gym, f.gym, f.sportschool, f.sportschool_fp, f.sportschool_input, f.gym_input, getPath(f, "extra.raw.aanmelding.gym")));
+  return s(
+    pickFirst(
+      f.fp_gym,
+      f.gym,
+      f.sportschool,
+      f.sportschool_fp,
+      f.sportschool_input,
+      f.gym_input,
+      getPath(f, "extra.raw.aanmelding.gym"),
+    ),
+  );
 }
 
 function trainerOf(f: Row) {
-  return s(pickFirst(f.trainer, f.naam_trainer, f.trainer_naam, f.contactpersoon, getPath(f, "extra.raw.aanmelding.trainer")));
+  return s(
+    pickFirst(
+      f.trainer,
+      f.naam_trainer,
+      f.trainer_naam,
+      f.contactpersoon,
+      getPath(f, "extra.raw.aanmelding.trainer"),
+    ),
+  );
 }
 
 function emailOf(f: Row) {
-  return s(pickFirst(f.email, f.emailadres, f.trainer_email, f.contact_email, getPath(f, "extra.raw.aanmelding.email"), getPath(f, "extra.raw.aanmelding.emailadres")));
+  return s(
+    pickFirst(
+      f.email,
+      f.emailadres,
+      f.trainer_email,
+      f.contact_email,
+      getPath(f, "extra.raw.aanmelding.email"),
+      getPath(f, "extra.raw.aanmelding.emailadres"),
+    ),
+  );
 }
 
 function phoneOf(f: Row) {
-  return s(pickFirst(f.telefoon, f.telefoonnummer, f.phone, f.trainer_telefoon, getPath(f, "extra.raw.aanmelding.telefoon"), getPath(f, "extra.raw.aanmelding.telefoonnummer")));
+  return s(
+    pickFirst(
+      f.telefoon,
+      f.telefoonnummer,
+      f.phone,
+      f.trainer_telefoon,
+      getPath(f, "extra.raw.aanmelding.telefoon"),
+      getPath(f, "extra.raw.aanmelding.telefoonnummer"),
+    ),
+  );
 }
 
 function disciplineOf(f: Row) {
-  return s(pickFirst(f.discipline, f.discipline_input, f.sport, f.vechtsport, getPath(f, "extra.raw.aanmelding.discipline"))) || "Onbekend";
+  return (
+    s(
+      pickFirst(
+        f.discipline,
+        f.discipline_input,
+        f.sport,
+        f.vechtsport,
+        getPath(f, "extra.raw.aanmelding.discipline"),
+      ),
+    ) || "Onbekend"
+  );
 }
 
 function klasseOf(f: Row) {
-  return s(pickFirst(f.klasse, f.fp_klasse, f.klasse_fp, f.klasse_input, f.nulmeting_klasse, getPath(f, "extra.raw.aanmelding.klasse"))) || "Onbekend";
+  return (
+    s(
+      pickFirst(
+        f.klasse,
+        f.fp_klasse,
+        f.klasse_fp,
+        f.klasse_input,
+        f.nulmeting_klasse,
+        getPath(f, "extra.raw.aanmelding.klasse"),
+      ),
+    ) || "Onbekend"
+  );
 }
 
 function geslachtOf(f: Row) {
-  const g = lower(pickFirst(f.geslacht, f.gender, f.sexe, getPath(f, "extra.raw.aanmelding.geslacht")));
-  if (["m", "man", "male", "heer", "heren", "jongen", "jongens"].includes(g)) return "Man";
-  if (["v", "vrouw", "female", "dame", "dames", "meisje", "meisjes"].includes(g)) return "Vrouw";
+  const g = lower(
+    pickFirst(
+      f.geslacht,
+      f.gender,
+      f.sexe,
+      getPath(f, "extra.raw.aanmelding.geslacht"),
+    ),
+  );
+  if (["m", "man", "male", "heer", "heren", "jongen", "jongens"].includes(g))
+    return "Man";
+  if (
+    ["v", "vrouw", "female", "dame", "dames", "meisje", "meisjes"].includes(g)
+  )
+    return "Vrouw";
   return s(pickFirst(f.geslacht, f.gender, f.sexe)) || "Onbekend";
 }
 
@@ -207,12 +319,20 @@ function parseDateOnly(v: any): Date | null {
   if (!v) return null;
   const txt = String(v).trim();
   const ymd = txt.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (ymd) return new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]), 12));
+  if (ymd)
+    return new Date(
+      Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]), 12),
+    );
   const dmy = txt.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dmy) return new Date(Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 12));
+  if (dmy)
+    return new Date(
+      Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 12),
+    );
   const d = new Date(txt);
   if (Number.isNaN(d.getTime())) return null;
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12));
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12),
+  );
 }
 
 function fmtDate(v: any) {
@@ -234,29 +354,59 @@ function calcAgeNumber(dob: any, ref: any) {
 }
 
 function dobOf(f: Row) {
-  return pickFirst(f.geboortedatum, f.fp_geboortedatum, f.geboortedatum_fp, f.dob, f.birthdate, getPath(f, "extra.raw.aanmelding.geboortedatum"));
+  return pickFirst(
+    f.geboortedatum,
+    f.fp_geboortedatum,
+    f.geboortedatum_fp,
+    f.dob,
+    f.birthdate,
+    getPath(f, "extra.raw.aanmelding.geboortedatum"),
+  );
 }
 
 function eventDateOf(f: Row, matchmaking: Row | null) {
-  return pickFirst(f.event_datum, f.event_date, f.datum, f.matchmaking_datum, matchmaking?.event_datum, matchmaking?.datum, matchmaking?.event_date);
+  return pickFirst(
+    f.event_datum,
+    f.event_date,
+    f.datum,
+    f.matchmaking_datum,
+    matchmaking?.event_datum,
+    matchmaking?.datum,
+    matchmaking?.event_date,
+  );
 }
 
 function leeftijdNumberOf(f: Row, matchmaking: Row | null) {
   const direct = pickFirst(f.leeftijd, f.age, f.fp_leeftijd);
   const directNumber = Number(String(direct ?? "").replace(/[^\d.-]/g, ""));
-  if (Number.isFinite(directNumber) && directNumber > 0) return Math.round(directNumber);
+  if (Number.isFinite(directNumber) && directNumber > 0)
+    return Math.round(directNumber);
   return calcAgeNumber(dobOf(f), eventDateOf(f, matchmaking));
 }
 
 function gewichtNumberOf(f: Row) {
-  const raw = pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht, f.gewicht_fp, f.weight, getPath(f, "extra.raw.aanmelding.gewicht"));
-  const n = Number(s(raw).replace(",", ".").replace(/[^\d.-]/g, ""));
+  const raw = pickFirst(
+    f.gewicht,
+    f.gewicht_input,
+    f.fp_gewicht,
+    f.gewicht_fp,
+    f.weight,
+    getPath(f, "extra.raw.aanmelding.gewicht"),
+  );
+  const n = Number(
+    s(raw)
+      .replace(",", ".")
+      .replace(/[^\d.-]/g, ""),
+  );
   return Number.isFinite(n) ? n : null;
 }
 
 function gewichtOf(f: Row) {
   const n = gewichtNumberOf(f);
-  if (n == null) return s(pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht, f.gewicht_fp)) || "";
+  if (n == null)
+    return (
+      s(pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht, f.gewicht_fp)) || ""
+    );
   return Number.isInteger(n) ? `${n} kg` : `${String(n).replace(".", ",")} kg`;
 }
 
@@ -268,53 +418,181 @@ function tabKeyOf(f: Row) {
 
   let klasse = kRaw;
   if (k.includes("jeugd") || k === "j" || k.includes("youth")) klasse = "J";
-  else if (k.includes("nieuweling") || k === "n" || k.includes("n-klasse") || k.includes("n klasse")) klasse = "N";
-  else if (k.includes("r-klasse") || k.includes("r klasse") || k === "r") klasse = "R";
-  else if (k.includes("c-klasse") || k.includes("c klasse") || k === "c") klasse = "C";
-  else if (k.includes("b-klasse") || k.includes("b klasse") || k === "b") klasse = "B";
-  else if (k.includes("a-klasse") || k.includes("a klasse") || k === "a") klasse = "A";
+  else if (
+    k.includes("nieuweling") ||
+    k === "n" ||
+    k.includes("n-klasse") ||
+    k.includes("n klasse")
+  )
+    klasse = "N";
+  else if (k.includes("r-klasse") || k.includes("r klasse") || k === "r")
+    klasse = "R";
+  else if (k.includes("c-klasse") || k.includes("c klasse") || k === "c")
+    klasse = "C";
+  else if (k.includes("b-klasse") || k.includes("b klasse") || k === "b")
+    klasse = "B";
+  else if (k.includes("a-klasse") || k.includes("a klasse") || k === "a")
+    klasse = "A";
   else if (k.includes("amateur") || k.includes("ama")) klasse = "Amateur";
   else if (k.includes("pro")) klasse = "Pro";
 
-  return `${discipline} - ${geslachtOf({ geslacht: g })} - ${klasse}`.replace(/[\\/?*\[\]:]/g, "-").slice(0, 31) || "Onbekend";
+  return (
+    `${discipline} - ${geslachtOf({ geslacht: g })} - ${klasse}`
+      .replace(/[\\/?*\[\]:]/g, "-")
+      .slice(0, 31) || "Onbekend"
+  );
 }
 
 function statusJaNee(raw: unknown) {
   const x = lower(raw);
-  if (["ja", "true", "geldig", "ok", "1", "valid", "yes", "y"].includes(x)) return "Ja";
-  if (["nee", "false", "ongeldig", "geen", "0", "invalid", "no", "n"].includes(x) || x.includes("geen")) return "Nee";
+  if (["ja", "true", "geldig", "ok", "1", "valid", "yes", "y"].includes(x))
+    return "Ja";
+  if (
+    ["nee", "false", "ongeldig", "geen", "0", "invalid", "no", "n"].includes(
+      x,
+    ) ||
+    x.includes("geen")
+  )
+    return "Nee";
   return s(raw);
 }
 
 function licentieOf(f: Row) {
-  const raw = pickFirst(f.licentie_status, f.licentie, f.licentie_ok, f.fightlicentie, f.fp_licentie, getPath(f, "raw.licentie"));
+  // matchmaker_fighter_context is leidend. De raw waarden zitten soms genest in extra.raw.fighters_raw.
+  const raw = pickFirst(
+    f.licentie,
+    f.licentie_status,
+    f.licentie_ok,
+    f.fightlicentie,
+    f.fp_licentie,
+    getPath(f, "extra.raw.fighters_raw.licentie"),
+    getPath(f, "raw.licentie"),
+  );
   return statusJaNee(raw) || "Onbekend";
 }
 
-function keurmerkOf(f: Row) {
-  const raw = pickFirst(f.heeft_keurmerk, f.keurmerk, f.keurmerk_status, f.keurmerk_ok, f.sportschool_keurmerk, f.gym_keurmerk, f.fp_keurmerk, getPath(f, "extra.heeft_keurmerk"), getPath(f, "extra.keurmerk"), getPath(f, "raw.keurmerk"), getPath(f, "raw.heeft_keurmerk"));
-  return statusJaNee(raw) || "Onbekend";
+function extractKeurmerkEndDate(reason: unknown) {
+  const txt = s(reason);
+  const iso =
+    txt.match(
+      /(?:t\/m|tot en met|eindigt|eindigde op|geldig t\/m)\s*(\d{4}-\d{2}-\d{2})/i,
+    )?.[1] || txt.match(/(\d{4}-\d{2}-\d{2})/)?.[1];
+  if (iso) return iso;
+  const dmy = txt.match(
+    /(?:t\/m|tot en met|eindigt|eindigde op|geldig t\/m)?\s*(\d{2})-(\d{2})-(\d{4})/i,
+  );
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  return "";
+}
+
+function extractKeurmerkMatchedName(reason: unknown) {
+  return s(reason).match(/gematcht met\s+"([^"]+)"/i)?.[1] || "";
+}
+
+function extractMmSportschool(reason: unknown) {
+  return s(reason).match(/\[MM sportschool:\]\s+"([^"]+)"/i)?.[1] || "";
+}
+
+function dateKey(v: unknown) {
+  const d = parseDateOnly(v);
+  if (!d) return "";
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function keurmerkReasonOf(f: Row) {
+  return s(
+    pickFirst(
+      f.keurmerk_reden,
+      f.keurmerk_reason,
+      f.keurmerk_melding,
+      getPath(f, "extra.keurmerk_reden"),
+      getPath(f, "extra.raw.fighters_raw.keurmerk_reden"),
+    ),
+  );
+}
+
+function keurmerkOf(f: Row, matchmaking?: Row | null) {
+  const reason = keurmerkReasonOf(f);
+  const txt = lower(reason);
+
+  if (
+    txt.includes("geen geldig keurmerk") ||
+    txt.includes("geen keurmerk") ||
+    txt.includes("verlopen")
+  )
+    return "Nee";
+
+  // Geen einddatum of verlopen einddatum telt als geen keurmerk.
+  const end = extractKeurmerkEndDate(reason);
+  if (!end) return "Nee";
+
+  const eventDate = dateKey(eventDateOf(f, matchmaking ?? null));
+  if (eventDate && end < eventDate) return "Nee";
+
+  if (txt.includes("keurmerk geldig") || txt.includes("geldig op eventdatum"))
+    return "Ja";
+
+  const raw = pickFirst(
+    f.heeft_keurmerk,
+    f.keurmerk,
+    f.keurmerk_status,
+    f.keurmerk_ok,
+  );
+  return statusJaNee(raw) === "Ja" ? "Ja" : "Nee";
 }
 
 function startverbodOf(f: Row) {
-  const raw = pickFirst(f.startverbod, f.heeft_startverbod, f.startverbod_status, f.fp_startverbod, getPath(f, "raw.startverbod"));
+  // matchmaker_fighter_context is leidend. De raw waarden zitten soms genest in extra.raw.fighters_raw.
+  const raw = pickFirst(
+    f.heeft_startverbod,
+    f.startverbod,
+    f.startverbod_status,
+    f.fp_startverbod,
+    getPath(f, "extra.raw.fighters_raw.heeft_startverbod"),
+    getPath(f, "raw.heeft_startverbod"),
+    getPath(f, "raw.startverbod"),
+  );
   const formatted = statusJaNee(raw);
-  if (!formatted) return "Onbekend";
-  return formatted;
+  return formatted || "Onbekend";
 }
 
 function getResultKind(v: unknown): "win" | "loss" | "draw" | "other" {
   const x = lower(v).replace(/\s+/g, " ").trim();
   if (!x) return "other";
-  if (x.includes("demo") || x.includes("no contest") || x.includes("nocontest") || x === "nc") return "other";
-  if (x.includes("onbeslist") || x.includes("gelijk") || x.includes("draw")) return "draw";
-  if (x.includes("verliest") || x.includes("verlies") || x.includes("verloren") || x.includes("loss") || x === "l") return "loss";
-  if (x.includes("wint") || x.includes("winst") || x.includes("gewonnen") || x === "win" || x === "w") return "win";
+  if (
+    x.includes("demo") ||
+    x.includes("no contest") ||
+    x.includes("nocontest") ||
+    x === "nc"
+  )
+    return "other";
+  if (x.includes("onbeslist") || x.includes("gelijk") || x.includes("draw"))
+    return "draw";
+  if (
+    x.includes("verliest") ||
+    x.includes("verlies") ||
+    x.includes("verloren") ||
+    x.includes("loss") ||
+    x === "l"
+  )
+    return "loss";
+  if (
+    x.includes("wint") ||
+    x.includes("winst") ||
+    x.includes("gewonnen") ||
+    x === "win" ||
+    x === "w"
+  )
+    return "win";
   return "other";
 }
 
 function normalizeClassToken(v: unknown) {
-  const x = lower(v).replace(/klasse/g, "").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  const x = lower(v)
+    .replace(/klasse/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!x || x === "-") return "";
   if (x === "j" || x.includes("jeugd") || x.includes("youth")) return "j";
   if (x === "r" || x.includes("recreant")) return "r";
@@ -328,7 +606,16 @@ function normalizeClassToken(v: unknown) {
 }
 
 function classRank(token: string) {
-  const order: Record<string, number> = { j: 1, r: 2, n: 3, c: 4, b: 5, a: 6, amateur: 3, pro: 6 };
+  const order: Record<string, number> = {
+    j: 1,
+    r: 2,
+    n: 3,
+    c: 4,
+    b: 5,
+    a: 6,
+    amateur: 3,
+    pro: 6,
+  };
   return order[token] ?? 0;
 }
 
@@ -339,7 +626,9 @@ function rowMatchesFighter(row: Row, f: Row) {
     (!!va && onlyDigits(row.va_nummer) === va) ||
     (!!va && onlyDigits(row.bron_va_nummer) === va) ||
     (!!va && onlyDigits(row.fighter_id) === va) ||
-    (!!inschrijvingId && s(pickFirst(row.inschrijving_id, row.aanmelding_id)) === inschrijvingId) ||
+    (!!inschrijvingId &&
+      s(pickFirst(row.inschrijving_id, row.aanmelding_id)) ===
+        inschrijvingId) ||
     (!!s(row.naam) && lower(row.naam) === lower(nameOf(f)))
   );
 }
@@ -350,8 +639,20 @@ function recordOf(f: Row, uitslagenRows: Row[]) {
     let highest = "";
     let highestRank = 0;
     for (const row of rows) {
-      if (getResultKind(pickFirst(row.uitslag, row.resultaat, row.outcome)) === "other") continue;
-      const token = normalizeClassToken(pickFirst(row.klasse, row.class, row.wedstrijdklasse, row.niveau, row.fight_class));
+      if (
+        getResultKind(pickFirst(row.uitslag, row.resultaat, row.outcome)) ===
+        "other"
+      )
+        continue;
+      const token = normalizeClassToken(
+        pickFirst(
+          row.klasse,
+          row.class,
+          row.wedstrijdklasse,
+          row.niveau,
+          row.fight_class,
+        ),
+      );
       const rank = classRank(token);
       if (rank > highestRank) {
         highest = token;
@@ -364,12 +665,22 @@ function recordOf(f: Row, uitslagenRows: Row[]) {
     let d = 0;
     let other = 0;
     for (const row of rows) {
-      const kind = getResultKind(pickFirst(row.uitslag, row.resultaat, row.outcome));
+      const kind = getResultKind(
+        pickFirst(row.uitslag, row.resultaat, row.outcome),
+      );
       if (kind === "other") {
         other += 1;
         continue;
       }
-      const rowClass = normalizeClassToken(pickFirst(row.klasse, row.class, row.wedstrijdklasse, row.niveau, row.fight_class));
+      const rowClass = normalizeClassToken(
+        pickFirst(
+          row.klasse,
+          row.class,
+          row.wedstrijdklasse,
+          row.niveau,
+          row.fight_class,
+        ),
+      );
       if (highest && rowClass && rowClass !== highest) {
         other += 1;
         continue;
@@ -381,16 +692,60 @@ function recordOf(f: Row, uitslagenRows: Row[]) {
     return `${w}-${l}-${d} (${other})`;
   }
 
-  const w = Number(String(pickFirst(f.win, f.wins, f.winst, f.record_w) || 0).replace(/[^\d.-]/g, ""));
-  const l = Number(String(pickFirst(f.loss, f.losses, f.verlies, f.record_l) || 0).replace(/[^\d.-]/g, ""));
-  const d = Number(String(pickFirst(f.draw, f.draws, f.onbeslist, f.record_d) || 0).replace(/[^\d.-]/g, ""));
-  const total = Number(String(pickFirst(f.totaal_wedstrijden, f.totaal_partijen, f.aantal_partijen, f.total_fights, f.fights_total, f.uitslagen_count) || 0).replace(/[^\d.-]/g, ""));
-  const explicitOther = Number(String(pickFirst(f.overige, f.overige_partijen, f.demo, f.demo_totaal, f.nulmeting_demo, f.demo_partijen, f.no_contest, f.no_contest_totaal) || 0).replace(/[^\d.-]/g, ""));
+  const w = Number(
+    String(pickFirst(f.win, f.wins, f.winst, f.record_w) || 0).replace(
+      /[^\d.-]/g,
+      "",
+    ),
+  );
+  const l = Number(
+    String(pickFirst(f.loss, f.losses, f.verlies, f.record_l) || 0).replace(
+      /[^\d.-]/g,
+      "",
+    ),
+  );
+  const d = Number(
+    String(pickFirst(f.draw, f.draws, f.onbeslist, f.record_d) || 0).replace(
+      /[^\d.-]/g,
+      "",
+    ),
+  );
+  const total = Number(
+    String(
+      pickFirst(
+        f.totaal_wedstrijden,
+        f.totaal_partijen,
+        f.aantal_partijen,
+        f.total_fights,
+        f.fights_total,
+        f.uitslagen_count,
+      ) || 0,
+    ).replace(/[^\d.-]/g, ""),
+  );
+  const explicitOther = Number(
+    String(
+      pickFirst(
+        f.overige,
+        f.overige_partijen,
+        f.demo,
+        f.demo_totaal,
+        f.nulmeting_demo,
+        f.demo_partijen,
+        f.no_contest,
+        f.no_contest_totaal,
+      ) || 0,
+    ).replace(/[^\d.-]/g, ""),
+  );
   const safeW = Number.isFinite(w) ? w : 0;
   const safeL = Number.isFinite(l) ? l : 0;
   const safeD = Number.isFinite(d) ? d : 0;
-  const fromTotal = Number.isFinite(total) ? Math.max(0, total - safeW - safeL - safeD) : 0;
-  const other = Math.max(Number.isFinite(explicitOther) ? explicitOther : 0, fromTotal);
+  const fromTotal = Number.isFinite(total)
+    ? Math.max(0, total - safeW - safeL - safeD)
+    : 0;
+  const other = Math.max(
+    Number.isFinite(explicitOther) ? explicitOther : 0,
+    fromTotal,
+  );
   return `${safeW}-${safeL}-${safeD} (${other})`;
 }
 
@@ -407,33 +762,90 @@ function buildStatusMaps(aanmeldingen: Row[]) {
   return { byId, byVa };
 }
 
-function mergeAanmeldingStatusIntoFighters(fighters: Row[], aanmeldingen: Row[]) {
+function mergeAanmeldingStatusIntoFighters(
+  fighters: Row[],
+  aanmeldingen: Row[],
+) {
   const { byId, byVa } = buildStatusMaps(aanmeldingen);
   return fighters.map((f) => {
     const id = inschrijvingIdOf(f);
     const va = vaOf(f);
     const aanmeldingStatus = (id && byId.get(id)) || (va && byVa.get(va)) || "";
-    return aanmeldingStatus ? { ...f, __fs_aanmelding_status: aanmeldingStatus } : f;
+    return aanmeldingStatus
+      ? { ...f, __fs_aanmelding_status: aanmeldingStatus }
+      : f;
   });
 }
 
 function collectMatchedKeys(bouts: Row[]) {
   const ids = new Set<string>();
   const vas = new Set<string>();
-  const addId = (v: any) => { const id = s(v); if (id) ids.add(id); };
-  const addVa = (v: any) => { const va = onlyDigits(v); if (va) vas.add(va); };
+  const addId = (v: any) => {
+    const id = s(v);
+    if (id) ids.add(id);
+  };
+  const addVa = (v: any) => {
+    const va = onlyDigits(v);
+    if (va) vas.add(va);
+  };
 
   for (const b of bouts || []) {
-    const status = lower(pickFirst(b?.status, b?.partij_status, b?.bout_status));
-    const verwijderd = b?.verwijderd === true || String(b?.verwijderd ?? "").trim() === "1" || lower(b?.verwijderd) === "true";
-    if (verwijderd || status.includes("verwijderd") || status.includes("deleted")) continue;
+    const status = lower(
+      pickFirst(b?.status, b?.partij_status, b?.bout_status),
+    );
+    const verwijderd =
+      b?.verwijderd === true ||
+      String(b?.verwijderd ?? "").trim() === "1" ||
+      lower(b?.verwijderd) === "true";
+    if (
+      verwijderd ||
+      status.includes("verwijderd") ||
+      status.includes("deleted")
+    )
+      continue;
 
     const raw = obj(b?.raw_json) || {};
     const deelnemer = obj(raw?.deelnemer) || {};
-    const rawAanmelding = obj(deelnemer?.aanmelding) || obj(deelnemer?.extra?.raw?.aanmelding) || obj(deelnemer?.raw?.aanmelding) || {};
+    const rawAanmelding =
+      obj(deelnemer?.aanmelding) ||
+      obj(deelnemer?.extra?.raw?.aanmelding) ||
+      obj(deelnemer?.raw?.aanmelding) ||
+      {};
 
-    [b?.rood_inschrijving_id, b?.blauw_inschrijving_id, b?.red_inschrijving_id, b?.blue_inschrijving_id, b?.rood_aanmelding_id, b?.blauw_aanmelding_id, b?.inschrijving_id, b?.aanmelding_id, deelnemer?.inschrijving_id, deelnemer?.aanmelding_id, deelnemer?.id, rawAanmelding?.inschrijving_id, rawAanmelding?.aanmelding_id, rawAanmelding?.id].forEach(addId);
-    [b?.va_rood, b?.va_blauw, b?.rood_va, b?.blauw_va, b?.red_va, b?.blue_va, b?.va_nummer, b?.fighter_id, b?.rood_fighter_id, b?.blauw_fighter_id, deelnemer?.va_nummer, deelnemer?.va, deelnemer?.fighter_id, rawAanmelding?.va_nummer, rawAanmelding?.va, rawAanmelding?.fightpaspoort_nummer].forEach(addVa);
+    [
+      b?.rood_inschrijving_id,
+      b?.blauw_inschrijving_id,
+      b?.red_inschrijving_id,
+      b?.blue_inschrijving_id,
+      b?.rood_aanmelding_id,
+      b?.blauw_aanmelding_id,
+      b?.inschrijving_id,
+      b?.aanmelding_id,
+      deelnemer?.inschrijving_id,
+      deelnemer?.aanmelding_id,
+      deelnemer?.id,
+      rawAanmelding?.inschrijving_id,
+      rawAanmelding?.aanmelding_id,
+      rawAanmelding?.id,
+    ].forEach(addId);
+    [
+      b?.va_rood,
+      b?.va_blauw,
+      b?.rood_va,
+      b?.blauw_va,
+      b?.red_va,
+      b?.blue_va,
+      b?.va_nummer,
+      b?.fighter_id,
+      b?.rood_fighter_id,
+      b?.blauw_fighter_id,
+      deelnemer?.va_nummer,
+      deelnemer?.va,
+      deelnemer?.fighter_id,
+      rawAanmelding?.va_nummer,
+      rawAanmelding?.va,
+      rawAanmelding?.fightpaspoort_nummer,
+    ].forEach(addVa);
   }
   return { ids, vas };
 }
@@ -443,19 +855,28 @@ function markMatchedFromBouts(fighters: Row[], bouts: Row[]) {
   return fighters.map((f) => {
     const id = inschrijvingIdOf(f);
     const va = vaOf(f);
-    if ((id && ids.has(id)) || (va && vas.has(va))) return { ...f, __fs_gematcht: true, __fs_status: "gematcht" };
+    if ((id && ids.has(id)) || (va && vas.has(va)))
+      return { ...f, __fs_gematcht: true, __fs_status: "gematcht" };
     return f;
   });
 }
 
 function isControlledFighter(f: Row) {
   const status = statusOf(f);
-  return status === "gescrapt" || status === "gematcht" || status === "afgemeld";
+  return (
+    status === "gescrapt" || status === "gematcht" || status === "afgemeld"
+  );
 }
 
 function mergeByAanmelding(base: Row[], scraped: Row[]) {
   const byKey = new Map<string, Row>();
-  const keysOf = (r: Row) => [s(pickFirst(r.inschrijving_id, r.aanmelding_id, r.id)), onlyDigits(pickFirst(r.va_nummer, r.va, r.fightpaspoort_nummer, r.fighter_id))].filter(Boolean);
+  const keysOf = (r: Row) =>
+    [
+      s(pickFirst(r.inschrijving_id, r.aanmelding_id, r.id)),
+      onlyDigits(
+        pickFirst(r.va_nummer, r.va, r.fightpaspoort_nummer, r.fighter_id),
+      ),
+    ].filter(Boolean);
 
   for (const a of base) {
     const keys = keysOf(a);
@@ -468,7 +889,11 @@ function mergeByAanmelding(base: Row[], scraped: Row[]) {
     let foundKey = keys.find((k) => byKey.has(k));
     if (!foundKey) foundKey = keys[0] || `scraped:${byKey.size}`;
     const current = byKey.get(foundKey) || {};
-    byKey.set(foundKey, { ...current, ...f, __source_aanmelding: current.__source_aanmelding || null });
+    byKey.set(foundKey, {
+      ...current,
+      ...f,
+      __source_aanmelding: current.__source_aanmelding || null,
+    });
   }
 
   return Array.from(byKey.values());
@@ -488,7 +913,11 @@ function setHeaderStyle(row: ExcelJS.Row) {
   row.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: WHITE } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BLACK } };
-    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.alignment = {
+      vertical: "middle",
+      horizontal: "center",
+      wrapText: true,
+    };
     cell.border = {
       top: { style: "thin", color: { argb: GREY } },
       left: { style: "thin", color: { argb: GREY } },
@@ -499,13 +928,28 @@ function setHeaderStyle(row: ExcelJS.Row) {
 }
 
 function addLogo(workbook: ExcelJS.Workbook, ws: ExcelJS.Worksheet) {
-  const logoPath = path.join(process.cwd(), "public", "branding", "fightsupport", "excel-logo.png");
+  const logoPath = path.join(
+    process.cwd(),
+    "public",
+    "branding",
+    "fightsupport",
+    "excel-logo.png",
+  );
   if (!fs.existsSync(logoPath)) return;
   const imageId = workbook.addImage({ filename: logoPath, extension: "png" });
-  ws.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 210, height: 54 } });
+  ws.addImage(imageId, {
+    tl: { col: 0, row: 0 },
+    ext: { width: 210, height: 54 },
+  });
 }
 
-function fillSheet(workbook: ExcelJS.Workbook, sheetName: string, fighters: Row[], uitslagenRows: Row[], matchmaking: Row | null) {
+function fillSheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string,
+  fighters: Row[],
+  uitslagenRows: Row[],
+  matchmaking: Row | null,
+) {
   const ws = workbook.addWorksheet(sheetName);
   addLogo(workbook, ws);
   ws.mergeCells("A1:Q3");
@@ -532,7 +976,6 @@ function fillSheet(workbook: ExcelJS.Workbook, sheetName: string, fighters: Row[
     "Licentie",
     "Keurmerk",
     "Startverbod",
-    "Opmerking",
   ];
   ws.addRow(header);
   const headerRow = ws.lastRow!;
@@ -556,9 +999,8 @@ function fillSheet(workbook: ExcelJS.Workbook, sheetName: string, fighters: Row[
       emailOf(f),
       phoneOf(f),
       licentieOf(f),
-      keurmerkOf(f),
+      keurmerkOf(f, matchmaking),
       startverbodOf(f),
-      s(pickFirst(f.opmerking, f.notitie, f.notes, getPath(f, "extra.raw.aanmelding.opmerking"))),
     ]);
 
     const rowNo = row.number;
@@ -570,21 +1012,297 @@ function fillSheet(workbook: ExcelJS.Workbook, sheetName: string, fighters: Row[
         bottom: { style: "thin", color: { argb: GREY } },
         right: { style: "thin", color: { argb: GREY } },
       };
-      if (rowNo % 2 === 0) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7F7F7" } };
+      if (rowNo % 2 === 0)
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF7F7F7" },
+        };
     });
     row.getCell(3).font = { bold: true, color: { argb: ORANGE } };
   }
 
   ws.views = [{ state: "frozen", ySplit: 5 }];
-  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: header.length } };
+  ws.autoFilter = {
+    from: { row: 5, column: 1 },
+    to: { row: 5, column: header.length },
+  };
   ws.columns = [
-    { width: 18 }, { width: 10 }, { width: 28 }, { width: 12 }, { width: 10 }, { width: 14 },
-    { width: 12 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 28 }, { width: 24 },
-    { width: 30 }, { width: 16 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 34 },
+    { width: 18 },
+    { width: 10 },
+    { width: 28 },
+    { width: 12 },
+    { width: 10 },
+    { width: 14 },
+    { width: 12 },
+    { width: 14 },
+    { width: 16 },
+    { width: 14 },
+    { width: 28 },
+    { width: 24 },
+    { width: 30 },
+    { width: 16 },
+    { width: 12 },
+    { width: 12 },
+    { width: 14 },
   ];
 }
 
-async function queryTable(table: string, matchmakingId: string, orderColumn?: string) {
+function ruleNameOf(row: Row) {
+  return s(pickFirst(row.rule, row.rule_code, "Melding"));
+}
+
+function resultTextOf(row: Row) {
+  return s(pickFirst(row.resultaat, row.severity, ""));
+}
+
+function messageOf(row: Row) {
+  return s(pickFirst(row.boodschap, row.message, row.opmerking, row.notitie));
+}
+
+function fighterKey(row: Row) {
+  return (
+    onlyDigits(row.va_nummer) ||
+    s(
+      pickFirst(
+        row.inschrijving_id,
+        row.aanmelding_id,
+        row.fighter_context_id,
+        row.fighter_id,
+        row.id,
+      ),
+    )
+  );
+}
+
+function buildFighterMaps(fighters: Row[]) {
+  const byVa = new Map<string, Row>();
+  const byInschrijving = new Map<string, Row>();
+  for (const f of fighters) {
+    const va = vaOf(f);
+    const ins = inschrijvingIdOf(f);
+    if (va) byVa.set(va, f);
+    if (ins) byInschrijving.set(ins, f);
+  }
+  return { byVa, byInschrijving };
+}
+
+function findFighterForRule(
+  row: Row,
+  maps: ReturnType<typeof buildFighterMaps>,
+) {
+  const va = onlyDigits(row.va_nummer);
+  const ins = s(pickFirst(row.inschrijving_id, row.aanmelding_id));
+  return (
+    (va && maps.byVa.get(va)) || (ins && maps.byInschrijving.get(ins)) || null
+  );
+}
+
+function fillMeldingenSheet(
+  workbook: ExcelJS.Workbook,
+  rules: Row[],
+  fighters: Row[],
+) {
+  const ws = workbook.addWorksheet("Meldingen");
+  addLogo(workbook, ws);
+  ws.mergeCells("A1:H3");
+  ws.getCell("A1").value = "Meldingen voor matchmaker";
+  ws.getCell("A1").font = { bold: true, size: 18, color: { argb: ORANGE } };
+  ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
+  ws.addRow([]);
+  ws.addRow([
+    "Naam",
+    "VA",
+    "Sportschool",
+    "Regel",
+    "Resultaat",
+    "Melding",
+    "Review",
+    "Controle run",
+  ]);
+  setHeaderStyle(ws.lastRow!);
+
+  const maps = buildFighterMaps(fighters);
+  const rows = [...rules].sort((a, b) =>
+    nameOf(findFighterForRule(a, maps) || a).localeCompare(
+      nameOf(findFighterForRule(b, maps) || b),
+      "nl",
+    ),
+  );
+  for (const r of rows) {
+    const f = findFighterForRule(r, maps) || r;
+    const row = ws.addRow([
+      nameOf(f),
+      onlyDigits(pickFirst(r.va_nummer, vaOf(f))),
+      gymOf(f),
+      ruleNameOf(r),
+      resultTextOf(r),
+      messageOf(r),
+      s(r.review_status),
+      s(r.controle_run_id),
+    ]);
+    row.eachCell((cell) => {
+      cell.alignment = { vertical: "top", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: GREY } },
+        left: { style: "thin", color: { argb: GREY } },
+        bottom: { style: "thin", color: { argb: GREY } },
+        right: { style: "thin", color: { argb: GREY } },
+      };
+    });
+    row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
+  }
+  ws.views = [{ state: "frozen", ySplit: 5 }];
+  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: 8 } };
+  ws.columns = [
+    { width: 28 },
+    { width: 10 },
+    { width: 28 },
+    { width: 34 },
+    { width: 14 },
+    { width: 90 },
+    { width: 16 },
+    { width: 36 },
+  ];
+}
+
+function fillKeurmerkenSheet(
+  workbook: ExcelJS.Workbook,
+  fighters: Row[],
+  matchmaking: Row | null,
+) {
+  const ws = workbook.addWorksheet("Keurmerken");
+  addLogo(workbook, ws);
+  ws.mergeCells("A1:H3");
+  ws.getCell("A1").value = "Keurmerken en sportschool-match";
+  ws.getCell("A1").font = { bold: true, size: 18, color: { argb: ORANGE } };
+  ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
+  ws.addRow([]);
+  ws.addRow([
+    "Sportschool aanmelding",
+    "Gematcht met DB",
+    "Keurmerk einde",
+    "Keurmerk",
+    "Vechter",
+    "VA",
+    "Eventdatum",
+    "Reden",
+  ]);
+  setHeaderStyle(ws.lastRow!);
+
+  const seen = new Set<string>();
+  const rows = [...fighters].sort(
+    (a, b) =>
+      gymOf(a).localeCompare(gymOf(b), "nl") ||
+      nameOf(a).localeCompare(nameOf(b), "nl"),
+  );
+  for (const f of rows) {
+    const reason = keurmerkReasonOf(f);
+    const mmGym = extractMmSportschool(reason) || gymOf(f);
+    const dbGym = extractKeurmerkMatchedName(reason);
+    const end = extractKeurmerkEndDate(reason);
+    const key = [mmGym, dbGym, end, keurmerkOf(f, matchmaking), reason]
+      .join("|")
+      .toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const row = ws.addRow([
+      mmGym,
+      dbGym || "-",
+      end ? fmtDate(end) : "Geen datum",
+      keurmerkOf(f, matchmaking),
+      nameOf(f),
+      vaOf(f),
+      fmtDate(eventDateOf(f, matchmaking)),
+      reason,
+    ]);
+    row.eachCell((cell) => {
+      cell.alignment = { vertical: "top", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: GREY } },
+        left: { style: "thin", color: { argb: GREY } },
+        bottom: { style: "thin", color: { argb: GREY } },
+        right: { style: "thin", color: { argb: GREY } },
+      };
+    });
+    row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
+  }
+  ws.views = [{ state: "frozen", ySplit: 5 }];
+  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: 8 } };
+  ws.columns = [
+    { width: 32 },
+    { width: 32 },
+    { width: 16 },
+    { width: 12 },
+    { width: 28 },
+    { width: 10 },
+    { width: 14 },
+    { width: 90 },
+  ];
+}
+
+function opmerkingOf(f: Row) {
+  return s(
+    pickFirst(
+      f.opmerking,
+      f.opmerkingen,
+      f.notitie,
+      f.notes,
+      getPath(f, "extra.raw.aanmelding.opmerkingen"),
+      getPath(f, "extra.raw.aanmelding.opmerking"),
+    ),
+  );
+}
+
+function fillOpmerkingenSheet(workbook: ExcelJS.Workbook, fighters: Row[]) {
+  const rows = fighters.filter((f) => opmerkingOf(f));
+  if (!rows.length) return;
+  const ws = workbook.addWorksheet("Opmerkingen");
+  addLogo(workbook, ws);
+  ws.mergeCells("A1:E3");
+  ws.getCell("A1").value = "Opmerkingen uit aanmeldingen";
+  ws.getCell("A1").font = { bold: true, size: 18, color: { argb: ORANGE } };
+  ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
+  ws.addRow([]);
+  ws.addRow(["Naam", "Opmerking", "VA", "Sportschool", "Groep"]);
+  setHeaderStyle(ws.lastRow!);
+  for (const f of rows.sort((a, b) =>
+    nameOf(a).localeCompare(nameOf(b), "nl"),
+  )) {
+    const row = ws.addRow([
+      nameOf(f),
+      opmerkingOf(f),
+      vaOf(f),
+      gymOf(f),
+      tabKeyOf(f),
+    ]);
+    row.eachCell((cell) => {
+      cell.alignment = { vertical: "top", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: GREY } },
+        left: { style: "thin", color: { argb: GREY } },
+        bottom: { style: "thin", color: { argb: GREY } },
+        right: { style: "thin", color: { argb: GREY } },
+      };
+    });
+    row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
+  }
+  ws.views = [{ state: "frozen", ySplit: 5 }];
+  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: 5 } };
+  ws.columns = [
+    { width: 30 },
+    { width: 78 },
+    { width: 10 },
+    { width: 30 },
+    { width: 28 },
+  ];
+}
+
+async function queryTable(
+  table: string,
+  matchmakingId: string,
+  orderColumn?: string,
+) {
   let q = supabase.from(table).select("*").eq("matchmaking_id", matchmakingId);
   if (orderColumn) q = q.order(orderColumn, { ascending: true });
   const { data, error } = await q;
@@ -598,21 +1316,47 @@ async function queryTable(table: string, matchmakingId: string, orderColumn?: st
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const matchmakingId = s(url.searchParams.get("matchmakingId") ?? url.searchParams.get("matchmakingid") ?? url.searchParams.get("id"));
+    const matchmakingId = s(
+      url.searchParams.get("matchmakingId") ??
+        url.searchParams.get("matchmakingid") ??
+        url.searchParams.get("id"),
+    );
     if (!matchmakingId) {
-      return NextResponse.json({ ok: false, error: "matchmakingId ontbreekt" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "matchmakingId ontbreekt" },
+        { status: 400 },
+      );
     }
 
-    const [{ data: matchmaking }, aanmeldingen, fightersRaw, uitslagenRows, bouts] = await Promise.all([
-      supabase.from("matchmakings").select("*").eq("id", matchmakingId).maybeSingle(),
+    const [
+      { data: matchmaking },
+      aanmeldingen,
+      fighterContext,
+      fightersRaw,
+      uitslagenRows,
+      bouts,
+      resultRows,
+    ] = await Promise.all([
+      supabase
+        .from("matchmakings")
+        .select("*")
+        .eq("id", matchmakingId)
+        .maybeSingle(),
       queryTable("aanmeldingen", matchmakingId, "created_at"),
+      queryTable("matchmaker_fighter_context", matchmakingId, "created_at"),
       queryTable("matchmaker_fighters_raw", matchmakingId, "created_at"),
       queryTable("matchmaker_uitslagen_raw", matchmakingId, "datum"),
       queryTable("matchmaking_bouts_raw", matchmakingId, "partij_nr"),
+      queryTable("matchmaker_fighter_resultaten", matchmakingId, "created_at"),
     ]);
 
-    const merged = mergeByAanmelding(aanmeldingen, fightersRaw);
-    const withAanmeldingStatus = mergeAanmeldingStatusIntoFighters(merged, aanmeldingen);
+    // Context is leidend: daarin staan licentie, startverbod, keurmerk_reden en de geneste raw scrape.
+    const contextPlusRaw = mergeByAanmelding(fighterContext, fightersRaw);
+    const merged = mergeByAanmelding(aanmeldingen, contextPlusRaw);
+    const withAanmeldingStatus = mergeAanmeldingStatusIntoFighters(
+      merged,
+      aanmeldingen,
+    );
     const marked = markMatchedFromBouts(withAanmeldingStatus, bouts);
     const controlled = marked.filter(isControlledFighter);
 
@@ -621,6 +1365,10 @@ export async function GET(req: Request) {
     workbook.created = new Date();
     workbook.modified = new Date();
 
+    fillMeldingenSheet(workbook, resultRows, controlled);
+    fillKeurmerkenSheet(workbook, controlled, matchmaking ?? null);
+    fillOpmerkingenSheet(workbook, controlled);
+
     const grouped = new Map<string, Row[]>();
     for (const f of controlled) {
       const key = tabKeyOf(f);
@@ -628,13 +1376,27 @@ export async function GET(req: Request) {
       grouped.get(key)!.push(f);
     }
 
-    const sortedGroups = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b, "nl"));
+    const sortedGroups = Array.from(grouped.entries()).sort(([a], [b]) =>
+      a.localeCompare(b, "nl"),
+    );
     if (!sortedGroups.length) {
-      fillSheet(workbook, "Geen gecontroleerde aanmeldingen", [], uitslagenRows, matchmaking ?? null);
+      fillSheet(
+        workbook,
+        "Geen gecontroleerde aanmeldingen",
+        [],
+        uitslagenRows,
+        matchmaking ?? null,
+      );
     } else {
       for (const [sheetName, rows] of sortedGroups) {
         rows.sort((a, b) => sortFighters(a, b, matchmaking ?? null));
-        fillSheet(workbook, sheetName, rows, uitslagenRows, matchmaking ?? null);
+        fillSheet(
+          workbook,
+          sheetName,
+          rows,
+          uitslagenRows,
+          matchmaking ?? null,
+        );
       }
     }
 
@@ -644,7 +1406,8 @@ export async function GET(req: Request) {
     return new NextResponse(buffer, {
       status: 200,
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
         "Cache-Control": "no-store",
       },
