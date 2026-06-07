@@ -27,7 +27,6 @@ import { authedFetch } from "@/lib/api/authedFetch";
 import NvbDarkButton from "@/components/NvbDarkButton";
 import NvbLightButton from "@/components/NvbLightButton";
 
-
 const inter = { className: "font-sans" };
 
 const NVB_ORANGE = "#ff4d00";
@@ -291,13 +290,15 @@ function normalizeDisciplineForRule(v: any): string {
 
 function isExactBoksen(ctx: AnyRow | null | undefined): boolean {
   if (!ctx) return false;
-  return normalizeDisciplineForRule(
-    ctx?.discipline ??
-      ctx?.discipline_mm ??
-      ctx?.discipline_fp ??
-      ctx?.wedstrijd_discipline ??
-      ctx?.bout_discipline,
-  ) === "boksen";
+  return (
+    normalizeDisciplineForRule(
+      ctx?.discipline ??
+        ctx?.discipline_mm ??
+        ctx?.discipline_fp ??
+        ctx?.wedstrijd_discipline ??
+        ctx?.bout_discipline,
+    ) === "boksen"
+  );
 }
 
 function isBoksenNoVaInfoRow(r: Partial<ResRow> | null | undefined): boolean {
@@ -695,12 +696,14 @@ function isGeenTegenstander(ctx: AnyRow): boolean {
 }
 
 function formatDurationExact(mins: number): string {
-  const rounded = Math.round(mins);
-  const h = Math.floor(rounded / 60);
-  const m = rounded % 60;
-  if (h <= 0) return `${m} min`;
+  const roundedOne = Math.round(mins * 10) / 10;
+  const h = Math.floor(roundedOne / 60);
+  const m = Math.round((roundedOne - h * 60) * 10) / 10;
+  const fmt = (n: number) =>
+    Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
+  if (h <= 0) return `${fmt(m)} min`;
   if (m === 0) return `${h} uur`;
-  return `${h} uur ${m} min`;
+  return `${h} uur ${fmt(m)} min`;
 }
 
 function isGalaDuurRow(r: ResRow) {
@@ -724,12 +727,17 @@ function isGalaDuurRow(r: ResRow) {
 const KLASSE_MINUTEN: Record<string, number> = {
   "a titel": 31,
   a: 21,
+  "a k1": 21,
   b: 14,
   c: 13,
-  n: 8,
-  "16/17": 8,
-  j: 8,
-  jeugd: 8,
+  n: 11.5,
+  "16/17": 10.5,
+  jeugd: 8.5,
+  "jeugd 16+": 10.5,
+  talentstatus: 10.5,
+  jplus: 10.5,
+  r: 8.5,
+  recreant: 8.5,
   demo: 6,
   boksen: 10,
   "mma pro": 17,
@@ -737,29 +745,76 @@ const KLASSE_MINUTEN: Record<string, number> = {
   "mma jeugd": 17,
 };
 
+type GalaDuurMatch = {
+  mins: number;
+  label: string;
+};
+
 function normalizeKlasse(raw: string): string {
   return String(raw ?? "")
     .trim()
     .toLowerCase()
-    .replace(/[_-]+/g, " ")
+    .replace(/\+/g, " plus ")
+    .replace(/[._/\\-]+/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/\bklasse\b/g, "")
-    .replace(/\bclass\b/g, "")
-    .replace(/\bheren\b/g, "")
-    .replace(/\bheer\b/g, "")
-    .replace(/\bdames\b/g, "")
-    .replace(/\bdame\b/g, "")
-    .replace(/\bjongens\b/g, "")
-    .replace(/\bjongen\b/g, "")
-    .replace(/\bmeisjes\b/g, "")
-    .replace(/\bmeisje\b/g, "")
+    .replace(/\bklas\b/g, " klasse ")
+    .replace(/\bklasse\b/g, " ")
+    .replace(/\bclass\b/g, " ")
+    .replace(/\bpartij(en)?\b/g, " ")
+    .replace(/\bmet\b/g, " ")
+    .replace(/\bheren\b/g, " ")
+    .replace(/\bheer\b/g, " ")
+    .replace(/\bdames\b/g, " ")
+    .replace(/\bdame\b/g, " ")
+    .replace(/\bjongens\b/g, " ")
+    .replace(/\bjongen\b/g, " ")
+    .replace(/\bmeisjes\b/g, " ")
+    .replace(/\bmeisje\b/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-function matchKlasseMinuten(
+function hasKlasseToken(
+  text: string,
+  token: "a" | "b" | "c" | "j" | "n" | "r",
+): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i").test(text);
+}
+
+function bothFightersAtLeastAge(row: AnyRow | null | undefined, minAge: number) {
+  if (!row) return false;
+  const rood = ageAtEventNumber(row, "rood");
+  const blauw = ageAtEventNumber(row, "blauw");
+  return rood != null && blauw != null && rood >= minAge && blauw >= minAge;
+}
+
+function hasTalentStatusKlasse(rawKlasse: string, normalizedKlasse: string): boolean {
+  const raw = String(rawKlasse ?? "").toLowerCase();
+  return (
+    raw.includes("j+") ||
+    normalizedKlasse.includes("j plus") ||
+    normalizedKlasse.includes("talentstatus") ||
+    normalizedKlasse.includes("talent status") ||
+    normalizedKlasse.includes("talent")
+  );
+}
+
+function isJeugdKlasse(rawKlasse: string, normalizedKlasse: string): boolean {
+  return (
+    hasKlasseToken(normalizedKlasse, "j") ||
+    normalizedKlasse.includes("jeugd") ||
+    normalizedKlasse.includes("youth") ||
+    normalizedKlasse.includes("junior") ||
+    hasTalentStatusKlasse(rawKlasse, normalizedKlasse)
+  );
+}
+
+function matchKlasseDuur(
   klasse: string,
   discipline?: string,
-): number | null {
+  row?: AnyRow | null,
+): GalaDuurMatch | null {
   const rawKlasse = String(klasse ?? "")
     .trim()
     .toLowerCase();
@@ -770,62 +825,92 @@ function matchKlasseMinuten(
   if (!rawKlasse && !rawDiscipline) return null;
 
   const k = normalizeKlasse(rawKlasse);
-  const d = rawDiscipline.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-
-  if (
-    d.includes("boksen") ||
-    d.includes("boxing") ||
-    k.includes("boksen") ||
-    k.includes("boxing")
-  ) {
-    return KLASSE_MINUTEN.boksen;
-  }
+  const d = rawDiscipline
+    .replace(/[._/\\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const haystack = `${k} ${d}`.trim();
 
   if (k.includes("mma") || d.includes("mma")) {
     if (k.includes("pro") || d.includes("pro"))
-      return KLASSE_MINUTEN["mma pro"];
+      return { mins: KLASSE_MINUTEN["mma pro"], label: "MMA Pro" };
     if (
       k.includes("jeugd") ||
       k.includes("youth") ||
+      k.includes("junior") ||
       d.includes("jeugd") ||
-      d.includes("youth")
+      d.includes("youth") ||
+      d.includes("junior")
     ) {
-      return KLASSE_MINUTEN["mma jeugd"];
+      return { mins: KLASSE_MINUTEN["mma jeugd"], label: "MMA jeugd" };
     }
-    return KLASSE_MINUTEN["mma amateur"];
+    return { mins: KLASSE_MINUTEN["mma amateur"], label: "MMA amateur" };
   }
 
-  if (k.includes("titel")) return KLASSE_MINUTEN["a titel"];
+  const disciplineIsBoksen = ["boksen", "boxing", "boxen"].includes(d);
+  const klasseIsBoksen = k.includes("boksen") || k.includes("boxing");
+  if (disciplineIsBoksen || klasseIsBoksen) {
+    return { mins: KLASSE_MINUTEN.boksen, label: "Boksen" };
+  }
+
+  if (haystack.includes("titel")) {
+    return { mins: KLASSE_MINUTEN["a titel"], label: "A titel" };
+  }
+
+  if (hasTalentStatusKlasse(rawKlasse, k)) {
+    return { mins: KLASSE_MINUTEN.talentstatus, label: "Talentstatus / J+" };
+  }
+
+  if (/16\s*17/.test(k) || /16\s*\/\s*17/.test(rawKlasse)) {
+    return { mins: KLASSE_MINUTEN["16/17"], label: "Jeugd 16/17" };
+  }
+
+  if (isJeugdKlasse(rawKlasse, k)) {
+    if (bothFightersAtLeastAge(row, 16)) {
+      return { mins: KLASSE_MINUTEN["jeugd 16+"], label: "Jeugd 16+ jaar (beide 16+)" };
+    }
+    return { mins: KLASSE_MINUTEN.jeugd, label: "Jeugd < 16 jaar" };
+  }
 
   if (
-    k === "j" ||
-    k.includes("jeugd") ||
-    k.includes("youth") ||
-    k.includes("junior")
+    hasKlasseToken(k, "r") ||
+    k.includes("recreant") ||
+    k.includes("recreanten") ||
+    k.includes("recreatief") ||
+    k.includes("recreatie")
   ) {
-    return KLASSE_MINUTEN.j;
-  }
-
-  if (/16\s*\/\s*17/.test(k) || (k.includes("16") && k.includes("17"))) {
-    return KLASSE_MINUTEN["16/17"];
+    return { mins: KLASSE_MINUTEN.r, label: "R / Recreant" };
   }
 
   if (
-    k === "n" ||
+    hasKlasseToken(k, "n") ||
     k.includes("nieuweling") ||
+    k.includes("nieuwelingen") ||
     k.includes("novice") ||
-    /^n\b/.test(k)
+    k.includes("newcomer")
   ) {
-    return KLASSE_MINUTEN.n;
+    return { mins: KLASSE_MINUTEN.n, label: "N / Nieuweling" };
   }
 
-  if (k === "c" || /^c\b/.test(k)) return KLASSE_MINUTEN.c;
-  if (k === "b" || /^b\b/.test(k)) return KLASSE_MINUTEN.b;
-  if (k === "a" || /^a\b/.test(k)) return KLASSE_MINUTEN.a;
+  if (hasKlasseToken(k, "c")) return { mins: KLASSE_MINUTEN.c, label: "C" };
+  if (hasKlasseToken(k, "b")) return { mins: KLASSE_MINUTEN.b, label: "B" };
+  if (hasKlasseToken(k, "a") || k.includes("a k1") || k.includes("a k 1")) {
+    return { mins: KLASSE_MINUTEN.a, label: "A / A K1" };
+  }
 
-  if (k.includes("demo")) return KLASSE_MINUTEN.demo;
+  if (k.includes("demo") || k.includes("demonstratie")) {
+    return { mins: KLASSE_MINUTEN.demo, label: "Demo" };
+  }
 
   return null;
+}
+
+function matchKlasseMinuten(
+  klasse: string,
+  discipline?: string,
+  row?: AnyRow | null,
+): number | null {
+  return matchKlasseDuur(klasse, discipline, row)?.mins ?? null;
 }
 
 function calcGalaDuurFromRows(rows: AnyRow[]): {
@@ -854,10 +939,10 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
   for (const r of gewoneRows) {
     const klasse = String(r.klasse_mm ?? r.klasse ?? "").trim();
     const discipline = String(r.discipline ?? "").trim();
-    const mins = matchKlasseMinuten(klasse, discipline);
-    const label = klasse || "-";
+    const match = matchKlasseDuur(klasse, discipline, r);
+    const label = match?.label ?? klasse;
 
-    if (mins !== null) addBreakdown(label, 1, mins);
+    if (match) addBreakdown(label, 1, match.mins);
     else if (klasse && klasse !== "-") unknownSet.add(klasse);
   }
 
@@ -893,12 +978,14 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
     const discipline = String(
       eersteMetKlasse?.discipline ?? groupRows[0]?.discipline ?? "",
     ).trim();
-    const mins = matchKlasseMinuten(klasse, discipline);
-    const label = klasse
-      ? `Toernooi ${toernooiKey} (${klasse})`
-      : `Toernooi ${toernooiKey}`;
+    const match = matchKlasseDuur(klasse, discipline, eersteMetKlasse ?? groupRows[0]);
+    const label = match
+      ? `Toernooi ${toernooiKey} - ${match.label}`
+      : klasse
+        ? `Toernooi ${toernooiKey} (${klasse})`
+        : `Toernooi ${toernooiKey}`;
 
-    if (mins !== null) addBreakdown(label, partijCount, mins);
+    if (match) addBreakdown(label, partijCount, match.mins);
     else if (label) unknownSet.add(label);
   }
 
@@ -926,9 +1013,9 @@ function buildGalaDuurFromMins(totalMins: number) {
     mins: totalMins,
     needsApproval,
     overMax,
-    text: `Geschatte gala-duur: ${formatDurationExact(totalMins)} (${Math.round(
-      totalMins,
-    )} min). ${extra}`,
+    text: `Geschatte gala-duur: ${formatDurationExact(totalMins)} (${String(
+      Math.round(totalMins * 10) / 10,
+    ).replace(".", ",")} min). ${extra}`,
   };
 }
 
@@ -956,7 +1043,9 @@ function buildCompactRunMeldingen(
 
   const compactMsg =
     mins != null
-      ? `Geschatte gala-duur: ${formatDurationExact(mins)} (${Math.round(mins)} min). ${
+      ? `Geschatte gala-duur: ${formatDurationExact(mins)} (${String(
+          Math.round(mins * 10) / 10,
+        ).replace(".", ",")} min). ${
           overMax
             ? "Overschrijdt max 8.5 uur — AFKEUR."
             : needsApproval
@@ -2541,7 +2630,12 @@ export default function ControleMatchmakingPage() {
     for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
       const pn = Number(pnStr);
       if (!Number.isFinite(pn)) continue;
-      if (rr.some((r) => !isBelgischeGymInfoRow(r) && normResultaatRow(r) === "afgekeurd")) {
+      if (
+        rr.some(
+          (r) =>
+            !isBelgischeGymInfoRow(r) && normResultaatRow(r) === "afgekeurd",
+        )
+      ) {
         m[pn] = true;
       }
     }
@@ -3359,7 +3453,28 @@ export default function ControleMatchmakingPage() {
                               </thead>
                               <tbody>
                                 {Object.entries(galaDuurCalc.countsByKlasse)
-                                  .sort((a, b) => a[0].localeCompare(b[0]))
+                                  .sort((a, b) => {
+                                    const order = [
+                                      "Jeugd < 16 jaar",
+                                      "Jeugd 16+ jaar (beide 16+)",
+                                      "Talentstatus / J+",
+                                      "R / Recreant",
+                                      "N / Nieuweling",
+                                      "C",
+                                      "B",
+                                      "A / A K1",
+                                      "A titel",
+                                      "Demo",
+                                      "Boksen",
+                                      "MMA jeugd",
+                                      "MMA amateur",
+                                      "MMA Pro",
+                                    ];
+                                    const ai = order.findIndex((x) => a[0].includes(x));
+                                    const bi = order.findIndex((x) => b[0].includes(x));
+                                    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+                                    return a[0].localeCompare(b[0], "nl");
+                                  })
                                   .map(([klasse, count], idx) => {
                                     const mins =
                                       galaDuurCalc.minsByKlasse[klasse] ?? 0;
@@ -3863,7 +3978,8 @@ export default function ControleMatchmakingPage() {
                           ? !!hasAfkeurByPartij[originalPn]
                           : false;
                         const heeftDispensatie = Number.isFinite(originalPn)
-                          ? !!hasDispByPartij[originalPn] || !!dispRequestByPartij[originalPn]
+                          ? !!hasDispByPartij[originalPn] ||
+                            !!dispRequestByPartij[originalPn]
                           : false;
                         const heeftActie = Number.isFinite(originalPn)
                           ? !!hasActieByPartij[originalPn]
