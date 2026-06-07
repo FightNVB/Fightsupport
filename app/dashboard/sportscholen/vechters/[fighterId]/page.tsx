@@ -256,6 +256,7 @@ export default function FighterDetailPage() {
   const [meldingText, setMeldingText] = useState("");
   const [meldingSaving, setMeldingSaving] = useState(false);
   const [meldingMsg, setMeldingMsg] = useState("");
+  const [meldingOpen, setMeldingOpen] = useState(false);
 
   useEffect(() => {
     if (fighterId) load();
@@ -527,12 +528,24 @@ export default function FighterDetailPage() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => router.push("/dashboard/sportscholen")}
-                    className="inline-flex items-center justify-center gap-2 border-2 border-[#d7d4ce] bg-[linear-gradient(180deg,#ffffff,#adadad_44%,#eeeeee_52%,#6f6f6f)] px-5 py-2 text-sm font-black text-black shadow-[inset_0_1px_0_#fff,0_5px_0_#28140c,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110"
-                  >
-                    <ArrowLeft size={18} /> Terug
-                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row md:flex-col lg:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => setMeldingOpen((v) => !v)}
+                      className="inline-flex items-center justify-center gap-2 border-2 border-[#ff4d00] bg-[linear-gradient(180deg,#ff8a4c,#ff4d00)] px-5 py-2 text-sm font-black text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_5px_0_#5b1d08,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110"
+                    >
+                      <MessageSquare size={18} />
+                      {meldingOpen ? "Sluit melding" : "Maak melding"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => router.push("/dashboard/sportscholen")}
+                      className="inline-flex items-center justify-center gap-2 border-2 border-[#d7d4ce] bg-[linear-gradient(180deg,#ffffff,#adadad_44%,#eeeeee_52%,#6f6f6f)] px-5 py-2 text-sm font-black text-black shadow-[inset_0_1px_0_#fff,0_5px_0_#28140c,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110"
+                    >
+                      <ArrowLeft size={18} /> Terug
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -562,6 +575,71 @@ export default function FighterDetailPage() {
                 />
               </div>
             </div>
+
+            {meldingOpen && (
+            <div className="mb-3 border border-zinc-600 bg-[#121212] p-4 shadow-2xl">
+                <div className="mb-3 flex flex-col justify-between gap-2 md:flex-row md:items-center">
+                  <div>
+                    <div className="flex items-center gap-2 text-lg font-black uppercase text-white">
+                      <MessageSquare size={20} className="text-[#ff4d00]" />
+                      Melding aan admin
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-400">
+                      Vraag een wijziging aan voor deze vechter, bijvoorbeeld traint niet meer bij ons, gegevens wijzigen of uitslag klopt niet.
+                    </div>
+                  </div>
+                  <div className="text-xs font-black uppercase tracking-[0.2em] text-[#ff4d00]">
+                    VA {safe(fighter.va_nummer)}
+                  </div>
+                </div>
+  
+                <div className="grid gap-3 md:grid-cols-[260px_1fr_auto] md:items-end">
+                  <label className="block text-xs font-black uppercase tracking-[0.18em] text-zinc-300">
+                    Type melding
+                    <select
+                      value={meldingType}
+                      onChange={(e) => setMeldingType(e.target.value)}
+                      className="mt-2 w-full border border-zinc-600 bg-[#111] px-3 py-2 text-sm font-bold text-white outline-none focus:border-[#ff4d00]"
+                    >
+                      <option value="traint_niet_meer_bij_ons">Traint niet meer bij ons</option>
+                      <option value="gegevens_wijzigen">Gegevens wijzigen</option>
+                      <option value="uitslag_klopt_niet">Uitslag klopt niet</option>
+                      <option value="licentie_klopt_niet">Licentie klopt niet</option>
+                      <option value="startverbod_klopt_niet">Startverbod klopt niet</option>
+                      <option value="sportschool_klopt_niet">Sportschool klopt niet</option>
+                      <option value="anders">Anders</option>
+                    </select>
+                  </label>
+  
+                  <label className="block text-xs font-black uppercase tracking-[0.18em] text-zinc-300">
+                    Toelichting
+                    <textarea
+                      value={meldingText}
+                      onChange={(e) => setMeldingText(e.target.value)}
+                      rows={3}
+                      placeholder="Beschrijf kort wat admin moet controleren of aanpassen..."
+                      className="mt-2 w-full resize-none border border-zinc-600 bg-[#111] px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-[#ff4d00]"
+                    />
+                  </label>
+  
+                  <button
+                    type="button"
+                    onClick={submitMelding}
+                    disabled={meldingSaving || !meldingText.trim()}
+                    className="inline-flex min-h-[42px] items-center justify-center gap-2 border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {meldingSaving ? <RefreshCw size={17} className="animate-spin" /> : <Send size={17} />}
+                    Verstuur
+                  </button>
+                </div>
+  
+                {meldingMsg && (
+                  <div className="mt-3 border border-zinc-700 bg-[#1c1c1c] p-3 text-sm font-bold text-zinc-200">
+                    {meldingMsg}
+                  </div>
+                )}
+              </div>
+            )}
 
             {(keurmerkExpired || keurmerkSoon) && (
               <div
@@ -623,68 +701,7 @@ export default function FighterDetailPage() {
 
 
 
-            <div className="mb-3 border border-zinc-600 bg-[#121212] p-4 shadow-2xl">
-              <div className="mb-3 flex flex-col justify-between gap-2 md:flex-row md:items-center">
-                <div>
-                  <div className="flex items-center gap-2 text-lg font-black uppercase text-white">
-                    <MessageSquare size={20} className="text-[#ff4d00]" />
-                    Melding aan admin
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-400">
-                    Vraag een wijziging aan voor deze vechter, bijvoorbeeld traint niet meer bij ons, gegevens wijzigen of uitslag klopt niet.
-                  </div>
-                </div>
-                <div className="text-xs font-black uppercase tracking-[0.2em] text-[#ff4d00]">
-                  VA {safe(fighter.va_nummer)}
-                </div>
-              </div>
 
-              <div className="grid gap-3 md:grid-cols-[260px_1fr_auto] md:items-end">
-                <label className="block text-xs font-black uppercase tracking-[0.18em] text-zinc-300">
-                  Type melding
-                  <select
-                    value={meldingType}
-                    onChange={(e) => setMeldingType(e.target.value)}
-                    className="mt-2 w-full border border-zinc-600 bg-[#111] px-3 py-2 text-sm font-bold text-white outline-none focus:border-[#ff4d00]"
-                  >
-                    <option value="traint_niet_meer_bij_ons">Traint niet meer bij ons</option>
-                    <option value="gegevens_wijzigen">Gegevens wijzigen</option>
-                    <option value="uitslag_klopt_niet">Uitslag klopt niet</option>
-                    <option value="licentie_klopt_niet">Licentie klopt niet</option>
-                    <option value="startverbod_klopt_niet">Startverbod klopt niet</option>
-                    <option value="sportschool_klopt_niet">Sportschool klopt niet</option>
-                    <option value="anders">Anders</option>
-                  </select>
-                </label>
-
-                <label className="block text-xs font-black uppercase tracking-[0.18em] text-zinc-300">
-                  Toelichting
-                  <textarea
-                    value={meldingText}
-                    onChange={(e) => setMeldingText(e.target.value)}
-                    rows={3}
-                    placeholder="Beschrijf kort wat admin moet controleren of aanpassen..."
-                    className="mt-2 w-full resize-none border border-zinc-600 bg-[#111] px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-[#ff4d00]"
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  onClick={submitMelding}
-                  disabled={meldingSaving || !meldingText.trim()}
-                  className="inline-flex min-h-[42px] items-center justify-center gap-2 border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {meldingSaving ? <RefreshCw size={17} className="animate-spin" /> : <Send size={17} />}
-                  Verstuur
-                </button>
-              </div>
-
-              {meldingMsg && (
-                <div className="mt-3 border border-zinc-700 bg-[#1c1c1c] p-3 text-sm font-bold text-zinc-200">
-                  {meldingMsg}
-                </div>
-              )}
-            </div>
 
             {fighter.scrape_error && (
               <div className="mb-3 rounded-[1rem] border-2 border-[#ff7a3d]/60 bg-[#24170f] p-3 text-[#ffd2bd] shadow-xl shadow-black/50">

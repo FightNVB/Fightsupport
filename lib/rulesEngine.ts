@@ -1082,6 +1082,77 @@ function getFighterGymName(ctx: any, hoek: "rood" | "blauw"): string {
   return gym || "Onbekende sportschool";
 }
 
+
+function hasFightPassportScrapeInfo(ctx: any, hoek: "rood" | "blauw"): boolean {
+  // Alleen echte FightPassport/scrape velden tellen hier mee.
+  // MM-velden tellen bewust niet mee: als VA verkeerd is en fighters_raw leeg blijft,
+  // wil je een ACTIE "geen info", niet allerlei afkeuren op lege FP-data.
+  if (!ctx) return false;
+
+  const values =
+    hoek === "rood"
+      ? [
+          ctx?.rood_naam_fp,
+          ctx?.rood_naam_scrape,
+          ctx?.rood_geboortedatum_fp,
+          ctx?.rood_va_fp,
+          ctx?.rood_va_scrape,
+          ctx?.rood_licentie,
+          ctx?.rood_licentie_ok,
+          ctx?.rood_licentie_geldig,
+          ctx?.rood_licentie_status,
+          ctx?.rood_licentie_fp,
+          ctx?.rood_licentie_ja_nee,
+          ctx?.rood_heeft_startverbod,
+          ctx?.rood_totaal_wedstrijden_scrape,
+          ctx?.rood_uitslagen_per_discipline,
+          ctx?.rood_nulmeting_klasse,
+          ctx?.rood_nulmeting_opmerking,
+        ]
+      : [
+          ctx?.blauw_naam_fp,
+          ctx?.blauw_naam_scrape,
+          ctx?.blauw_geboortedatum_fp,
+          ctx?.blauw_va_fp,
+          ctx?.blauw_va_scrape,
+          ctx?.blauw_licentie,
+          ctx?.blauw_licentie_ok,
+          ctx?.blauw_licentie_geldig,
+          ctx?.blauw_licentie_status,
+          ctx?.blauw_licentie_fp,
+          ctx?.blauw_licentie_ja_nee,
+          ctx?.blauw_heeft_startverbod,
+          ctx?.blauw_totaal_wedstrijden_scrape,
+          ctx?.blauw_uitslagen_per_discipline,
+          ctx?.blauw_nulmeting_klasse,
+          ctx?.blauw_nulmeting_opmerking,
+        ];
+
+  return values.some((v) => cleanTournamentValue(v) !== "");
+}
+
+function buildGeenFightPassportInfoHit(opts: {
+  matchmaking_id: string;
+  partij_nr: number | null;
+  bout_id: string | null;
+  hoek: "rood" | "blauw";
+  naam: string;
+  va: string;
+}): RuleHit {
+  const label = opts.hoek === "rood" ? "Rood" : "Blauw";
+  return {
+    matchmaking_id: opts.matchmaking_id,
+    partij_nr: opts.partij_nr,
+    bout_id: opts.bout_id,
+    hoek: opts.hoek,
+    rule: `Geen FightPassport-info (${opts.hoek})`,
+    rule_code: `GEEN_FIGHTPASSPORT_INFO_${opts.hoek.toUpperCase()}`,
+    resultaat: "ACTIE",
+    severity: "warning",
+    boodschap: `${label} ${opts.naam} heeft VA ${opts.va}, maar er is geen FightPassport/scrape-info gevonden. Controleer of het VA-nummer klopt.`,
+  };
+}
+
 function isBelgischeSportschoolReason(v: any): boolean {
   const s = String(v ?? "").toLowerCase().trim();
   if (!s) return false;
@@ -2092,6 +2163,45 @@ export async function rulesEngine(opts: {
       );
     }
 
+    const roodHeeftFightPassportInfo =
+      skipLicentieEnKeurmerk || !vaRood || hasFightPassportScrapeInfo(ctx, "rood");
+    const blauwHeeftFightPassportInfo =
+      skipLicentieEnKeurmerk || !vaBlauw || hasFightPassportScrapeInfo(ctx, "blauw");
+
+    if (!skipLicentieEnKeurmerk && vaRood && !roodHeeftFightPassportInfo) {
+      pushTournamentPersonHit(
+        hits,
+        tournamentSeen,
+        buildGeenFightPassportInfoHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          hoek: "rood",
+          naam: getFighterDisplayName(ctx, "rood"),
+          va: vaRood,
+        }),
+        ctx,
+        "rood"
+      );
+    }
+
+    if (!skipLicentieEnKeurmerk && vaBlauw && !blauwHeeftFightPassportInfo) {
+      pushTournamentPersonHit(
+        hits,
+        tournamentSeen,
+        buildGeenFightPassportInfoHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          hoek: "blauw",
+          naam: getFighterDisplayName(ctx, "blauw"),
+          va: vaBlauw,
+        }),
+        ctx,
+        "blauw"
+      );
+    }
+
     const jeugd = isJeugdFromCtx(ctx);
     const volwassenen = isVolwassenePair(ctx);
     const mma = isMmaBout(ctx);
@@ -2200,7 +2310,7 @@ export async function rulesEngine(opts: {
       const blauwNaamMM = ctx?.blauw_naam_mm;
       const blauwNaamFP = ctx?.blauw_naam_fp ?? ctx?.blauw_naam_scrape;
 
-      if (!nameSimilar(roodNaamMM, roodNaamFP)) {
+      if (roodHeeftFightPassportInfo && !nameSimilar(roodNaamMM, roodNaamFP)) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2217,7 +2327,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!nameSimilar(blauwNaamMM, blauwNaamFP)) {
+      if (blauwHeeftFightPassportInfo && !nameSimilar(blauwNaamMM, blauwNaamFP)) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2241,7 +2351,7 @@ export async function rulesEngine(opts: {
       const redenR = String(ctx?.keurmerk_reden_rood ?? "").trim();
       const redenB = String(ctx?.keurmerk_reden_blauw ?? "").trim();
 
-      if (!skipLicentieEnKeurmerk && hasRood && isBelgischeSportschoolCtx(ctx, "rood")) {
+      if (!skipLicentieEnKeurmerk && hasRood && roodHeeftFightPassportInfo && isBelgischeSportschoolCtx(ctx, "rood")) {
         const naam = getFighterDisplayName(ctx, "rood");
         const gym = getFighterGymName(ctx, "rood");
 
@@ -2263,7 +2373,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!skipLicentieEnKeurmerk && hasBlauw && isBelgischeSportschoolCtx(ctx, "blauw")) {
+      if (!skipLicentieEnKeurmerk && hasBlauw && blauwHeeftFightPassportInfo && isBelgischeSportschoolCtx(ctx, "blauw")) {
         const naam = getFighterDisplayName(ctx, "blauw");
         const gym = getFighterGymName(ctx, "blauw");
 
@@ -2285,7 +2395,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!skipLicentieEnKeurmerk && kR == null) {
+      if (!skipLicentieEnKeurmerk && roodHeeftFightPassportInfo && kR == null) {
         const naam = getFighterDisplayName(ctx, "rood");
         const gym = getFighterGymName(ctx, "rood");
 
@@ -2305,7 +2415,7 @@ export async function rulesEngine(opts: {
           ctx,
           "rood"
         );
-      } else if (!skipLicentieEnKeurmerk && hasRood && kR === false) {
+      } else if (!skipLicentieEnKeurmerk && hasRood && roodHeeftFightPassportInfo && kR === false) {
         const naam = getFighterDisplayName(ctx, "rood");
         const gym = getFighterGymName(ctx, "rood");
 
@@ -2329,7 +2439,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!skipLicentieEnKeurmerk && kB == null) {
+      if (!skipLicentieEnKeurmerk && blauwHeeftFightPassportInfo && kB == null) {
         const naam = getFighterDisplayName(ctx, "blauw");
         const gym = getFighterGymName(ctx, "blauw");
 
@@ -2349,7 +2459,7 @@ export async function rulesEngine(opts: {
           ctx,
           "blauw"
         );
-      } else if (!skipLicentieEnKeurmerk && hasBlauw && kB === false) {
+      } else if (!skipLicentieEnKeurmerk && hasBlauw && blauwHeeftFightPassportInfo && kB === false) {
         const naam = getFighterDisplayName(ctx, "blauw");
         const gym = getFighterGymName(ctx, "blauw");
 
@@ -2400,7 +2510,7 @@ export async function rulesEngine(opts: {
       const sbR_has = sbR === "ja" || sbR === "true" || sbR === "1";
       const sbB_has = sbB === "ja" || sbB === "true" || sbB === "1";
 
-      if (sbR_has) {
+      if (roodHeeftFightPassportInfo && sbR_has) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2417,7 +2527,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (sbB_has) {
+      if (blauwHeeftFightPassportInfo && sbB_has) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2452,7 +2562,7 @@ export async function rulesEngine(opts: {
         licB === "1" ||
         licB === "geldig";
 
-      if (!skipLicentieEnKeurmerk && !licR_ok) {
+      if (!skipLicentieEnKeurmerk && roodHeeftFightPassportInfo && !licR_ok) {
         const naam = getFighterDisplayName(ctx, "rood");
         const licWaarde = String(ctx?.rood_licentie ?? "").trim() || "leeg";
 
@@ -2474,7 +2584,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!skipLicentieEnKeurmerk && !licB_ok) {
+      if (!skipLicentieEnKeurmerk && blauwHeeftFightPassportInfo && !licB_ok) {
         const naam = getFighterDisplayName(ctx, "blauw");
         const licWaarde = String(ctx?.blauw_licentie ?? "").trim() || "leeg";
 
@@ -2910,20 +3020,24 @@ export async function rulesEngine(opts: {
         }
       }
 
-      const roodOk = canFightAdultKbMtBoutClassFromRecord({
-        fighterKlasse: roodK,
-        boutK,
-        baseK: baseR,
-        winsInBase: recR.wins,
-        totalInBase: recR.total,
-      });
-      const blauwOk = canFightAdultKbMtBoutClassFromRecord({
-        fighterKlasse: blauwK,
-        boutK,
-        baseK: baseB,
-        winsInBase: recB.wins,
-        totalInBase: recB.total,
-      });
+      const roodOk =
+        !roodHeeftFightPassportInfo ||
+        canFightAdultKbMtBoutClassFromRecord({
+          fighterKlasse: roodK,
+          boutK,
+          baseK: baseR,
+          winsInBase: recR.wins,
+          totalInBase: recR.total,
+        });
+      const blauwOk =
+        !blauwHeeftFightPassportInfo ||
+        canFightAdultKbMtBoutClassFromRecord({
+          fighterKlasse: blauwK,
+          boutK,
+          baseK: baseB,
+          winsInBase: recB.wins,
+          totalInBase: recB.total,
+        });
 
       // Geen automatische promotie op basis van jeugd-ervaring.
       // Vanaf 18 jaar is startpunt N. Jeugd kan wel reden zijn voor handmatige beoordeling,
@@ -2934,7 +3048,7 @@ export async function rulesEngine(opts: {
       const jeugdB = getJeugdExperienceStats(rowsB);
       const requestedHigherThanN = !!boutK && idxKlasse(boutK) > idxKlasse("N");
 
-      if (requestedHigherThanN && !roodOk && roodK === "N") {
+      if (requestedHigherThanN && roodHeeftFightPassportInfo && !roodOk && roodK === "N") {
         // Alleen echte jeugd-uitslagen tellen hier als jeugd-ervaring.
         // Scraped totaal_wedstrijden mag hier NIET gebruikt worden, want dat bevat ook volwassen N/C/B/A partijen.
         const hasJeugdErvaring = jeugdR.total > 0;
@@ -2960,7 +3074,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (requestedHigherThanN && !blauwOk && blauwK === "N") {
+      if (requestedHigherThanN && blauwHeeftFightPassportInfo && !blauwOk && blauwK === "N") {
         // Alleen echte jeugd-uitslagen tellen hier als jeugd-ervaring.
         // Scraped totaal_wedstrijden mag hier NIET gebruikt worden, want dat bevat ook volwassen N/C/B/A partijen.
         const hasJeugdErvaring = jeugdB.total > 0;
