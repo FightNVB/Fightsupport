@@ -1397,7 +1397,7 @@ export default function FightersPage() {
     setMsg("");
     try {
       const res = await authedFetch(
-        `/api/matchmaker/${matchmakingId}/gecontroleerde-aanmeldingen/excel`,
+        `/api/rapport/matchmaker-gecontroleerde-aanmeldingen-excel?matchmakingId=${encodeURIComponent(matchmakingId)}`,
       );
 
       if (!res.ok) {
