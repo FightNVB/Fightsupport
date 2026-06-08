@@ -22,7 +22,19 @@ type MenuAction = {
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
-const ALLOWED_MENU_ROLES = ["official", "hoofdofficial", "admin", "superadmin"];
+const ALLOWED_MENU_ROLES = ["official", "hoofdofficial", "admin", "superadmin"] as const;
+
+function normalizeRole(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().toLowerCase();
+}
+
+function canOpenOfficialsMenu(roleList: readonly unknown[]): boolean {
+  const normalizedRoles = roleList.map(normalizeRole);
+  return normalizedRoles.some((role) =>
+    ALLOWED_MENU_ROLES.includes(role as (typeof ALLOWED_MENU_ROLES)[number]),
+  );
+}
 
 
 const pageBackground: CSSProperties = {
@@ -160,7 +172,7 @@ export default function OfficialsDashboardPage() {
     }
 
     const roleList = roles ?? [];
-    const allowed = roleList.some((role) => ALLOWED_MENU_ROLES.includes(role));
+    const allowed = canOpenOfficialsMenu(roleList);
 
     if (!loading && user && !allowed) {
       router.replace("/dashboard");
@@ -178,7 +190,7 @@ export default function OfficialsDashboardPage() {
   if (!user) return null;
 
   const roleList = roles ?? [];
-  const allowed = roleList.some((role) => ALLOWED_MENU_ROLES.includes(role));
+  const allowed = canOpenOfficialsMenu(roleList);
 
   if (!allowed) return null;
 
