@@ -160,7 +160,7 @@ export default function OfficialsDashboardPage() {
     }
 
     const roleList = roles ?? [];
-    const allowed = ALLOWED_MENU_ROLES.some((role) => roleList.includes(role));
+    const allowed = roleList.some((role) => ALLOWED_MENU_ROLES.includes(role));
 
     if (!loading && user && !allowed) {
       router.replace("/dashboard");
@@ -178,7 +178,7 @@ export default function OfficialsDashboardPage() {
   if (!user) return null;
 
   const roleList = roles ?? [];
-  const allowed = ALLOWED_MENU_ROLES.some((role) => roleList.includes(role));
+  const allowed = roleList.some((role) => ALLOWED_MENU_ROLES.includes(role));
 
   if (!allowed) return null;
 
