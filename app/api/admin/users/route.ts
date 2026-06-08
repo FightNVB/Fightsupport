@@ -19,8 +19,11 @@ const KNOWN_ROLES = [
   "hoofdofficial",
   "dispensatie_admin",
   "trainer",
-  "sportschool",
 ];
+
+const ROLE_ALIASES: Record<string, string> = {
+  sportschool: "trainer",
+};
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -37,7 +40,8 @@ function normalizeEmail(v: unknown) {
 
 function normalizeRole(value: unknown) {
   const raw = String(value ?? "").trim().toLowerCase();
-  return KNOWN_ROLES.includes(raw) ? raw : raw;
+  const mapped = ROLE_ALIASES[raw] ?? raw;
+  return KNOWN_ROLES.includes(mapped) ? mapped : mapped;
 }
 
 function normalizeRoles(value: unknown): string[] {
@@ -86,6 +90,52 @@ async function findAuthUserByEmail(email: string) {
   }
 
   return null;
+}
+
+async function ensureAuthUser(input: {
+  req: Request;
+  email: string;
+  full_name: string | null;
+  roles: string[];
+  bondteam: string | null;
+}) {
+  const role = input.roles[0] ?? "matchmaker";
+  const existing = await findAuthUserByEmail(input.email);
+
+  if (existing?.id) {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
+      user_metadata: {
+        full_name: input.full_name,
+        role,
+        roles: input.roles,
+        bondteam: input.bondteam,
+      },
+      app_metadata: {
+        role,
+        roles: input.roles,
+        bondteam: input.bondteam,
+      },
+    });
+
+    if (error) throw error;
+    return { authUser: existing, invited: false };
+  }
+
+  const redirectTo = `${getBaseUrl(input.req)}/login/set`;
+  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(input.email, {
+    redirectTo,
+    data: {
+      full_name: input.full_name,
+      role,
+      roles: input.roles,
+      bondteam: input.bondteam,
+    },
+  });
+
+  if (error) throw error;
+  if (!data?.user?.id) throw new Error("Kon geen auth user id krijgen");
+
+  return { authUser: data.user, invited: true };
 }
 
 async function syncAuthMetadata(
@@ -164,6 +214,31 @@ async function getUserRoleNames(userId: string): Promise<string[]> {
   return Array.from(new Set([...roleNamesFromIds, ...directRoles]));
 }
 
+async function syncPublicUser(input: {
+  userId: string;
+  authId: string;
+  email: string;
+  full_name: string | null;
+}) {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .upsert(
+      {
+        id: input.userId,
+        auth_id: input.authId,
+        email: input.email,
+        full_name: input.full_name,
+        status: "active",
+      },
+      { onConflict: "id" }
+    )
+    .select("id,auth_id,email,full_name,status,created_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 async function syncUserRoles(userId: string, roleNames: string[]) {
   const cleanRoles = normalizeRoles(roleNames);
 
@@ -229,14 +304,6 @@ async function upsertProfile(input: {
   if (error) throw error;
 
   const syncedRoles = await syncUserRoles(input.userId, roles);
-
-  await syncAuthMetadata(input.userId, {
-    full_name: input.full_name,
-    role: primaryRole,
-    roles: syncedRoles,
-    bondteam: input.bondteam,
-  });
-
   return { ...data, roles: syncedRoles };
 }
 
@@ -281,29 +348,25 @@ export async function POST(req: Request) {
     const email = normalizeEmail(body?.email);
     const full_name = cleanString(body?.full_name);
     const roles = normalizeRoles(body?.roles ?? body?.role ?? "matchmaker");
-    const role = roles[0] ?? "matchmaker";
     const bondteam = cleanString(body?.bondteam);
 
     if (!email) return jsonError("Email is verplicht", 400);
     if (roles.length === 0) return jsonError("Minimaal één rol is verplicht", 400);
 
-    const redirectTo = `${getBaseUrl(req)}/login/set`;
-    let authUser = await findAuthUserByEmail(email);
-    let invited = false;
+    const { authUser, invited } = await ensureAuthUser({
+      req,
+      email,
+      full_name,
+      roles,
+      bondteam,
+    });
 
-    if (!authUser) {
-      const { data: invite, error: inviteErr } =
-        await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-          redirectTo,
-          data: { full_name, role, roles, bondteam },
-        });
-
-      if (inviteErr) return jsonError(inviteErr.message, 500);
-      authUser = invite?.user ?? null;
-      invited = true;
-    }
-
-    if (!authUser?.id) return jsonError("Kon geen auth user id krijgen", 500);
+    const publicUser = await syncPublicUser({
+      userId: authUser.id,
+      authId: authUser.id,
+      email,
+      full_name,
+    });
 
     const user = await upsertProfile({
       userId: authUser.id,
@@ -314,12 +377,14 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({
-      user,
+      user: {
+        ...user,
+        public_user: publicUser,
+      },
       invited,
-      redirectTo,
       message: invited
-        ? "Uitnodiging verzonden."
-        : "Bestaande auth user gekoppeld en profiel bijgewerkt.",
+        ? "Uitnodiging verzonden en gebruiker opgeslagen in auth.users, users, user_profiles en user_roles."
+        : "Bestaande auth user bijgewerkt en opgeslagen in users, user_profiles en user_roles.",
     });
   } catch (e: any) {
     if (e instanceof Response) return e;
@@ -355,8 +420,22 @@ export async function PATCH(req: Request) {
         : primaryRole;
     }
 
-    if (Object.keys(patch).length === 0 && !("roles" in body)) {
+    const publicPatch: Record<string, any> = {};
+    if ("email" in body) publicPatch.email = normalizeEmail(body.email);
+    if ("full_name" in body) publicPatch.full_name = cleanString(body.full_name);
+    if ("status" in body) publicPatch.status = cleanString(body.status) ?? "active";
+
+    if (Object.keys(patch).length === 0 && Object.keys(publicPatch).length === 0 && !("roles" in body)) {
       return jsonError("Geen wijzigingen ontvangen", 400);
+    }
+
+    if (Object.keys(publicPatch).length > 0) {
+      const { error: publicUserErr } = await supabaseAdmin
+        .from("users")
+        .update(publicPatch)
+        .eq("id", id);
+
+      if (publicUserErr) return jsonError(`users bijwerken mislukt: ${publicUserErr.message}`, 500);
     }
 
     const { data, error } = await supabaseAdmin
@@ -408,14 +487,6 @@ export async function DELETE(req: Request) {
 
     const cleanupWarnings: string[] = [];
 
-    const { data: profileBeforeDelete } = await supabaseAdmin
-      .from("user_profiles")
-      .select("id,email")
-      .eq("id", id)
-      .maybeSingle();
-
-    const email = normalizeEmail(profileBeforeDelete?.email ?? body?.email);
-
     const { error: roleErr } = await supabaseAdmin
       .from("user_roles")
       .delete()
@@ -427,9 +498,6 @@ export async function DELETE(req: Request) {
 
     if (roleErr) cleanupWarnings.push(`user_roles overgeslagen: ${roleErr.message}`);
 
-    // Let op: public.users wordt niet meer gebruikt in deze nieuwe account-flow.
-    // Nieuwe/beheerde accounts staan alleen in auth.users, user_profiles en user_roles.
-
     const { error: profileErr } = await supabaseAdmin
       .from("user_profiles")
       .delete()
@@ -439,17 +507,22 @@ export async function DELETE(req: Request) {
       return jsonError(`user_profiles verwijderen mislukt: ${profileErr.message}`, 500);
     }
 
+    const { error: publicUserErr } = await supabaseAdmin
+      .from("users")
+      .delete()
+      .eq("id", id);
+
+    if (publicUserErr && !isMissingLegacyTableOrColumn(publicUserErr)) {
+      return jsonError(`users verwijderen mislukt: ${publicUserErr.message}`, 500);
+    }
+
+    if (publicUserErr) cleanupWarnings.push(`users overgeslagen: ${publicUserErr.message}`);
+
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(id);
 
-    // Supabase Auth kan soms nog "Database error deleting user" teruggeven
-    // nadat de public-tabellen al netjes zijn opgeruimd. In dat geval willen we
-    // niet alsnog een 500 naar de UI sturen, want de beheeractie is praktisch
-    // afgerond. We geven de melding als warning terug zodat je hem nog kunt zien.
     if (authErr) {
       const authMessage = String(authErr.message ?? "");
-      const authMessageLower = authMessage.toLowerCase();
-
-      if (!authMessageLower.includes("not found")) {
+      if (!authMessage.toLowerCase().includes("not found")) {
         cleanupWarnings.push(`Auth user cleanup melding: ${authMessage}`);
       }
     }
@@ -458,6 +531,7 @@ export async function DELETE(req: Request) {
       ok: true,
       deleted: {
         auth_user: !authErr,
+        users: !publicUserErr,
         user_profiles: true,
         user_roles: !roleErr,
       },
