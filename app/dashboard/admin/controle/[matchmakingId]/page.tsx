@@ -1217,8 +1217,106 @@ function toNumberLoose(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+
+function firstFilled(...vals: any[]) {
+  for (const v of vals) {
+    if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  }
+  return null;
+}
+
+function parseJsonObjectLoose(v: any): any {
+  if (!v) return {};
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return {};
+  }
+}
+
+function getResolvedMaxWeightRaw(row: AnyRow): any {
+  const extra = parseJsonObjectLoose(row?.extra);
+  const raw = parseJsonObjectLoose(row?.raw_json);
+  return firstFilled(
+    row?.max_gewicht,
+    row?.max_gewicht_mm,
+    row?.gewicht_max_mm,
+    row?.matchmaking_bouts_raw_max_gewicht,
+    row?.gewicht_max,
+    row?.max_kg,
+    row?.maximum_gewicht,
+    row?.gewichtslimiet,
+    extra?.max_gewicht,
+    extra?.max_kg,
+    extra?.gewicht_max,
+    extra?.maximum_gewicht,
+    extra?.gewichtslimiet,
+    raw?.max_gewicht,
+    raw?.max_kg,
+    raw?.gewicht_max,
+    raw?.maximum_gewicht,
+    raw?.gewichtslimiet,
+  );
+}
+
+function getResolvedMaxWeightNumber(row: AnyRow): number | null {
+  const raw = getResolvedMaxWeightRaw(row);
+  const n = toNumberLoose(raw);
+  return n == null ? null : Math.abs(n);
+}
+
+function mergeRawMaxWeightIntoContextRows(ctxRows: AnyRow[], rawRows: AnyRow[]): AnyRow[] {
+  if (!ctxRows.length || !rawRows.length) return ctxRows;
+
+  const rawByPartij = new Map<number, AnyRow>();
+  const rawById = new Map<string, AnyRow>();
+
+  for (const raw of rawRows) {
+    const pn = Number(raw?.partij_nr);
+    if (Number.isFinite(pn)) rawByPartij.set(pn, raw);
+
+    for (const key of [raw?.id, raw?.bout_uid, raw?.source_matchmaker_bout_id]) {
+      const id = String(key ?? "").trim();
+      if (id) rawById.set(id, raw);
+    }
+  }
+
+  return ctxRows.map((ctx) => {
+    const ids = [ctx?.bout_id, ctx?.bout_uid, ctx?.raw_bout_id, ctx?.matchmaker_bout_id, ctx?.source_matchmaker_bout_id]
+      .map((v) => String(v ?? "").trim())
+      .filter(Boolean);
+
+    let raw: AnyRow | undefined;
+    for (const id of ids) {
+      raw = rawById.get(id);
+      if (raw) break;
+    }
+
+    const pn = Number(ctx?.partij_nr);
+    if (!raw && Number.isFinite(pn)) raw = rawByPartij.get(pn);
+    if (!raw) return ctx;
+
+    const next = { ...ctx };
+
+    const maxWeight = getResolvedMaxWeightRaw(raw);
+    if (firstFilled(next.max_gewicht, next.max_gewicht_mm, next.matchmaking_bouts_raw_max_gewicht) == null && maxWeight != null) {
+      next.max_gewicht = maxWeight;
+      next.matchmaking_bouts_raw_max_gewicht = maxWeight;
+    }
+
+    for (const key of ["max_gewicht_notatie", "max_gewicht_type"]) {
+      if (firstFilled(next[key]) == null && firstFilled(raw?.[key]) != null) {
+        next[key] = raw[key];
+      }
+    }
+
+    return next;
+  });
+}
+
 function getBoutWeightForSort(r: AnyRow): number {
-  const maxKg = toNumberLoose(r?.max_gewicht);
+  const maxKg = getResolvedMaxWeightNumber(r);
   if (maxKg != null) return maxKg;
 
   const rood = toNumberLoose(r?.rood_gewicht);
@@ -2138,7 +2236,10 @@ export default function ControleMatchmakingPage() {
       blauw_gym: fBlauwGym.trim(),
       va_blauw: fBlauwVa.trim(),
       blauw_gewicht: toNum(fBlauwKg),
-      max_gewicht: toNum(fMaxKg),
+      max_gewicht: (() => {
+        const n = toNum(fMaxKg);
+        return n == null ? null : Math.abs(n);
+      })(),
     };
 
     if (
@@ -2477,7 +2578,17 @@ export default function ControleMatchmakingPage() {
         ctxRows = fallbackCtx.data ?? [];
       }
 
-      const ctxList = (ctxRows ?? []) as AnyRow[];
+      const { data: rawRows, error: rawErr } = await supabase
+        .from("matchmaking_bouts_raw")
+        .select("id, bout_uid, source_matchmaker_bout_id, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
+        .eq("matchmaking_id", matchmakingId);
+
+      if (rawErr) throw rawErr;
+
+      const ctxList = mergeRawMaxWeightIntoContextRows(
+        (ctxRows ?? []) as AnyRow[],
+        (rawRows ?? []) as AnyRow[],
+      );
       setRows(ctxList);
       syncOrderedRowsFromRows(ctxList);
 
@@ -3538,7 +3649,7 @@ export default function ControleMatchmakingPage() {
                         "-",
                       );
                       const maxGewichten = groep.rows
-                        .map((r) => toNumberLoose(r?.max_gewicht))
+                        .map((r) => getResolvedMaxWeightNumber(r))
                         .filter(
                           (v): v is number => v != null && Number.isFinite(v),
                         );
@@ -3966,7 +4077,7 @@ export default function ControleMatchmakingPage() {
 
                         const discipline = safeText(r.discipline, "-");
                         const klasse = safeText(r.klasse_mm ?? r.klasse, "-");
-                        const maxGewicht = toNumberLoose(r.max_gewicht);
+                        const maxGewicht = getResolvedMaxWeightNumber(r);
                         const isToernooi = isToernooiRow(r);
                         const dividerClass = zebraWhite
                           ? "border-t border-gray-400/70"

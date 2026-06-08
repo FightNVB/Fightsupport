@@ -414,6 +414,82 @@ function normalizeText(v: any) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+
+function hasFilledValue(v: any) {
+  return v !== null && v !== undefined && String(v).trim() !== "";
+}
+
+async function getMatchmakingRawMap(matchmaking_id: string) {
+  const byBoutId = new Map<string, any>();
+  const byPartijNr = new Map<number, any>();
+
+  const { data, error } = await supabase
+    .from("matchmaking_bouts_raw")
+    .select("id, bout_uid, source_matchmaker_bout_id, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    for (const key of [(row as any)?.id, (row as any)?.bout_uid, (row as any)?.source_matchmaker_bout_id]) {
+      const id = safe(key, "");
+      if (id) byBoutId.set(id, row as any);
+    }
+
+    const pn = Number((row as any)?.partij_nr);
+    if (Number.isFinite(pn)) byPartijNr.set(pn, row as any);
+  }
+
+  return { byBoutId, byPartijNr };
+}
+
+function mergeRawMaxWeightIntoContextRows(
+  ctxRows: any[],
+  rawMaps: { byBoutId: Map<string, any>; byPartijNr: Map<number, any> },
+) {
+  return (ctxRows ?? []).map((ctx) => {
+    const ids = [ctx?.bout_id, ctx?.bout_uid, ctx?.raw_bout_id, ctx?.matchmaker_bout_id, ctx?.source_matchmaker_bout_id]
+      .map((v) => safe(v, ""))
+      .filter(Boolean);
+
+    let raw: any = null;
+    for (const id of ids) {
+      raw = rawMaps.byBoutId.get(id);
+      if (raw) break;
+    }
+
+    const pn = Number(ctx?.partij_nr);
+    if (!raw && Number.isFinite(pn)) raw = rawMaps.byPartijNr.get(pn);
+    if (!raw) return ctx;
+
+    const next = { ...ctx };
+
+    const rawExtra = rawJsonObject(raw);
+    const rawWeight = pickFirst(
+      raw?.max_gewicht,
+      raw?.max_gewicht_kg,
+      raw?.maxgewicht,
+      raw?.gewichtslimiet,
+      rawExtra?.max_gewicht,
+      rawExtra?.max_gewicht_kg,
+      rawExtra?.maxgewicht,
+      rawExtra?.gewichtslimiet,
+    );
+
+    if (!hasFilledValue(pickFirst(next?.max_gewicht, next?.max_gewicht_kg, next?.maxgewicht, next?.gewichtslimiet)) && hasFilledValue(rawWeight)) {
+      next.max_gewicht = rawWeight;
+    }
+
+    for (const key of ["max_gewicht_notatie", "max_gewicht_type"]) {
+      if (!hasFilledValue(next?.[key]) && hasFilledValue(raw?.[key])) {
+        next[key] = raw[key];
+      }
+    }
+
+    return next;
+  });
+}
+
 function getDiscipline(ctx: any) {
   const extra = rawJsonObject(ctx);
   return safe(
@@ -1751,7 +1827,8 @@ export async function GET(req: Request) {
 
     if (ctxErr) throw ctxErr;
 
-    const ctxList = (ctxRows ?? []) as any[];
+    const rawMaps = await getMatchmakingRawMap(matchmaking_id);
+    const ctxList = mergeRawMaxWeightIntoContextRows((ctxRows ?? []) as any[], rawMaps);
     if (!ctxList.length) {
       return NextResponse.json(
         {

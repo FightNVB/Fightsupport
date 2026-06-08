@@ -1168,13 +1168,13 @@ async function getMatchmakingRawMap(matchmaking_id: string) {
 
   const { data, error } = await supabase
     .from("matchmaking_bouts_raw")
-    .select("bout_uid, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
+    .select("id, bout_uid, source_matchmaker_bout_id, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
     .eq("matchmaking_id", matchmaking_id);
 
   if (error) throw error;
 
   for (const row of data ?? []) {
-    const boutIdCandidates = [(row as any)?.bout_uid]
+    const boutIdCandidates = [(row as any)?.id, (row as any)?.bout_uid, (row as any)?.source_matchmaker_bout_id]
       .map((v: any) => safe(v, ""))
       .filter(Boolean);
 

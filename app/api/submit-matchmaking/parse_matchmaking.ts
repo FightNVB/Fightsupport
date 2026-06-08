@@ -166,6 +166,18 @@ function extractWeightMeta(raw: any, opts?: { allowClassNotation?: boolean }): P
   if (raw == null) return null;
 
   if (typeof raw === "number" && Number.isFinite(raw)) {
+    const abs = Math.abs(raw);
+
+    // ExcelJS geeft een cel met -63.5 vaak als number -63.5 terug.
+    // Dat is in matchmaking geen negatief gewicht, maar gewichtsklasse "tot 63.5".
+    if (allowClassNotation && raw < 0 && abs >= 10 && abs <= 200) {
+      return {
+        value: abs,
+        label: `-${formatWeightNumber(abs)}`,
+        type: "up_to",
+      };
+    }
+
     if (raw >= 10 && raw <= 200) {
       const label = formatWeightNumber(raw);
       return { value: raw, label, type: "exact" };
@@ -315,11 +327,11 @@ function parseAgreedWeightMeta(v: any): ParsedWeightMeta | null {
   const meta = extractWeightMeta(v, { allowClassNotation: true });
   if (!meta) return null;
 
-  // Afgesproken partijgewicht is altijd een MAX gewicht:
-  // - 62 / 62 kg / KG 62  => -62 (up_to)
-  // - -62 / -62 kg        => -62 (up_to)
-  // - 95+ / +95 / 95+ kg => 95+ (open_above / zwaar gewicht)
-  // Let op: plain 95 betekent dus -95. Alleen 95+ betekent zwaar gewicht.
+  // Afgesproken partijgewicht:
+  // - 62 / 62 kg / KG 62  => -62 (max / up_to)
+  // - -62 / -62 kg        => -62 (max / up_to)
+  // - 95+ / +95 / 95+ kg => 95+ (min / open_above)
+  // Let op: plain 95 betekent dus -95. Alleen 95+ betekent vanaf 95 kg.
   if (meta.type === "exact") {
     return {
       value: meta.value,
@@ -461,10 +473,21 @@ function applyAgreedWeightMeta(
 ) {
   if (!meta) return;
 
+  // +95 / 95+ betekent "vanaf 95 kg" en mag nooit als max_gewicht worden opgeslagen.
+  if (meta.type === "open_above") {
+    bout.min_gewicht = meta.value;
+    bout.min_gewicht_notatie = meta.label;
+    bout.extra.min_gewicht_type = meta.type;
+    return;
+  }
+
+  // -63.5 / 63.5 in afgesproken gewicht betekent altijd "tot 63.5 kg".
   if (kind === "max") {
     bout.max_gewicht = meta.value;
-    bout.max_gewicht_notatie = meta.label;
-    bout.extra.max_gewicht_type = meta.type;
+    bout.max_gewicht_notatie = meta.label.startsWith("-")
+      ? meta.label
+      : `-${formatWeightNumber(meta.value)}`;
+    bout.extra.max_gewicht_type = "up_to";
     return;
   }
 
