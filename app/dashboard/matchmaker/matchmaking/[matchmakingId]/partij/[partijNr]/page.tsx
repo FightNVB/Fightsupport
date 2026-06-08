@@ -1451,7 +1451,28 @@ export default function PartijDetailPage() {
     setEditBoutDiscipline(d);
     setEditBoutKlasse(k);
 
-    editDraftRef.current = { va, naam, gym, discipline: d, klasse: k };
+    const gewicht = String(
+      ctx?.[`${side}_gewicht_mm`] ??
+        ctx?.[`${side}_gewicht`] ??
+        "",
+    ).trim();
+    const geslacht = String(ctx?.geslacht ?? "").trim();
+    const maxGewicht = String(ctx?.max_gewicht ?? "").trim();
+
+    setEditGewicht(gewicht);
+    setEditGeslacht(geslacht);
+    setEditMaxGewicht(maxGewicht);
+
+    editDraftRef.current = {
+      va,
+      naam,
+      gym,
+      discipline: d,
+      klasse: k,
+      gewicht,
+      geslacht,
+      max_gewicht: maxGewicht,
+    };
     setEditMountKey((x) => x + 1);
     setEditOpen(side);
   }
@@ -1459,12 +1480,18 @@ export default function PartijDetailPage() {
   function closeEdit() {
     setEditBoutDiscipline("");
     setEditBoutKlasse("");
+    setEditGewicht("");
+    setEditGeslacht("");
+    setEditMaxGewicht("");
     editDraftRef.current = {
       va: "",
       naam: "",
       gym: "",
       discipline: "",
       klasse: "",
+      gewicht: "",
+      geslacht: "",
+      max_gewicht: "",
     };
     setEditOpen(null);
   }
