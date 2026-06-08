@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
+  { auth: { persistSession: false } },
 );
 
 const KNOWN_ROLES = [
@@ -35,11 +35,15 @@ function cleanString(v: unknown) {
 }
 
 function normalizeEmail(v: unknown) {
-  return String(v ?? "").trim().toLowerCase();
+  return String(v ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 function normalizeRole(value: unknown) {
-  const raw = String(value ?? "").trim().toLowerCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
   const mapped = ROLE_ALIASES[raw] ?? raw;
   return KNOWN_ROLES.includes(mapped) ? mapped : mapped;
 }
@@ -47,7 +51,9 @@ function normalizeRole(value: unknown) {
 function normalizeRoles(value: unknown): string[] {
   const input = Array.isArray(value) ? value : value ? [value] : [];
   return Array.from(
-    new Set(input.map((r) => normalizeRole(r)).filter((r) => KNOWN_ROLES.includes(r)))
+    new Set(
+      input.map((r) => normalizeRole(r)).filter((r) => KNOWN_ROLES.includes(r)),
+    ),
   );
 }
 
@@ -83,13 +89,25 @@ async function findAuthUserByEmail(email: string) {
     if (error) throw error;
 
     const users = data?.users ?? [];
-    const found = users.find((u) => String(u.email ?? "").toLowerCase() === target);
+    const found = users.find(
+      (u) => String(u.email ?? "").toLowerCase() === target,
+    );
     if (found) return found;
     if (users.length < perPage) return null;
     page += 1;
   }
 
   return null;
+}
+
+async function sendPasswordSetupMail(req: Request, email: string) {
+  const redirectTo = `${getBaseUrl(req)}/login/set`;
+
+  const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+
+  if (error) throw error;
 }
 
 async function ensureAuthUser(input: {
@@ -103,39 +121,60 @@ async function ensureAuthUser(input: {
   const existing = await findAuthUserByEmail(input.email);
 
   if (existing?.id) {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
-      user_metadata: {
+    const { data, error } = await supabaseAdmin.auth.admin.updateUserById(
+      existing.id,
+      {
+        user_metadata: {
+          full_name: input.full_name,
+          role,
+          roles: input.roles,
+          bondteam: input.bondteam,
+        },
+        app_metadata: {
+          role,
+          roles: input.roles,
+          bondteam: input.bondteam,
+        },
+      },
+    );
+
+    if (error) throw error;
+
+    // Supabase verstuurt bij een bestaande auth user geen nieuwe invite-mail.
+    // Daarom sturen we dan een password setup/reset mail naar dezelfde /login/set flow.
+    await sendPasswordSetupMail(input.req, input.email);
+
+    return {
+      authUser: data?.user ?? existing,
+      invited: false,
+      mailSent: true,
+      mailType: "password_setup",
+    };
+  }
+
+  const redirectTo = `${getBaseUrl(input.req)}/login/set`;
+  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+    input.email,
+    {
+      redirectTo,
+      data: {
         full_name: input.full_name,
         role,
         roles: input.roles,
         bondteam: input.bondteam,
       },
-      app_metadata: {
-        role,
-        roles: input.roles,
-        bondteam: input.bondteam,
-      },
-    });
-
-    if (error) throw error;
-    return { authUser: existing, invited: false };
-  }
-
-  const redirectTo = `${getBaseUrl(input.req)}/login/set`;
-  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(input.email, {
-    redirectTo,
-    data: {
-      full_name: input.full_name,
-      role,
-      roles: input.roles,
-      bondteam: input.bondteam,
     },
-  });
+  );
 
   if (error) throw error;
   if (!data?.user?.id) throw new Error("Kon geen auth user id krijgen");
 
-  return { authUser: data.user, invited: true };
+  return {
+    authUser: data.user,
+    invited: true,
+    mailSent: true,
+    mailType: "invite",
+  };
 }
 
 async function syncAuthMetadata(
@@ -145,7 +184,7 @@ async function syncAuthMetadata(
     role: string | null;
     roles: string[];
     bondteam: string | null;
-  }
+  },
 ) {
   const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
     user_metadata: {
@@ -192,8 +231,8 @@ async function getUserRoleNames(userId: string): Promise<string[]> {
     new Set(
       (userRoles ?? [])
         .map((r: any) => r.role_id)
-        .filter((id: any) => id !== null && id !== undefined)
-    )
+        .filter((id: any) => id !== null && id !== undefined),
+    ),
   );
 
   let roleNamesFromIds: string[] = [];
@@ -230,7 +269,7 @@ async function syncPublicUser(input: {
         full_name: input.full_name,
         status: "active",
       },
-      { onConflict: "id" }
+      { onConflict: "id" },
     )
     .select("id,auth_id,email,full_name,status,created_at")
     .single();
@@ -296,9 +335,11 @@ async function upsertProfile(input: {
         active_role: primaryRole,
         bondteam: input.bondteam,
       },
-      { onConflict: "id" }
+      { onConflict: "id" },
     )
-    .select("id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at")
+    .select(
+      "id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at",
+    )
     .single();
 
   if (error) throw error;
@@ -313,7 +354,9 @@ export async function GET(req: Request) {
   try {
     const { data, error } = await supabaseAdmin
       .from("user_profiles")
-      .select("id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at")
+      .select(
+        "id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at",
+      )
       .order("email", { ascending: true });
 
     if (error) return jsonError(error.message, 500);
@@ -323,14 +366,15 @@ export async function GET(req: Request) {
       rows.map(async (u: any) => {
         const roles = await getUserRoleNames(u.id).catch(() => []);
         const fallbackRole = normalizeRole(u.role);
-        const finalRoles = roles.length > 0 ? roles : fallbackRole ? [fallbackRole] : [];
+        const finalRoles =
+          roles.length > 0 ? roles : fallbackRole ? [fallbackRole] : [];
         return {
           ...u,
           roles: finalRoles,
           role: fallbackRole,
           active_role: normalizeRole(u.active_role),
         };
-      })
+      }),
     );
 
     return NextResponse.json({ users });
@@ -351,9 +395,10 @@ export async function POST(req: Request) {
     const bondteam = cleanString(body?.bondteam);
 
     if (!email) return jsonError("Email is verplicht", 400);
-    if (roles.length === 0) return jsonError("Minimaal één rol is verplicht", 400);
+    if (roles.length === 0)
+      return jsonError("Minimaal één rol is verplicht", 400);
 
-    const { authUser, invited } = await ensureAuthUser({
+    const { authUser, invited, mailSent, mailType } = await ensureAuthUser({
       req,
       email,
       full_name,
@@ -382,9 +427,11 @@ export async function POST(req: Request) {
         public_user: publicUser,
       },
       invited,
+      mail_sent: mailSent,
+      mail_type: mailType,
       message: invited
         ? "Uitnodiging verzonden en gebruiker opgeslagen in auth.users, users, user_profiles en user_roles."
-        : "Bestaande auth user bijgewerkt en opgeslagen in users, user_profiles en user_roles.",
+        : "Bestaande auth user bijgewerkt en wachtwoord/setup-mail opnieuw verzonden.",
     });
   } catch (e: any) {
     if (e instanceof Response) return e;
@@ -411,8 +458,10 @@ export async function PATCH(req: Request) {
     const patch: Record<string, any> = {};
     if ("full_name" in body) patch.full_name = cleanString(body.full_name);
     if ("bondteam" in body) patch.bondteam = cleanString(body.bondteam);
-    if ("active_sportschool_id" in body) patch.active_sportschool_id = cleanString(body.active_sportschool_id);
-    if ("meekijk_sportschool_id" in body) patch.meekijk_sportschool_id = cleanString(body.meekijk_sportschool_id);
+    if ("active_sportschool_id" in body)
+      patch.active_sportschool_id = cleanString(body.active_sportschool_id);
+    if ("meekijk_sportschool_id" in body)
+      patch.meekijk_sportschool_id = cleanString(body.meekijk_sportschool_id);
     if ("roles" in body || "role" in body) {
       patch.role = primaryRole;
       patch.active_role = roles.includes(normalizeRole(body?.active_role))
@@ -422,10 +471,16 @@ export async function PATCH(req: Request) {
 
     const publicPatch: Record<string, any> = {};
     if ("email" in body) publicPatch.email = normalizeEmail(body.email);
-    if ("full_name" in body) publicPatch.full_name = cleanString(body.full_name);
-    if ("status" in body) publicPatch.status = cleanString(body.status) ?? "active";
+    if ("full_name" in body)
+      publicPatch.full_name = cleanString(body.full_name);
+    if ("status" in body)
+      publicPatch.status = cleanString(body.status) ?? "active";
 
-    if (Object.keys(patch).length === 0 && Object.keys(publicPatch).length === 0 && !("roles" in body)) {
+    if (
+      Object.keys(patch).length === 0 &&
+      Object.keys(publicPatch).length === 0 &&
+      !("roles" in body)
+    ) {
       return jsonError("Geen wijzigingen ontvangen", 400);
     }
 
@@ -435,19 +490,26 @@ export async function PATCH(req: Request) {
         .update(publicPatch)
         .eq("id", id);
 
-      if (publicUserErr) return jsonError(`users bijwerken mislukt: ${publicUserErr.message}`, 500);
+      if (publicUserErr)
+        return jsonError(
+          `users bijwerken mislukt: ${publicUserErr.message}`,
+          500,
+        );
     }
 
     const { data, error } = await supabaseAdmin
       .from("user_profiles")
       .update(patch)
       .eq("id", id)
-      .select("id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at")
+      .select(
+        "id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at",
+      )
       .single();
 
     if (error) return jsonError(error.message, 500);
 
-    const syncedRoles = "roles" in body ? await syncUserRoles(id, roles) : roles;
+    const syncedRoles =
+      "roles" in body ? await syncUserRoles(id, roles) : roles;
 
     await syncAuthMetadata(id, {
       full_name: data.full_name ?? null,
@@ -493,10 +555,14 @@ export async function DELETE(req: Request) {
       .eq("user_id", id);
 
     if (roleErr && !isMissingLegacyTableOrColumn(roleErr)) {
-      return jsonError(`user_roles verwijderen mislukt: ${roleErr.message}`, 500);
+      return jsonError(
+        `user_roles verwijderen mislukt: ${roleErr.message}`,
+        500,
+      );
     }
 
-    if (roleErr) cleanupWarnings.push(`user_roles overgeslagen: ${roleErr.message}`);
+    if (roleErr)
+      cleanupWarnings.push(`user_roles overgeslagen: ${roleErr.message}`);
 
     const { error: profileErr } = await supabaseAdmin
       .from("user_profiles")
@@ -504,7 +570,10 @@ export async function DELETE(req: Request) {
       .eq("id", id);
 
     if (profileErr) {
-      return jsonError(`user_profiles verwijderen mislukt: ${profileErr.message}`, 500);
+      return jsonError(
+        `user_profiles verwijderen mislukt: ${profileErr.message}`,
+        500,
+      );
     }
 
     const { error: publicUserErr } = await supabaseAdmin
@@ -513,10 +582,14 @@ export async function DELETE(req: Request) {
       .eq("id", id);
 
     if (publicUserErr && !isMissingLegacyTableOrColumn(publicUserErr)) {
-      return jsonError(`users verwijderen mislukt: ${publicUserErr.message}`, 500);
+      return jsonError(
+        `users verwijderen mislukt: ${publicUserErr.message}`,
+        500,
+      );
     }
 
-    if (publicUserErr) cleanupWarnings.push(`users overgeslagen: ${publicUserErr.message}`);
+    if (publicUserErr)
+      cleanupWarnings.push(`users overgeslagen: ${publicUserErr.message}`);
 
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(id);
 
