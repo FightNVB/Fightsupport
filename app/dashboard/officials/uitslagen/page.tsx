@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, ShieldCheck } from "lucide-react";
@@ -22,9 +21,15 @@ type Row = {
 type UserProfile = { bondteam: string | null };
 type ActiveTab = "active" | "done";
 
-function clean(v: unknown) { return String(v ?? "").trim(); }
-function norm(v: unknown) { return clean(v).toUpperCase(); }
-function lower(v: unknown) { return clean(v).toLowerCase(); }
+function clean(v: unknown) {
+  return String(v ?? "").trim();
+}
+function norm(v: unknown) {
+  return clean(v).toUpperCase();
+}
+function lower(v: unknown) {
+  return clean(v).toLowerCase();
+}
 
 function formatDate(v: string | null) {
   if (!v) return "-";
@@ -44,13 +49,18 @@ export default function OfficialsUitslagenPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("active");
 
   const allowed = useMemo(
-    () => roles?.some((r) => ["official", "hoofdofficial", "admin", "superadmin"].includes(String(r).toLowerCase())) ?? false,
-    [roles]
+    () =>
+      roles?.some((r) =>
+        ["official", "hoofdofficial", "admin", "superadmin"].includes(
+          String(r).toLowerCase(),
+        ),
+      ) ?? false,
+    [roles],
   );
 
   const isSuperadmin = useMemo(
     () => roles?.some((r) => String(r).toLowerCase() === "superadmin") ?? false,
-    [roles]
+    [roles],
   );
 
   const canSeeAllBonds = isSuperadmin && norm(myBondteam) === "NVB";
@@ -62,7 +72,10 @@ export default function OfficialsUitslagenPage() {
       .eq("id", userId)
       .maybeSingle<UserProfile>();
 
-    if (error) throw new Error(`Bondteam ophalen uit user_profiles mislukt: ${error.message}`);
+    if (error)
+      throw new Error(
+        `Bondteam ophalen uit user_profiles mislukt: ${error.message}`,
+      );
     return clean(data?.bondteam).toUpperCase();
   }
 
@@ -77,7 +90,9 @@ export default function OfficialsUitslagenPage() {
 
       if (!profileBondteam) {
         setRows([]);
-        setMelding("Geen bondteam gevonden in user_profiles. Zet bondteam op de gebruiker om uitslagen te tonen.");
+        setMelding(
+          "Geen bondteam gevonden in user_profiles. Zet bondteam op de gebruiker om uitslagen te tonen.",
+        );
         return;
       }
 
@@ -89,10 +104,20 @@ export default function OfficialsUitslagenPage() {
         { data: mmRows, error: mmError },
       ] = await Promise.all([
         supabase.from("uitslagen_runs").select("id, matchmaking_id, status"),
-        supabase.from("uitslagen_bouts").select("uitslagen_run_id, matchmaking_id, partij_nr"),
-        supabase.from("uitslagen_resultaten").select("uitslagen_run_id, matchmaking_id, uitslag_status"),
-        supabase.from("matchmaking_uploads").select("matchmaking_id, bondteam, evenement_naam, evenement_datum"),
-        supabase.from("matchmakings").select("id, naam, datum, bondteam, huidige_eigenaar_bondteam, stadium, status"),
+        supabase
+          .from("uitslagen_bouts")
+          .select("uitslagen_run_id, matchmaking_id, partij_nr"),
+        supabase
+          .from("uitslagen_resultaten")
+          .select("uitslagen_run_id, matchmaking_id, uitslag_status"),
+        supabase
+          .from("matchmaking_uploads")
+          .select("matchmaking_id, bondteam, evenement_naam, evenement_datum"),
+        supabase
+          .from("matchmakings")
+          .select(
+            "id, naam, datum, bondteam, huidige_eigenaar_bondteam, stadium, status",
+          ),
       ]);
 
       if (runError) throw runError;
@@ -101,7 +126,9 @@ export default function OfficialsUitslagenPage() {
       if (uploadError) throw uploadError;
       if (mmError) throw mmError;
 
-      const uploadById = new Map((uploadRows ?? []).map((r: any) => [String(r.matchmaking_id), r]));
+      const uploadById = new Map(
+        (uploadRows ?? []).map((r: any) => [String(r.matchmaking_id), r]),
+      );
       const mmById = new Map((mmRows ?? []).map((r: any) => [String(r.id), r]));
       const byRun = new Map<string, Row>();
 
@@ -112,7 +139,9 @@ export default function OfficialsUitslagenPage() {
 
         const upload: any = uploadById.get(mmid) ?? {};
         const mm: any = mmById.get(mmid) ?? {};
-        const rowBondteam = norm(upload?.bondteam || mm?.huidige_eigenaar_bondteam || mm?.bondteam);
+        const rowBondteam = norm(
+          upload?.bondteam || mm?.huidige_eigenaar_bondteam || mm?.bondteam,
+        );
 
         if (!canSeeAllBonds && rowBondteam !== profileBondteam) continue;
 
@@ -124,7 +153,10 @@ export default function OfficialsUitslagenPage() {
           partijen: 0,
           ingevuld: 0,
           run_status: clean((run as any).status) || null,
-          finalized: lower((run as any).status) === "afgerond" || lower(mm?.status) === "uitslagen_definitief" || lower(mm?.stadium) === "uitslagen_definitief",
+          finalized:
+            lower((run as any).status) === "afgerond" ||
+            lower(mm?.status) === "uitslagen_definitief" ||
+            lower(mm?.stadium) === "uitslagen_definitief",
         });
       }
 
@@ -135,10 +167,17 @@ export default function OfficialsUitslagenPage() {
 
       for (const row of resultRows ?? []) {
         const cur = byRun.get(String((row as any).uitslagen_run_id));
-        if (cur && String((row as any).uitslag_status ?? "") !== "concept") cur.ingevuld += 1;
+        if (cur && String((row as any).uitslag_status ?? "") !== "concept")
+          cur.ingevuld += 1;
       }
 
-      setRows(Array.from(byRun.values()).sort((a, b) => String(b.evenement_datum ?? "").localeCompare(String(a.evenement_datum ?? ""))));
+      setRows(
+        Array.from(byRun.values()).sort((a, b) =>
+          String(b.evenement_datum ?? "").localeCompare(
+            String(a.evenement_datum ?? ""),
+          ),
+        ),
+      );
     } catch (e: any) {
       setRows([]);
       setMelding(e?.message ?? "Uitslagen laden mislukt.");
@@ -159,13 +198,10 @@ export default function OfficialsUitslagenPage() {
 
   const activeRows = useMemo(
     () => rows.filter((row) => !row.finalized),
-    [rows]
+    [rows],
   );
 
-  const doneRows = useMemo(
-    () => rows.filter((row) => row.finalized),
-    [rows]
-  );
+  const doneRows = useMemo(() => rows.filter((row) => row.finalized), [rows]);
 
   const tabRows = activeTab === "active" ? activeRows : doneRows;
 
@@ -173,147 +209,222 @@ export default function OfficialsUitslagenPage() {
     [row.evenement_naam, row.evenement_datum, row.bondteam, row.run_status]
       .join(" ")
       .toLowerCase()
-      .includes(query.toLowerCase())
+      .includes(query.toLowerCase()),
   );
 
   return (
-    <main className="min-h-screen bg-[#07090d] text-white">
-      <div className="mx-auto max-w-[1740px] px-6 py-5">
-        <div className="overflow-hidden rounded-none border-4 border-[#a3a7ad] bg-[linear-gradient(180deg,#3a3d43_0%,#171b22_40%,#080b11_100%)] shadow-[0_0_45px_rgba(0,0,0,0.7)]">
-          <div className="grid grid-cols-[210px_1fr_380px] items-center gap-5 border-b-2 border-[#ff4d00] px-8 py-4">
-            <button
-              onClick={() => router.push("/dashboard/officials")}
-              className="h-[48px] rounded-none border-2 border-[#f4f4f4] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_42%,#878787_100%)] text-[16px] font-black text-black shadow-[inset_0_2px_0_rgba(255,255,255,.9),0_0_0_1px_rgba(0,0,0,.5)]"
-            >
-              ← Officials
-            </button>
-
-            <div className="flex items-center justify-center">
-              <Image
-                src="/branding/fightsupport/fightsupport1.png"
-                alt="FightSupport"
-                width={1400}
-                height={260}
-                loading="eager"
-                priority
-                className="h-[125px] w-[700px] object-contain drop-shadow-[0_0_32px_rgba(255,255,255,0.28)]"
-              />
+    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
+      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
+        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#ff4d00]">
+                FightSupport Officials
+              </p>
+              <h1 className="text-2xl font-black uppercase">Uitslagen</h1>
+              <p className="text-sm text-zinc-300">
+                {canSeeAllBonds
+                  ? "NVB superadmin: alle bondteams zichtbaar"
+                  : `Alleen uitslagen van bondteam ${myBondteam || "-"}`}
+              </p>
             </div>
 
-            <div className="text-right">
-              <div className="text-[30px] font-black tracking-[7px] text-[#ff4d00]">UITSLAGEN</div>
-              <div className="text-sm text-zinc-300">Invoeren en inzien · FightSupport</div>
-              <div className="mt-3 inline-flex items-center gap-2 border border-[#ff4d00] bg-[#ff4d0017] px-3 py-2 text-xs font-black uppercase tracking-[2px] text-[#ff7a3c]">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 border border-[#ff4d00] bg-[#ff4d0017] px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#ff7a3c]">
                 <ShieldCheck className="h-4 w-4" />
                 Bond: {myBondteam || "-"}
               </div>
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard/officials")}
+                className="border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110"
+              >
+                Terug naar officials
+              </button>
             </div>
           </div>
+        </header>
 
-          <div className="px-8 py-8 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.10),transparent_38%)]">
-            <div className="mb-6 flex items-center justify-between gap-6">
-              <div>
-                <h1 className="text-[34px] font-black tracking-[5px] text-[#ff4d00]">EVENT OVERZICHT</h1>
-                <p className="text-zinc-300">
-                  {canSeeAllBonds ? "NVB superadmin: alle bondteams zichtbaar" : `Alleen uitslagen van bondteam ${myBondteam || "-"}`}
-                </p>
-              </div>
-
-              <div className="relative w-[440px]">
-                <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Zoek event, status of bondteam..."
-                  className="h-[48px] w-full rounded-none border-2 border-[#777c86] bg-black/75 pl-12 pr-4 text-white outline-none transition focus:border-[#ff4d00]"
-                />
-              </div>
-            </div>
-
-            {melding ? <div className="mb-6 border-2 border-red-500/70 bg-red-950/70 px-5 py-4 text-sm font-black text-red-100">{melding}</div> : null}
-
-            <div className="mb-6 flex flex-wrap items-center justify-center gap-4">
-              <button
-                type="button"
-                onClick={() => setActiveTab("active")}
-                className={`h-[46px] min-w-[240px] rounded-none border-2 px-5 text-sm font-black uppercase tracking-[2px] transition ${
-                  activeTab === "active"
-                    ? "border-[#ffb18b] bg-[linear-gradient(180deg,#ff7d38_0%,#ff4d00_100%)] text-white shadow-[0_0_25px_rgba(255,77,0,0.35)]"
-                    : "border-[#f4f4f4] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_42%,#878787_100%)] text-black shadow-[inset_0_2px_0_rgba(255,255,255,.9),0_0_0_1px_rgba(0,0,0,.5)]"
-                }`}
-              >
-                Actieve uitslagen ({activeRows.length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab("done")}
-                className={`h-[46px] min-w-[240px] rounded-none border-2 px-5 text-sm font-black uppercase tracking-[2px] transition ${
-                  activeTab === "done"
-                    ? "border-[#ffb18b] bg-[linear-gradient(180deg,#ff7d38_0%,#ff4d00_100%)] text-white shadow-[0_0_25px_rgba(255,77,0,0.35)]"
-                    : "border-[#f4f4f4] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_42%,#878787_100%)] text-black shadow-[inset_0_2px_0_rgba(255,255,255,.9),0_0_0_1px_rgba(0,0,0,.5)]"
-                }`}
-              >
-                Afgeronde uitslagen ({doneRows.length})
-              </button>
-            </div>
-
-            <div className="mb-4 text-center text-sm font-bold text-zinc-300">
-              {activeTab === "active"
-                ? "Uitslagen die nog ingevoerd of gecontroleerd moeten worden."
-                : "Uitslagen die definitief zijn afgerond en alleen nog ingezien kunnen worden."}
-            </div>
-
-            <div className="overflow-hidden rounded-none border-4 border-[#a3a7ad] shadow-[inset_0_0_0_2px_rgba(255,255,255,.25),0_18px_35px_rgba(0,0,0,.45)]">
-              <div className="grid grid-cols-[2fr_120px_140px_120px_1fr_390px] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_30%,#8f8f8f_64%,#eeeeee_100%)] px-6 py-4 border-b-2 border-black text-sm font-black uppercase tracking-[2px] text-black">
-                <div>Event</div><div>Bond</div><div>Datum</div><div>Partijen</div><div>Status</div><div className="text-right">Acties</div>
-              </div>
-
-              {loading ? (
-                <div className="bg-[#0e1118] px-6 py-10 text-center text-zinc-400">Laden...</div>
-              ) : filtered.length === 0 ? (
-                <div className="bg-[#0e1118] px-6 py-10 text-center text-zinc-400">{activeTab === "active" ? "Geen actieve uitslagen gevonden." : "Geen afgeronde uitslagen gevonden."}</div>
-              ) : filtered.map((row, index) => {
-                const pct = row.partijen > 0 ? Math.round((row.ingevuld / row.partijen) * 100) : 0;
-                const finalized = row.finalized;
-                return (
-                  <div key={row.matchmaking_id} className={`grid grid-cols-[2fr_120px_140px_120px_1fr_390px] items-center border-t-2 border-[#4f545c] px-6 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,.08)] ${index % 2 === 0 ? "bg-[#0f131a]" : "bg-[#161b23]"}`}>
-                    <div>
-                      <div className="text-[26px] font-black uppercase tracking-[2px] text-white">{row.evenement_naam || "-"}</div>
-                      <div className="mt-1 text-xs text-zinc-500">{row.matchmaking_id}</div>
-                    </div>
-                    <div><span className="rounded-none border border-[#ff4d00] bg-[#ff4d0017] px-4 py-2 text-sm font-black text-[#ff7a3c]">{row.bondteam || "-"}</span></div>
-                    <div className="font-bold text-zinc-300">{formatDate(row.evenement_datum)}</div>
-                    <div className="text-lg font-black">{row.partijen}</div>
-                    <div className="pr-6">
-                      <div className="mb-2 flex items-center justify-between text-sm">
-                        <span className="text-zinc-400">{row.ingevuld} ingevuld</span>
-                        <span className={finalized ? "font-black text-emerald-300" : "font-black text-[#ff4d00]"}>{finalized ? "Definitief" : `${pct}%`}</span>
-                      </div>
-                      <div className="h-3 overflow-hidden rounded-none bg-black border border-[#222]"><div className="h-full rounded-none bg-[linear-gradient(90deg,#ffffff_0%,#c8c8c8_45%,#ff4d00_100%)]" style={{ width: `${pct}%` }} /></div>
-                    </div>
-                    <div className="flex justify-end gap-3 text-right">
-                      {activeTab === "active" ? (
-                        <Link href={`/dashboard/officials/uitslagen/${row.matchmaking_id}`} className="inline-flex h-[42px] items-center justify-center rounded-none border-2 border-[#ffb18b] bg-[linear-gradient(180deg,#ff7d38_0%,#ff4d00_100%)] px-4 text-xs font-black uppercase tracking-[1.5px] text-white shadow-[0_0_25px_rgba(255,77,0,0.35)] transition hover:scale-[1.02]">
-                          Uitslagen
-                        </Link>
-                      ) : (
-                        <Link href={`/dashboard/officials/uitslagen/inzien/${row.matchmaking_id}`} className="inline-flex h-[42px] items-center justify-center rounded-none border-2 border-[#f4f4f4] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_42%,#878787_100%)] px-4 text-xs font-black uppercase tracking-[1.5px] !text-black text-black shadow-[inset_0_2px_0_rgba(255,255,255,.9),0_0_0_1px_rgba(0,0,0,.5)] transition hover:scale-[1.02]">
-                          Inzien
-                        </Link>
-                      )}
-
-                      <Link href={`/dashboard/officials/controle/${row.matchmaking_id}`} className="inline-flex h-[42px] items-center justify-center rounded-none border-2 border-[#f4f4f4] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_42%,#878787_100%)] px-4 text-xs font-black uppercase tracking-[1.5px] !text-black text-black shadow-[inset_0_2px_0_rgba(255,255,255,.9),0_0_0_1px_rgba(0,0,0,.5)] transition hover:scale-[1.02]">
-                        Matchmaking
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+        <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-4">
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">{activeRows.length}</b>
+            <p className="text-xs uppercase text-zinc-400">Actieve uitslagen</p>
+          </div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">{doneRows.length}</b>
+            <p className="text-xs uppercase text-zinc-400">Afgerond</p>
+          </div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">{rows.length}</b>
+            <p className="text-xs uppercase text-zinc-400">Totaal zichtbaar</p>
+          </div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">{myBondteam || "-"}</b>
+            <p className="text-xs uppercase text-zinc-400">Bondteam</p>
           </div>
         </div>
-      </div>
+
+        <div className="flex flex-wrap items-center gap-2 p-4">
+          <button
+            type="button"
+            onClick={() => setActiveTab("active")}
+            className={`border px-3 py-2 text-xs font-black uppercase ${activeTab === "active" ? "border-[#ff4d00] bg-[#ff4d00] !text-black" : "border-zinc-500 bg-[#242424] text-white"}`}
+          >
+            Actief ({activeRows.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("done")}
+            className={`border px-3 py-2 text-xs font-black uppercase ${activeTab === "done" ? "border-[#ff4d00] bg-[#ff4d00] !text-black" : "border-zinc-500 bg-[#242424] text-white"}`}
+          >
+            Afgerond ({doneRows.length})
+          </button>
+
+          <div className="ml-auto flex min-w-[320px] items-center gap-2 border border-zinc-600 bg-[#111] px-3 py-2">
+            <Search className="h-4 w-4 text-zinc-500" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Zoek event, status of bondteam..."
+              className="w-full bg-transparent text-sm font-bold text-white outline-none placeholder:text-zinc-500"
+            />
+          </div>
+        </div>
+
+        {melding ? (
+          <p className="mx-4 mb-4 border border-red-500 bg-red-950 p-3 text-sm font-bold text-red-100">
+            {melding}
+          </p>
+        ) : null}
+
+        <div className="px-4 pb-5">
+          <div className="overflow-x-auto border border-zinc-700">
+            <table className="w-full min-w-[1060px] border-collapse text-sm">
+              <thead>
+                <tr className="bg-[#252525] text-left text-xs uppercase text-zinc-300">
+                  <th className="border border-zinc-700 px-4 py-3">Event</th>
+                  <th className="border border-zinc-700 px-4 py-3">Bond</th>
+                  <th className="border border-zinc-700 px-4 py-3">Datum</th>
+                  <th className="border border-zinc-700 px-4 py-3">Partijen</th>
+                  <th className="border border-zinc-700 px-4 py-3">
+                    Voortgang
+                  </th>
+                  <th className="border border-zinc-700 px-4 py-3 text-right">
+                    Acties
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="border border-zinc-800 px-4 py-8 text-center text-zinc-300"
+                    >
+                      Laden...
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="border border-zinc-800 px-4 py-8 text-center text-zinc-300"
+                    >
+                      {activeTab === "active"
+                        ? "Geen actieve uitslagen gevonden."
+                        : "Geen afgeronde uitslagen gevonden."}
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((row, index) => {
+                    const pct =
+                      row.partijen > 0
+                        ? Math.round((row.ingevuld / row.partijen) * 100)
+                        : 0;
+                    const finalized = row.finalized;
+
+                    return (
+                      <tr
+                        key={row.matchmaking_id}
+                        className={
+                          index % 2 === 0
+                            ? "bg-[#171717] text-white"
+                            : "bg-[#202020] text-white"
+                        }
+                      >
+                        <td className="border border-zinc-800 px-4 py-3">
+                          <b className="text-[#ff4d00]">
+                            {row.evenement_naam || "-"}
+                          </b>
+                          <div className="mt-1 text-xs text-zinc-500">
+                            {row.matchmaking_id}
+                          </div>
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3 font-black text-[#ff4d00]">
+                          {row.bondteam || "-"}
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3">
+                          {formatDate(row.evenement_datum)}
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3 font-black">
+                          {row.partijen}
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3">
+                          <div className="mb-2 flex items-center justify-between text-xs">
+                            <span className="text-zinc-400">
+                              {row.ingevuld} ingevuld
+                            </span>
+                            <span
+                              className={
+                                finalized
+                                  ? "font-black text-emerald-300"
+                                  : "font-black text-[#ff4d00]"
+                              }
+                            >
+                              {finalized ? "Definitief" : `${pct}%`}
+                            </span>
+                          </div>
+                          <div className="h-2 border border-zinc-700 bg-black">
+                            <div
+                              className="h-full bg-[#ff4d00]"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            {activeTab === "active" ? (
+                              <Link
+                                href={`/dashboard/officials/uitslagen/${row.matchmaking_id}`}
+                                className="inline-flex border border-[#ff4d00] bg-[#ff4d00] px-3 py-2 text-xs font-black uppercase !text-black"
+                              >
+                                Uitslagen
+                              </Link>
+                            ) : (
+                              <Link
+                                href={`/dashboard/officials/uitslagen/inzien/${row.matchmaking_id}`}
+                                className="inline-flex border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-2 text-xs font-black uppercase !text-black"
+                              >
+                                Inzien
+                              </Link>
+                            )}
+                            <Link
+                              href={`/dashboard/officials/controle/${row.matchmaking_id}`}
+                              className="inline-flex border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-2 text-xs font-black uppercase !text-black"
+                            >
+                              Matchmaking
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

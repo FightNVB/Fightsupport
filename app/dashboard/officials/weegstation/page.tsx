@@ -225,16 +225,27 @@ function normalizeStageKey(v: unknown) {
 }
 
 function normalizeBondteam(v: unknown) {
-  return String(v ?? "").trim().toUpperCase();
+  return String(v ?? "")
+    .trim()
+    .toUpperCase();
 }
 
-function isWeegstationFlow(stadium: unknown, status?: unknown, ownerType?: unknown) {
+function isWeegstationFlow(
+  stadium: unknown,
+  status?: unknown,
+  ownerType?: unknown,
+) {
   const values = [stadium, status].map(normalizeStageKey);
   const owner = String(ownerType ?? "")
     .trim()
     .toLowerCase();
 
-  if (owner === "bondteam" && values.some((v) => v === "naar-weegstation" || v === "klaar-voor-weegstation")) {
+  if (
+    owner === "bondteam" &&
+    values.some(
+      (v) => v === "naar-weegstation" || v === "klaar-voor-weegstation",
+    )
+  ) {
     return true;
   }
 
@@ -312,7 +323,10 @@ export default function WeegstationOverzichtPage() {
   const [myBondteam, setMyBondteam] = useState("");
 
   const canSeeAllBondteams = useMemo(() => {
-    return roleNames.includes("superadmin") && normalizeBondteam(myBondteam) === "NVB";
+    return (
+      roleNames.includes("superadmin") &&
+      normalizeBondteam(myBondteam) === "NVB"
+    );
   }, [roleNames, myBondteam]);
 
   useEffect(() => {
@@ -419,7 +433,9 @@ export default function WeegstationOverzichtPage() {
         throw new Error(json?.error || "Weegdata verwijderen mislukt.");
       }
 
-      setMelding("Eerdere weegdata verwijderd. De matchmaking staat nog steeds klaar voor weegstation.");
+      setMelding(
+        "Eerdere weegdata verwijderd. De matchmaking staat nog steeds klaar voor weegstation.",
+      );
       await loadRows();
     } catch (e: any) {
       setMelding(e?.message ?? "Weegdata verwijderen mislukt.");
@@ -491,265 +507,214 @@ export default function WeegstationOverzichtPage() {
   }, [roleNames]);
 
   return (
-    <main
-      className="min-h-screen px-3 py-4 md:px-5 md:py-5"
-      style={pageBgStyle()}
-    >
-      <div className="mx-auto max-w-[1480px]" style={metalFrameStyle()}>
-        <div className="p-3 md:p-4" style={metalInnerStyle()}>
-          <div
-            className="rounded-[14px] px-4 py-4 text-white shadow-2xl"
-            style={darkPanelStyle()}
-          >
-            <div className="grid items-center gap-4 lg:grid-cols-[1fr_auto_1fr]">
-              <div className="min-w-0 leading-tight">
-                <div
-                  className="text-[11px] font-black uppercase tracking-[0.12em]"
-                  style={{ color: ORANGE }}
-                >
-                  Officials portaal
-                </div>
+    <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
+      <section className="mx-auto max-w-7xl border border-zinc-500 bg-[#121212] shadow-2xl">
+        <header className="border-b border-zinc-600 bg-gradient-to-r from-[#1d1d1d] via-[#303030] to-[#151515] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#ff4d00]">
+                FightSupport Officials
+              </p>
+              <h1 className="flex items-center gap-2 text-2xl font-black uppercase">
+                <Scale className="h-6 w-6 text-[#ff4d00]" />
+                Weegstation
+              </h1>
+              <p className="text-sm text-zinc-300">
+                {canSeeAllBondteams
+                  ? "Alle matchmakings die naar weegstation zijn gestuurd"
+                  : "Alleen matchmakings van jouw bond die naar weegstation zijn gestuurd"}
+              </p>
+            </div>
 
-                <div className="mt-1 flex items-center gap-2 text-[26px] font-black leading-[1.05] text-white">
-                  <Scale className="h-6 w-6" style={{ color: ORANGE }} />
-                  <span>WEEGSTATION</span>
-                </div>
-
-                <div className="mt-2 text-[13px] font-semibold text-white/75">
-                  {canSeeAllBondteams
-                    ? "Alle matchmakings die naar weegstation zijn gestuurd"
-                    : "Alleen matchmakings van jouw bond die naar weegstation zijn gestuurd"}
-                </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="border border-[#ff4d00] bg-[#ff4d0017] px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#ff7a3c]">
+                {roleLabel} · Bondteam: {safeText(myBondteam)}
               </div>
-
-              <div className="flex items-center justify-center">
-                <div className="w-full max-w-[440px]">
-                  <HeaderLogo />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3">
-                <div className="min-w-[170px] rounded-[10px] border border-white/10 bg-white/5 px-3 py-2">
-                  <div
-                    className="text-[10px] font-black uppercase tracking-[0.1em]"
-                    style={{ color: ORANGE }}
-                  >
-                    Toegang
-                  </div>
-                  <div className="mt-1 text-sm font-black text-white">
-                    {roleLabel}
-                  </div>
-                  <div className="mt-1 text-xs font-semibold text-white/65">
-                    Bondteam: {safeText(myBondteam)}
-                  </div>
-                </div>
-
-                <ActionButton
-                  onClick={() => router.push("/dashboard/officials")}
-                  tone="silver"
-                >
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Terug
-                </ActionButton>
-              </div>
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard/officials")}
+                className="inline-flex items-center border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110"
+              >
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Terug
+              </button>
             </div>
           </div>
+        </header>
 
-          <div className="mt-4 rounded-[18px] p-4" style={silverCardStyle()}>
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div className="min-w-0">
-                <div className="text-[15px] font-black uppercase tracking-[0.08em] text-zinc-900">
-                  Kies matchmaking voor wegen
-                </div>
-                <div className="text-sm font-semibold text-zinc-600">
-                  {canSeeAllBondteams
-                    ? "Superadmin NVB ziet alle bondteams"
-                    : "Gefilterd op jouw bondteam"}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
-                <label className="flex min-w-[280px] items-center gap-2 rounded-[8px] border border-black/15 bg-white/80 px-3 py-2">
-                  <Search className="h-4 w-4 text-zinc-500" />
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Zoek op event, datum, bondteam of id..."
-                    className="w-full bg-transparent text-sm font-semibold text-zinc-900 outline-none placeholder:text-zinc-400"
-                  />
-                </label>
-
-                {canSeeAllBondteams ? (
-                  <div className="relative min-w-[180px]">
-                    <select
-                      value={bondteamFilter}
-                      onChange={(e) => setBondteamFilter(e.target.value)}
-                      className="w-full appearance-none rounded-[8px] border border-black/15 bg-white/85 px-3 py-2 pr-10 text-sm font-black text-zinc-900 outline-none"
-                    >
-                      {bondteamOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option === "ALLE" ? "Alle bondteams" : option}
-                        </option>
-                      ))}
-                    </select>
-
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            {melding ? (
-              <div
-                className="mt-4 rounded-[10px] px-4 py-3 text-sm font-bold"
-                style={{
-                  background: "#fee2e2",
-                  color: "#991b1b",
-                  border: "1px solid #fca5a5",
-                }}
-              >
-                {melding}
-              </div>
-            ) : null}
-
-            <div className="mt-4 overflow-hidden rounded-[16px] border border-black/15">
-              <div
-                className="grid items-center gap-3 px-4 py-3 text-[11px] font-black uppercase tracking-[0.08em]"
-                style={{
-                  gridTemplateColumns:
-                    "minmax(260px,2fr) 130px 160px 180px 260px",
-                  background:
-                    "linear-gradient(180deg, #2f323a 0%, #1e2025 100%)",
-                  color: "#fff",
-                }}
-              >
-                <div>Evenement</div>
-                <div>Datum</div>
-                <div>Bondteam</div>
-                <div>Stadium</div>
-                <div className="text-right">Actie</div>
-              </div>
-
-              {loading ? (
-                <div className="px-4 py-8 text-center text-sm font-bold text-zinc-600">
-                  Laden...
-                </div>
-              ) : filteredRows.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm font-bold text-zinc-600">
-                  Geen matchmakings gevonden.
-                </div>
-              ) : (
-                filteredRows.map((row, index) => {
-                  const darkRow = index % 2 === 1;
-                  const matchmakingId = String(row.id ?? "").trim();
-
-                  return (
-                    <div
-                      key={matchmakingId}
-                      className="grid items-center gap-3 px-4 py-3"
-                      style={{
-                        gridTemplateColumns:
-                          "minmax(260px,2fr) 130px 160px 180px 260px",
-                        background: darkRow
-                          ? "linear-gradient(180deg, #3a3f48 0%, #2d3138 100%)"
-                          : "linear-gradient(180deg, #ffffff 0%, #eef2f6 100%)",
-                        color: darkRow ? "#ffffff" : "#111827",
-                        borderTop: "1px solid rgba(0,0,0,0.10)",
-                      }}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-[18px] font-black">
-                          {safeText(row.naam, "Onbekend evenement")}
-                        </div>
-
-                        <div
-                          className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-bold"
-                          style={{
-                            color: darkRow
-                              ? "rgba(255,255,255,0.72)"
-                              : "#6b7280",
-                          }}
-                        >
-                          <span className="inline-flex items-center gap-1.5">
-                            <Swords className="h-3.5 w-3.5" />
-                            Matchmaking
-                          </span>
-
-                          <span className="truncate">ID: {matchmakingId}</span>
-
-                          {row.locatie ? (
-                            <span className="truncate">
-                              Locatie: {row.locatie}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="text-sm font-black">
-                        <span className="inline-flex items-center gap-1.5">
-                          <CalendarDays className="h-4 w-4" />
-                          {formatDate(row.datum)}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span
-                          className="inline-flex items-center rounded-[4px] px-2 py-1 text-[11px] font-black uppercase"
-                          style={getBondteamBadgeStyle(row.bondteam, darkRow)}
-                        >
-                          <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
-                          {safeText(row.bondteam)}
-                        </span>
-                      </div>
-
-                      <div className="text-xs font-black uppercase tracking-[0.04em]">
-                        {displayStage(row)}
-                      </div>
-
-                      <div className="flex items-center justify-end gap-2">
-                        <ActionButton
-                          onClick={() =>
-                            router.push(
-                              `/dashboard/officials/weegstation/${matchmakingId}`,
-                            )
-                          }
-                          tone="orange"
-                        >
-                          Weegstation
-                        </ActionButton>
-
-                        <ActionButton
-                          onClick={() => handleDelete(matchmakingId)}
-                          tone="danger"
-                          disabled={deletingId === matchmakingId}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          {deletingId === matchmakingId
-                            ? "Wissen..."
-                            : "Wis data"}
-                        </ActionButton>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
+        <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-4">
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">{filteredRows.length}</b>
+            <p className="text-xs uppercase text-zinc-400">In selectie</p>
           </div>
-
-          <div
-            className="mt-4 text-center"
-            style={{
-              fontSize: 10,
-              letterSpacing: 2,
-              color: "rgba(255,255,255,0.34)",
-              textTransform: "uppercase",
-            }}
-          >
-            © Fightsupport
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">{rows.length}</b>
+            <p className="text-xs uppercase text-zinc-400">Totaal geladen</p>
+          </div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">
+              {canSeeAllBondteams ? "ALLE" : safeText(myBondteam)}
+            </b>
+            <p className="text-xs uppercase text-zinc-400">Bondteam filter</p>
+          </div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
+            <b className="text-xl text-[#ff4d00]">{roleLabel}</b>
+            <p className="text-xs uppercase text-zinc-400">Toegang</p>
           </div>
         </div>
-      </div>
+
+        <div className="flex flex-wrap items-center gap-2 p-4">
+          <div className="flex min-w-[320px] flex-1 items-center gap-2 border border-zinc-600 bg-[#111] px-3 py-2">
+            <Search className="h-4 w-4 text-zinc-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Zoek op event, datum, bondteam of id..."
+              className="w-full bg-transparent text-sm font-bold text-white outline-none placeholder:text-zinc-500"
+            />
+          </div>
+
+          {canSeeAllBondteams ? (
+            <div className="relative min-w-[190px]">
+              <select
+                value={bondteamFilter}
+                onChange={(e) => setBondteamFilter(e.target.value)}
+                className="w-full appearance-none border border-zinc-500 bg-[#242424] px-3 py-2 pr-10 text-sm font-black uppercase text-white outline-none focus:border-[#ff4d00]"
+              >
+                {bondteamOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option === "ALLE" ? "Alle bondteams" : option}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            </div>
+          ) : null}
+        </div>
+
+        {melding ? (
+          <p className="mx-4 mb-4 border border-red-500 bg-red-950 p-3 text-sm font-bold text-red-100">
+            {melding}
+          </p>
+        ) : null}
+
+        <div className="px-4 pb-5">
+          <div className="overflow-x-auto border border-zinc-700">
+            <table className="w-full min-w-[1040px] border-collapse text-sm">
+              <thead>
+                <tr className="bg-[#252525] text-left text-xs uppercase text-zinc-300">
+                  <th className="border border-zinc-700 px-4 py-3">
+                    Evenement
+                  </th>
+                  <th className="border border-zinc-700 px-4 py-3">Datum</th>
+                  <th className="border border-zinc-700 px-4 py-3">Bondteam</th>
+                  <th className="border border-zinc-700 px-4 py-3">Stadium</th>
+                  <th className="border border-zinc-700 px-4 py-3 text-right">
+                    Actie
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="border border-zinc-800 px-4 py-8 text-center text-zinc-300"
+                    >
+                      Laden...
+                    </td>
+                  </tr>
+                ) : filteredRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="border border-zinc-800 px-4 py-8 text-center text-zinc-300"
+                    >
+                      Geen matchmakings gevonden.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRows.map((row, index) => {
+                    const darkRow = index % 2 === 1;
+                    const matchmakingId = String(row.id ?? "").trim();
+
+                    return (
+                      <tr
+                        key={matchmakingId}
+                        className={
+                          darkRow
+                            ? "bg-[#202020] text-white"
+                            : "bg-[#171717] text-white"
+                        }
+                      >
+                        <td className="border border-zinc-800 px-4 py-3">
+                          <b className="text-[#ff4d00]">
+                            {safeText(row.naam, "Onbekend evenement")}
+                          </b>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500">
+                            <span className="inline-flex items-center gap-1">
+                              <Swords className="h-3.5 w-3.5" /> Matchmaking
+                            </span>
+                            <span>ID: {matchmakingId}</span>
+                            {row.locatie ? (
+                              <span>Locatie: {row.locatie}</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3 font-black">
+                          <span className="inline-flex items-center gap-1.5">
+                            <CalendarDays className="h-4 w-4 text-[#ff4d00]" />
+                            {formatDate(row.datum)}
+                          </span>
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3">
+                          <span
+                            className="inline-flex items-center rounded-[4px] px-2 py-1 text-[11px] font-black uppercase"
+                            style={getBondteamBadgeStyle(row.bondteam, true)}
+                          >
+                            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                            {safeText(row.bondteam)}
+                          </span>
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3 text-xs font-black uppercase tracking-[0.04em] text-zinc-200">
+                          {displayStage(row)}
+                        </td>
+                        <td className="border border-zinc-800 px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                router.push(
+                                  `/dashboard/officials/weegstation/${matchmakingId}`,
+                                )
+                              }
+                              className="inline-flex border border-[#ff4d00] bg-[#ff4d00] px-3 py-2 text-xs font-black uppercase !text-black"
+                            >
+                              Weegstation
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(matchmakingId)}
+                              disabled={deletingId === matchmakingId}
+                              className="inline-flex items-center border border-red-500 bg-red-700 px-3 py-2 text-xs font-black uppercase text-white disabled:opacity-50"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              {deletingId === matchmakingId
+                                ? "Wissen..."
+                                : "Wis data"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
