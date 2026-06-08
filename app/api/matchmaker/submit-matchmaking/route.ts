@@ -938,7 +938,6 @@ export async function POST(req: Request) {
         bron_type: lifecycleBronType,
         stadium: lifecycleStage,
         eigenaar_type: lifecycleOwnerType,
-        eigenaar_type: lifecycleOwnerType,
         eigenaar_user_id: lifecycleOwnerUserId,
         eigenaar_bondteam: lifecycleBondteam,
       },
