@@ -91,6 +91,7 @@ async function fetchUserProfile(): Promise<UserProfileRow | null> {
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
+const OFFICIAL_PORTAL_ROLES = ["official", "hoofdofficial"] as const;
 
 const pageBackground: CSSProperties = {
   minHeight: "100vh",
@@ -336,8 +337,9 @@ export default function DashboardPage() {
 
   const isAdmin = role === "admin";
   const isSuperadmin = role === "superadmin";
-  const isOfficial = role === "official";
-  const isHoofdofficial = role === "hoofdofficial";
+  const isOfficialPortalRole = OFFICIAL_PORTAL_ROLES.includes(
+    role as (typeof OFFICIAL_PORTAL_ROLES)[number],
+  );
   const isMatchmaker = role === "matchmaker";
   const isTrainerOrSportschool = role === "trainer" || role === "sportschool";
 
@@ -348,11 +350,7 @@ export default function DashboardPage() {
   const canOpenAdmin = isRootAdmin || isAnySuperadmin;
   const canOpenDispensatie = isRootAdmin || isAnySuperadmin;
   const canOpenOfficial =
-    isRootAdmin ||
-    isAnySuperadmin ||
-    isOtherBondAdmin ||
-    isOfficial ||
-    isHoofdofficial;
+    isRootAdmin || isAnySuperadmin || isOtherBondAdmin || isOfficialPortalRole;
   const canOpenMatchmaker =
     isRootAdmin ||
     isAnySuperadmin ||
