@@ -100,16 +100,6 @@ async function findAuthUserByEmail(email: string) {
   return null;
 }
 
-async function sendPasswordSetupMail(req: Request, email: string) {
-  const redirectTo = `${getBaseUrl(req)}/login/set`;
-
-  const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
-    redirectTo,
-  });
-
-  if (error) throw error;
-}
-
 async function ensureAuthUser(input: {
   req: Request;
   email: string;
@@ -120,36 +110,20 @@ async function ensureAuthUser(input: {
   const role = input.roles[0] ?? "matchmaker";
   const existing = await findAuthUserByEmail(input.email);
 
+  let reinvited = false;
+
   if (existing?.id) {
-    const { data, error } = await supabaseAdmin.auth.admin.updateUserById(
+    // Opnieuw uitnodigen werkt betrouwbaarder dan een reset-password link,
+    // omdat jouw /login/set pagina op de Supabase invite-flow is ingericht.
+    // Daarom verwijderen we alleen de auth user en maken we daarna opnieuw
+    // dezelfde gebruiker aan via inviteUserByEmail. De app-tabellen worden
+    // hieronder opnieuw ge-upsert op basis van het nieuwe auth user id.
+    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(
       existing.id,
-      {
-        user_metadata: {
-          full_name: input.full_name,
-          role,
-          roles: input.roles,
-          bondteam: input.bondteam,
-        },
-        app_metadata: {
-          role,
-          roles: input.roles,
-          bondteam: input.bondteam,
-        },
-      },
     );
 
-    if (error) throw error;
-
-    // Supabase verstuurt bij een bestaande auth user geen nieuwe invite-mail.
-    // Daarom sturen we dan een password setup/reset mail naar dezelfde /login/set flow.
-    await sendPasswordSetupMail(input.req, input.email);
-
-    return {
-      authUser: data?.user ?? existing,
-      invited: false,
-      mailSent: true,
-      mailType: "password_setup",
-    };
+    if (deleteError) throw deleteError;
+    reinvited = true;
   }
 
   const redirectTo = `${getBaseUrl(input.req)}/login/set`;
@@ -172,8 +146,9 @@ async function ensureAuthUser(input: {
   return {
     authUser: data.user,
     invited: true,
+    reinvited,
     mailSent: true,
-    mailType: "invite",
+    mailType: reinvited ? "reinvite" : "invite",
   };
 }
 
@@ -398,7 +373,7 @@ export async function POST(req: Request) {
     if (roles.length === 0)
       return jsonError("Minimaal één rol is verplicht", 400);
 
-    const { authUser, invited, mailSent, mailType } = await ensureAuthUser({
+    const { authUser, invited, reinvited, mailSent, mailType } = await ensureAuthUser({
       req,
       email,
       full_name,
@@ -427,11 +402,12 @@ export async function POST(req: Request) {
         public_user: publicUser,
       },
       invited,
+      reinvited,
       mail_sent: mailSent,
       mail_type: mailType,
-      message: invited
-        ? "Uitnodiging verzonden en gebruiker opgeslagen in auth.users, users, user_profiles en user_roles."
-        : "Bestaande auth user bijgewerkt en wachtwoord/setup-mail opnieuw verzonden.",
+      message: reinvited
+        ? "Bestaande auth user verwijderd, opnieuw uitgenodigd en gebruiker opnieuw opgeslagen in auth.users, users, user_profiles en user_roles."
+        : "Uitnodiging verzonden en gebruiker opgeslagen in auth.users, users, user_profiles en user_roles.",
     });
   } catch (e: any) {
     if (e instanceof Response) return e;
