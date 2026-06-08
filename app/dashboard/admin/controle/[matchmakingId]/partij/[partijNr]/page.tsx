@@ -1314,18 +1314,27 @@ export default function PartijDetailPage() {
   const [editGym, setEditGym] = useState("");
   const [editBoutDiscipline, setEditBoutDiscipline] = useState("");
   const [editBoutKlasse, setEditBoutKlasse] = useState("");
+  const [editGewicht, setEditGewicht] = useState("");
+  const [editGeslacht, setEditGeslacht] = useState("");
+  const [editMaxGewicht, setEditMaxGewicht] = useState("");
   const editDraftRef = useRef<{
     va: string;
     naam: string;
     gym: string;
     discipline: string;
     klasse: string;
+    gewicht: string;
+    geslacht: string;
+    max_gewicht: string;
   }>({
     va: "",
     naam: "",
     gym: "",
     discipline: "",
     klasse: "",
+    gewicht: "",
+    geslacht: "",
+    max_gewicht: "",
   });
   const [editMountKey, setEditMountKey] = useState(0);
   const [editSaving, setEditSaving] = useState(false);
@@ -1355,17 +1364,34 @@ export default function PartijDetailPage() {
       ctx?.[`${side}_naam_mm`] ?? ctx?.[`${side}_naam_fp`] ?? ""
     ).trim();
     const gym = String(ctx?.[`${side}_gym_mm`] ?? "").trim();
+    const gewicht = String(
+      ctx?.[`${side}_gewicht_mm`] ??
+        ctx?.[`${side}_gewicht`] ??
+        ctx?.[`gewicht_${side}_mm`] ??
+        ""
+    ).trim();
 
     setEditVa(va);
     setEditNaam(naam);
     setEditGym(gym);
+    setEditGewicht(gewicht);
 
     const d = String(ctx?.discipline ?? ctx?.discipline_mm ?? "").trim();
     const k = String(ctx?.klasse_mm ?? ctx?.klasse ?? "").trim();
+    const g = String(ctx?.geslacht ?? ctx?.[`${side}_geslacht_mm`] ?? ctx?.[`${side}_geslacht`] ?? "").trim();
+    const maxG = String(
+      ctx?.max_gewicht ??
+        ctx?.max_gewicht_mm ??
+        ctx?.gewicht_max_mm ??
+        ctx?.matchmaking_bouts_raw_max_gewicht ??
+        ""
+    ).trim();
     setEditBoutDiscipline(d);
     setEditBoutKlasse(k);
+    setEditGeslacht(g);
+    setEditMaxGewicht(maxG);
 
-    editDraftRef.current = { va, naam, gym, discipline: d, klasse: k };
+    editDraftRef.current = { va, naam, gym, discipline: d, klasse: k, gewicht, geslacht: g, max_gewicht: maxG };
     setEditMountKey((x) => x + 1);
     setEditOpen(side);
   }
@@ -1373,12 +1399,18 @@ export default function PartijDetailPage() {
   function closeEdit() {
     setEditBoutDiscipline("");
     setEditBoutKlasse("");
+    setEditGewicht("");
+    setEditGeslacht("");
+    setEditMaxGewicht("");
     editDraftRef.current = {
       va: "",
       naam: "",
       gym: "",
       discipline: "",
       klasse: "",
+      gewicht: "",
+      geslacht: "",
+      max_gewicht: "",
     };
     setEditOpen(null);
   }
@@ -2363,18 +2395,25 @@ export default function PartijDetailPage() {
       const va = String(editDraftRef.current.va ?? editVa ?? "");
       const naam = String(editDraftRef.current.naam ?? editNaam ?? "");
       const gym = String(editDraftRef.current.gym ?? editGym ?? "");
+      const gewicht = String(editDraftRef.current.gewicht ?? editGewicht ?? "");
+      const geslacht = String(editDraftRef.current.geslacht ?? editGeslacht ?? "");
+      const maxGewicht = String(editDraftRef.current.max_gewicht ?? editMaxGewicht ?? "");
 
       if (d) payload.new_discipline = d;
       if (k) payload.new_klasse_mm = k;
+      payload.new_geslacht = geslacht;
+      payload.new_max_gewicht = maxGewicht;
 
       if (editOpen === "rood") {
         payload.new_va_rood = va;
         payload.new_rood_naam = naam;
         payload.new_rood_gym = gym;
+        payload.new_rood_gewicht = gewicht;
       } else {
         payload.new_va_blauw = va;
         payload.new_blauw_naam = naam;
         payload.new_blauw_gym = gym;
+        payload.new_blauw_gewicht = gewicht;
       }
 
       const r1 = await authedFetch("/api/control-engine/correct-bout", {
@@ -2424,18 +2463,25 @@ export default function PartijDetailPage() {
       const va = String(editDraftRef.current.va ?? editVa ?? "");
       const naam = String(editDraftRef.current.naam ?? editNaam ?? "");
       const gym = String(editDraftRef.current.gym ?? editGym ?? "");
+      const gewicht = String(editDraftRef.current.gewicht ?? editGewicht ?? "");
+      const geslacht = String(editDraftRef.current.geslacht ?? editGeslacht ?? "");
+      const maxGewicht = String(editDraftRef.current.max_gewicht ?? editMaxGewicht ?? "");
 
       if (d) payload.new_discipline = d;
       if (k) payload.new_klasse_mm = k;
+      payload.new_geslacht = geslacht;
+      payload.new_max_gewicht = maxGewicht;
 
       if (editOpen === "rood") {
         payload.new_va_rood = va;
         payload.new_rood_naam = naam;
         payload.new_rood_gym = gym;
+        payload.new_rood_gewicht = gewicht;
       } else {
         payload.new_va_blauw = va;
         payload.new_blauw_naam = naam;
         payload.new_blauw_gym = gym;
+        payload.new_blauw_gewicht = gewicht;
       }
 
       const r1 = await authedFetch("/api/control-engine/correct-bout", {
@@ -3142,6 +3188,18 @@ export default function PartijDetailPage() {
                 </div>
 
                 <div>
+                  <div className="text-xs text-zinc-600 mb-1">Gewicht vechter</div>
+                  <input
+                    defaultValue={editDraftRef.current.gewicht}
+                    onChange={(e) => {
+                      editDraftRef.current.gewicht = e.target.value;
+                    }}
+                    className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    placeholder="Bijv. 41"
+                  />
+                </div>
+
+                <div>
                   <div className="text-xs text-zinc-600 mb-1">Discipline (partij)</div>
                   <input
                     defaultValue={editDraftRef.current.discipline}
@@ -3162,6 +3220,30 @@ export default function PartijDetailPage() {
                     }}
                     className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                     placeholder="Bijv. JEUGD/YOUTH, N, C, B…"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-600 mb-1">Geslacht (partij)</div>
+                  <input
+                    defaultValue={editDraftRef.current.geslacht}
+                    onChange={(e) => {
+                      editDraftRef.current.geslacht = e.target.value;
+                    }}
+                    className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    placeholder="Bijv. Man, Vrouw of Gemengd"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-600 mb-1">Max gewicht partij</div>
+                  <input
+                    defaultValue={editDraftRef.current.max_gewicht}
+                    onChange={(e) => {
+                      editDraftRef.current.max_gewicht = e.target.value;
+                    }}
+                    className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    placeholder="Bijv. 41"
                   />
                 </div>
 

@@ -1391,18 +1391,27 @@ export default function PartijDetailPage() {
   const [editGym, setEditGym] = useState("");
   const [editBoutDiscipline, setEditBoutDiscipline] = useState("");
   const [editBoutKlasse, setEditBoutKlasse] = useState("");
+  const [editGewicht, setEditGewicht] = useState("");
+  const [editGeslacht, setEditGeslacht] = useState("");
+  const [editMaxGewicht, setEditMaxGewicht] = useState("");
   const editDraftRef = useRef<{
     va: string;
     naam: string;
     gym: string;
     discipline: string;
     klasse: string;
+    gewicht: string;
+    geslacht: string;
+    max_gewicht: string;
   }>({
     va: "",
     naam: "",
     gym: "",
     discipline: "",
     klasse: "",
+    gewicht: "",
+    geslacht: "",
+    max_gewicht: "",
   });
   const [editMountKey, setEditMountKey] = useState(0);
   const [editSaving, setEditSaving] = useState(false);
@@ -2495,27 +2504,30 @@ export default function PartijDetailPage() {
         va_gewijzigd: false,
       };
 
-      const d = String(
-        editDraftRef.current.discipline ?? editBoutDiscipline ?? "",
-      ).trim();
-      const k = String(
-        editDraftRef.current.klasse ?? editBoutKlasse ?? "",
-      ).trim();
+      const d = String(editDraftRef.current.discipline ?? editBoutDiscipline ?? "").trim();
+      const k = String(editDraftRef.current.klasse ?? editBoutKlasse ?? "").trim();
       const va = String(editDraftRef.current.va ?? editVa ?? "");
       const naam = String(editDraftRef.current.naam ?? editNaam ?? "");
       const gym = String(editDraftRef.current.gym ?? editGym ?? "");
+      const gewicht = String(editDraftRef.current.gewicht ?? editGewicht ?? "");
+      const geslacht = String(editDraftRef.current.geslacht ?? editGeslacht ?? "");
+      const maxGewicht = String(editDraftRef.current.max_gewicht ?? editMaxGewicht ?? "");
 
       if (d) payload.new_discipline = d;
       if (k) payload.new_klasse_mm = k;
+      payload.new_geslacht = geslacht;
+      payload.new_max_gewicht = maxGewicht;
 
       if (editOpen === "rood") {
         payload.new_va_rood = va;
         payload.new_rood_naam = naam;
         payload.new_rood_gym = gym;
+        payload.new_rood_gewicht = gewicht;
       } else {
         payload.new_va_blauw = va;
         payload.new_blauw_naam = naam;
         payload.new_blauw_gym = gym;
+        payload.new_blauw_gewicht = gewicht;
       }
 
       const r1 = await authedFetch("/api/control-engine/correct-bout", {
@@ -2528,8 +2540,7 @@ export default function PartijDetailPage() {
       });
 
       const j1 = await r1.json().catch(() => ({}));
-      if (!r1.ok)
-        throw new Error(j1?.error ?? "Opslaan mislukt (correct-bout)");
+      if (!r1.ok) throw new Error(j1?.error ?? "Opslaan mislukt (correct-bout)");
 
       setMsg("✅ Opgeslagen.");
       closeEdit();
@@ -2561,27 +2572,30 @@ export default function PartijDetailPage() {
         va_gewijzigd: false,
       };
 
-      const d = String(
-        editDraftRef.current.discipline ?? editBoutDiscipline ?? "",
-      ).trim();
-      const k = String(
-        editDraftRef.current.klasse ?? editBoutKlasse ?? "",
-      ).trim();
+      const d = String(editDraftRef.current.discipline ?? editBoutDiscipline ?? "").trim();
+      const k = String(editDraftRef.current.klasse ?? editBoutKlasse ?? "").trim();
       const va = String(editDraftRef.current.va ?? editVa ?? "");
       const naam = String(editDraftRef.current.naam ?? editNaam ?? "");
       const gym = String(editDraftRef.current.gym ?? editGym ?? "");
+      const gewicht = String(editDraftRef.current.gewicht ?? editGewicht ?? "");
+      const geslacht = String(editDraftRef.current.geslacht ?? editGeslacht ?? "");
+      const maxGewicht = String(editDraftRef.current.max_gewicht ?? editMaxGewicht ?? "");
 
       if (d) payload.new_discipline = d;
       if (k) payload.new_klasse_mm = k;
+      payload.new_geslacht = geslacht;
+      payload.new_max_gewicht = maxGewicht;
 
       if (editOpen === "rood") {
         payload.new_va_rood = va;
         payload.new_rood_naam = naam;
         payload.new_rood_gym = gym;
+        payload.new_rood_gewicht = gewicht;
       } else {
         payload.new_va_blauw = va;
         payload.new_blauw_naam = naam;
         payload.new_blauw_gym = gym;
+        payload.new_blauw_gewicht = gewicht;
       }
 
       const r1 = await authedFetch("/api/control-engine/correct-bout", {
@@ -2594,8 +2608,7 @@ export default function PartijDetailPage() {
       });
 
       const j1 = await r1.json().catch(() => ({}));
-      if (!r1.ok)
-        throw new Error(j1?.error ?? "Opslaan mislukt (admin-correct-bout)");
+      if (!r1.ok) throw new Error(j1?.error ?? "Opslaan mislukt (admin-correct-bout)");
 
       const va_rood =
         editOpen === "rood"
@@ -3335,9 +3348,19 @@ export default function PartijDetailPage() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-zinc-600 mb-1">
-                    Discipline (partij)
-                  </div>
+                  <div className="text-xs text-zinc-600 mb-1">Gewicht vechter</div>
+                  <input
+                    defaultValue={editDraftRef.current.gewicht}
+                    onChange={(e) => {
+                      editDraftRef.current.gewicht = e.target.value;
+                    }}
+                    className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    placeholder="Bijv. 41"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-600 mb-1">Discipline (partij)</div>
                   <input
                     defaultValue={editDraftRef.current.discipline}
                     onChange={(e) => {
@@ -3349,9 +3372,7 @@ export default function PartijDetailPage() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-zinc-600 mb-1">
-                    Klasse (partij)
-                  </div>
+                  <div className="text-xs text-zinc-600 mb-1">Klasse (partij)</div>
                   <input
                     defaultValue={editDraftRef.current.klasse}
                     onChange={(e) => {
@@ -3359,6 +3380,30 @@ export default function PartijDetailPage() {
                     }}
                     className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                     placeholder="Bijv. JEUGD/YOUTH, N, C, B…"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-600 mb-1">Geslacht (partij)</div>
+                  <input
+                    defaultValue={editDraftRef.current.geslacht}
+                    onChange={(e) => {
+                      editDraftRef.current.geslacht = e.target.value;
+                    }}
+                    className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    placeholder="Bijv. Man, Vrouw of Gemengd"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-600 mb-1">Max gewicht partij</div>
+                  <input
+                    defaultValue={editDraftRef.current.max_gewicht}
+                    onChange={(e) => {
+                      editDraftRef.current.max_gewicht = e.target.value;
+                    }}
+                    className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    placeholder="Bijv. 41"
                   />
                 </div>
 
@@ -3393,8 +3438,8 @@ export default function PartijDetailPage() {
                 </div>
 
                 <div className="text-xs text-zinc-600">
-                  Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan +
-                  Autocheck” haalt daarna data Fightpaspoort opnieuw op.
+                  Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan + Autocheck”
+                  haalt daarna data Fightpaspoort opnieuw op.
                 </div>
               </div>
             </div>

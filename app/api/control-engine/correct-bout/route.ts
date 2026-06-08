@@ -35,6 +35,14 @@ function normalizeText(input: unknown): string | null {
   return s ? s : null;
 }
 
+function normalizeWeight(input: unknown): string | null {
+  if (input === null || input === undefined) return null;
+  const s = String(input).trim().replace(/,/g, ".");
+  if (!s) return null;
+  const cleaned = s.replace(/[^0-9.\-]/g, "");
+  return cleaned ? cleaned : null;
+}
+
 function unwrapUuid(v: any): string | null {
   if (v == null) return null;
   const s = String(v).trim();
@@ -207,12 +215,22 @@ function readToernooiInput(body: any) {
   const newKlasse = normalizeText(
     hasOwn(body, "new_klasse")
       ? body.new_klasse
-      : hasOwn(body, "klasse")
-        ? body.klasse
+      : hasOwn(body, "new_klasse_mm")
+        ? body.new_klasse_mm
+        : hasOwn(body, "klasse")
+          ? body.klasse
+          : undefined
+  );
+
+  const newGewicht = normalizeWeight(
+    hasOwn(body, "new_gewicht")
+      ? body.new_gewicht
+      : hasOwn(body, "gewicht")
+        ? body.gewicht
         : undefined
   );
 
-  return { toernooi_code, oldVa, newVa, newNaam, newGym, newDiscipline, newKlasse };
+  return { toernooi_code, oldVa, newVa, newNaam, newGym, newDiscipline, newKlasse, newGewicht };
 }
 
 async function correctToernooiFighter(opts: {
@@ -231,6 +249,7 @@ async function correctToernooiFighter(opts: {
     newGym,
     newDiscipline,
     newKlasse,
+    newGewicht,
   } = readToernooiInput(body);
 
   if (!toernooi_code) {
@@ -261,7 +280,8 @@ async function correctToernooiFighter(opts: {
     );
   }
 
-  const sourceVa = newVa ?? oldVa;
+  const hasNewVaInput = hasOwn(body, "new_va_nummer") || hasOwn(body, "new_va");
+  const sourceVa = hasNewVaInput ? newVa : oldVa;
   const isRood =
     normalizeVa(rawBout?.va_rood ?? rawBout?.rood_va ?? rawBout?.rood_va_mm) === oldVa;
   const isBlauw =
@@ -278,9 +298,10 @@ async function correctToernooiFighter(opts: {
     if (newKlasse !== null) boutPatch.klasse = newKlasse;
 
     if (isRood) {
-      if (sourceVa) boutPatch.va_rood = sourceVa;
+      if (hasNewVaInput) boutPatch.va_rood = sourceVa;
       if (newNaam !== null) boutPatch.rood_naam = newNaam;
       if (newGym !== null) boutPatch.rood_gym = newGym;
+      if (newGewicht !== null) boutPatch.rood_gewicht = newGewicht;
 
       if (sourceVa !== oldVa) {
         boutPatch.rood_va_changed = true;
@@ -290,9 +311,10 @@ async function correctToernooiFighter(opts: {
         if (!rawBout?.rood_va_mm_prev) boutPatch.rood_va_mm_prev = oldVa;
       }
     } else if (isBlauw) {
-      if (sourceVa) boutPatch.va_blauw = sourceVa;
+      if (hasNewVaInput) boutPatch.va_blauw = sourceVa;
       if (newNaam !== null) boutPatch.blauw_naam = newNaam;
       if (newGym !== null) boutPatch.blauw_gym = newGym;
+      if (newGewicht !== null) boutPatch.blauw_gewicht = newGewicht;
 
       if (sourceVa !== oldVa) {
         boutPatch.blauw_va_changed = true;
@@ -320,7 +342,7 @@ async function correctToernooiFighter(opts: {
       bijgewerkt_op: new Date().toISOString().slice(0, 10),
     };
 
-    if (sourceVa) {
+    if (hasNewVaInput) {
       ctxPatch.va_nummer = sourceVa;
       ctxPatch.fighter_id = sourceVa;
     }
@@ -333,6 +355,11 @@ async function correctToernooiFighter(opts: {
     if (newGym !== null) {
       ctxPatch.sportschool_mm = newGym;
       ctxPatch.sportschool = newGym;
+    }
+
+    if (newGewicht !== null) {
+      ctxPatch.gewicht_mm = newGewicht;
+      ctxPatch.gewicht = newGewicht;
     }
 
     if (newDiscipline !== null) ctxPatch.discipline = newDiscipline;
@@ -370,14 +397,14 @@ async function correctToernooiFighter(opts: {
   //    omdat buildToernooiContext scraped FP-waarden kan terugzetten.
   await buildToernooiContext(matchmaking_id, controle_run_id, {
     toernooi_code,
-    fighter_id: sourceVa,
+    fighter_id: sourceVa ?? oldVa,
   });
 
   const rebuiltCtx = await getToernooiContextRow({
     matchmaking_id,
     controle_run_id,
     toernooi_code,
-    va_nummer: sourceVa,
+    va_nummer: sourceVa ?? oldVa,
   });
 
   if (rebuiltCtx) {
@@ -394,12 +421,16 @@ async function correctToernooiFighter(opts: {
       finalPatch.sportschool_mm = newGym;
       finalPatch.sportschool = newGym;
     }
+    if (newGewicht !== null) {
+      finalPatch.gewicht_mm = newGewicht;
+      finalPatch.gewicht = newGewicht;
+    }
     if (newDiscipline !== null) finalPatch.discipline = newDiscipline;
     if (newKlasse !== null) {
       finalPatch.klasse_mm = newKlasse;
       finalPatch.klasse = newKlasse;
     }
-    if (sourceVa) {
+    if (hasNewVaInput) {
       finalPatch.va_nummer = sourceVa;
       finalPatch.fighter_id = sourceVa;
     }
@@ -527,14 +558,36 @@ export async function POST(req: Request) {
     const hasNewDiscipline = hasOwn(body, "new_discipline");
     const hasDiscipline = hasOwn(body, "discipline");
     const hasNewKlasse = hasOwn(body, "new_klasse");
+    const hasNewKlasseMm = hasOwn(body, "new_klasse_mm");
     const hasKlasse = hasOwn(body, "klasse");
 
     if (hasNewDiscipline || hasDiscipline) {
       patch.discipline = normalizeText(hasNewDiscipline ? body.new_discipline : body.discipline);
     }
 
-    if (hasNewKlasse || hasKlasse) {
-      patch.klasse = normalizeText(hasNewKlasse ? body.new_klasse : body.klasse);
+    if (hasNewKlasse || hasNewKlasseMm || hasKlasse) {
+      patch.klasse = normalizeText(
+        hasNewKlasse ? body.new_klasse : hasNewKlasseMm ? body.new_klasse_mm : body.klasse
+      );
+    }
+
+    if (hasOwn(body, "new_geslacht") || hasOwn(body, "geslacht")) {
+      patch.geslacht = normalizeText(hasOwn(body, "new_geslacht") ? body.new_geslacht : body.geslacht);
+    }
+
+    if (hasOwn(body, "new_max_gewicht") || hasOwn(body, "max_gewicht")) {
+      const maxGewicht = normalizeWeight(hasOwn(body, "new_max_gewicht") ? body.new_max_gewicht : body.max_gewicht);
+      patch.max_gewicht = maxGewicht;
+      patch.max_gewicht_notatie = maxGewicht ? `-${maxGewicht}` : null;
+      if (!patch.max_gewicht_type) patch.max_gewicht_type = "up_to";
+    }
+
+    if (hasOwn(body, "new_rood_gewicht")) {
+      patch.rood_gewicht = normalizeWeight(body.new_rood_gewicht);
+    }
+
+    if (hasOwn(body, "new_blauw_gewicht")) {
+      patch.blauw_gewicht = normalizeWeight(body.new_blauw_gewicht);
     }
 
     const newVaRood = hasNewVaRood ? (patch.va_rood ?? null) : oldVaRood;
@@ -574,6 +627,8 @@ export async function POST(req: Request) {
     }
 
     if (Object.keys(patch).length > 0) {
+      patch.laatste_bewerking_op = new Date().toISOString();
+
       const { error: upErr } = await supabase
         .from("matchmaking_bouts_raw")
         .update(patch)
@@ -616,7 +671,38 @@ export async function POST(req: Request) {
       bout_id: scopedBoutId,
     });
 
-    const ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+    let ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+
+    // Final override na build + enrich:
+    // buildControleBoutContext/enrich kunnen context opnieuw vullen vanuit raw/scrape.
+    // De bewerkvelden uit deze request moeten leidend blijven, inclusief lege VA's.
+    if (ctxFinal && (hasNewVaRood || hasNewVaBlauw)) {
+      const finalCtxPatch: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (hasNewVaRood) {
+        finalCtxPatch.rood_va_mm = newVaRood;
+        finalCtxPatch.rood_va_mm_prev = oldVaRood;
+      }
+
+      if (hasNewVaBlauw) {
+        finalCtxPatch.blauw_va_mm = newVaBlauw;
+        finalCtxPatch.blauw_va_mm_prev = oldVaBlauw;
+      }
+
+      const { error: finalCtxErr } = await supabase
+        .from("controle_bout_context")
+        .update(finalCtxPatch)
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("controle_run_id", controle_run_id)
+        .eq("partij_nr", partij_nr);
+
+      if (finalCtxErr) throw finalCtxErr;
+
+      ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+    }
+
     const ctxRows = ctxFinal ? [ctxFinal] : [];
 
     if (ctxRows.length === 0) {

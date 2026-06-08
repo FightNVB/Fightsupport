@@ -106,9 +106,18 @@ function firstValidVa(...values: any[]): string | null {
 // Handmatige correcties landen in va_rood / va_blauw en moeten dus
 // vóór oude / scrape-velden gekozen worden.
 function pickVA(row: any, side: "rood" | "blauw"): string | null {
+  // Belangrijk:
+  // va_rood / va_blauw in matchmaking_bouts_raw zijn de bewerkbare bronvelden.
+  // Als zo'n veld expliciet bestaat maar leeg/null is gemaakt, dan betekent dat:
+  // "VA verwijderen". Dan mogen we NIET terugvallen op oude velden zoals
+  // rood_va_mm_prev / rood_va_was, want dan verschijnt het verwijderde VA-nummer
+  // na een rebuild direct weer terug in controle_bout_context.
   if (side === "rood") {
+    if (Object.prototype.hasOwnProperty.call(row ?? {}, "va_rood")) {
+      return toVaStrict(row?.va_rood);
+    }
+
     return firstValidVa(
-      row?.va_rood,
       row?.rood_va_mm,
       row?.rood_va,
       row?.rood_va_mm_prev,
@@ -118,8 +127,11 @@ function pickVA(row: any, side: "rood" | "blauw"): string | null {
     );
   }
 
+  if (Object.prototype.hasOwnProperty.call(row ?? {}, "va_blauw")) {
+    return toVaStrict(row?.va_blauw);
+  }
+
   return firstValidVa(
-    row?.va_blauw,
     row?.blauw_va_mm,
     row?.blauw_va,
     row?.blauw_va_mm_prev,
