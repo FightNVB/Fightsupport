@@ -482,13 +482,16 @@ export default function ContactpersonenFightcrewPage() {
     () => selectedContacts.find((c) => c.actief !== false),
     [selectedContacts],
   );
+  const selectedContactHasExistingLogin = Boolean(selectedContact?.user_id);
   const selectedHasCrew =
     fighters.length > 0 || Number(selected?.fighter_count ?? 0) > 0;
   const selectedSynced = ["klaar", "ok", "done"].includes(
     String(selected?.team_sync_status ?? "").toLowerCase(),
   );
   const selectedReadyForLogin = Boolean(
-    selectedContact && (selectedHasCrew || selectedSynced),
+    selectedContact &&
+      !selectedContactHasExistingLogin &&
+      (selectedHasCrew || selectedSynced),
   );
 
   useEffect(() => {
@@ -886,7 +889,7 @@ export default function ContactpersonenFightcrewPage() {
       await loadContacts(selected.sportschool_id);
       await loadExistingTrainerUsers();
       setSelectedTrainerUserId("");
-      setMelding("Bestaande trainer/sportschool-gebruiker is gekoppeld aan deze sportschool.");
+      setMelding("Bestaande trainer/sportschool-gebruiker is gekoppeld. Er hoeft geen nieuwe login verstuurd te worden.");
     } catch (e: any) {
       setMelding(e?.message ?? "Bestaande gebruiker koppelen mislukt");
     } finally {
@@ -1225,7 +1228,7 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
             title="Login versturen"
             text="Pas versturen als de trainer aan de juiste sportschool en Fightcrew gekoppeld is."
             active={selectedReadyForLogin}
-            done={!!selectedContact?.login_verstuurd_at}
+            done={selectedContactHasExistingLogin || !!selectedContact?.login_verstuurd_at}
           />
         </section>
 
@@ -1482,9 +1485,11 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                 <div style={{ ...lightMetal, padding: 13 }}>
                   <div style={labelStyle}>Trainer-login</div>
                   <b>
-                    {selectedContact?.login_verstuurd_at
-                      ? "Verstuurd"
-                      : "Nog niet verstuurd"}
+                    {selectedContactHasExistingLogin
+                      ? "Bestaand account"
+                      : selectedContact?.login_verstuurd_at
+                        ? "Verstuurd"
+                        : "Nog niet verstuurd"}
                   </b>
                   <div
                     style={{
@@ -1493,7 +1498,9 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                       marginTop: 4,
                     }}
                   >
-                    {fmtDateTime(selectedContact?.login_verstuurd_at)}
+                    {selectedContactHasExistingLogin
+                      ? "Niet opnieuw nodig"
+                      : fmtDateTime(selectedContact?.login_verstuurd_at)}
                   </div>
                 </div>
               </div>
@@ -1636,16 +1643,22 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                       : "Vechters beperkt scrapen"}
                   </button>
                   <button
-                    style={orangeButton}
+                    style={selectedContactHasExistingLogin ? darkButton : orangeButton}
                     onClick={() =>
                       selectedContact && sendTrainerLogin(selectedContact)
                     }
-                    disabled={!selectedReadyForLogin || !!selectedLoginBusy}
+                    disabled={
+                      selectedContactHasExistingLogin ||
+                      !selectedReadyForLogin ||
+                      !!selectedLoginBusy
+                    }
                   >
                     <Mail size={16} />{" "}
-                    {selectedLoginBusy
-                      ? "Login versturen…"
-                      : "Trainer-login versturen"}
+                    {selectedContactHasExistingLogin
+                      ? "Account bestaat al"
+                      : selectedLoginBusy
+                        ? "Login versturen…"
+                        : "Trainer-login versturen"}
                   </button>
                   <button
                     style={
@@ -1668,9 +1681,9 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                       lineHeight: 1.45,
                     }}
                   >
-                    De login-knop blijft bewust later in de flow: eerst
-                    koppelen, daarna team ophalen/verrijken, daarna toegang
-                    geven.
+                    De login-knop blijft bewust later in de flow. Kies je een
+                    bestaande trainer/sportschool-gebruiker, dan heeft die al
+                    toegang en sturen we geen nieuwe login.
                   </div>
                 </div>
               </section>
@@ -1775,7 +1788,7 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                         <td style={td}>{clean(c.naam)}</td>
                         <td style={td}>{clean(c.email)}</td>
                         <td style={td}>{clean(c.rol, "trainer")}</td>
-                        <td style={td}>{fmtDateTime(c.login_verstuurd_at)}</td>
+                        <td style={td}>{c.user_id ? "Bestaand account" : fmtDateTime(c.login_verstuurd_at)}</td>
                         <td style={td}>
                           <Badge
                             value={c.actief === false ? "inactief" : "actief"}
