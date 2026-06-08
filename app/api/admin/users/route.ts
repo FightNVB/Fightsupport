@@ -100,6 +100,34 @@ async function findAuthUserByEmail(email: string) {
   return null;
 }
 
+async function cleanupExistingUserForReinvite(userId: string) {
+  const cleanupSteps = [
+    {
+      name: "user_roles",
+      run: () =>
+        supabaseAdmin.from("user_roles").delete().eq("user_id", userId),
+    },
+    {
+      name: "user_profiles",
+      run: () =>
+        supabaseAdmin.from("user_profiles").delete().eq("id", userId),
+    },
+    {
+      name: "users",
+      run: () => supabaseAdmin.from("users").delete().eq("id", userId),
+    },
+  ];
+
+  for (const step of cleanupSteps) {
+    const { error } = await step.run();
+    if (error) {
+      throw new Error(
+        `Bestaande gebruiker opruimen mislukt bij ${step.name}: ${error.message}`,
+      );
+    }
+  }
+}
+
 async function ensureAuthUser(input: {
   req: Request;
   email: string;
@@ -115,14 +143,18 @@ async function ensureAuthUser(input: {
   if (existing?.id) {
     // Opnieuw uitnodigen werkt betrouwbaarder dan een reset-password link,
     // omdat jouw /login/set pagina op de Supabase invite-flow is ingericht.
-    // Daarom verwijderen we alleen de auth user en maken we daarna opnieuw
-    // dezelfde gebruiker aan via inviteUserByEmail. De app-tabellen worden
-    // hieronder opnieuw ge-upsert op basis van het nieuwe auth user id.
+    // Belangrijk: eerst app-tabellen opruimen, anders blokkeert de FK naar
+    // auth.users en krijg je: Database error deleting user.
+    await cleanupExistingUserForReinvite(existing.id);
+
     const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(
       existing.id,
     );
 
-    if (deleteError) throw deleteError;
+    if (deleteError) {
+      throw new Error(`Auth user verwijderen mislukt: ${deleteError.message}`);
+    }
+
     reinvited = true;
   }
 
