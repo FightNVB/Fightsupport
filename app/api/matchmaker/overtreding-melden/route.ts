@@ -69,6 +69,48 @@ async function getBearerUserId(req: NextRequest, supabase: any) {
   return data?.user?.id || null;
 }
 
+
+async function findEventByName(supabase: any, value: string | null) {
+  const eventNaam = cleanString(value);
+  if (!eventNaam) return null;
+
+  const candidates = [
+    { table: "events", column: "naam" },
+    { table: "events", column: "name" },
+    { table: "events", column: "event_name" },
+    { table: "matchmakings", column: "event_naam" },
+    { table: "matchmakings", column: "event_name" },
+  ];
+
+  for (const c of candidates) {
+    const { data, error } = await supabase
+      .from(c.table)
+      .select("id")
+      .ilike(c.column, eventNaam)
+      .limit(2);
+
+    if (error) {
+      const msg = String(error.message || "").toLowerCase();
+      const code = String(error.code || "").toLowerCase();
+      if (
+        code === "42p01" ||
+        code === "42703" ||
+        code === "pgrst204" ||
+        msg.includes("does not exist") ||
+        msg.includes("could not find") ||
+        msg.includes("schema cache")
+      ) {
+        continue;
+      }
+      throw error;
+    }
+
+    if ((data ?? []).length === 1) return data[0].id;
+  }
+
+  return null;
+}
+
 async function getProfile(supabase: any, userId: string | null) {
   if (!userId) return null;
   const { data } = await supabase
@@ -87,6 +129,11 @@ export async function POST(req: NextRequest) {
     const naam = cleanString(body.naam);
     const categorie = cleanString(body.categorie) || "matchmaker_melding";
     const omschrijving = cleanString(body.omschrijving);
+    const eventNaam =
+      cleanString(body.event_naam) ||
+      cleanString(body.event_name) ||
+      cleanString(body.event);
+    const eventId = cleanString(body.event_id) || await findEventByName(supabase, eventNaam);
 
     if (!naam) return NextResponse.json({ ok: false, error: "Naam betrokkene is verplicht." }, { status: 400 });
     if (!omschrijving) return NextResponse.json({ ok: false, error: "Omschrijving is verplicht." }, { status: 400 });
@@ -122,6 +169,8 @@ export async function POST(req: NextRequest) {
       melderBondteam ? `MELDER_BONDTEAM: ${melderBondteam}` : "",
       melderRole ? `MELDER_ROL: ${melderRole}` : "",
       cleanString(body.datum_overtreding) ? `Datum overtreding: ${cleanString(body.datum_overtreding)}` : "",
+      eventNaam ? `EVENT_NAAM: ${eventNaam}` : "",
+      eventNaam && !eventId ? "LET OP: event_id niet automatisch gevonden op basis van eventnaam." : "",
       cleanString(body.interne_notitie) || "",
     ].filter(Boolean).join("\n");
 
@@ -133,7 +182,9 @@ export async function POST(req: NextRequest) {
       va_nummer: cleanVa(body.va_nummer),
       naam,
       matchmaking_id: cleanString(body.matchmaking_id),
-      event_id: cleanString(body.event_id),
+      event_id: eventId,
+      event_naam: eventNaam,
+      event_name: eventNaam,
       bout_id: cleanString(body.bout_id),
       categorie,
       ernst: cleanString(body.ernst) || "laag",
