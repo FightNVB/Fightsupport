@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, type CSSProperties, type ReactNode } from "react";
+import React, { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { authedFetch } from "@/lib/api/authedFetch";
 import {
   ClipboardList,
   Scale,
@@ -24,16 +25,48 @@ const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
 const ALLOWED_MENU_ROLES = ["official", "hoofdofficial", "admin", "superadmin"] as const;
 
+type UserProfileRow = {
+  role: string | null;
+  active_role?: string | null;
+  default_role?: string | null;
+  available_roles?: string[] | null;
+};
+
 function normalizeRole(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value).trim().toLowerCase();
 }
 
-function canOpenOfficialsMenu(roleList: readonly unknown[]): boolean {
-  const normalizedRoles = roleList.map(normalizeRole);
-  return normalizedRoles.some((role) =>
-    ALLOWED_MENU_ROLES.includes(role as (typeof ALLOWED_MENU_ROLES)[number]),
+function canOpenOfficialsPortal(profile: UserProfileRow | null): boolean {
+  const roles = new Set(
+    [
+      profile?.active_role,
+      profile?.role,
+      profile?.default_role,
+      ...(profile?.available_roles ?? []),
+    ]
+      .map(normalizeRole)
+      .filter(Boolean),
   );
+
+  return ALLOWED_MENU_ROLES.some((role) => roles.has(role));
+}
+
+async function fetchUserProfile(): Promise<UserProfileRow | null> {
+  const response = await authedFetch("/api/me/profile", {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    console.error("user profile laden mislukt", response.status, message);
+    return null;
+  }
+
+  return (await response.json()) as UserProfileRow;
 }
 
 
@@ -163,23 +196,51 @@ const darkPlate: CSSProperties = {
 
 export default function OfficialsDashboardPage() {
   const router = useRouter();
-  const { user, roles, loading } = useAuth();
+  const { user, loading } = useAuth();
+  const [profile, setProfile] = useState<UserProfileRow | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
-      return;
+    }
+  }, [loading, router, user]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUserProfile() {
+      if (loading) return;
+
+      if (!user?.id) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+
+      setProfileLoading(true);
+      const data = await fetchUserProfile();
+
+      if (!cancelled) {
+        setProfile(data);
+        setProfileLoading(false);
+      }
     }
 
-    const roleList = roles ?? [];
-    const allowed = canOpenOfficialsMenu(roleList);
+    loadUserProfile();
 
-    if (!loading && user && !allowed) {
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user?.id]);
+
+  useEffect(() => {
+    if (!loading && !profileLoading && user && !canOpenOfficialsPortal(profile)) {
       router.replace("/dashboard");
     }
-  }, [loading, roles, router, user]);
+  }, [loading, profileLoading, profile, router, user]);
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <main style={pageBackground}>
         <CenteredMessage text="Bezig met laden..." />
@@ -188,11 +249,7 @@ export default function OfficialsDashboardPage() {
   }
 
   if (!user) return null;
-
-  const roleList = roles ?? [];
-  const allowed = canOpenOfficialsMenu(roleList);
-
-  if (!allowed) return null;
+  if (!canOpenOfficialsPortal(profile)) return null;
 
   const actions: MenuAction[] = [
     {
