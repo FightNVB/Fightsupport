@@ -22,6 +22,8 @@ type MenuAction = {
 
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
+const ALLOWED_MENU_ROLES = ["official", "hoofdofficial", "admin", "superadmin"];
+
 
 const pageBackground: CSSProperties = {
   minHeight: "100vh",
@@ -158,11 +160,7 @@ export default function OfficialsDashboardPage() {
     }
 
     const roleList = roles ?? [];
-    const allowed =
-      roleList.includes("official") ||
-      roleList.includes("hoofdofficial") ||
-      roleList.includes("admin") ||
-      roleList.includes("superadmin");
+    const allowed = ALLOWED_MENU_ROLES.some((role) => roleList.includes(role));
 
     if (!loading && user && !allowed) {
       router.replace("/dashboard");
@@ -180,11 +178,7 @@ export default function OfficialsDashboardPage() {
   if (!user) return null;
 
   const roleList = roles ?? [];
-  const allowed =
-    roleList.includes("official") ||
-    roleList.includes("hoofdofficial") ||
-    roleList.includes("admin") ||
-    roleList.includes("superadmin");
+  const allowed = ALLOWED_MENU_ROLES.some((role) => roleList.includes(role));
 
   if (!allowed) return null;
 
