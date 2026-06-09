@@ -77,7 +77,7 @@ const KB_TM_MUAYTHAI_LIMITS: Array<{ match: RegExp; max: number | null; openMin?
   { match: /middleweight\s*76(?:[.,]20)?/i, max: 76.20 },
   { match: /middleweight/i, max: 72.57 },
   { match: /cruiser/i, max: 86.18 },
-  { match: /heavyweight/i, max: 95.00 },
+  { match: /heavyweight/i, max: null, openMin: 95.0 },
 ];
 
 export type WeighInEngineInput = {
@@ -130,11 +130,7 @@ function parseKlasseMaxGewicht(label: string | null | undefined): number | null 
 
 function isYouthClassCode(v: string | null | undefined): boolean {
   const s = String(v ?? "").trim().toLowerCase();
-
-  // Alleen J/J+ of expliciet "jeugd" telt als jeugd.
-  // Gewichtsklassen zoals "junior welter" zijn géén jeugdklasse en mogen
-  // daarom niet per ongeluk de jeugd-marge van max - 2 kg krijgen.
-  return s === "j" || s === "j+" || s.includes("jeugd");
+  return s === "j" || s === "j+" || s.includes("jeugd") || s.includes("junior");
 }
 
 function inferLeeftijdType(
@@ -210,6 +206,13 @@ function getAllowedWeightRange(params: {
   }
 
   const max = Number((effectiveMaxGewicht + UPPER_TOLERANCE).toFixed(2));
+
+  if (isMma) {
+    return {
+      min: null,
+      max,
+    };
+  }
 
   if (leeftijdType === "jeugd") {
     return {
@@ -404,10 +407,10 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
     messages.push(`Maximaal toegestaan gewicht: ${fmtKg(maxToelaatbaarGewicht)}.`);
   }
 
-  if (teLichtRood) messages.push("Rood is te licht voor de afgesproken partij en kan een minpunt krijgen.");
-  if (teZwaarRood) messages.push("Rood is te zwaar voor de afgesproken partij en kan een minpunt krijgen.");
-  if (teLichtBlauw) messages.push("Blauw is te licht voor de afgesproken partij en kan een minpunt krijgen.");
-  if (teZwaarBlauw) messages.push("Blauw is te zwaar voor de afgesproken partij en kan een minpunt krijgen.");
+  if (teLichtRood) messages.push("Rood is te licht voor de afgesproken partij.");
+  if (teZwaarRood) messages.push("Rood is te zwaar voor de afgesproken partij.");
+  if (teLichtBlauw) messages.push("Blauw is te licht voor de afgesproken partij.");
+  if (teZwaarBlauw) messages.push("Blauw is te zwaar voor de afgesproken partij.");
 
   if (isMma) {
     if (diff <= 4.0) {
