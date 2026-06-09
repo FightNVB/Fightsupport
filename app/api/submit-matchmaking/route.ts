@@ -480,6 +480,29 @@ export async function POST(req: Request) {
       );
     }
 
+    console.log("[submit-matchmaking] parser resultaat", {
+      raw_filename,
+      bouts: bouts.length,
+      normal_bouts: bouts.filter((b) => (b as any)?.is_toernooi !== true).length,
+      tournament_bouts: bouts.filter((b) => (b as any)?.is_toernooi === true).length,
+      va_rood: bouts.filter((b) => (b as any)?.va_rood).length,
+      va_blauw: bouts.filter((b) => (b as any)?.va_blauw).length,
+      unique_va: new Set(
+        bouts
+          .flatMap((b) => [(b as any)?.va_rood, (b as any)?.va_blauw])
+          .filter(Boolean)
+      ).size,
+      sample: bouts.slice(0, 5).map((b) => ({
+        partij_nr: (b as any)?.partij_nr ?? null,
+        is_toernooi: (b as any)?.is_toernooi ?? null,
+        toernooi_code: (b as any)?.toernooi_code ?? null,
+        rood_naam: (b as any)?.rood_naam ?? null,
+        va_rood: (b as any)?.va_rood ?? null,
+        blauw_naam: (b as any)?.blauw_naam ?? null,
+        va_blauw: (b as any)?.va_blauw ?? null,
+      })),
+    });
+
     profileForUpload = await findUserProfileForUpload(auth);
 
     console.log("[submit-matchmaking] ingelogde user_profiles gebruiker", {

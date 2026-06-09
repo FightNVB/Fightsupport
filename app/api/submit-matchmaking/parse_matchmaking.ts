@@ -683,13 +683,32 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
   for (let r = 1; r <= Math.min(25, ws.rowCount); r++) {
     const row = ws.getRow(r);
     const header = [];
-    for (let c = 1; c <= Math.min(40, ws.columnCount); c++) {
+    for (let c = 1; c <= Math.min(13, ws.columnCount); c++) {
       header.push(row.getCell(c).value);
     }
+
     const detected = detectTemplateCols(header);
     if (detected) {
       headerRowIndex = r;
-      cols = detected;
+
+      // Eigen FightSupport-template is altijd A t/m M.
+      // Kolom Q bevat alleen de dropdown/lijst voor kolom H en mag nooit worden gelezen.
+      cols = {
+        partijNr: 1,
+        discipline: 2,
+        klasse: 3,
+        naam1: 4,
+        gym1: 5,
+        va1: 6,
+        kg1: 7,
+        vs: 8,
+        naam2: 9,
+        gym2: 10,
+        va2: 11,
+        kg2: 12,
+        maxKg: 13,
+        minKg: null,
+      };
       break;
     }
   }
@@ -698,7 +717,14 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
 
   const bouts: any[] = [];
   const deelnemersByT: Record<string, any[]> = {};
-  let maxPartijNr = 0;
+
+  const pushTournamentDeelnemer = (code: string, deelnemer: any) => {
+    if (!code) return;
+    if (!deelnemer?.naam && !deelnemer?.va && !deelnemer?.gym && !deelnemer?.kg_meta) return;
+
+    if (!deelnemersByT[code]) deelnemersByT[code] = [];
+    deelnemersByT[code].push(deelnemer);
+  };
 
   const lastRow = ws.rowCount;
   for (let r = headerRowIndex + 1; r <= lastRow; r++) {
@@ -706,11 +732,6 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
 
     const partijMeta = parsePartijNrOrToernooiCode(row.getCell(cols.partijNr).value);
     const partijNr = partijMeta.partijNr;
-    const partijTCode = partijMeta.toernooiCode;
-
-    if (Number.isFinite(partijNr) && partijNr! > maxPartijNr) {
-      maxPartijNr = partijNr!;
-    }
 
     const discipline = normCell(row.getCell(cols.discipline).value) || null;
     const klasse = normCell(row.getCell(cols.klasse).value) || null;
@@ -721,7 +742,12 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
     const kg1Meta =
       cols.kg1 > 0 ? extractWeightMeta(row.getCell(cols.kg1).value, { allowClassNotation: true }) : null;
 
+    // Kolom H is leidend:
+    // - "VS" = gewone partij
+    // - "T1" / "T2" / ... = toernooi
+    // Kolom Q wordt bewust genegeerd, omdat die alleen de dropdown/data-validatie-lijst is.
     const vsVal = row.getCell(cols.vs).value;
+    const hTournamentCode = parseTCode(vsVal);
 
     const naam2 = normCell(row.getCell(cols.naam2).value) || null;
     const gym2 = normCell(row.getCell(cols.gym2).value) || null;
@@ -735,9 +761,6 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
     const maxKgMeta = parseAgreedWeightMeta(maxKgVal);
     const minKgMeta = parseAgreedWeightMeta(minKgVal);
 
-    const vsTCode = parseTCode(vsVal);
-    const tournamentCode = partijTCode || vsTCode;
-
     const isEmptyLine =
       !naam1 &&
       !gym1 &&
@@ -749,14 +772,14 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
       !kg2Meta &&
       !discipline &&
       !klasse &&
-      !tournamentCode &&
+      !hTournamentCode &&
       !maxKgMeta &&
       !minKgMeta &&
       partijNr == null;
 
     if (isEmptyLine) continue;
 
-    if (partijNr != null && isVsMarker(vsVal) && (naam2 || va2 || gym2 || kg2Meta)) {
+    if (isVsMarker(vsVal) && (naam1 || va1 || gym1 || naam2 || va2 || gym2 || kg1Meta || kg2Meta)) {
       const bout = makeEmptyBout();
       bout.bout_uid = randomUUID();
       bout.partij_nr = partijNr;
@@ -797,8 +820,8 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
       bout.toernooi_code = null;
       bout.extra = {
         ...bout.extra,
-        template: "admin_vs_t",
-        t_code: tournamentCode,
+        template: "admin_vs_t_fixed_a_m",
+        h_marker: normCell(vsVal) || null,
         rood_gewicht_type: kg1Meta?.type ?? null,
         blauw_gewicht_type: kg2Meta?.type ?? null,
         max_gewicht_type: bout.extra.max_gewicht_type ?? maxKgMeta?.type ?? null,
@@ -809,13 +832,25 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
       continue;
     }
 
-    if (tournamentCode) {
-      if (!deelnemersByT[tournamentCode]) deelnemersByT[tournamentCode] = [];
-      deelnemersByT[tournamentCode].push({
+    if (hTournamentCode) {
+      pushTournamentDeelnemer(hTournamentCode, {
         naam: naam1,
         gym: gym1,
         va: va1,
         kg_meta: kg1Meta,
+        discipline,
+        klasse,
+        max_gewicht_meta: maxKgMeta,
+        min_gewicht_meta: minKgMeta,
+      });
+
+      // Meestal gebruikt een toernooi-rij alleen atleet 1.
+      // Als iemand toch atleet 2 invult op dezelfde T-rij, nemen we die ook mee.
+      pushTournamentDeelnemer(hTournamentCode, {
+        naam: naam2,
+        gym: gym2,
+        va: va2,
+        kg_meta: kg2Meta,
         discipline,
         klasse,
         max_gewicht_meta: maxKgMeta,
@@ -841,7 +876,7 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         const bout = makeEmptyBout();
         bout.bout_uid = randomUUID();
 
-        // ✅ GEEN nep partijnummers voor gegenereerde toernooi-bouts
+        // Toernooi-bouts worden gegenereerd; geen nep partijnummers.
         bout.partij_nr = null;
 
         bout.rood_naam = a?.naam ?? null;
@@ -871,13 +906,14 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         bout.record_blauw_d = 0;
 
         bout.is_toernooi = true;
-        (bout as any).toernooi_code = code;
+        bout.toernooi_code = code;
 
         bout.extra = {
           ...bout.extra,
           toernooi_code: code,
           toernooi_format: "roundrobin",
-          template: "admin_vs_t",
+          template: "admin_vs_t_fixed_a_m",
+          h_marker: code,
           rood_gewicht_type: a?.kg_meta?.type ?? null,
           blauw_gewicht_type: b?.kg_meta?.type ?? null,
           max_gewicht_type: bout.extra.max_gewicht_type ?? mk?.type ?? null,
@@ -887,6 +923,20 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         bouts.push(bout);
       }
     }
+  }
+
+  if (bouts.length) {
+    console.log("[parseExcelToBouts] admin template parsed", {
+      template: "admin_vs_t_fixed_a_m",
+      rows: bouts.length,
+      normal_bouts: bouts.filter((b) => b.is_toernooi !== true).length,
+      tournament_bouts: bouts.filter((b) => b.is_toernooi === true).length,
+      va_rood: bouts.filter((b) => b.va_rood).length,
+      va_blauw: bouts.filter((b) => b.va_blauw).length,
+      unique_va: new Set(
+        bouts.flatMap((b) => [b.va_rood, b.va_blauw]).filter(Boolean)
+      ).size,
+    });
   }
 
   return bouts.length ? bouts : null;
