@@ -7,6 +7,8 @@ import { Search, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
 
+const API_ME_PROFILE = "/api/me/profile";
+
 type Row = {
   matchmaking_id: string;
   bondteam: string | null;
