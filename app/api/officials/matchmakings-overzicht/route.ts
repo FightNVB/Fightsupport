@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -9,6 +8,8 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
+
+const ALLOWED_ROLES = new Set(["official", "hoofdofficial", "admin", "superadmin"]);
 
 type ControleRun = {
   id: string;
@@ -19,15 +20,44 @@ type ControleRun = {
   run_type: string | null;
 };
 
-function getUserIdFromAuth(auth: any) {
-  return String(
-    auth?.user?.id ??
-      auth?.session?.user?.id ??
-      auth?.profile?.id ??
-      auth?.id ??
-      auth?.userId ??
-      ""
-  ).trim();
+type UserProfileRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
+  active_role?: string | null;
+  default_role?: string | null;
+  available_roles?: string[] | null;
+  bondteam: string | null;
+};
+
+function normalizeRole(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().toLowerCase();
+}
+
+function getProfileRoles(profile: UserProfileRow | null): string[] {
+  return [
+    profile?.active_role,
+    profile?.role,
+    profile?.default_role,
+    ...(Array.isArray(profile?.available_roles) ? profile.available_roles : []),
+  ]
+    .map(normalizeRole)
+    .filter(Boolean);
+}
+
+function canOpenOfficialsOverview(profile: UserProfileRow | null): boolean {
+  return getProfileRoles(profile).some((role) => ALLOWED_ROLES.has(role));
+}
+
+function getBearerToken(req: Request): string {
+  const authHeader = req.headers.get("authorization") ?? "";
+  return authHeader.replace(/^Bearer\s+/i, "").trim();
+}
+
+function escapePostgrestValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function inferTab(bronType: string | null | undefined): "uploaded" | "received" {
@@ -42,27 +72,32 @@ function inferTab(bronType: string | null | undefined): "uploaded" | "received" 
 
 export async function GET(req: Request) {
   try {
-    const auth = await requireUserWithRole(req, [
-      "official",
-      "hoofdofficial",
-      "admin",
-      "superadmin",
-    ]);
+    const token = getBearerToken(req);
 
-    const userId = getUserIdFromAuth(auth);
-
-    if (!userId) {
+    if (!token) {
       return NextResponse.json(
-        { ok: false, error: "Geen geldige gebruiker gevonden." },
+        { ok: false, error: "Geen geldige sessie gevonden." },
         { status: 401 }
       );
     }
 
+    const { data: authUser, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !authUser?.user?.id) {
+      console.error("[officials/matchmakings-overzicht] auth error:", authError);
+      return NextResponse.json(
+        { ok: false, error: "Sessie ongeldig of verlopen." },
+        { status: 401 }
+      );
+    }
+
+    const userId = authUser.user.id;
+
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("user_profiles")
-      .select("id, full_name, email, role, bondteam")
+      .select("id, full_name, email, role, active_role, default_role, available_roles, bondteam")
       .eq("id", userId)
-      .maybeSingle();
+      .maybeSingle<UserProfileRow>();
 
     if (profileError) {
       console.error("[officials/matchmakings-overzicht] profile error:", profileError);
@@ -72,7 +107,26 @@ export async function GET(req: Request) {
       );
     }
 
-    const bondteam = String(profile?.bondteam ?? "").trim();
+    if (!profile) {
+      return NextResponse.json(
+        { ok: false, error: "Geen profiel gevonden voor deze gebruiker." },
+        { status: 404 }
+      );
+    }
+
+    const profileRoles = getProfileRoles(profile);
+
+    if (!canOpenOfficialsOverview(profile)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Geen toegang tot officials overzicht. Rollen gevonden: ${profileRoles.join(", ") || "-"}`,
+        },
+        { status: 403 }
+      );
+    }
+
+    const bondteam = String(profile.bondteam ?? "").trim();
 
     if (!bondteam) {
       return NextResponse.json(
@@ -83,6 +137,8 @@ export async function GET(req: Request) {
         { status: 400 }
       );
     }
+
+    const escapedBondteam = escapePostgrestValue(bondteam);
 
     const { data: matchmakings, error } = await supabaseAdmin
       .from("matchmakings")
@@ -117,7 +173,7 @@ export async function GET(req: Request) {
       `)
       .or("is_archived.is.null,is_archived.eq.false")
       .in("huidige_eigenaar_type", ["bondteam", "official"])
-      .or(`huidige_eigenaar_bondteam.eq.${bondteam},bondteam.eq.${bondteam}`)
+      .or(`huidige_eigenaar_bondteam.eq."${escapedBondteam}",bondteam.eq."${escapedBondteam}"`)
       .order("datum", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -208,9 +264,19 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       bondteam,
+      roles: profileRoles,
       rows,
     });
   } catch (e: any) {
+    if (e instanceof Response) {
+      const text = await e.text().catch(() => "");
+      console.error("[officials/matchmakings-overzicht] response error:", e.status, text);
+      return NextResponse.json(
+        { ok: false, error: text || `Toegang geweigerd (${e.status})` },
+        { status: e.status || 500 }
+      );
+    }
+
     console.error("[officials/matchmakings-overzicht] unexpected:", e);
     return NextResponse.json(
       { ok: false, error: e?.message ?? "Onverwachte fout" },
