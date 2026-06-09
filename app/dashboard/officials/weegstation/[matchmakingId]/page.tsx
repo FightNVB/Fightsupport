@@ -3052,7 +3052,7 @@ export default function WeegstationDetailPage() {
                             )}
 
                             <Link
-                              href={`/dashboard/officials/controle/${matchmakingId}/${row.partij_nr}`}
+                              href={`/dashboard/officials/controle/${matchmakingId}/partij/${row.partij_nr}`}
                               className="inline-flex items-center justify-center whitespace-nowrap px-2 py-1 text-[11px] font-black leading-none text-white"
                               style={{
                                 borderRadius: 4,
