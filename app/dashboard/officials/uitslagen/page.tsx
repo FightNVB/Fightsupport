@@ -18,7 +18,11 @@ type Row = {
   finalized: boolean;
 };
 
-type UserProfile = { bondteam: string | null };
+type UserProfile = {
+  bondteam: string | null;
+  role?: string | null;
+  active_role?: string | null;
+};
 type ActiveTab = "active" | "done";
 
 function clean(v: unknown) {
@@ -46,36 +50,51 @@ export default function OfficialsUitslagenPage() {
   const [loading, setLoading] = useState(true);
   const [myBondteam, setMyBondteam] = useState("");
   const [melding, setMelding] = useState<string | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("active");
+
+  const profileRoles = useMemo(() => {
+    const fromAuth = Array.isArray(roles) ? roles : [];
+    return [profile?.active_role, profile?.role, ...fromAuth]
+      .map((r) => lower(r))
+      .filter(Boolean);
+  }, [profile?.active_role, profile?.role, roles]);
 
   const allowed = useMemo(
     () =>
-      roles?.some((r) =>
-        ["official", "hoofdofficial", "admin", "superadmin"].includes(
-          String(r).toLowerCase(),
-        ),
-      ) ?? false,
-    [roles],
+      profileRoles.some((r) =>
+        ["official", "hoofdofficial", "admin", "superadmin"].includes(r),
+      ),
+    [profileRoles],
   );
 
   const isSuperadmin = useMemo(
-    () => roles?.some((r) => String(r).toLowerCase() === "superadmin") ?? false,
-    [roles],
+    () => profileRoles.some((r) => r === "superadmin"),
+    [profileRoles],
   );
 
   const canSeeAllBonds = isSuperadmin && norm(myBondteam) === "NVB";
 
-  async function loadMyProfileBondteam(userId: string) {
-    const { data, error } = await supabase
-      .from("user_profiles")
-      .select("bondteam")
-      .eq("id", userId)
-      .maybeSingle<UserProfile>();
+  async function loadMyProfile() {
+    const res = await fetch(API_ME_PROFILE, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
 
-    if (error)
-      throw new Error(
-        `Bondteam ophalen uit user_profiles mislukt: ${error.message}`,
-      );
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      throw new Error(json?.error ?? "Profiel ophalen mislukt.");
+    }
+
+    return json as UserProfile;
+  }
+
+  async function loadMyProfileBondteam() {
+    const data = await loadMyProfile();
+    setProfile(data);
     return clean(data?.bondteam).toUpperCase();
   }
 
@@ -85,7 +104,7 @@ export default function OfficialsUitslagenPage() {
     setMelding(null);
 
     try {
-      const profileBondteam = await loadMyProfileBondteam(user.id);
+      const profileBondteam = await loadMyProfileBondteam();
       setMyBondteam(profileBondteam);
 
       if (!profileBondteam) {
@@ -187,14 +206,49 @@ export default function OfficialsUitslagenPage() {
   }
 
   useEffect(() => {
-    if (authLoading) return;
+    let cancelled = false;
+
+    async function loadProfileForAccess() {
+      if (authLoading) return;
+
+      if (!user) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+
+      setProfileLoading(true);
+
+      try {
+        const data = await loadMyProfile();
+        if (!cancelled) setProfile(data);
+      } catch (e: any) {
+        if (!cancelled) {
+          setProfile(null);
+          setMelding(e?.message ?? "Profiel ophalen mislukt.");
+        }
+      } finally {
+        if (!cancelled) setProfileLoading(false);
+      }
+    }
+
+    void loadProfileForAccess();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user?.id]);
+
+  useEffect(() => {
+    if (authLoading || profileLoading) return;
     if (!user) return void router.replace("/login");
     if (!allowed) return void router.replace("/dashboard");
     void load();
     const interval = setInterval(load, 10000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user?.id, allowed, router, roles]);
+  }, [authLoading, profileLoading, user?.id, allowed, router, profileRoles.join("|")]);
 
   const activeRows = useMemo(
     () => rows.filter((row) => !row.finalized),
@@ -315,7 +369,7 @@ export default function OfficialsUitslagenPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
+                {loading || profileLoading ? (
                   <tr>
                     <td
                       colSpan={6}
