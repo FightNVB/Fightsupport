@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { authedFetch } from "@/lib/api/authedFetch";
 import { useAuth } from "@/context/AuthContext";
 
 const API_ME_PROFILE = "/api/me/profile";
@@ -79,9 +80,8 @@ export default function OfficialsUitslagenPage() {
   const canSeeAllBonds = isSuperadmin && norm(myBondteam) === "NVB";
 
   async function loadMyProfile() {
-    const res = await fetch(API_ME_PROFILE, {
+    const res = await authedFetch(API_ME_PROFILE, {
       method: "GET",
-      credentials: "include",
       cache: "no-store",
     });
 
