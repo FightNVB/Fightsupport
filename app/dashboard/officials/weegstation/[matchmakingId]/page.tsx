@@ -379,6 +379,27 @@ function parseWeightClass(
     }
   }
 
+  const fallbackLabel = String(fallbackMax ?? "").trim();
+  const normalizedFallbackLabel = fallbackLabel
+    .toLowerCase()
+    .replace(",", ".")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalizedFallbackLabel) {
+    const fallbackPlus95 =
+      /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)/i.test(normalizedFallbackLabel) ||
+      /\+\s*95(?:[.,]0+)?/i.test(normalizedFallbackLabel);
+
+    if (fallbackPlus95) {
+      return {
+        kind: "heavy",
+        threshold: 95,
+        label: fallbackLabel || raw || "95+",
+      };
+    }
+  }
+
   const fallback = toNum(fallbackMax);
   if (fallback != null) {
     const normalizedFallback = Math.abs(fallback);
@@ -505,7 +526,10 @@ function getWeightClassHint(
 }
 
 function getWeightRuleTitle(row: WeighInBout | null) {
-  const parsed = parseWeightClass(row?.klasse_mm, row?.max_gewicht);
+  const parsed = parseWeightClass(
+    row?.klasse_mm,
+    row?.max_gewicht_notatie ?? row?.max_gewicht,
+  );
   if (parsed.kind === "heavy") return "Gewichtsklasse";
   if (parsed.kind === "max") return "Max gewicht";
   return "Gewichtsregel";
