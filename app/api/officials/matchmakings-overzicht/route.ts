@@ -26,8 +26,6 @@ type UserProfileRow = {
   email: string | null;
   role: string | null;
   active_role?: string | null;
-  default_role?: string | null;
-  available_roles?: string[] | null;
   bondteam: string | null;
 };
 
@@ -37,12 +35,7 @@ function normalizeRole(value: unknown): string {
 }
 
 function getProfileRoles(profile: UserProfileRow | null): string[] {
-  return [
-    profile?.active_role,
-    profile?.role,
-    profile?.default_role,
-    ...(Array.isArray(profile?.available_roles) ? profile.available_roles : []),
-  ]
+  return [profile?.active_role, profile?.role]
     .map(normalizeRole)
     .filter(Boolean);
 }
@@ -95,7 +88,7 @@ export async function GET(req: Request) {
 
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("user_profiles")
-      .select("id, full_name, email, role, active_role, default_role, available_roles, bondteam")
+      .select("id, full_name, email, role, active_role, bondteam")
       .eq("id", userId)
       .maybeSingle<UserProfileRow>();
 
