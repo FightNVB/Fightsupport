@@ -125,6 +125,14 @@ type ToernooiGroep = {
   totaalBelgieCheck: number;
 };
 
+type MatchmakingPresenceUser = {
+  user_id: string;
+  user_name: string | null;
+  user_role: string | null;
+  page: string | null;
+  last_seen: string;
+};
+
 function metalFrameStyle(accent: "none" | "orange" = "orange"): CSSProperties {
   const accentGlow =
     accent === "orange"
@@ -218,6 +226,19 @@ function minAgeAtEvent(ctx: AnyRow): number {
 function safeText(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
   return s.length ? s : fallback;
+}
+
+function formatPresenceAge(lastSeen: string): string {
+  const t = new Date(lastSeen).getTime();
+  if (!Number.isFinite(t)) return "zojuist";
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (diffSeconds < 60) return "zojuist";
+  const minutes = Math.floor(diffSeconds / 60);
+  if (minutes === 1) return "1 minuut geleden";
+  if (minutes < 60) return `${minutes} minuten geleden`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return "1 uur geleden";
+  return `${hours} uur geleden`;
 }
 
 function licenseValueToOk(v: any): boolean | null {
@@ -2184,9 +2205,42 @@ export default function ControleMatchmakingPage() {
   const [fBlauwKg, setFBlauwKg] = useState("");
   const [fMaxKg, setFMaxKg] = useState("");
 
+  const [presenceUsers, setPresenceUsers] = useState<MatchmakingPresenceUser[]>([]);
+
   async function getAccessToken(): Promise<string | null> {
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
+  }
+
+  async function refreshPresence() {
+    if (!matchmakingId) return;
+
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      const resp = await authedFetch(
+        `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}&page=officials_controle`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            matchmakingId,
+            page: "officials_controle",
+          }),
+        },
+      );
+
+      const json = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        setPresenceUsers((json?.users ?? []) as MatchmakingPresenceUser[]);
+      }
+    } catch {
+      // Presence mag de controlepagina nooit blokkeren.
+    }
   }
 
   const subtitle = useMemo(() => {
@@ -3031,6 +3085,16 @@ export default function ControleMatchmakingPage() {
   }, [matchmakingId, reloadTick]);
 
   useEffect(() => {
+    refreshPresence();
+    const interval = window.setInterval(() => {
+      refreshPresence();
+    }, 30000);
+
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchmakingId]);
+
+  useEffect(() => {
     if (!lineupMode) syncOrderedRowsFromRows(rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
@@ -3669,6 +3733,34 @@ export default function ControleMatchmakingPage() {
                 </div>
               </button>
             </div>
+
+            {presenceUsers.length > 0 && (
+              <div
+                className="mx-auto mt-4 max-w-4xl rounded-xl px-4 py-3 text-sm"
+                style={{
+                  background:
+                    "linear-gradient(180deg, rgba(255,244,190,0.96) 0%, rgba(255,230,150,0.96) 100%)",
+                  border: "1px solid rgba(180,120,0,0.45)",
+                  boxShadow: "0 10px 22px rgba(0,0,0,0.10)",
+                  color: "#2a1c00",
+                }}
+              >
+                <div className="font-black">
+                  ⚠️ Deze matchmaking is ook geopend door:
+                </div>
+                <div className="mt-1 flex flex-wrap gap-2 font-semibold">
+                  {presenceUsers.map((u) => (
+                    <span
+                      key={u.user_id}
+                      className="rounded-full bg-white/70 px-3 py-1"
+                    >
+                      {safeText(u.user_name, "Onbekende gebruiker")}
+                      {u.user_role ? ` · ${u.user_role}` : ""} · {formatPresenceAge(u.last_seen)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
               <div
