@@ -130,7 +130,11 @@ function parseKlasseMaxGewicht(label: string | null | undefined): number | null 
 
 function isYouthClassCode(v: string | null | undefined): boolean {
   const s = String(v ?? "").trim().toLowerCase();
-  return s === "j" || s === "j+" || s.includes("jeugd") || s.includes("junior");
+
+  // Alleen J/J+ of expliciet "jeugd" telt als jeugd.
+  // Gewichtsklassen zoals "junior welter" zijn géén jeugdklasse en mogen
+  // daarom niet per ongeluk de jeugd-marge van max - 2 kg krijgen.
+  return s === "j" || s === "j+" || s.includes("jeugd");
 }
 
 function inferLeeftijdType(
@@ -206,13 +210,6 @@ function getAllowedWeightRange(params: {
   }
 
   const max = Number((effectiveMaxGewicht + UPPER_TOLERANCE).toFixed(2));
-
-  if (isMma) {
-    return {
-      min: null,
-      max,
-    };
-  }
 
   if (leeftijdType === "jeugd") {
     return {
@@ -407,10 +404,10 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
     messages.push(`Maximaal toegestaan gewicht: ${fmtKg(maxToelaatbaarGewicht)}.`);
   }
 
-  if (teLichtRood) messages.push("Rood is te licht voor de afgesproken partij.");
-  if (teZwaarRood) messages.push("Rood is te zwaar voor de afgesproken partij.");
-  if (teLichtBlauw) messages.push("Blauw is te licht voor de afgesproken partij.");
-  if (teZwaarBlauw) messages.push("Blauw is te zwaar voor de afgesproken partij.");
+  if (teLichtRood) messages.push("Rood is te licht voor de afgesproken partij en kan een minpunt krijgen.");
+  if (teZwaarRood) messages.push("Rood is te zwaar voor de afgesproken partij en kan een minpunt krijgen.");
+  if (teLichtBlauw) messages.push("Blauw is te licht voor de afgesproken partij en kan een minpunt krijgen.");
+  if (teZwaarBlauw) messages.push("Blauw is te zwaar voor de afgesproken partij en kan een minpunt krijgen.");
 
   if (isMma) {
     if (diff <= 4.0) {

@@ -428,6 +428,21 @@ function getWeightRangeForUi(
   };
 }
 
+
+function getWeightRangeTextForUi(
+  klasse: string | null | undefined,
+  fallbackMax: number | string | null | undefined,
+  leeftijdType?: string | null | undefined,
+) {
+  const range = getWeightRangeForUi(klasse, fallbackMax, leeftijdType);
+
+  if (range.min == null && range.max == null) return "-";
+  if (range.max == null) return `minimaal ${range.min?.toFixed(1)} kg`;
+  if (range.min == null) return `maximaal ${range.max.toFixed(1)} kg`;
+
+  return `${range.min.toFixed(1)} t/m ${range.max.toFixed(1)} kg`;
+}
+
 function isWeightOutsideClass(
   weight: number | null | undefined,
   klasse: string | null | undefined,
@@ -2530,6 +2545,14 @@ export default function WeegstationDetailPage() {
                                 selectedRow.max_gewicht,
                             )}
                           </div>
+                          <div className="mt-1 text-xs font-bold text-zinc-700">
+                            Toegestaan wegen: {getWeightRangeTextForUi(
+                              selectedRow.klasse_mm,
+                              selectedRow.max_gewicht_notatie ??
+                                selectedRow.max_gewicht,
+                              selectedRow.leeftijd_type,
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2595,8 +2618,12 @@ export default function WeegstationDetailPage() {
                             selectedRow.max_gewicht_notatie ??
                               selectedRow.max_gewicht,
                           )}
-                          ). Controleer de toegestane range uit de rules-engine
-                          hierboven.
+                          ). Toegestaan wegen: {getWeightRangeTextForUi(
+                            selectedRow.klasse_mm,
+                            selectedRow.max_gewicht_notatie ??
+                              selectedRow.max_gewicht,
+                            selectedRow.leeftijd_type,
+                          )}. Je kunt dus te zwaar én te licht zijn.
                         </div>
                       )}
 
@@ -2643,7 +2670,7 @@ export default function WeegstationDetailPage() {
                             border: `1px solid ${FS_LINE_LIGHT}`,
                           }}
                         >
-                          Voor deze vechter is nu geen minpunt mogelijk.
+                          Voor deze vechter is nu geen minpunt mogelijk. Minpunt kan alleen bij te zwaar of te licht wegen buiten de toegestane range.
                         </div>
                       ) : !isHoofdofficialOrSuperadmin ? (
                         <div className="rounded-[8px] border border-orange-200 bg-orange-50 p-3 text-sm font-bold text-orange-800">
