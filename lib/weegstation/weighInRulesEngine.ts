@@ -485,12 +485,12 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       leeftijdType,
       diff,
       reglementStatus: hasAnyOffWeight ? "AFWIJKING_GEWICHT" : "OK",
-      praktijkStatus: hasAnyOffWeight ? "AFKEUR" : "OK",
-      eindStatus: hasAnyOffWeight ? "AFKEUR" : "OK",
+      praktijkStatus: "OK",
+      eindStatus: "OK",
       dispensatieNodig: false,
       dispensatieMogelijk: false,
       messages: hasAnyOffWeight
-        ? [...messages, "95+ klasse: minimaal één vechter weegt onder het minimumgewicht en valt dus buiten de klasse."]
+        ? [...messages, "95+ klasse: minimaal één vechter weegt onder 95 kg. Niet-op-gewicht; minpunt mogelijk."]
         : [...messages, "95+ klasse toegestaan. Onderling gewichtsverschil speelt hier geen rol."],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,
@@ -505,7 +505,7 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       teZwaarRood,
       teZwaarBlauw,
       hasAnyOffWeight,
-      canProceedWithPenalty: false,
+      canProceedWithPenalty: hasAnyOffWeight,
       adminSanctieNodig: false,
       adminSanctieReason: null,
       isHeavyweightOpen,
