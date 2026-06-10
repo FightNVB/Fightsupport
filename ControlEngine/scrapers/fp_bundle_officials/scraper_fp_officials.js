@@ -137,7 +137,7 @@ async function isLoginPage(page) {
         );
       }
 
-      // Unlock/pincodepagina is GEEN gewone loginpagina.
+      // Unlockpagina is geen gewone loginpagina.
       const pincode =
         document.querySelector("input.pincode") ||
         document.querySelector("input.target_input.pincode") ||
@@ -234,7 +234,6 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
     await wait(softWaitMs);
 
     const loginNow = await isLoginPage(p);
-
     if (loginNow) {
       await hardClosePage(p).catch(() => {});
       throw new Error("LOGIN_PAGE");
@@ -284,7 +283,6 @@ async function scrapeHeader(page) {
     const infoBlock = k2?.innerText?.trim() || "";
 
     const m = nameBlock.match(/^(.+)\((\d+)\)$/);
-
     if (m) {
       r.naam = m[1].trim();
       r.va_nummer = m[2].trim();
@@ -297,7 +295,6 @@ async function scrapeHeader(page) {
     if (age) r.leeftijd = parseInt(age[1], 10);
 
     const low = infoBlock.toLowerCase();
-
     if (low.includes("man")) r.geslacht = "man";
     if (low.includes("vrouw")) r.geslacht = "vrouw";
 
@@ -383,7 +380,6 @@ async function scrapeDetails(page, va) {
 
 async function scrapeZeroMeting(page) {
   const exists = await page.$("input.dnva_nulmetingaantalwedstr");
-
   if (!exists) {
     await closeAnyModal(page);
     return { totaal: 0, opmerking: "", klasse: null };
@@ -399,7 +395,6 @@ async function scrapeZeroMeting(page) {
 
     let klasse = null;
     const sel = document.querySelector("select.dvnulmetingklasseoms");
-
     if (sel) {
       const opt = sel.options[sel.selectedIndex];
       klasse = opt?.textContent?.trim() || sel.value || null;
@@ -425,7 +420,6 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
   }
 
   let geboortedatum_correct = null;
-
   if (header.geboortedatum) {
     const [dd, mm, yyyy] = header.geboortedatum.split("-");
     geboortedatum_correct = `${yyyy}-${mm}-${dd}`;
@@ -461,7 +455,6 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
 
 async function doFullfighter(page, va, matchmaking_id, controle_run_id) {
   const header = await scrapeHeader(page);
-
   if (!header?.va_nummer) {
     console.log("[fullfighter] ❌ header.va_nummer ontbreekt:", va);
     return;
@@ -487,8 +480,8 @@ function parseNlDate(v) {
   const m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (!m) return null;
 
-  let dd = m[1].padStart(2, "0");
-  let mm = m[2].padStart(2, "0");
+  const dd = m[1].padStart(2, "0");
+  const mm = m[2].padStart(2, "0");
   let yy = m[3];
 
   if (yy.length === 2) yy = Number(yy) < 30 ? `20${yy}` : `19${yy}`;
@@ -498,7 +491,6 @@ function parseNlDate(v) {
 
 function toStr(v) {
   if (v == null) return null;
-
   const s = String(v).trim();
   return s.length ? s : null;
 }
@@ -515,7 +507,6 @@ async function fetchPartijNrByVa(matchmaking_id) {
     const s = String(v ?? "")
       .trim()
       .replace(/\D+/g, "");
-
     if (!s) return null;
 
     const noZeros = s.replace(/^0+/, "");
@@ -547,7 +538,7 @@ async function fetchPartijNrByVa(matchmaking_id) {
   for (const [va, set] of tmp.entries()) {
     out.set(
       va,
-      Array.from(set).sort((a, b) => a - b)
+      Array.from(set).sort((a, b) => Number(a) - Number(b))
     );
   }
 
@@ -563,7 +554,6 @@ async function openUitslagenTile(page, va) {
 
     const headers = [...tab.querySelectorAll(".tileHeader.enabled")];
     const target = headers.find((h) => (h.innerText || "").trim().toUpperCase() === "UITSLAGEN");
-
     target?.closest(".tile")?.click();
   }, va);
 
@@ -600,19 +590,12 @@ async function downloadExcel(page, matchmaking_id, va) {
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const client = await page.target().createCDPSession();
-
   await client.send("Page.setDownloadBehavior", {
     behavior: "allow",
     downloadPath: downloadDir,
   });
 
-  const selectors = [
-    '[title="download als excel"]',
-    '[title*="download"][title*="excel"]',
-    'svg use[href*="#img_41"]',
-    'svg use[href*="img_41"]',
-  ];
-
+  const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
   const found = await waitForAnySelectorInAnyFrame(page, selectors, 45000);
 
   if (!found) throw new Error(`Download knop niet gevonden — VA ${va}`);
@@ -620,19 +603,8 @@ async function downloadExcel(page, matchmaking_id, va) {
   const clickDownload = async () => {
     await found.frame.evaluate((sel) => {
       const el = document.querySelector(sel);
-
-      if (!el) return;
-
-      const clickable =
-        el.closest?.('[title="download als excel"]') ||
-        el.closest?.('[title*="download"][title*="excel"]') ||
-        el.closest?.(".icon") ||
-        el.closest?.(".has_action") ||
-        el.closest?.("div") ||
-        el;
-
-      clickable?.scrollIntoView?.({ block: "center", inline: "center" });
-      clickable?.click?.();
+      el?.scrollIntoView?.({ block: "center" });
+      el?.click?.();
     }, found.selector);
   };
 
@@ -642,7 +614,7 @@ async function downloadExcel(page, matchmaking_id, va) {
   let retried = false;
 
   while (Date.now() - start < 60000) {
-    const filesNow = fs.existsSync(downloadDir) ? fs.readdirSync(downloadDir) : [];
+    const filesNow = fs.readdirSync(downloadDir);
     const lower = filesNow.map((f) => f.toLowerCase());
 
     const xlsx = filesNow
@@ -653,9 +625,11 @@ async function downloadExcel(page, matchmaking_id, va) {
     if (xlsx[0]) {
       const downloadedFile = xlsx[0];
 
+      // Klein beetje wachten zodat excel lock weg is.
       await wait(300);
 
-      process.once("exit", () => {
+      // Bestand automatisch opruimen zodra node afsluit.
+      process.on("exit", () => {
         try {
           if (fs.existsSync(downloadedFile)) {
             fs.unlinkSync(downloadedFile);
@@ -708,17 +682,11 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
 
   const missing = must.filter(([, idx]) => idx === -1).map(([name]) => name);
 
-  /**
-   * BELANGRIJK:
-   * Geen kolomkoppen betekent bij FightPassport meestal:
-   * "deze vechter heeft geen uitslagen".
-   * Dit is dus GEEN scraper-fout.
-   */
   if (missing.length) {
     return {
       rows: [],
       meta: {
-        ok: true,
+        ok: false,
         emptyExport: true,
         missingHeaders: missing,
         headers: headers.filter(Boolean),
@@ -770,7 +738,11 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
       r.discipline,
       r.klasse,
     ]
-      .map((x) => String(x ?? "").replace(/\s+/g, " ").trim())
+      .map((x) =>
+        String(x ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+      )
       .join("||");
 
     if (seen.has(k)) continue;
@@ -788,22 +760,6 @@ async function parseExcel(filePath, va, matchmaking_id, controle_run_id) {
       headers: headers.filter(Boolean),
     },
   };
-}
-
-async function cleanupDownloadedFile(filePath) {
-  if (!filePath) return;
-
-  try {
-    const dir = path.dirname(filePath);
-
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    if (fs.existsSync(dir)) {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  } catch {}
 }
 
 async function saveUitslagenSnapshot(rows, matchmaking_id, controle_run_id, va, partijNrByVaMap) {
@@ -849,63 +805,54 @@ async function doUitslagen(page, matchmaking_id, controle_run_id, va, partijNrBy
   let lastMeta = null;
 
   for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
-    let file = null;
+    await openUitslagenTile(page, va);
 
-    try {
-      await openUitslagenTile(page, va);
+    const file = await downloadExcel(page, matchmaking_id, va);
 
-      file = await downloadExcel(page, matchmaking_id, va);
-
-      if (!file) {
-        await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(
-          () => {}
-        );
-
-        console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
-        return { ok: true, n: 0, reason: "no_file" };
-      }
-
-      const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
-      lastMeta = parsed?.meta ?? null;
-
-      /**
-       * Ook bij lege export is parsed.meta.ok === true.
-       * Dan worden bestaande oude uitslagen voor deze run/VA verwijderd
-       * en slaan we gewoon 0 regels op.
-       */
-      if (parsed?.meta?.ok) {
-        const res = await saveUitslagenSnapshot(
-          parsed.rows,
-          matchmaking_id,
-          controle_run_id,
-          va,
-          partijNrByVaMap
-        );
-
-        const n = res?.saved ?? parsed.rows.length ?? 0;
-
-        if (parsed?.meta?.emptyExport) {
-          console.log(`[uitslagen] ℹ️ Geen uitslagen voor VA ${va} (lege export / geen kolomkoppen)`);
-          console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
-          return { ok: true, n: 0, reason: "geen_uitslagen" };
-        }
-
-        console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
-        return { ok: true, n, reason: "ok" };
-      }
-
-      await closeAnyModal(page).catch(() => {});
-      await wait(600 + attempt * 400);
-    } finally {
-      await cleanupDownloadedFile(file).catch(() => {});
+    if (!file) {
+      await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
+      console.log(`[uitslagen] ✅ done VA ${va} (n=0) (no file)`);
+      return { ok: true, n: 0, reason: "no_file" };
     }
+
+    const parsed = await parseExcel(file, va, matchmaking_id, controle_run_id);
+    lastMeta = parsed?.meta ?? null;
+
+    if (parsed?.meta?.ok) {
+      const res = await saveUitslagenSnapshot(
+        parsed.rows,
+        matchmaking_id,
+        controle_run_id,
+        va,
+        partijNrByVaMap
+      );
+
+      const n = res?.saved ?? parsed.rows.length ?? 0;
+
+      console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
+      return { ok: true, n, reason: "ok" };
+    }
+
+    const missing = lastMeta?.missingHeaders ?? [];
+    const headers = lastMeta?.headers ?? [];
+
+    console.log(`[uitslagen] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`, {
+      attempt,
+      missingHeaders: missing,
+      headers,
+    });
+
+    await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
+
+    return {
+      ok: true,
+      n: 0,
+      reason: "geen_uitslagen",
+      missingHeaders: missing,
+    };
   }
 
-  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(
-    () => {}
-  );
-
-  console.log(`[uitslagen] ℹ️ Geen uitslagen gevonden voor VA ${va}`, lastMeta ?? "");
+  await saveUitslagenSnapshot([], matchmaking_id, controle_run_id, va, partijNrByVaMap).catch(() => {});
   console.log(`[uitslagen] ✅ done VA ${va} (n=0)`);
 
   return { ok: true, n: 0, reason: "no_uitslagen" };
@@ -940,7 +887,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
 
     masterRefreshPromise = (async () => {
       console.log(`[bundle] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
-
       await ensureLoggedIn(masterPage, { force: true });
 
       try {
@@ -948,7 +894,6 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
       } catch {}
 
       console.log("[bundle] ✅ master refreshed (cookies updated)");
-
       return cookies;
     })();
 
@@ -971,19 +916,13 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
     let ctx = await createWorkerContext(browser);
 
     async function resetWorkerContext(reason) {
-      console.log(
-        `[bundle] 🧨 reset worker context (worker${workerIdx + 1}) ${
-          reason ? `(${reason})` : ""
-        }`
-      );
-
+      console.log(`[bundle] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
       await closeWorkerContext(ctx).catch(() => {});
       ctx = await createWorkerContext(browser);
     }
 
     while (true) {
       const myIdx = idx++;
-
       if (myIdx >= vaList.length) break;
 
       const va = vaList[myIdx];
@@ -1005,10 +944,8 @@ async function runBundle(matchmaking_id, controle_run_id, vaList, workers = 5) {
 
         if (!page) {
           console.log(`[bundle] ❌ ${label} kon fighter niet openen na retries: VA ${va}`);
-
           fullfighterStatus = "open_fail";
           uitslagenStatus = "open_fail";
-
           continue;
         }
 

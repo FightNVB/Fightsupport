@@ -315,6 +315,75 @@ function TabButton({
   );
 }
 
+function ActionSquare({
+  title,
+  children,
+  onClick,
+  href,
+  disabled,
+  color,
+  borderColor,
+}: {
+  title: string;
+  children: ReactNode;
+  onClick?: () => void;
+  href?: string;
+  disabled?: boolean;
+  color: string;
+  borderColor?: string;
+}) {
+  const style: CSSProperties = {
+    width: 34,
+    height: 34,
+    minWidth: 34,
+    borderRadius: 8,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: color,
+    color: "#fff",
+    border: `1px solid ${borderColor ?? "rgba(255,255,255,0.22)"}`,
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.22), 0 6px 14px rgba(0,0,0,0.22)",
+    fontSize: 15,
+    fontWeight: 900,
+    lineHeight: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+  };
+
+  if (href) {
+    return (
+      <Link href={href} title={title} aria-label={title} style={style}>
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      style={style}
+    >
+      {children}
+    </button>
+  );
+}
+
+const ACTION_COLORS = {
+  matchmaking: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
+  controle: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
+  weegstation: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
+  uitslagen: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
+  archief: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
+  herupload: "linear-gradient(180deg, #ff8a1f 0%, #d94700 100%)",
+  verwijderen: "linear-gradient(180deg, #c53636 0%, #7a1717 100%)",
+};
+
 export default function OfficialsOverzichtPage() {
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
   const [bondteam, setBondteam] = useState<string>("");
@@ -1086,6 +1155,27 @@ export default function OfficialsOverzichtPage() {
                     </div>
                   )}
 
+                  {!loading && (
+                    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-700/30 bg-[#242428] px-3 py-2 text-xs font-semibold text-white shadow-inner">
+                      <span className="mr-1 text-zinc-300">Legenda acties:</span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#238a3b]" /> Matchmaking / weegstation
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Start controle / uitslagen
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#8b4ab8]" /> Inzien / archief
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#ff8a1f]" /> Herupload
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#c53636]" /> Verwijderen
+                      </span>
+                    </div>
+                  )}
+
                   {loading ? (
                     <p className="mt-6 text-center text-gray-500">Laden…</p>
                   ) : (
@@ -1115,15 +1205,15 @@ export default function OfficialsOverzichtPage() {
                             }}
                           >
                             <tr>
-                              <th className="px-4 py-3 text-left">Datum</th>
-                              <th className="px-4 py-3 text-left">Evenement</th>
-                              <th className="px-4 py-3 text-left">Bron</th>
-                              <th className="px-4 py-3 text-left">Eigenaar</th>
-                              <th className="px-4 py-3 text-left">Bondteam</th>
-                              <th className="px-4 py-3 text-left">
+                              <th className="px-3 py-2 text-left">Datum</th>
+                              <th className="px-3 py-2 text-left">Evenement</th>
+                              <th className="px-3 py-2 text-left">Bron</th>
+                              <th className="px-3 py-2 text-left">Eigenaar</th>
+                              <th className="px-3 py-2 text-left">Bondteam</th>
+                              <th className="px-3 py-2 text-left">
                                 Laatst bijgewerkt
                               </th>
-                              <th className="px-4 py-3 text-left">Acties</th>
+                              <th className="px-3 py-2 text-left">Acties</th>
                             </tr>
                           </thead>
 
@@ -1171,11 +1261,11 @@ export default function OfficialsOverzichtPage() {
                                       color: zebra ? "#000" : "#fff",
                                     }}
                                   >
-                                    <td className="px-4 py-3">
+                                    <td className="px-3 py-2">
                                       {formatDate(r.datum)}
                                     </td>
 
-                                    <td className="px-4 py-3 font-semibold">
+                                    <td className="px-3 py-2 font-semibold">
                                       <div>{r.naam ?? "-"}</div>
                                       {r.locatie ? (
                                         <div className="text-xs opacity-75">
@@ -1184,115 +1274,118 @@ export default function OfficialsOverzichtPage() {
                                       ) : null}
                                     </td>
 
-                                    <td className="px-4 py-3">
+                                    <td className="px-3 py-2">
                                       {formatBronLabel(r.bron_type)}
                                     </td>
 
-                                    <td className="px-4 py-3">
+                                    <td className="px-3 py-2">
                                       {formatOwnerLabel(r)}
                                     </td>
 
-                                    <td className="px-4 py-3">
+                                    <td className="px-3 py-2">
                                       {r.bondteam ??
                                         r.huidige_eigenaar_bondteam ??
                                         "-"}
                                     </td>
 
-                                    <td className="px-4 py-3 text-sm">
+                                    <td className="px-3 py-2 text-sm">
                                       <div>{formatDateTime(r.last_updated_at)}</div>
                                       <div className="text-xs opacity-75">
                                         {formatStatusLabel(rowStatus)}
                                       </div>
                                     </td>
 
-                                    <td className="px-4 py-3">
-                                      <div className="flex flex-wrap items-center gap-3">
-                                        <Link
+                                    <td className="px-3 py-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <ActionSquare
                                           href={
                                             activeTab === "weegstation"
                                               ? `/dashboard/officials/weegstation/${r.id}`
                                               : `/dashboard/officials/controle/${r.id}`
                                           }
-                                          className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                          title={activeTab === "weegstation" ? "Open weegstation" : "Matchmaking openen"}
+                                          color={activeTab === "weegstation" ? ACTION_COLORS.weegstation : ACTION_COLORS.matchmaking}
                                         >
-                                          {activeTab === "weegstation" ? "Open weegstation" : "Matchmaking"}
-                                        </Link>
+                                          {activeTab === "weegstation" ? "⚖" : "M"}
+                                        </ActionSquare>
 
                                         {activeTab === "uploaded" ? (
                                           <>
-                                            <button
+                                            <ActionSquare
                                               onClick={() => startControle(r.id)}
                                               disabled={rowBusy || isBusy}
-                                              className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
-                                              title="Start volledige controle"
+                                              title={
+                                                isRunningStatus(rowStatus)
+                                                  ? "Controle loopt"
+                                                  : "Start volledige controle"
+                                              }
+                                              color={ACTION_COLORS.controle}
                                             >
-                                              {rowBusy && isBusy && !rowHeruploadBusy
-                                                ? "Bezig…"
-                                                : isRunningStatus(rowStatus)
-                                                ? "Controle loopt…"
-                                                : "Start controle"}
-                                            </button>
+                                              {rowBusy && isBusy && !rowHeruploadBusy ? "…" : "▶"}
+                                            </ActionSquare>
 
-                                            <button
+                                            <ActionSquare
                                               onClick={() => openHerupload(r)}
                                               disabled={rowBusy || isBusy || rowHeruploadBusy}
-                                              className="rounded border border-[var(--brand-orange)] bg-[#ff4d00] px-3 py-1 text-sm font-bold text-white hover:bg-[#d94700] disabled:opacity-60"
                                               title="Herupload aangepaste Excel voor deze official upload"
+                                              color={ACTION_COLORS.herupload}
                                             >
-                                              {rowHeruploadBusy ? "Herupload…" : "Herupload"}
-                                            </button>
+                                              {rowHeruploadBusy ? "…" : "⬆"}
+                                            </ActionSquare>
                                           </>
                                         ) : null}
 
                                         {activeTab === "lineup" ? (
-                                          <button
+                                          <ActionSquare
                                             onClick={() => naarUitslagen(r.id)}
                                             disabled={rowBusy || isBusy}
-                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
                                             title="Zet definitieve lineup om naar uitslagen"
+                                            color={ACTION_COLORS.uitslagen}
                                           >
-                                            {rowBusy && isBusy ? "Bezig…" : "Naar uitslagen"}
-                                          </button>
+                                            {rowBusy && isBusy ? "…" : "→"}
+                                          </ActionSquare>
                                         ) : null}
 
                                         {activeTab === "results" ? (
-                                          <Link
+                                          <ActionSquare
                                             href={`/dashboard/officials/uitslagen/${r.id}`}
-                                            className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                            title="Uitslagen openen"
+                                            color={ACTION_COLORS.uitslagen}
                                           >
-                                            Uitslagen openen
-                                          </Link>
+                                            U
+                                          </ActionSquare>
                                         ) : null}
 
                                         {activeTab === "archive" ? (
                                           <>
-                                            <Link
+                                            <ActionSquare
                                               href={`/dashboard/officials/uitslagen/inzien/${r.id}`}
-                                              className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
+                                              title="Uitslagen inzien"
+                                              color={ACTION_COLORS.archief}
                                             >
-                                              Uitslagen inzien
-                                            </Link>
+                                              👁
+                                            </ActionSquare>
 
-                                            <button
+                                            <ActionSquare
                                               onClick={() => verplaatsNaarAdminArchief(r)}
                                               disabled={rowBusy || isBusy}
-                                              className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
                                               title="Verplaatst deze afgeronde matchmaking naar Admin Archief"
+                                              color={ACTION_COLORS.verwijderen}
                                             >
-                                              {rowBusy && isBusy ? "Bezig…" : "Verwijderen"}
-                                            </button>
+                                              {rowBusy && isBusy ? "…" : "×"}
+                                            </ActionSquare>
                                           </>
                                         ) : null}
 
                                         {activeTab !== "archive" && activeTab !== "weegstation" ? (
-                                          <button
+                                          <ActionSquare
                                             onClick={() => deleteMatchmaking(r)}
                                             disabled={rowBusy || isBusy}
-                                            className="rounded border border-red-600 bg-[#2f2f33] px-3 py-1 text-sm text-red-200 hover:bg-red-600 hover:text-white disabled:opacity-60"
                                             title="Verwijdert deze matchmaking met gekoppelde controledata"
+                                            color={ACTION_COLORS.verwijderen}
                                           >
-                                            {rowBusy && isBusy && !rowHeruploadBusy ? "Bezig…" : "Verwijderen"}
-                                          </button>
+                                            {rowBusy && isBusy && !rowHeruploadBusy ? "…" : "×"}
+                                          </ActionSquare>
                                         ) : null}
 
                                         {rowMsg ? (

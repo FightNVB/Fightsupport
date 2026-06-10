@@ -63,19 +63,6 @@ function SilverLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-function OrangeButton({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="inline-flex items-center justify-center gap-2 border border-[#ff4d00] bg-[#ff4d00] px-3 py-2 text-xs font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {children}
-    </button>
-  );
-}
-
 function DarkDangerButton({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
     <button
@@ -144,7 +131,9 @@ export default function AdminAlgemeenArchiefPage() {
       const q = supabase
         .from("matchmakings")
         .select("id, naam, datum, locatie, bondteam, huidige_eigenaar_bondteam, status, stadium, last_updated_at, results_finalized_at")
-        .or("status.eq.admin_archief,stadium.eq.admin_archief")
+        .or(
+          "status.eq.admin_archief,stadium.eq.admin_archief,status.eq.gearchiveerd,stadium.eq.gearchiveerd,is_archived.eq.true"
+        )
         .order("last_updated_at", { ascending: false });
 
       const { data, error } = await q;
@@ -161,28 +150,6 @@ export default function AdminAlgemeenArchiefPage() {
       setMelding(e?.message ?? "Admin archief laden mislukt.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function heropen(row: Row) {
-    if (!isSuperadmin) return;
-    const ok = window.confirm(`Uitslagen van ${row.naam ?? "dit evenement"} weer op bewerken zetten?`);
-    if (!ok) return;
-
-    setBusyId(row.id);
-    try {
-      const res = await authedFetch("/api/admin/uitslagen/heropen", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchmaking_id: row.id }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error ?? "Heropenen mislukt.");
-      await load();
-    } catch (e: any) {
-      alert(e?.message ?? "Heropenen mislukt.");
-    } finally {
-      setBusyId(null);
     }
   }
 
@@ -268,7 +235,7 @@ export default function AdminAlgemeenArchiefPage() {
           <StatCard label="Bondteams" value={bondOptions.length || "-"} muted={canSeeAll ? "NVB superadmin" : "Beperkte weergave"} />
           <div className="border border-zinc-600 bg-[#1c1c1c] p-3 shadow-lg shadow-black/20">
             <div className="flex items-center gap-2 text-[#ff4d00]"><ShieldCheck className="h-5 w-5" /><b className="text-sm uppercase">Archief</b></div>
-            <p className="mt-2 text-xs text-zinc-400">Inzien blijft beschikbaar. Heropenen is alleen voor superadmin.</p>
+            <p className="mt-2 text-xs text-zinc-400">Gearchiveerde matchmakings blijven beschikbaar voor inzage en rapportage.</p>
           </div>
         </div>
 
@@ -343,10 +310,8 @@ export default function AdminAlgemeenArchiefPage() {
                     <div className="font-black">{statusLabel(row.status || row.stadium)}</div>
                     <div>{formatDateTime(row.last_updated_at || row.results_finalized_at)}</div>
                     <div className="flex flex-wrap justify-end gap-2">
-                      <SilverLink href={`/dashboard/officials/uitslagen/inzien/${row.id}`}>Inzien</SilverLink>
-                      {isSuperadmin ? (
-                        <OrangeButton onClick={() => heropen(row)} disabled={busyId === row.id}>Op bewerken</OrangeButton>
-                      ) : null}
+                      <SilverLink href={`/dashboard/admin/algemeen/archief/${row.id}`}>Open</SilverLink>
+                      <SilverLink href={`/dashboard/officials/uitslagen/inzien/${row.id}`}>Uitslagen</SilverLink>
                       <DarkDangerButton onClick={() => definitiefVerwijderen(row)} disabled={busyId === row.id}>Verwijderen</DarkDangerButton>
                     </div>
                   </div>

@@ -12,8 +12,10 @@ import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutConte
 import { rulesEngine } from "@/lib/rulesEngine";
 import {
   assertCanAccessMatchmaking,
+  getUserBondteam,
   requireUserWithRole,
 } from "@/app/api/_utils/authz";
+import { transferLifecycle } from "@/app/api/_utils/matchmakingLifecycle";
 
 export const runtime = "nodejs";
 
@@ -25,7 +27,9 @@ const supabase = createClient(
 
 const DEBUG = process.env.CONTROL_ENGINE_DEBUG === "1";
 
-// officials gebruikt de eigen officials scraper
+// Official-autocheck gebruikt de aparte official scraper.
+// Pad: ControlEngine/scrapers/fp_bundle_officials/scraper_fp_officials.js
+const SCRAPER_DIR = "fp_bundle_officials";
 const SCRAPER_FILE = "scraper_fp_officials.js";
 
 function dlog(...args: any[]) {
@@ -123,8 +127,21 @@ function clampInt(n: any, def: number, min: number, max: number): number {
 }
 
 function isRoleAllowedForRoute(role: string | null | undefined) {
-  const r = String(role ?? "").trim().toLowerCase();
-  return r === "hoofdofficial" || r === "admin" || r === "superadmin";
+  return role === "official" || role === "hoofdofficial" || role === "admin" || role === "superadmin";
+}
+
+function isFightPassportUnlockError(err: any) {
+  const text = String(err?.message ?? err ?? "").toLowerCase();
+  return (
+    text.includes("unlock") ||
+    text.includes("verification") ||
+    text.includes("verificatie") ||
+    text.includes("2fa") ||
+    text.includes("two-factor") ||
+    text.includes("two factor") ||
+    text.includes("code gevraagd") ||
+    text.includes("fp_unlock_required")
+  );
 }
 
 async function updateRunProgress(args: {
@@ -363,6 +380,38 @@ export async function POST(req: Request) {
 
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
+    const { data: mmAccessRow, error: mmAccessErr } = await supabase
+      .from("matchmakings")
+      .select("id, bron_type, huidige_eigenaar_type, huidige_eigenaar_user_id, huidige_eigenaar_bondteam, bondteam")
+      .eq("id", matchmaking_id)
+      .maybeSingle();
+
+    if (mmAccessErr) throw mmAccessErr;
+    if (!mmAccessRow?.id) {
+      return NextResponse.json({ error: "Matchmaking niet gevonden." }, { status: 404 });
+    }
+
+    if (role === "official" || role === "hoofdofficial") {
+      const ownerType = String((mmAccessRow as any).huidige_eigenaar_type ?? "").trim().toLowerCase();
+      const ownerBondteam = String((mmAccessRow as any).huidige_eigenaar_bondteam ?? "").trim().toUpperCase();
+      const rowBondteam = String((mmAccessRow as any).bondteam ?? "").trim().toUpperCase();
+      const bronType = String((mmAccessRow as any).bron_type ?? "").trim().toLowerCase();
+      const userBondteam = String((await getUserBondteam(String(userId ?? ""))) ?? "").trim().toUpperCase();
+
+      if (
+        bronType !== "official_upload" ||
+        ownerType !== "bondteam" ||
+        !userBondteam ||
+        (ownerBondteam && ownerBondteam !== userBondteam) ||
+        (!ownerBondteam && rowBondteam !== userBondteam)
+      ) {
+        return NextResponse.json(
+          { error: "Je mag alleen official-uploads van je eigen bondteam controleren." },
+          { status: 403 }
+        );
+      }
+    }
+
     await abortActiveRuns(matchmaking_id);
 
     const run = await createControleRun({
@@ -474,7 +523,7 @@ export async function POST(req: Request) {
 
     const fpBundlePath = resolveScriptPath(
       "scrapers",
-      "fp_bundle_officials",
+      SCRAPER_DIR,
       SCRAPER_FILE
     );
 
@@ -497,12 +546,13 @@ export async function POST(req: Request) {
           fpBundlePath,
           [matchmaking_id!, controle_run_id!, ...va_nummers],
           {
-            // Control-engine/officials start gebruikt ALTIJD de master-login.
+            // Official start gebruikt de aparte official scraper/session.
             // Belangrijk: process.env.FP_MATCHMAKER_ID kan globaal bestaan, maar mag hier niet doorlekken.
             FP_MATCHMAKER_ID: "",
-            FP_SESSION_MODE: "master",
+            FP_OFFICIAL_ID: String(userId ?? ""),
+            FP_SESSION_MODE: "official",
 
-            // Zelfde headless-regels als de andere scrapers.
+            // Zelfde headless-regels als je andere scrapers.
             HEADLESS: process.env.HEADLESS ?? "false",
             PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
 
@@ -538,6 +588,72 @@ export async function POST(req: Request) {
             scraper: SCRAPER_FILE,
           }
         );
+
+        if (isFightPassportUnlockError(e)) {
+          const nowIso = new Date().toISOString();
+
+          await updateRunProgress({
+            controle_run_id: controle_run_id!,
+            progress: 35,
+            current_step:
+              "FightPassport vraagt om unlock-code. Matchmaking wordt naar admin gestuurd...",
+          });
+
+          await supabase
+            .from("controle_runs")
+            .update({
+              status: "failed",
+              foutmelding: "FightPassport unlock vereist",
+              afgerond_op: nowIso,
+              current_step: "Unlock vereist; doorgestuurd naar admin.",
+            })
+            .eq("id", controle_run_id!);
+
+          await transferLifecycle({
+            matchmakingId: matchmaking_id!,
+            newStage: "ingediend_admin" as any,
+            newOwnerType: "admin" as any,
+            newOwnerUserId: null,
+            actorUserId: userId ?? null,
+            actorRole: role ?? "official",
+            opmerking: "FightPassport unlock vereist tijdens official-autocheck.",
+            metadata: {
+              route: "api/control-engine/officials/start",
+              action: "auto_send_to_admin_unlock_required",
+              controle_run_id,
+            },
+          });
+
+          await supabase
+            .from("matchmakings")
+            .update({
+              stadium: "ingediend_admin",
+              status: "ingediend_admin",
+              final_status: "ingediend_admin",
+              huidige_eigenaar_type: "admin",
+              huidige_eigenaar_user_id: null,
+              huidige_eigenaar_bondteam: null,
+              submitted_to_admin_at: nowIso,
+              sent_at: nowIso,
+              sent_by: userId ?? null,
+              last_updated_at: nowIso,
+              last_updated_by: userId ?? null,
+            })
+            .eq("id", matchmaking_id!);
+
+          return NextResponse.json(
+            {
+              ok: false,
+              code: "FP_UNLOCK_REQUIRED",
+              unlock_required: true,
+              message:
+                "Autocheck mislukt: FightPassport vraagt om een unlock-code. De matchmaking is automatisch naar admin gestuurd.",
+              controle_run_id,
+              matchmaking_id,
+            },
+            { status: 202 }
+          );
+        }
 
         await updateRunProgress({
           controle_run_id: controle_run_id!,
@@ -731,7 +847,7 @@ export async function POST(req: Request) {
       role,
     });
   } catch (err: any) {
-    console.error("❌ ControlEngine admin fout:", err);
+    console.error("❌ ControlEngine officials fout:", err);
 
     if (controle_run_id) {
       await supabase

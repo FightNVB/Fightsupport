@@ -82,9 +82,9 @@ export default function AdminReadyToUploadPage() {
   );
   const canSeeAllBonds = isSuperadmin && norm(myBondteam) === "NVB";
 
-  async function load(silent = false) {
+  async function load() {
     if (!user?.id) return;
-    if (!silent) setLoading(true);
+    setLoading(true);
     setError("");
     try {
       const { data: profile } = await supabase
@@ -92,62 +92,37 @@ export default function AdminReadyToUploadPage() {
         .select("bondteam")
         .eq("id", user.id)
         .maybeSingle();
-
       const profileBond = norm((profile as any)?.bondteam);
       setMyBondteam(profileBond);
 
-      const { data: runs, error: runErr } = await supabase
-        .from("uitslagen_runs")
-        .select("id, matchmaking_id, status")
-        .eq("status", "afgerond")
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      if (runErr) throw runErr;
-
-      const runIds = Array.from(
-        new Set((runs ?? []).map((run: any) => clean(run.id)).filter(Boolean)),
-      );
-      const matchmakingIds = Array.from(
-        new Set(
-          (runs ?? [])
-            .map((run: any) => clean(run.matchmaking_id))
-            .filter(Boolean),
-        ),
-      );
-
-      if (runIds.length === 0 || matchmakingIds.length === 0) {
-        setRows([]);
-        return;
-      }
-
       const [
+        { data: runs, error: runErr },
         { data: bouts, error: boutErr },
         { data: results, error: resultErr },
         { data: uploads, error: uploadErr },
         { data: matchmakings, error: mmErr },
       ] = await Promise.all([
         supabase
+          .from("uitslagen_runs")
+          .select("id, matchmaking_id, status")
+          .eq("status", "afgerond"),
+        supabase
           .from("uitslagen_bouts")
-          .select("uitslagen_run_id, matchmaking_id, partij_nr")
-          .in("uitslagen_run_id", runIds),
+          .select("uitslagen_run_id, matchmaking_id, partij_nr"),
         supabase
           .from("uitslagen_resultaten")
-          .select("uitslagen_run_id, matchmaking_id, uitslag_status")
-          .in("uitslagen_run_id", runIds)
-          .neq("uitslag_status", "concept"),
+          .select("uitslagen_run_id, matchmaking_id, uitslag_status"),
         supabase
           .from("matchmaking_uploads")
-          .select("matchmaking_id, evenement_naam, evenement_datum, bondteam")
-          .in("matchmaking_id", matchmakingIds),
+          .select("matchmaking_id, evenement_naam, evenement_datum, bondteam"),
         supabase
           .from("matchmakings")
           .select(
             "id, naam, datum, bondteam, huidige_eigenaar_bondteam, status, stadium",
-          )
-          .in("id", matchmakingIds),
+          ),
       ]);
 
+      if (runErr) throw runErr;
       if (boutErr) throw boutErr;
       if (resultErr) throw resultErr;
       if (uploadErr) throw uploadErr;
@@ -169,10 +144,8 @@ export default function AdminReadyToUploadPage() {
         const bond = norm(
           meta.bondteam || mm.huidige_eigenaar_bondteam || mm.bondteam,
         );
-
         if (!canSeeAllBonds && profileBond && bond && bond !== profileBond)
           continue;
-
         rowsByRun.set(runId, {
           matchmaking_id: mmid,
           evenement_naam: meta.evenement_naam ?? mm.naam ?? null,
@@ -187,10 +160,13 @@ export default function AdminReadyToUploadPage() {
         const cur = rowsByRun.get(clean((bout as any).uitslagen_run_id));
         if (cur) cur.partijen += 1;
       }
-
       for (const res of results ?? []) {
         const cur = rowsByRun.get(clean((res as any).uitslagen_run_id));
-        if (cur) cur.ingevuld += 1;
+        if (
+          cur &&
+          clean((res as any).uitslag_status).toLowerCase() !== "concept"
+        )
+          cur.ingevuld += 1;
       }
 
       setRows(
@@ -201,7 +177,7 @@ export default function AdminReadyToUploadPage() {
     } catch (e: any) {
       setError(e?.message ?? "Laden mislukt.");
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   }
 
@@ -234,15 +210,7 @@ export default function AdminReadyToUploadPage() {
     if (authLoading) return;
     if (!user) return void router.replace("/login");
     if (!allowed) return void router.replace("/dashboard");
-
     void load();
-
-    const interval = setInterval(() => {
-      void load(true);
-    }, 10000);
-
-    return () => clearInterval(interval);
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id, allowed, router, roles]);
 
@@ -264,7 +232,15 @@ export default function AdminReadyToUploadPage() {
                     className={silverBtn}
                   >
                     ← Admin
-                  </button>                </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void load()}
+                    className={orangeBtn}
+                  >
+                    ↺ Ververs
+                  </button>
+                </div>
 
                 <div className="flex justify-center">
                   <Image
@@ -328,8 +304,7 @@ export default function AdminReadyToUploadPage() {
                         Klaar voor FightPassport upload
                       </h2>
                       <p className="mt-2 max-w-4xl text-sm font-semibold leading-relaxed text-zinc-300">
-                        Officials kunnen deze uitslagen alleen inzien. Alleen
-                        superadmin van hetzelfde bondteam, of NVB superadmin,
+                        Alleen Superadmin van hetzelfde bondteam, of NVB superadmin,
                         kan een definitieve uitslag hier opnieuw op bewerken
                         zetten.
                       </p>
@@ -445,7 +420,7 @@ export default function AdminReadyToUploadPage() {
                                       disabled={busyId === row.matchmaking_id}
                                       className="border border-[#ff4d00] bg-[#ff4d00] px-2 py-1 text-[10px] font-black uppercase !text-black disabled:opacity-50"
                                     >
-                                      Bewerken
+                                      Edit
                                     </button>
                                   ) : null}
                                 </div>

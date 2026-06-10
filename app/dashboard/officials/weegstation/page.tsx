@@ -783,6 +783,18 @@ export default function WeegstationOverzichtPage() {
                               type="button"
                               onClick={() =>
                                 router.push(
+                                  `/dashboard/officials/controle/${matchmakingId}`,
+                                )
+                              }
+                              className="inline-flex border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-black uppercase text-white"
+                            >
+                              MM
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                router.push(
                                   `/dashboard/officials/weegstation/${matchmakingId}`,
                                 )
                               }

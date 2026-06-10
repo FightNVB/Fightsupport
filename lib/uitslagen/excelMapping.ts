@@ -101,7 +101,20 @@ export function mapDisciplineToExcel(input: unknown): string {
 export function mapKlasseToExcel(input: unknown): string {
   const raw = String(input ?? "").trim().toLowerCase();
 
-  if (["jeugd", "jeugd klasse", "youth", "jeugd/youth"].includes(raw)) {
+  if (
+    [
+      "j",
+      "j+",
+      "j plus",
+      "j-plus",
+      "jeugd",
+      "jeugd klasse",
+      "youth",
+      "jeugd/youth",
+      "talentstatus",
+      "talent status",
+    ].includes(raw)
+  ) {
     return "Jeugd/Youth";
   }
   if (["nieuweling", "newcomer", "nieuweling/newcomer"].includes(raw)) {

@@ -17,33 +17,35 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "baseUrl": ".",
+
     "paths": {
       "@/*": [
-        "*"
+        "./*"
       ],
       "@/app/*": [
-        "app/*"
+        "./app/*"
       ],
       "@/components/*": [
-        "components/*"
+        "./components/*"
       ],
       "@/context/*": [
-        "app/context/*"
+        "./app/context/*"
       ],
       "@/lib/*": [
-        "lib/*"
+        "./lib/*"
       ],
       "@/styles/*": [
-        "styles/*"
+        "./styles/*"
       ]
     },
+
     "plugins": [
       {
         "name": "next"
       }
     ]
   },
+
   "include": [
     "next-env.d.ts",
     "**/*.ts",
@@ -51,6 +53,7 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
+
   "exclude": [
     "node_modules",
     "supabase/functions"
