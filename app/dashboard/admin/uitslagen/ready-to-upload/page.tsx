@@ -82,9 +82,9 @@ export default function AdminReadyToUploadPage() {
   );
   const canSeeAllBonds = isSuperadmin && norm(myBondteam) === "NVB";
 
-  async function load() {
+  async function load(silent = false) {
     if (!user?.id) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError("");
     try {
       const { data: profile } = await supabase
@@ -92,37 +92,62 @@ export default function AdminReadyToUploadPage() {
         .select("bondteam")
         .eq("id", user.id)
         .maybeSingle();
+
       const profileBond = norm((profile as any)?.bondteam);
       setMyBondteam(profileBond);
 
+      const { data: runs, error: runErr } = await supabase
+        .from("uitslagen_runs")
+        .select("id, matchmaking_id, status")
+        .eq("status", "afgerond")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (runErr) throw runErr;
+
+      const runIds = Array.from(
+        new Set((runs ?? []).map((run: any) => clean(run.id)).filter(Boolean)),
+      );
+      const matchmakingIds = Array.from(
+        new Set(
+          (runs ?? [])
+            .map((run: any) => clean(run.matchmaking_id))
+            .filter(Boolean),
+        ),
+      );
+
+      if (runIds.length === 0 || matchmakingIds.length === 0) {
+        setRows([]);
+        return;
+      }
+
       const [
-        { data: runs, error: runErr },
         { data: bouts, error: boutErr },
         { data: results, error: resultErr },
         { data: uploads, error: uploadErr },
         { data: matchmakings, error: mmErr },
       ] = await Promise.all([
         supabase
-          .from("uitslagen_runs")
-          .select("id, matchmaking_id, status")
-          .eq("status", "afgerond"),
-        supabase
           .from("uitslagen_bouts")
-          .select("uitslagen_run_id, matchmaking_id, partij_nr"),
+          .select("uitslagen_run_id, matchmaking_id, partij_nr")
+          .in("uitslagen_run_id", runIds),
         supabase
           .from("uitslagen_resultaten")
-          .select("uitslagen_run_id, matchmaking_id, uitslag_status"),
+          .select("uitslagen_run_id, matchmaking_id, uitslag_status")
+          .in("uitslagen_run_id", runIds)
+          .neq("uitslag_status", "concept"),
         supabase
           .from("matchmaking_uploads")
-          .select("matchmaking_id, evenement_naam, evenement_datum, bondteam"),
+          .select("matchmaking_id, evenement_naam, evenement_datum, bondteam")
+          .in("matchmaking_id", matchmakingIds),
         supabase
           .from("matchmakings")
           .select(
             "id, naam, datum, bondteam, huidige_eigenaar_bondteam, status, stadium",
-          ),
+          )
+          .in("id", matchmakingIds),
       ]);
 
-      if (runErr) throw runErr;
       if (boutErr) throw boutErr;
       if (resultErr) throw resultErr;
       if (uploadErr) throw uploadErr;
@@ -144,8 +169,10 @@ export default function AdminReadyToUploadPage() {
         const bond = norm(
           meta.bondteam || mm.huidige_eigenaar_bondteam || mm.bondteam,
         );
+
         if (!canSeeAllBonds && profileBond && bond && bond !== profileBond)
           continue;
+
         rowsByRun.set(runId, {
           matchmaking_id: mmid,
           evenement_naam: meta.evenement_naam ?? mm.naam ?? null,
@@ -160,13 +187,10 @@ export default function AdminReadyToUploadPage() {
         const cur = rowsByRun.get(clean((bout as any).uitslagen_run_id));
         if (cur) cur.partijen += 1;
       }
+
       for (const res of results ?? []) {
         const cur = rowsByRun.get(clean((res as any).uitslagen_run_id));
-        if (
-          cur &&
-          clean((res as any).uitslag_status).toLowerCase() !== "concept"
-        )
-          cur.ingevuld += 1;
+        if (cur) cur.ingevuld += 1;
       }
 
       setRows(
@@ -177,7 +201,7 @@ export default function AdminReadyToUploadPage() {
     } catch (e: any) {
       setError(e?.message ?? "Laden mislukt.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -214,7 +238,7 @@ export default function AdminReadyToUploadPage() {
     void load();
 
     const interval = setInterval(() => {
-      void load();
+      void load(true);
     }, 10000);
 
     return () => clearInterval(interval);
