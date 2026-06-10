@@ -1003,13 +1003,34 @@ function asUuid(v: any): string | null {
 }
 
 function isApprovedOverride(row: ControleResultaatRow): boolean {
-  return String(row?.review_status ?? "").trim().toLowerCase() === "goedgekeurd" || normResultaat(row?.resultaat) === "ok";
+  const review = String(row?.review_status ?? "").trim().toLowerCase();
+
+  // Een expliciet afgekeurde weegstation/controle-melding mag niet alsnog als OK tonen
+  // alleen omdat het oorspronkelijke resultaat "ok" was.
+  if (["afgekeurd", "rejected", "rejected_by_official", "geweigerd"].includes(review)) {
+    return false;
+  }
+
+  if (["goedgekeurd", "akkoord", "approved", "accepted", "geaccepteerd", "opgelost", "resolved"].includes(review)) {
+    return true;
+  }
+
+  return normResultaat(row?.resultaat) === "ok";
+}
+
+function isRejectedReviewStatus(v: any): boolean {
+  const s = String(v ?? "").trim().toLowerCase();
+  return ["afgekeurd", "rejected", "rejected_by_official", "geweigerd"].includes(s);
 }
 
 function displayResultaat(row: ControleResultaatRow): {
   label: string;
   tone: "ok" | "warn" | "disp" | "err" | "info";
 } {
+  if (isRejectedReviewStatus(row?.review_status)) {
+    return { label: "AFKEUR", tone: "err" };
+  }
+
   if (isApprovedOverride(row)) {
     return { label: "OK", tone: "ok" };
   }
@@ -1041,6 +1062,10 @@ function displayResultaat(row: ControleResultaatRow): {
 }
 
 function displayBoodschap(row: ControleResultaatRow): string {
+  if (isRejectedReviewStatus(row?.review_status)) {
+    const note = String(row?.aantekeningen ?? "").trim();
+    return note ? `AFGEKEURD: ${note}` : "AFGEKEURD";
+  }
   if (isApprovedOverride(row)) return "OK";
   return String(row?.boodschap ?? "-") || "-";
 }
@@ -1424,7 +1449,15 @@ export default function PartijDetailPage() {
 
   function canReviewDecision(r: ControleResultaatRow, decision: "approve" | "reject") {
     const res = normResultaat(r?.resultaat);
-    if (!res || res === "ok") return false;
+    if (!res) return false;
+
+    // Weegstationmeldingen moeten door officials/hoofdofficial/admin expliciet goed- of afgekeurd kunnen worden,
+    // ook wanneer het oorspronkelijke resultaat "ok" is.
+    if (isWeegstationRow(r)) {
+      return isSuperadmin || isAdmin || isHoofdofficial || isOfficial;
+    }
+
+    if (res === "ok") return false;
 
     // Verbod/startverbod: alleen superadmin.
     if (isVerbodRule(r)) return isSuperadmin;
@@ -1531,7 +1564,9 @@ export default function PartijDetailPage() {
       }
 
       const res = normResultaat(row?.resultaat);
-      if (res === "ok") throw new Error("Deze melding is al OK/goedgekeurd.");
+      if (res === "ok" && row && !isWeegstationRow(row)) {
+        throw new Error("Deze melding is al OK/goedgekeurd.");
+      }
 
       const reason = String(getNoteFor(resultaatId) ?? "").trim();
 
@@ -1570,7 +1605,9 @@ export default function PartijDetailPage() {
       }
 
       const res = normResultaat(row?.resultaat);
-      if (res === "ok") throw new Error("Deze melding is al OK/goedgekeurd.");
+      if (res === "ok" && row && !isWeegstationRow(row)) {
+        throw new Error("Deze melding is al OK/goedgekeurd.");
+      }
 
       const reason = String(getNoteFor(resultaatId) ?? "").trim();
       if (!reason) throw new Error("Vul eerst een reden in bij Aantekeningen (verplicht bij afkeuren).");

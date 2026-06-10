@@ -55,6 +55,11 @@ function isOpenReview(v: unknown) {
   return s === "OPEN" || s === "PENDING" || s === "WACHT" || s === "WACHTEND";
 }
 
+function isApprovedStatus(v: unknown) {
+  const s = upper(v);
+  return ["GOEDGEKEURD", "APPROVED", "AKKOORD", "OK", "OPGELOST", "RESOLVED"].includes(s);
+}
+
 function blocksByControleResult(row: any) {
   const rule = upper(row.rule);
   const result = upper(row.resultaat);
@@ -65,12 +70,38 @@ function blocksByControleResult(row: any) {
   const boodschap = upper(row.boodschap);
   const combined = `${rule} ${result} ${ruleCode} ${severity} ${reviewStatus} ${actieStatus} ${boodschap}`;
 
-  // INFO mag door, tenzij het expliciet een afkeur/status/blokkade betreft.
-  const isPureInfo = severity === "INFO";
+  const isMinpunt =
+    rule.includes("MINPUNT") ||
+    ruleCode.includes("MINPUNT") ||
+    boodschap.includes("MINPUNT");
 
-  // Weegstation status is leidend als die expliciet AFKEUR/AFGEKEURD is.
+  const isPureOk = result === "OK" || ruleCode === "OK" || isApprovedStatus(reviewStatus);
+  const isPureInfo = result === "INFO" || severity === "INFO";
+
+  // Weegstation status OK/INFO mag nooit blokkeren door een oude review_status=open.
+  // Weegstation status AFKEUR/AFGEKEURD blijft wel een harde blokkade.
   if (rule === "WEEGSTATION_STATUS") {
-    return result === "AFKEUR" || result === "AFGEKEURD" || ruleCode === "AFKEUR" || ruleCode === "AFGEKEURD";
+    return (
+      result === "AFKEUR" ||
+      result === "AFGEKEURD" ||
+      ruleCode === "AFKEUR" ||
+      ruleCode === "AFGEKEURD" ||
+      combined.includes("STARTVERBOD") ||
+      combined.includes("VERBOD")
+    );
+  }
+
+  // ACTIE minpunt rood/blauw is de enige ACTIE die door mag.
+  // Die moet als strafpunt mee naar uitslagen, maar mag finaliseren niet blokkeren.
+  if ((result === "ACTIE" || ruleCode.includes("ACTIE")) && isMinpunt) {
+    return false;
+  }
+
+  // OK en INFO mogen door, tenzij dezelfde regel expliciet een harde blokkade noemt.
+  if ((isPureOk || isPureInfo) && !(combined.includes("STARTVERBOD") || combined.includes("VERBOD"))) {
+    if (result !== "AFKEUR" && result !== "AFGEKEURD" && ruleCode !== "AFKEUR" && ruleCode !== "AFGEKEURD") {
+      return false;
+    }
   }
 
   // Startverbod / verbod altijd blokkeren.
@@ -79,22 +110,40 @@ function blocksByControleResult(row: any) {
   // Harde afkeur blokkeert.
   if (result === "AFKEUR" || result === "AFGEKEURD" || ruleCode === "AFKEUR" || ruleCode === "AFGEKEURD") return true;
 
-  // Open actiepunten blokkeren.
-  if (result === "ACTIE" || ruleCode.includes("ACTIE") || isOpenReview(reviewStatus) || isOpenReview(actieStatus)) {
-    return true;
-  }
-
-  // Open/nodige dispensatie blokkeert. Verleend mag door.
-  const isDispensatie = result === "DISPENSATIE" || rule.includes("DISPENSATIE") || ruleCode.includes("DISPENSATIE") || rule === "WEEGSTATION_DISPENSATIE";
-  const isVerleend = result === "VERLEEND" || ruleCode === "VERLEEND" || combined.includes("DISPENSATIE VERLEEND");
-  const isAfgewezen = result === "AFGEWEZEN" || result === "AFGEKEURD" || ruleCode === "AFGEWEZEN";
+  // Open/nodige dispensatie blokkeert. Verleend/goedgekeurd mag door.
+  const isDispensatie =
+    result === "DISPENSATIE" ||
+    rule.includes("DISPENSATIE") ||
+    ruleCode.includes("DISPENSATIE") ||
+    rule === "WEEGSTATION_DISPENSATIE";
+  const isVerleend =
+    result === "VERLEEND" ||
+    ruleCode === "VERLEEND" ||
+    combined.includes("DISPENSATIE VERLEEND") ||
+    isApprovedStatus(reviewStatus) ||
+    isApprovedStatus(actieStatus);
+  const isAfgewezen =
+    result === "AFGEWEZEN" ||
+    result === "AFGEKEURD" ||
+    ruleCode === "AFGEWEZEN" ||
+    combined.includes("AFGEWEZEN") ||
+    combined.includes("GEWEIGERD") ||
+    combined.includes("NIET VERLEEND");
   const isNodig = result === "NODIG" || ruleCode === "NODIG" || result === "DISPENSATIE";
 
+  if (isAfgewezen) return true;
   if (isDispensatie && !isVerleend) return true;
-  if (isAfgewezen || isNodig) return true;
+  if (isNodig && !isVerleend) return true;
 
-  // Info-regels die niet onder bovenstaande vallen blokkeren niet.
-  if (isPureInfo) return false;
+  // Alle overige ACTIE/open review blokkeert.
+  if (
+    (result === "ACTIE" && !isMinpunt) ||
+    (ruleCode.includes("ACTIE") && !isMinpunt) ||
+    isOpenReview(reviewStatus) ||
+    isOpenReview(actieStatus)
+  ) {
+    return true;
+  }
 
   return false;
 }
@@ -121,10 +170,25 @@ export async function POST(req: NextRequest) {
 
     const { data: bouts, error: boutErr } = await supabase
       .from("uitslagen_bouts")
-      .select("id, uitslagen_run_id, matchmaking_id, partij_nr")
+      .select("id, uitslagen_run_id, matchmaking_id, partij_nr, original_partij_nr")
       .eq("matchmaking_id", matchmakingId);
 
     if (boutErr) return bad(boutErr.message, 500);
+
+    // uitslagen_bouts.partij_nr is opnieuw genummerd voor de uitslagenflow.
+    // controle_resultaten.partij_nr verwijst nog naar het originele matchmaking-partijnummer.
+    // Daarom controleren we hieronder op original_partij_nr, maar tonen we in meldingen
+    // het zichtbare uitslagen-partijnummer dat de official op deze pagina ziet.
+    const uitslagenNrByOriginal = new Map<number, number>();
+
+    for (const b of bouts ?? []) {
+      const originalNr = Number((b as any).original_partij_nr ?? (b as any).partij_nr);
+      const uitslagenNr = Number((b as any).partij_nr);
+
+      if (Number.isFinite(originalNr) && Number.isFinite(uitslagenNr)) {
+        uitslagenNrByOriginal.set(originalNr, uitslagenNr);
+      }
+    }
 
     const total = bouts?.length ?? 0;
     if (total <= 0) return bad("Geen partijen gevonden om te finaliseren.");
@@ -142,20 +206,35 @@ export async function POST(req: NextRequest) {
       return bad(`Nog niet alle uitslagen zijn ingevuld (${filled}/${total}).`);
     }
 
-    const partijNrs = Array.from(new Set((bouts ?? []).map((b: any) => Number(b.partij_nr)).filter((n) => Number.isFinite(n))));
+    const controlePartijNrs = Array.from(
+      new Set(
+        (bouts ?? [])
+          .map((b: any) => Number((b as any).original_partij_nr ?? (b as any).partij_nr))
+          .filter((n) => Number.isFinite(n))
+      )
+    );
 
     const { data: controles, error: ctrlErr } = await supabase
       .from("controle_resultaten")
       .select("id, partij_nr, bout_id, rule, resultaat, rule_code, severity, actie_status, review_status, boodschap")
       .eq("matchmaking_id", matchmakingId)
-      .in("partij_nr", partijNrs);
+      .in("partij_nr", controlePartijNrs);
 
     if (ctrlErr) return bad(ctrlErr.message, 500);
 
     const blocked = (controles ?? []).filter(blocksByControleResult);
 
     if (blocked.length > 0) {
-      const uniquePartijen = Array.from(new Set(blocked.map((r: any) => clean(r.partij_nr)).filter(Boolean))).sort((a, b) => Number(a) - Number(b));
+      const uniquePartijen = Array.from(
+        new Set(
+          blocked
+            .map((r: any) => {
+              const originalNr = Number(r.partij_nr);
+              return uitslagenNrByOriginal.get(originalNr) ?? originalNr;
+            })
+            .filter((n) => Number.isFinite(n))
+        )
+      ).sort((a, b) => a - b);
       const preview = uniquePartijen.slice(0, 12).join(", ");
       const extra = uniquePartijen.length > 12 ? ` + ${uniquePartijen.length - 12} meer` : "";
       return bad(

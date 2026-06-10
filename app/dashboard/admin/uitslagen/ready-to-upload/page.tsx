@@ -210,7 +210,15 @@ export default function AdminReadyToUploadPage() {
     if (authLoading) return;
     if (!user) return void router.replace("/login");
     if (!allowed) return void router.replace("/dashboard");
+
     void load();
+
+    const interval = setInterval(() => {
+      void load();
+    }, 10000);
+
+    return () => clearInterval(interval);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id, allowed, router, roles]);
 
@@ -232,15 +240,7 @@ export default function AdminReadyToUploadPage() {
                     className={silverBtn}
                   >
                     ← Admin
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void load()}
-                    className={orangeBtn}
-                  >
-                    ↺ Ververs
-                  </button>
-                </div>
+                  </button>                </div>
 
                 <div className="flex justify-center">
                   <Image
@@ -401,6 +401,17 @@ export default function AdminReadyToUploadPage() {
                                   >
                                     Excel
                                   </a>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      router.push(
+                                        `/dashboard/officials/uitslagen/inzien/${row.matchmaking_id}`
+                                      )
+                                    }
+                                    className="border border-sky-400 bg-sky-500 px-2 py-1 text-[10px] font-black uppercase text-black"
+                                  >
+                                    Inzien
+                                  </button>
                                   {isSuperadmin ? (
                                     <button
                                       type="button"

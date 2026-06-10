@@ -37,7 +37,7 @@ interface ControleRun {
   run_type: string | null;
 }
 
-type ActiveTab = "received" | "lineup" | "results" | "archive" | "uploaded";
+type ActiveTab = "received" | "weegstation" | "lineup" | "results" | "archive" | "uploaded";
 
 interface MatchmakingRow {
   id: string;
@@ -251,6 +251,17 @@ function getOfficialOverviewTab(row: MatchmakingRow): ActiveTab {
     uitslagenRunStatus === "in_bewerking"
   ) {
     return "results";
+  }
+
+  // Matchmakings die naar het weegstation zijn gestuurd, krijgen een eigen tab.
+  // Vanuit deze tab mag alleen het weegstation geopend worden.
+  if (
+    stadium === "klaar_voor_weegstation" ||
+    stadium === "in_weegstation" ||
+    status === "klaar_voor_weegstation" ||
+    status === "in_weegstation"
+  ) {
+    return "weegstation";
   }
 
   // Weegstation zelf heeft een eigen pagina/flow.
@@ -725,6 +736,11 @@ export default function OfficialsOverzichtPage() {
     [rows]
   );
 
+  const weegstationCount = useMemo(
+    () => rows.filter((r) => getOfficialOverviewTab(r) === "weegstation").length,
+    [rows]
+  );
+
   const lineupCount = useMemo(
     () => rows.filter((r) => getOfficialOverviewTab(r) === "lineup").length,
     [rows]
@@ -908,6 +924,12 @@ export default function OfficialsOverzichtPage() {
                       onClick={() => setActiveTab("received")}
                     />
                     <TabButton
+                      active={activeTab === "weegstation"}
+                      label="In weegstation"
+                      count={weegstationCount}
+                      onClick={() => setActiveTab("weegstation")}
+                    />
+                    <TabButton
                       active={activeTab === "lineup"}
                       label="Definitieve lineup"
                       count={lineupCount}
@@ -965,6 +987,8 @@ export default function OfficialsOverzichtPage() {
                           <div className="mt-1 text-xs text-zinc-500">
                             {activeTab === "received"
                               ? "Ontvangen matchmakings die nu bij dit bondteam in beheer zijn"
+                              : activeTab === "weegstation"
+                              ? "Matchmakings die nu in het weegstation staan"
                               : activeTab === "lineup"
                               ? "Weging verwerkt: klaar voor definitieve lineup en daarna uitslagen"
                               : activeTab === "results"
@@ -1113,6 +1137,8 @@ export default function OfficialsOverzichtPage() {
                                 >
                                   {activeTab === "received"
                                     ? "Geen ontvangen matchmakings gevonden."
+                                    : activeTab === "weegstation"
+                                    ? "Geen matchmakings in weegstation gevonden."
                                     : activeTab === "lineup"
                                     ? "Geen matchmakings klaar voor definitieve lineup gevonden."
                                     : activeTab === "results"
@@ -1182,10 +1208,14 @@ export default function OfficialsOverzichtPage() {
                                     <td className="px-4 py-3">
                                       <div className="flex flex-wrap items-center gap-3">
                                         <Link
-                                          href={`/dashboard/officials/controle/${r.id}`}
+                                          href={
+                                            activeTab === "weegstation"
+                                              ? `/dashboard/officials/weegstation/${r.id}`
+                                              : `/dashboard/officials/controle/${r.id}`
+                                          }
                                           className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-1 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
                                         >
-                                          Matchmaking
+                                          {activeTab === "weegstation" ? "Open weegstation" : "Matchmaking"}
                                         </Link>
 
                                         {activeTab === "uploaded" ? (
@@ -1254,7 +1284,7 @@ export default function OfficialsOverzichtPage() {
                                           </>
                                         ) : null}
 
-                                        {activeTab !== "archive" ? (
+                                        {activeTab !== "archive" && activeTab !== "weegstation" ? (
                                           <button
                                             onClick={() => deleteMatchmaking(r)}
                                             disabled={rowBusy || isBusy}

@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
     const winnaarHoek = clean(body.winnaar_hoek);
     const methode = clean(body.methode);
     const opmerkingen = clean(body.opmerkingen);
+    const klasse = clean(body.klasse ?? body.bout_klasse ?? body.partij_klasse);
 
     if (!uitslagenBoutId) return bad("uitslagen_bout_id ontbreekt");
     if (!matchmakingId) return bad("matchmaking_id ontbreekt");
@@ -92,6 +93,7 @@ export async function POST(req: NextRequest) {
       resultaat_type: resultaatType(winnaarHoek),
       winnaar_hoek: winnaarHoek,
       methode,
+      klasse: klasse || null,
       ronde: body.ronde ?? null,
       tijd_in_ronde: body.tijd_in_ronde ?? null,
       opmerkingen: opmerkingen || null,

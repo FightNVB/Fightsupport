@@ -126,7 +126,25 @@ export default function OfficialsUitslagenInzienPage() {
       <div className="mx-auto max-w-[1720px] px-6 py-5">
         <div className="overflow-hidden rounded-none border-4 border-[#a3a7ad] bg-[linear-gradient(180deg,#3a3d43_0%,#171b22_40%,#080b11_100%)] shadow-[0_0_45px_rgba(0,0,0,0.75)]">
           <div className="grid grid-cols-[210px_1fr_360px] items-center gap-5 border-b-2 border-[#ff4d00] px-8 py-4">
-            <button onClick={() => router.push("/dashboard/officials/uitslagen")} className="h-[48px] rounded-none border-2 border-[#f4f4f4] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_42%,#878787_100%)] text-[15px] font-black uppercase tracking-[1.5px] text-black shadow-[inset_0_2px_0_rgba(255,255,255,.9),0_0_0_1px_rgba(0,0,0,.5)]">← Uitslagen</button>
+            <div className="flex flex-wrap gap-2">
+              {isSuperadmin && myBondteam === "NVB" ? (
+                <button
+                  onClick={() =>
+                    router.push("/dashboard/admin/uitslagen/ready-to-upload")
+                  }
+                  className="h-[48px] rounded-none border-2 border-[#ff4d00] bg-[linear-gradient(180deg,#ff8a45_0%,#ff4d00_50%,#8f2600_100%)] px-4 text-[15px] font-black uppercase tracking-[1.5px] text-white shadow-[inset_0_2px_0_rgba(255,255,255,.35),0_0_0_1px_rgba(0,0,0,.5)]"
+                >
+                  Naar Admin
+                </button>
+              ) : null}
+
+              <button
+                onClick={() => router.push("/dashboard/officials/uitslagen")}
+                className="h-[48px] rounded-none border-2 border-[#f4f4f4] bg-[linear-gradient(180deg,#ffffff_0%,#d8d8d8_42%,#878787_100%)] px-4 text-[15px] font-black uppercase tracking-[1.5px] text-black shadow-[inset_0_2px_0_rgba(255,255,255,.9),0_0_0_1px_rgba(0,0,0,.5)]"
+              >
+                ← Uitslagen
+              </button>
+            </div>
             <div className="flex items-center justify-center"><Image src="/branding/fightsupport/fightsupport1.png" alt="FightSupport" width={1400} height={260} priority className="h-[118px] w-[680px] object-contain drop-shadow-[0_0_32px_rgba(255,255,255,0.28)]" /></div>
             <div className="text-right"><div className="text-[29px] font-black tracking-[6px] text-[#ff4d00]">INZIEN</div><div className="text-sm text-zinc-300">Alleen lezen · geen wijzigingen</div><div className="mt-3 inline-flex items-center gap-2 border border-[#ff4d00] bg-[#ff4d0017] px-3 py-2 text-xs font-black uppercase tracking-[2px] text-[#ff7a3c]"><ShieldCheck className="h-4 w-4" /> {myBondteam || "-"}</div></div>
           </div>

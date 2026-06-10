@@ -238,6 +238,10 @@ const ALLOWED_BONDTEAMS = new Set([
   "MON",
 ]);
 
+function normalizeBondteamValue(v: unknown): string {
+  return String(v ?? "").trim().toUpperCase();
+}
+
 function bad(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
 }
@@ -422,20 +426,28 @@ export async function POST(req: Request) {
       );
     }
 
+    if (!bondteam && profileForUpload.bondteam) {
+      const profileBondteam = normalizeBondteamValue(profileForUpload.bondteam);
+      if (ALLOWED_BONDTEAMS.has(profileBondteam)) bondteam = profileBondteam;
+    }
+
+    const normalizedBondteam = normalizeBondteamValue(bondteam);
+
     if (!evenement_naam || !evenement_datum) {
       return bad("Vul verplicht in: evenement_naam en evenement_datum.");
     }
-    if (!bondteam) {
+    if (!normalizedBondteam) {
       return bad("Bondteam is verplicht.");
     }
-    if (!ALLOWED_BONDTEAMS.has(String(bondteam))) {
+    if (!ALLOWED_BONDTEAMS.has(normalizedBondteam)) {
       return bad("Onbekend bondteam.");
     }
 
     if (role === "official" || role === "hoofdofficial") {
       const userBond = await getUserBondteam(userId);
       if (!userBond) return bad("Je profiel mist bondteam.", 403);
-      if (String(userBond) !== String(bondteam)) {
+      const normalizedUserBond = normalizeBondteamValue(userBond);
+      if (normalizedUserBond !== normalizedBondteam) {
         return bad(
           "Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.",
           403
@@ -503,7 +515,7 @@ export async function POST(req: Request) {
           datum: evenement_datum,
           locatie,
           status: "draft",
-          bondteam,
+          bondteam: normalizedBondteam,
           matchmaker,
           hoofdofficial,
           promotor,
@@ -569,7 +581,7 @@ const existingStage =
           naam: evenement_naam,
           datum: evenement_datum,
           locatie,
-          bondteam,
+          bondteam: normalizedBondteam,
 
           maker_type: makerType,
           maker_user_id: makerUserId,
@@ -606,7 +618,7 @@ const existingStage =
           naam: evenement_naam,
           datum: evenement_datum,
           locatie,
-          bondteam,
+          bondteam: normalizedBondteam,
 
           maker_type: makerType,
           maker_user_id: makerUserId,
@@ -651,7 +663,7 @@ const existingStage =
       matchmakerId: makerUserId,
       makerType,
       makerUserId,
-      bondteam: bondteam || null,
+      bondteam: normalizedBondteam,
       eventId: evId || null,
       bronType: lifecycleBronType,
       stage: lifecycleStage,
@@ -668,7 +680,7 @@ const existingStage =
       },
     });
 
-    const lifecycleBondteam = bondteam;
+    const lifecycleBondteam = normalizedBondteam;
 
     const { data: uploadRow, error: uploadErr } = await supabaseAdmin
       .from("matchmaking_uploads")
@@ -681,7 +693,7 @@ const existingStage =
         locatie,
         raw_filename,
         matchmaker,
-        bondteam,
+        bondteam: normalizedBondteam,
         hoofdofficial,
         promotor,
         uploaded_by,

@@ -52,20 +52,44 @@ function pick(...vals: any[]) {
   return null;
 }
 
+function toNumberLoose(v: any): number | null {
+  if (v === null || v === undefined) return null;
+  const raw = String(v).trim().replace(",", ".");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeMinpuntValue(v: any): number {
+  const n = toNumberLoose(v);
+  if (n === null || n <= 0) return 0;
+
+  // In deze flow is ACTIE MINPUNT rood/blauw één strafpunt.
+  // Door dubbele weegstation/controle_resultaten-koppeling kan dezelfde minpunt
+  // als 2 opgeslagen zijn. Toon en verstuur hem daarom maar één keer.
+  return 1;
+}
+
+function pickMinpunten(...vals: any[]) {
+  const nums = vals
+    .map((v) => normalizeMinpuntValue(v))
+    .filter((v) => v > 0);
+
+  return nums.length ? 1 : 0;
+}
+
 function fmt(v: any, suffix = "") {
   const s = String(v ?? "").trim();
   return s ? `${s}${suffix}` : "-";
 }
 
 function hasMinpunten(v: any) {
-  const s = String(v ?? "").trim();
-  return !!s && s !== "0" && s !== "0.0" && s !== "0.00";
+  return normalizeMinpuntValue(v) > 0;
 }
 
 function fmtMinpunten(v: any) {
-  const s = String(v ?? "").trim();
-  if (!hasMinpunten(v)) return "0";
-  return s.startsWith("-") ? s : `-${s}`;
+  const n = normalizeMinpuntValue(v);
+  return n > 0 ? `-${n}` : "0";
 }
 
 function mapDiscipline(v: string | null) {
@@ -286,8 +310,15 @@ export default function OfficialsUitslagenDetailPage() {
         rood_naam: b.rood_naam,
         rood_gym: b.rood_gym,
         rood_va: pick(b.rood_va, b.rood_va_nummer),
-        rood_gewicht: pick(b.rood_gewogen_gewicht, b.rood_weeggewicht, b.rood_gewicht, b.rood_doorgegeven_gewicht),
-        rood_minpunten: pick(
+        rood_gewicht: pick(
+          b.rood_gewicht_gewogen,
+          b.rood_gewogen_gewicht,
+          b.rood_weeggewicht,
+          b.rood_gewicht,
+          b.rood_gewicht_opgegeven,
+          b.rood_doorgegeven_gewicht
+        ),
+        rood_minpunten: pickMinpunten(
           b.rood_minpunten,
           b.rood_min_punten,
           b.rood_strafpunten,
@@ -299,8 +330,15 @@ export default function OfficialsUitslagenDetailPage() {
         blauw_naam: b.blauw_naam,
         blauw_gym: b.blauw_gym,
         blauw_va: pick(b.blauw_va, b.blauw_va_nummer),
-        blauw_gewicht: pick(b.blauw_gewogen_gewicht, b.blauw_weeggewicht, b.blauw_gewicht, b.blauw_doorgegeven_gewicht),
-        blauw_minpunten: pick(
+        blauw_gewicht: pick(
+          b.blauw_gewicht_gewogen,
+          b.blauw_gewogen_gewicht,
+          b.blauw_weeggewicht,
+          b.blauw_gewicht,
+          b.blauw_gewicht_opgegeven,
+          b.blauw_doorgegeven_gewicht
+        ),
+        blauw_minpunten: pickMinpunten(
           b.blauw_minpunten,
           b.blauw_min_punten,
           b.blauw_strafpunten,
@@ -403,8 +441,8 @@ export default function OfficialsUitslagenDetailPage() {
           winnaar_hoek: currentState.winnaar_hoek,
           methode: currentState.methode,
           opmerkingen: currentState.opmerkingen,
-          rood_minpunten: current.rood_minpunten ?? 0,
-          blauw_minpunten: current.blauw_minpunten ?? 0,
+          rood_minpunten: normalizeMinpuntValue(current.rood_minpunten),
+          blauw_minpunten: normalizeMinpuntValue(current.blauw_minpunten),
           uitslag_status: "definitief",
         }),
       });

@@ -2967,16 +2967,72 @@ export default function ControleMatchmakingPage() {
         })
         .filter((w) => Number.isFinite(Number(w.partij_nr)));
 
-      const mergedResMap = new Map<string, ResRow>();
-      for (const item of [
+      const controleResultatenRows = [
         ...((resRows ?? []) as ResRow[]),
         ...((weegRows ?? []) as ResRow[]),
-        ...directWeegResultaten,
+      ];
+
+      const weegDedupeKey = (item: ResRow) => {
+        if (!isWeegstationRow(item)) return "";
+
+        const pn = Number(item.partij_nr);
+        if (!Number.isFinite(pn) || pn <= 0) return "";
+
+        const code = String(item.rule_code ?? "").trim().toUpperCase();
+        const rule = String(item.rule ?? "").trim().toLowerCase();
+        const msg = String(item.boodschap ?? "").trim().toLowerCase();
+        const hoek = String(item.hoek ?? "").trim().toLowerCase();
+        const res = normResultaat((item as any).resultaat);
+
+        let soort = "status";
+        if (rule.includes("minpunt") || code.includes("MINPUNT") || msg.includes("minpunt")) {
+          soort = `minpunt:${hoek || "algemeen"}`;
+        } else if (
+          rule.includes("dispensatie") ||
+          code.includes("DISP") ||
+          msg.includes("dispensatie") ||
+          res === "dispensatie"
+        ) {
+          soort = "dispensatie";
+        } else if (
+          code.includes("AFKEUR") ||
+          res === "afgekeurd" ||
+          msg.includes("afkeur") ||
+          msg.includes("afgekeurd")
+        ) {
+          soort = "afkeur";
+        } else if (code === "OK" || res === "ok" || msg.includes("status ok")) {
+          soort = "ok";
+        }
+
+        return `${pn}:${soort}`;
+      };
+
+      // controle_resultaten is leidend. directWeegResultaten uit weigh_in_bouts is alleen fallback
+      // voor oude data zonder controle_resultaten-weegregel. Anders krijg je dubbele badges/minpunten.
+      const controleWeegKeys = new Set(
+        controleResultatenRows
+          .filter(isWeegstationRow)
+          .map(weegDedupeKey)
+          .filter(Boolean),
+      );
+
+      const directWeegFallbackRows = directWeegResultaten.filter((item) => {
+        const key = weegDedupeKey(item);
+        return !key || !controleWeegKeys.has(key);
+      });
+
+      const mergedResMap = new Map<string, ResRow>();
+      for (const item of [
+        ...controleResultatenRows,
+        ...directWeegFallbackRows,
       ]) {
-        const key = String(
-          item.id ??
-            `${item.partij_nr ?? ""}-${item.rule ?? ""}-${item.rule_code ?? ""}-${item.hoek ?? ""}-${item.boodschap ?? ""}`,
-        );
+        const key =
+          (isWeegstationRow(item) && weegDedupeKey(item)) ||
+          String(
+            item.id ??
+              `${item.partij_nr ?? ""}-${item.rule ?? ""}-${item.rule_code ?? ""}-${item.hoek ?? ""}-${item.boodschap ?? ""}`,
+          );
         if (!mergedResMap.has(key)) mergedResMap.set(key, item);
       }
 

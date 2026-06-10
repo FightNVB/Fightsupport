@@ -27,6 +27,8 @@ type RoleName =
   | "hoofdofficial"
   | "dispensatie_admin";
 
+type WeegstationTab = "actief" | "afgerond";
+
 type MatchmakingRow = {
   id: string;
   matchmaking_id?: string | null;
@@ -268,6 +270,59 @@ function displayStage(row: MatchmakingRow) {
   return safeText(row.stadium ?? row.status);
 }
 
+function isAfgerondWeegstation(row: MatchmakingRow) {
+  const stadium = normalizeStageKey(row.stadium);
+  const status = normalizeStageKey(row.status);
+
+  return [stadium, status].some((v) =>
+    [
+      "weegstation-verwerkt",
+      "weging-afgesloten",
+      "definitieve-matchmaking-ingediend",
+      "definitieve-lineup",
+      "klaar-voor-uitslagen",
+      "uitslagen-in-bewerking",
+      "uitslagen-definitief",
+    ].includes(v),
+  );
+}
+
+function isActiefWeegstation(row: MatchmakingRow) {
+  return !isAfgerondWeegstation(row);
+}
+
+function TabButton({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="border px-4 py-2 text-xs font-black uppercase tracking-[0.16em] transition"
+      style={{
+        borderColor: active ? "#ff4d00" : "rgba(113,113,122,0.75)",
+        background: active
+          ? "linear-gradient(180deg, #ff6a2b 0%, #ff4d00 100%)"
+          : "linear-gradient(180deg, #2f3238 0%, #191b20 100%)",
+        color: active ? "#111" : "#f4f4f5",
+        boxShadow: active
+          ? "0 0 18px rgba(255,77,0,0.24), inset 0 1px 0 rgba(255,255,255,0.22)"
+          : "inset 0 1px 0 rgba(255,255,255,0.08)",
+      }}
+    >
+      {label} ({count})
+    </button>
+  );
+}
+
 function HeaderLogo() {
   const [broken, setBroken] = useState(false);
 
@@ -318,6 +373,7 @@ export default function WeegstationOverzichtPage() {
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
   const [search, setSearch] = useState("");
   const [bondteamFilter, setBondteamFilter] = useState("ALLE");
+  const [activeTab, setActiveTab] = useState<WeegstationTab>("actief");
 
   const [roleNames, setRoleNames] = useState<RoleName[]>([]);
   const [myBondteam, setMyBondteam] = useState("");
@@ -444,10 +500,16 @@ export default function WeegstationOverzichtPage() {
     }
   }
 
+  function effectiveBondteam(row: MatchmakingRow) {
+    return normalizeBondteam(
+      row.bondteam ?? row.huidige_eigenaar_bondteam ?? "",
+    );
+  }
+
   const bondteamOptions = useMemo(() => {
     const unique = Array.from(
       new Set<string>(
-        rows.map((row) => String(row.bondteam ?? "").trim()).filter(Boolean),
+        rows.map((row) => effectiveBondteam(row)).filter(Boolean),
       ),
     ).sort((a, b) => a.localeCompare(b, "nl"));
 
@@ -458,17 +520,17 @@ export default function WeegstationOverzichtPage() {
     return myBondteam ? [myBondteam] : [];
   }, [rows, canSeeAllBondteams, myBondteam]);
 
-  const filteredRows = useMemo(() => {
+  const visibleRows = useMemo(() => {
     const q = normalizeSearchText(search);
     const ownBondteam = normalizeBondteam(myBondteam);
 
     return rows.filter((row) => {
-      const rowBondteam = normalizeBondteam(row.bondteam);
+      const rowBondteam = effectiveBondteam(row);
 
       if (canSeeAllBondteams) {
         if (
           bondteamFilter !== "ALLE" &&
-          normalizeBondteam(row.bondteam) !== normalizeBondteam(bondteamFilter)
+          rowBondteam !== normalizeBondteam(bondteamFilter)
         ) {
           return false;
         }
@@ -482,7 +544,7 @@ export default function WeegstationOverzichtPage() {
         [
           row.naam,
           row.datum,
-          row.bondteam,
+          effectiveBondteam(row),
           row.locatie,
           row.id,
           row.stadium,
@@ -495,6 +557,18 @@ export default function WeegstationOverzichtPage() {
       return haystack.includes(q);
     });
   }, [rows, search, bondteamFilter, canSeeAllBondteams, myBondteam]);
+
+  const activeRows = useMemo(
+    () => visibleRows.filter((row) => isActiefWeegstation(row)),
+    [visibleRows],
+  );
+
+  const afgerondRows = useMemo(
+    () => visibleRows.filter((row) => isAfgerondWeegstation(row)),
+    [visibleRows],
+  );
+
+  const filteredRows = activeTab === "afgerond" ? afgerondRows : activeRows;
 
   const roleLabel = useMemo(() => {
     if (roleNames.includes("superadmin")) return "SUPERADMIN";
@@ -548,8 +622,8 @@ export default function WeegstationOverzichtPage() {
             <p className="text-xs uppercase text-zinc-400">In selectie</p>
           </div>
           <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
-            <b className="text-xl text-[#ff4d00]">{rows.length}</b>
-            <p className="text-xs uppercase text-zinc-400">Totaal geladen</p>
+            <b className="text-xl text-[#ff4d00]">{visibleRows.length}</b>
+            <p className="text-xs uppercase text-zinc-400">Zichtbaar totaal</p>
           </div>
           <div className="border border-zinc-600 bg-[#1c1c1c] p-3">
             <b className="text-xl text-[#ff4d00]">
@@ -561,6 +635,24 @@ export default function WeegstationOverzichtPage() {
             <b className="text-xl text-[#ff4d00]">{roleLabel}</b>
             <p className="text-xs uppercase text-zinc-400">Toegang</p>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-700 p-4">
+          <TabButton
+            label="Actief"
+            count={activeRows.length}
+            active={activeTab === "actief"}
+            onClick={() => setActiveTab("actief")}
+          />
+          <TabButton
+            label="Afgerond"
+            count={afgerondRows.length}
+            active={activeTab === "afgerond"}
+            onClick={() => setActiveTab("afgerond")}
+          />
+          <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+            Afgerond is alleen inzien; aanpassen of wissen is uitgeschakeld.
+          </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 p-4">
@@ -631,7 +723,9 @@ export default function WeegstationOverzichtPage() {
                       colSpan={5}
                       className="border border-zinc-800 px-4 py-8 text-center text-zinc-300"
                     >
-                      Geen matchmakings gevonden.
+                      {activeTab === "afgerond"
+                        ? "Geen afgeronde matchmakings gevonden."
+                        : "Geen actieve matchmakings gevonden."}
                     </td>
                   </tr>
                 ) : (
@@ -671,10 +765,13 @@ export default function WeegstationOverzichtPage() {
                         <td className="border border-zinc-800 px-4 py-3">
                           <span
                             className="inline-flex items-center rounded-[4px] px-2 py-1 text-[11px] font-black uppercase"
-                            style={getBondteamBadgeStyle(row.bondteam, true)}
+                            style={getBondteamBadgeStyle(
+                              effectiveBondteam(row),
+                              true,
+                            )}
                           >
                             <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
-                            {safeText(row.bondteam)}
+                            {safeText(effectiveBondteam(row))}
                           </span>
                         </td>
                         <td className="border border-zinc-800 px-4 py-3 text-xs font-black uppercase tracking-[0.04em] text-zinc-200">
@@ -691,19 +788,28 @@ export default function WeegstationOverzichtPage() {
                               }
                               className="inline-flex border border-[#ff4d00] bg-[#ff4d00] px-3 py-2 text-xs font-black uppercase !text-black"
                             >
-                              Weegstation
+                              {activeTab === "afgerond"
+                                ? "Inzien"
+                                : "Weegstation"}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(matchmakingId)}
-                              disabled={deletingId === matchmakingId}
-                              className="inline-flex items-center border border-red-500 bg-red-700 px-3 py-2 text-xs font-black uppercase text-white disabled:opacity-50"
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              {deletingId === matchmakingId
-                                ? "Wissen..."
-                                : "Wis data"}
-                            </button>
+
+                            {activeTab === "actief" ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(matchmakingId)}
+                                disabled={deletingId === matchmakingId}
+                                className="inline-flex items-center border border-red-500 bg-red-700 px-3 py-2 text-xs font-black uppercase text-white disabled:opacity-50"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                {deletingId === matchmakingId
+                                  ? "Wissen..."
+                                  : "Wis data"}
+                              </button>
+                            ) : (
+                              <span className="inline-flex items-center border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-black uppercase text-zinc-300">
+                                Afgerond · niet wijzigen
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>

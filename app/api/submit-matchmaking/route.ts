@@ -62,6 +62,10 @@ function normUpper(v: any): string {
   return String(v ?? "").trim().toUpperCase();
 }
 
+function normalizeBondteamValue(v: any): string {
+  return String(v ?? "").trim().toUpperCase();
+}
+
 function canonVaPair(vaR: string | null, vaB: string | null): string | null {
   if (!vaR || !vaB) return null;
   const a = String(vaR).trim();
@@ -527,19 +531,21 @@ export async function POST(req: Request) {
     }
 
     if (!bondteam && profileForUpload.bondteam) {
-      const profileBondteam = String(profileForUpload.bondteam).trim().toUpperCase();
+      const profileBondteam = normalizeBondteamValue(profileForUpload.bondteam);
       if (ALLOWED_BONDTEAMS.has(profileBondteam)) bondteam = profileBondteam;
     }
+
+    const normalizedBondteam = normalizeBondteamValue(bondteam);
 
     lifecycleBronType = resolveLifecycleBronType(role);
 
     if (!evenement_naam || !evenement_datum) {
       return bad("Vul verplicht in: evenement_naam en evenement_datum.");
     }
-    if (!bondteam) {
+    if (!normalizedBondteam) {
       return bad("Bondteam is verplicht.");
     }
-    if (!ALLOWED_BONDTEAMS.has(String(bondteam))) {
+    if (!ALLOWED_BONDTEAMS.has(normalizedBondteam)) {
       return bad("Onbekend bondteam.");
     }
 
@@ -548,7 +554,7 @@ export async function POST(req: Request) {
       if (!userBond) return bad("Je profiel mist bondteam.", 403);
 
       const normalizedUserBond = String(userBond).trim().toUpperCase();
-      const normalizedUploadBond = String(bondteam).trim().toUpperCase();
+      const normalizedUploadBond = normalizedBondteam;
 
       if (normalizedUserBond !== normalizedUploadBond) {
         return bad(
@@ -580,7 +586,7 @@ export async function POST(req: Request) {
           datum: evenement_datum,
           locatie,
           status: "draft",
-          bondteam,
+          bondteam: normalizedBondteam,
           matchmaker,
           hoofdofficial,
           promotor,
@@ -655,7 +661,7 @@ export async function POST(req: Request) {
         : "admin";
 
     const lifecycleOwnerUserId = shouldSendToAdmin ? null : isOfficialUpload ? userId : null;
-    const lifecycleOwnerBondteam = shouldSendToAdmin ? null : isOfficialUpload ? bondteam : null;
+    const lifecycleOwnerBondteam = shouldSendToAdmin ? null : isOfficialUpload ? normalizedBondteam : null;
     const submittedToAdminAt = shouldSendToAdmin ? now : null;
 
     if (!force_new && matchmaking_id) {
@@ -694,7 +700,7 @@ export async function POST(req: Request) {
           naam: evenement_naam,
           datum: evenement_datum,
           locatie,
-          bondteam,
+          bondteam: normalizedBondteam,
 
           maker_type: makerType,
           maker_user_id: makerUserId,
@@ -731,7 +737,7 @@ export async function POST(req: Request) {
           naam: evenement_naam,
           datum: evenement_datum,
           locatie,
-          bondteam,
+          bondteam: normalizedBondteam,
 
           maker_type: makerType,
           maker_user_id: makerUserId,
@@ -783,7 +789,7 @@ export async function POST(req: Request) {
       matchmakerId: role === "matchmaker" ? makerUserId : null,
       makerType: lifecycleMakerType,
       makerUserId,
-      bondteam: bondteam || null,
+      bondteam: normalizedBondteam,
       eventId: evId || null,
       bronType: lifecycleBronType,
       stage: lifecycleStage,
@@ -802,7 +808,7 @@ export async function POST(req: Request) {
       },
     });
 
-    const lifecycleBondteam = bondteam;
+    const lifecycleBondteam = normalizedBondteam;
 
     // Laatste beveiliging tegen FK-fout: uploaded_by moet exact public.user_profiles.id zijn.
     // Dit voorkomt dat auth.users.id zoals e43d7b0c-... per ongeluk wordt opgeslagen.
@@ -820,7 +826,7 @@ export async function POST(req: Request) {
         locatie,
         raw_filename,
         matchmaker,
-        bondteam,
+        bondteam: normalizedBondteam,
         hoofdofficial,
         promotor,
         uploaded_by,
@@ -841,7 +847,7 @@ export async function POST(req: Request) {
         uploaded_by,
         role,
         makerType,
-        bondteam,
+        bondteam: normalizedBondteam,
       });
       return NextResponse.json({ error: uploadErr.message }, { status: 500 });
     }
