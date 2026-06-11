@@ -29,11 +29,55 @@ export default function TalentstatusPartijenPage() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
-  const stats = useMemo(() => {
-    const events = new Set(partijen.map((p) => clean(p.event_naam)).filter(Boolean));
-    const openEvaluatie = partijen.filter((p) => clean(p.status).toLowerCase().includes("evaluatie")).length;
-    return { events: events.size, openEvaluatie };
+  const displayPartijen = useMemo(() => {
+    const map = new Map<string, Party>();
+
+    for (const p of partijen) {
+      const key = [
+        clean(p.matchmaking_id),
+        clean(p.bout_id),
+        clean(p.partij_nr),
+        clean(p.vechter_naam).toLowerCase(),
+        clean(p.tegenstander_naam).toLowerCase(),
+      ].join("|");
+
+      const existing = map.get(key);
+
+      // Bij dubbel syncen kan dezelfde partij twee keer terugkomen.
+      // Bewaar dan de meest complete/laatst bijgewerkte regel.
+      if (!existing) {
+        map.set(key, p);
+        continue;
+      }
+
+      const existingScore =
+        (clean(existing.event_naam) ? 1 : 0) +
+        (clean(existing.event_datum) ? 1 : 0) +
+        (clean(existing.winnaar) ? 1 : 0) +
+        (clean(existing.uitslag || existing.methode) ? 1 : 0);
+
+      const newScore =
+        (clean(p.event_naam) ? 1 : 0) +
+        (clean(p.event_datum) ? 1 : 0) +
+        (clean(p.winnaar) ? 1 : 0) +
+        (clean(p.uitslag || p.methode) ? 1 : 0);
+
+      const existingUpdated = Date.parse(clean(existing.updated_at) || clean(existing.created_at) || "0") || 0;
+      const newUpdated = Date.parse(clean(p.updated_at) || clean(p.created_at) || "0") || 0;
+
+      if (newScore > existingScore || (newScore === existingScore && newUpdated >= existingUpdated)) {
+        map.set(key, p);
+      }
+    }
+
+    return Array.from(map.values());
   }, [partijen]);
+
+  const stats = useMemo(() => {
+    const events = new Set(displayPartijen.map((p) => clean(p.event_naam)).filter(Boolean));
+    const openEvaluatie = displayPartijen.filter((p) => clean(p.status).toLowerCase().includes("evaluatie")).length;
+    return { events: events.size, openEvaluatie };
+  }, [displayPartijen]);
 
   return (
     <main className="min-h-screen bg-[#2b2b2b] p-6 text-white">
@@ -55,7 +99,7 @@ export default function TalentstatusPartijenPage() {
         </header>
 
         <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-3">
-          <Stat value={partijen.length} label="J+ partijen" />
+          <Stat value={displayPartijen.length} label="J+ partijen" />
           <Stat value={stats.events} label="Evenementen" />
           <Stat value={stats.openEvaluatie} label="Evaluatie nodig" />
         </div>
@@ -83,19 +127,31 @@ export default function TalentstatusPartijenPage() {
             <tbody>
               {loading ? (
                 <tr><td colSpan={7} className="border border-zinc-800 p-4">Laden...</td></tr>
-              ) : partijen.length === 0 ? (
+              ) : displayPartijen.length === 0 ? (
                 <tr><td colSpan={7} className="border border-zinc-800 p-4">Geen J+ talentstatus-partijen gevonden.</td></tr>
-              ) : partijen.map((p) => (
-                <tr key={p.id} className="bg-[#171717] hover:bg-[#202020]">
-                  <td className="border border-zinc-800 p-2"><b>{p.event_naam || "-"}</b><br /><span className="text-xs text-zinc-400">{p.event_datum || "geen datum"} · partij {p.partij_nr || "-"}</span></td>
-                  <td className="border border-zinc-800 p-2"><b className="text-[#ff4d00]">{p.vechter_naam || "-"}</b><br /><span className="text-xs text-zinc-400">{p.vechter_sportschool || "-"} {p.vechter_va ? `· VA ${p.vechter_va}` : ""}</span></td>
-                  <td className="border border-zinc-800 p-2"><b className="text-[#ff4d00]">{p.tegenstander_naam || "-"}</b><br /><span className="text-xs text-zinc-400">{p.tegenstander_sportschool || "-"} {p.tegenstander_va ? `· VA ${p.tegenstander_va}` : ""}</span></td>
-                  <td className="border border-zinc-800 p-2">{p.vechter_gewicht || "-"} / {p.tegenstander_gewicht || "-"}</td>
-                  <td className="border border-zinc-800 p-2"><b>{p.winnaar || "-"}</b><br /><span className="text-xs text-zinc-400">{p.uitslag || p.methode || ""}</span></td>
-                  <td className="border border-zinc-800 p-2"><span className="border border-zinc-500 px-2 py-1 text-xs font-black uppercase text-zinc-200">{p.bron || "-"}</span></td>
-                  <td className="border border-zinc-800 p-2"><span className="border border-[#ff4d00] bg-[#ff4d00] px-2 py-1 text-xs font-black uppercase text-black">{p.klasse || "J+"}</span></td>
-                </tr>
-              ))}
+              ) : displayPartijen.map((p, index) => {
+                const isLight = index % 2 === 0;
+                const rowClass = isLight
+                  ? "bg-zinc-100 text-black hover:bg-zinc-200"
+                  : "bg-[#171717] text-white hover:bg-[#202020]";
+                const mutedClass = isLight ? "text-zinc-700" : "text-zinc-400";
+                const nameClass = isLight ? "text-[#c23a00]" : "text-[#ff4d00]";
+                const sourceClass = isLight
+                  ? "border border-zinc-500 px-2 py-1 text-xs font-black uppercase text-black"
+                  : "border border-zinc-500 px-2 py-1 text-xs font-black uppercase text-zinc-200";
+
+                return (
+                  <tr key={`${clean(p.matchmaking_id)}-${clean(p.bout_id)}-${clean(p.partij_nr)}-${clean(p.id)}`} className={rowClass}>
+                    <td className="border border-zinc-800 p-2"><b>{p.event_naam || "-"}</b><br /><span className={`text-xs ${mutedClass}`}>{p.event_datum || "geen datum"} · partij {p.partij_nr || "-"}</span></td>
+                    <td className="border border-zinc-800 p-2"><b className={nameClass}>{p.vechter_naam || "-"}</b><br /><span className={`text-xs ${mutedClass}`}>{p.vechter_sportschool || "-"} {p.vechter_va ? `· VA ${p.vechter_va}` : ""}</span></td>
+                    <td className="border border-zinc-800 p-2"><b className={nameClass}>{p.tegenstander_naam || "-"}</b><br /><span className={`text-xs ${mutedClass}`}>{p.tegenstander_sportschool || "-"} {p.tegenstander_va ? `· VA ${p.tegenstander_va}` : ""}</span></td>
+                    <td className="border border-zinc-800 p-2">{p.vechter_gewicht || "-"} / {p.tegenstander_gewicht || "-"}</td>
+                    <td className="border border-zinc-800 p-2"><b>{p.winnaar || "-"}</b><br /><span className={`text-xs ${mutedClass}`}>{p.uitslag || p.methode || ""}</span></td>
+                    <td className="border border-zinc-800 p-2"><span className={sourceClass}>{p.bron || "-"}</span></td>
+                    <td className="border border-zinc-800 p-2"><span className="border border-[#ff4d00] bg-[#ff4d00] px-2 py-1 text-xs font-black uppercase text-black">{p.klasse || "J+"}</span></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

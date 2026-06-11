@@ -48,7 +48,16 @@ function jsonError(message: string, status = 400, extra?: unknown) {
 
 async function cleanupOldUitslagenData(matchmakingId: string) {
   // Bij opnieuw klaarzetten van uitslagen moet de uitslagenflow volledig vers zijn.
-  // Eerst resultaten verwijderen, daarna bouts. Dit voorkomt oude concepten, oude minpunten en dubbele partijen.
+  // Eerst oude talentstatus-regels uit uitslagen verwijderen, daarna resultaten en bouts.
+  // Let op: handmatig ingeboekte talentstatus-partijen blijven staan, want die hebben geen bron=uitslagen.
+  const { error: oldTalentstatusErr } = await supabaseAdmin
+    .from("talentstatus_partijen")
+    .delete()
+    .eq("matchmaking_id", matchmakingId)
+    .eq("bron", "uitslagen");
+
+  if (oldTalentstatusErr) throw oldTalentstatusErr;
+
   const { error: oldResultsErr } = await supabaseAdmin
     .from("uitslagen_resultaten")
     .delete()
