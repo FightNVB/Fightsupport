@@ -35,12 +35,13 @@ async function findTalent(id: string | null, va: string) {
   return null;
 }
 
-function normalizeManualPartij(p: AnyRow) {
+function normalizeManualPartij(p: AnyRow): AnyRow {
   return {
     ...p,
     id: `talentstatus-${p.id}`,
     source_id: p.id,
     source_type: "talentstatus_partijen",
+    bout_id: p.bout_id || null,
     klasse: "J+",
     methode: p.uitslag || null,
   };
