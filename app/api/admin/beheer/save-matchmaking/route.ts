@@ -34,7 +34,7 @@ async function writeAuditLog(
     old_value?: any;
     new_value?: any;
     meta?: any;
-  }
+  },
 ) {
   try {
     await supabase.from("admin_beheer_audit_log").insert({
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     if (!matchmaking_id) {
       return NextResponse.json(
         { error: "matchmaking_id ontbreekt." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -96,9 +96,10 @@ export async function POST(req: NextRequest) {
       .eq("id", user.id)
       .maybeSingle();
 
-    const actorRole = String(profile?.role ?? "")
-      .trim()
-      .toLowerCase() || null;
+    const actorRole =
+      String(profile?.role ?? "")
+        .trim()
+        .toLowerCase() || null;
 
     const { data: uploads, error: uploadError } = await supabase
       .from("matchmaking_uploads")
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
           bondteam,
           official_release,
           official_released_at
-        `
+        `,
       )
       .eq("matchmaking_id", matchmaking_id)
       .order("uploaded_at", { ascending: false })
@@ -127,7 +128,7 @@ export async function POST(req: NextRequest) {
       console.error("save-matchmaking uploadError:", uploadError);
       return NextResponse.json(
         { error: "Kon matchmaking_uploads niet laden." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -135,7 +136,7 @@ export async function POST(req: NextRequest) {
     if (!upload) {
       return NextResponse.json(
         { error: "Geen matchmaking_upload gevonden." },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -150,64 +151,82 @@ export async function POST(req: NextRequest) {
       console.error("save-matchmaking runError:", runError);
       return NextResponse.json(
         { error: "Kon controle_runs niet laden." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     const run = runs?.[0] ?? null;
 
-    const { data: boutsData, error: boutsError } = await supabase
-      .from("weigh_in_bouts")
-      .select(
-        `
-          id,
-          partij_nr,
-          discipline,
-          klasse_mm,
-          max_gewicht,
-          rood_naam,
-          rood_gym,
-          rood_va,
-          rood_doorgegeven_gewicht,
-          rood_gewogen_gewicht,
-          blauw_naam,
-          blauw_gym,
-          blauw_va,
-          blauw_doorgegeven_gewicht,
-          blauw_gewogen_gewicht,
-          gewicht_verschil,
-          leeftijd_type,
-          reglement_status,
-          praktijk_status,
-          eindstatus,
-          dispensatie_nodig,
-          dispensatie_verleend,
-          dispensatie_reason,
-          dispensatie_by,
-          dispensatie_at,
-          gewicht_strafpunt_rood,
-          gewicht_strafpunt_blauw,
-          admin_sanctie_nodig,
-          admin_sanctie_reason,
-          weging_notitie,
-          laatste_bewerking_op,
-          laatste_bewerking_door,
-          created_at,
-          updated_at
-        `
-      )
-      .eq("matchmaking_id", matchmaking_id)
-      .order("partij_nr", { ascending: true });
+    // Snapshot moet partijen kunnen bewaren vanuit elke fase:
+    // 1. uitslagen_bouts       -> na / tijdens uitslagen
+    // 2. weigh_in_bouts        -> na / tijdens weegstation
+    // 3. matchmaking_bouts_raw -> vóór weegstation, direct na upload/controle
+    const { data: uitslagenBoutsData, error: uitslagenBoutsError } =
+      await supabase
+        .from("uitslagen_bouts")
+        .select("*")
+        .eq("matchmaking_id", matchmaking_id)
+        .order("partij_nr", { ascending: true });
 
-    if (boutsError) {
-      console.error("save-matchmaking boutsError:", boutsError);
+    if (uitslagenBoutsError) {
+      console.error(
+        "save-matchmaking uitslagenBoutsError:",
+        uitslagenBoutsError,
+      );
       return NextResponse.json(
-        { error: "Kon weigh_in_bouts niet laden." },
-        { status: 500 }
+        { error: "Kon uitslagen_bouts niet laden." },
+        { status: 500 },
       );
     }
 
-    const bouts = Array.isArray(boutsData) ? boutsData : [];
+    const { data: weighInBoutsData, error: weighInBoutsError } = await supabase
+      .from("weigh_in_bouts")
+      .select("*")
+      .eq("matchmaking_id", matchmaking_id)
+      .order("partij_nr", { ascending: true });
+
+    if (weighInBoutsError) {
+      console.error("save-matchmaking weighInBoutsError:", weighInBoutsError);
+      return NextResponse.json(
+        { error: "Kon weigh_in_bouts niet laden." },
+        { status: 500 },
+      );
+    }
+
+    const { data: rawBoutsData, error: rawBoutsError } = await supabase
+      .from("matchmaking_bouts_raw")
+      .select("*")
+      .eq("matchmaking_id", matchmaking_id)
+      .eq("verwijderd", false)
+      .order("partij_nr", { ascending: true });
+
+    if (rawBoutsError) {
+      console.error("save-matchmaking rawBoutsError:", rawBoutsError);
+      return NextResponse.json(
+        { error: "Kon matchmaking_bouts_raw niet laden." },
+        { status: 500 },
+      );
+    }
+
+    const uitslagenBouts = Array.isArray(uitslagenBoutsData)
+      ? uitslagenBoutsData
+      : [];
+    const weighInBouts = Array.isArray(weighInBoutsData)
+      ? weighInBoutsData
+      : [];
+    const rawBouts = Array.isArray(rawBoutsData) ? rawBoutsData : [];
+
+    let boutsSource = "matchmaking_bouts_raw";
+    let bouts = rawBouts;
+
+    if (uitslagenBouts.length > 0) {
+      boutsSource = "uitslagen_bouts";
+      bouts = uitslagenBouts;
+    } else if (weighInBouts.length > 0) {
+      boutsSource = "weigh_in_bouts";
+      bouts = weighInBouts;
+    }
+
     const totaalPartijen = bouts.length;
 
     const snapshot = {
@@ -240,6 +259,10 @@ export async function POST(req: NextRequest) {
         upload,
         latest_run: run,
         bouts,
+        bouts_source: boutsSource,
+        uitslagen_bouts: uitslagenBouts,
+        weigh_in_bouts: weighInBouts,
+        raw_bouts: rawBouts,
         saved_from: "admin_controle_overzicht",
       },
     };
@@ -254,7 +277,7 @@ export async function POST(req: NextRequest) {
       console.error("save-matchmaking insertError:", insertError);
       return NextResponse.json(
         { error: "Opslaan in beheer-tabel mislukt." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -274,6 +297,10 @@ export async function POST(req: NextRequest) {
       },
       meta: {
         saved_from: "admin_controle_overzicht",
+        bouts_source: boutsSource,
+        uitslagen_bouts: uitslagenBouts.length,
+        weigh_in_bouts: weighInBouts.length,
+        raw_bouts: rawBouts.length,
         notitie,
       },
     });
@@ -288,7 +315,7 @@ export async function POST(req: NextRequest) {
     console.error("save-matchmaking fatal:", error);
     return NextResponse.json(
       { error: error?.message ?? "Onbekende fout." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

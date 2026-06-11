@@ -15,6 +15,8 @@ import {
   Link2,
   School,
   ArchiveRestore,
+  GitBranch,
+  Camera,
 } from "lucide-react";
 
 const logoSrc = "/branding/fightsupport/fightsupport1.png";
@@ -188,6 +190,18 @@ export default function AlgemeenBeheerPortalPage() {
         href: "/dashboard/admin/algemeen/overtredingen",
         icon: ArchiveRestore,
       },
+      {
+        title: "Overzicht Matchmakings",
+        subtitle: "Eigenaar, bondteam, stadium en alle info over matchmakings",
+        href: "/dashboard/admin/algemeen/matchmakings",
+        icon: GitBranch,
+      },
+      {
+        title: "Matchmaking Snapshots",
+        subtitle: "Bekijk opgeslagen snapshots van matchmakings",
+        href: "/dashboard/admin/algemeen/snapshots",
+        icon: Camera,
+      },
     ],
     [],
   );
@@ -222,7 +236,60 @@ export default function AlgemeenBeheerPortalPage() {
     );
   }
 
+  const activeRole = String(user?.user_metadata?.active_role || user?.user_metadata?.role || "").toLowerCase();
+  const userBondteam = String(user?.user_metadata?.bondteam || "").toUpperCase();
+  const allowed = (activeRole === "superadmin" || activeRole === "admin") && userBondteam === "NVB";
+
   if (!user) return null;
+
+  if (!allowed) {
+    return (
+      <main style={pageBackground}>
+        <TopLogoBand />
+        <TitleBand onDashboard={() => router.push("/dashboard/admin")} />
+
+        <div
+          className="portal-shell"
+          style={{
+            maxWidth: 760,
+            margin: "0 auto",
+            padding: "24px 20px",
+          }}
+        >
+          <SteelFrame>
+            <div
+              style={{
+                ...darkPlate,
+                padding: "26px 28px",
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 24,
+                  fontWeight: 900,
+                  color: NVB_ORANGE,
+                  textTransform: "uppercase",
+                }}
+              >
+                Geen toegang
+              </div>
+              <p style={{ marginTop: 10, color: "#ddd", fontSize: 14 }}>
+                Deze pagina is alleen beschikbaar voor superadmin of admin van NVB.
+              </p>
+              <div style={{ marginTop: 18 }}>
+                <HeaderSilverButton
+                  label="ADMIN MENU"
+                  icon={<ArrowLeft size={15} strokeWidth={2.8} />}
+                  onClick={() => router.push("/dashboard/admin")}
+                />
+              </div>
+            </div>
+          </SteelFrame>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main style={pageBackground}>
@@ -409,8 +476,7 @@ export default function AlgemeenBeheerPortalPage() {
               style={{
                 marginTop: 14,
                 display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gridTemplateRows: "repeat(2, minmax(132px, auto))",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
                 gap: 14,
                 alignItems: "stretch",
                 flex: 1,
