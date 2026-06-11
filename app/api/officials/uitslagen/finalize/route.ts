@@ -114,7 +114,6 @@ async function syncTalentstatusPartijen(supabase: any, matchmakingId: string) {
       matchmaking_id: matchmakingId,
       bout_id: String(bout.id),
       partij_nr: Number(bout.partij_nr) || null,
-      klasse: "J+",
       vechter_naam: pickFirst(bout.rood_naam, bout.vechter_naam) || "Rood",
       vechter_sportschool: pickFirst(bout.rood_gym, bout.rood_sportschool, bout.vechter_sportschool) || null,
       vechter_va: pickFirst(bout.rood_va) || null,
