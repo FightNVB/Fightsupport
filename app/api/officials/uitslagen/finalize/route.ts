@@ -85,6 +85,17 @@ function winnerName(result: any, bout: any) {
 }
 
 async function syncTalentstatusPartijen(supabase: any, matchmakingId: string) {
+  const { data: matchmaking, error: matchmakingErr } = await supabase
+    .from("matchmakings")
+    .select("id, naam, datum")
+    .eq("id", matchmakingId)
+    .maybeSingle();
+
+  if (matchmakingErr) throw new Error(matchmakingErr.message);
+
+  const eventNaam = pickFirst((matchmaking as any)?.naam);
+  const eventDatum = pickFirst((matchmaking as any)?.datum);
+
   const { data: bouts, error: boutErr } = await supabase
     .from("uitslagen_bouts")
     .select("*")
@@ -109,8 +120,8 @@ async function syncTalentstatusPartijen(supabase: any, matchmakingId: string) {
     if (!isJPlus(klasse)) continue;
 
     const payload = {
-      event_naam: pickFirst(bout.event_name) || null,
-      event_datum: pickFirst(bout.datum) || null,
+      event_naam: pickFirst(bout.event_name, bout.event_naam, eventNaam) || null,
+      event_datum: pickFirst(bout.datum, bout.event_datum, eventDatum) || null,
       matchmaking_id: matchmakingId,
       bout_id: String(bout.id),
       partij_nr: Number(bout.partij_nr) || null,
