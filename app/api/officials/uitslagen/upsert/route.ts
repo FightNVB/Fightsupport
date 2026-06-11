@@ -41,6 +41,37 @@ async function getUserIdFromBearer(req: NextRequest) {
   return data.user.id;
 }
 
+
+function pickFirst(...vals: any[]) {
+  for (const v of vals) {
+    const s = clean(v);
+    if (s) return s;
+  }
+  return "";
+}
+
+async function resolveKlasse(supabase: any, body: any, bout: any) {
+  const direct = pickFirst(body.klasse, body.bout_klasse, body.partij_klasse, bout?.klasse, bout?.bout_klasse, bout?.partij_klasse);
+  if (direct) return direct;
+
+  const partijNr = Number(bout?.original_partij_nr ?? bout?.partij_nr ?? body?.partij_nr);
+  if (!Number.isFinite(partijNr)) return "";
+
+  const { data, error } = await supabase
+    .from("matchmaking_bouts_raw")
+    .select("*")
+    .eq("matchmaking_id", clean(body.matchmaking_id))
+    .eq("partij_nr", partijNr)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[officials/uitslagen/upsert] klasse fallback mislukt:", error.message);
+    return "";
+  }
+
+  return pickFirst(data?.klasse, data?.bout_klasse, data?.partij_klasse, data?.class, data?.klasse_rood, data?.klasse_blauw);
+}
+
 function resultaatType(winnaarHoek: string) {
   const s = winnaarHoek.toLowerCase();
   if (s === "rood" || s === "blauw") return "winnaar";
@@ -62,7 +93,7 @@ export async function POST(req: NextRequest) {
     const winnaarHoek = clean(body.winnaar_hoek);
     const methode = clean(body.methode);
     const opmerkingen = clean(body.opmerkingen);
-    const klasse = clean(body.klasse ?? body.bout_klasse ?? body.partij_klasse);
+    const klasseInput = clean(body.klasse ?? body.bout_klasse ?? body.partij_klasse);
 
     if (!uitslagenBoutId) return bad("uitslagen_bout_id ontbreekt");
     if (!matchmakingId) return bad("matchmaking_id ontbreekt");
@@ -73,13 +104,15 @@ export async function POST(req: NextRequest) {
 
     const { data: bout, error: boutErr } = await supabase
       .from("uitslagen_bouts")
-      .select("id, matchmaking_id, uitslagen_run_id, partij_nr")
+      .select("*")
       .eq("id", uitslagenBoutId)
       .eq("matchmaking_id", matchmakingId)
       .maybeSingle();
 
     if (boutErr) return bad(boutErr.message, 500);
     if (!bout) return bad("Uitslagenpartij niet gevonden.", 404);
+
+    const klasse = klasseInput || await resolveKlasse(supabase, body, bout);
 
     const now = new Date().toISOString();
 

@@ -60,6 +60,97 @@ function isApprovedStatus(v: unknown) {
   return ["GOEDGEKEURD", "APPROVED", "AKKOORD", "OK", "OPGELOST", "RESOLVED"].includes(s);
 }
 
+
+function pickFirst(...vals: any[]) {
+  for (const v of vals) {
+    const s = clean(v);
+    if (s) return s;
+  }
+  return "";
+}
+
+function isJPlus(v: unknown) {
+  const s = upper(v).replace(/\s+/g, "");
+  return s === "J+" || s.includes("J+TALENTSTATUS") || s.includes("TALENTSTATUS");
+}
+
+function winnerName(result: any, bout: any) {
+  const hoek = clean(result?.winnaar_hoek).toLowerCase();
+  if (hoek === "rood") return clean(bout?.rood_naam) || null;
+  if (hoek === "blauw") return clean(bout?.blauw_naam) || null;
+  if (hoek === "onbeslist") return "Onbeslist";
+  if (hoek === "no_contest") return "No contest";
+  if (hoek === "demo") return "Demo";
+  return null;
+}
+
+async function syncTalentstatusPartijen(supabase: any, matchmakingId: string) {
+  const { data: bouts, error: boutErr } = await supabase
+    .from("uitslagen_bouts")
+    .select("*")
+    .eq("matchmaking_id", matchmakingId);
+  if (boutErr) throw new Error(boutErr.message);
+
+  const { data: results, error: resultErr } = await supabase
+    .from("uitslagen_resultaten")
+    .select("*")
+    .eq("matchmaking_id", matchmakingId)
+    .neq("uitslag_status", "concept");
+  if (resultErr) throw new Error(resultErr.message);
+
+  const resultByBoutId = new Map((results ?? []).map((r: any) => [String(r.uitslagen_bout_id), r]));
+  let synced = 0;
+
+  for (const bout of bouts ?? []) {
+    const result: any = resultByBoutId.get(String(bout.id));
+    if (!result) continue;
+
+    const klasse = pickFirst(bout.klasse, bout.bout_klasse, bout.partij_klasse, result.klasse);
+    if (!isJPlus(klasse)) continue;
+
+    const payload = {
+      event_naam: pickFirst(bout.event_name) || null,
+      event_datum: pickFirst(bout.datum) || null,
+      matchmaking_id: matchmakingId,
+      bout_id: String(bout.id),
+      partij_nr: Number(bout.partij_nr) || null,
+      klasse: "J+",
+      vechter_naam: pickFirst(bout.rood_naam, bout.vechter_naam) || "Rood",
+      vechter_sportschool: pickFirst(bout.rood_gym, bout.rood_sportschool, bout.vechter_sportschool) || null,
+      vechter_va: pickFirst(bout.rood_va) || null,
+      vechter_land: pickFirst(bout.rood_land, bout.vechter_land) || "NL",
+      vechter_gewicht: bout.rood_gewicht_gewogen ?? bout.rood_gewogen_gewicht ?? bout.rood_weeggewicht ?? bout.rood_gewicht ?? null,
+      tegenstander_naam: pickFirst(bout.blauw_naam, bout.tegenstander_naam) || "Blauw",
+      tegenstander_sportschool: pickFirst(bout.blauw_gym, bout.blauw_sportschool, bout.tegenstander_sportschool) || null,
+      tegenstander_va: pickFirst(bout.blauw_va) || null,
+      tegenstander_land: pickFirst(bout.blauw_land, bout.tegenstander_land) || "NL",
+      tegenstander_gewicht: bout.blauw_gewicht_gewogen ?? bout.blauw_gewogen_gewicht ?? bout.blauw_weeggewicht ?? bout.blauw_gewicht ?? null,
+      winnaar: winnerName(result, bout),
+      uitslag: pickFirst(result.methode, result.resultaat_type) || null,
+      status: "geregistreerd",
+      bron: "uitslagen",
+      opmerkingen: pickFirst(result.opmerkingen) || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: existing, error: existingErr } = await supabase
+      .from("talentstatus_partijen")
+      .select("id")
+      .eq("matchmaking_id", matchmakingId)
+      .eq("bout_id", String(bout.id))
+      .maybeSingle();
+    if (existingErr) throw new Error(existingErr.message);
+
+    const write = existing?.id
+      ? await supabase.from("talentstatus_partijen").update(payload).eq("id", existing.id)
+      : await supabase.from("talentstatus_partijen").insert(payload);
+    if (write.error) throw new Error(write.error.message);
+    synced++;
+  }
+
+  return synced;
+}
+
 function blocksByControleResult(row: any) {
   const rule = upper(row.rule);
   const result = upper(row.resultaat);
@@ -170,7 +261,7 @@ export async function POST(req: NextRequest) {
 
     const { data: bouts, error: boutErr } = await supabase
       .from("uitslagen_bouts")
-      .select("id, uitslagen_run_id, matchmaking_id, partij_nr, original_partij_nr")
+      .select("*")
       .eq("matchmaking_id", matchmakingId);
 
     if (boutErr) return bad(boutErr.message, 500);
@@ -277,6 +368,18 @@ export async function POST(req: NextRequest) {
       return bad(`Deze matchmaking staat op '${currentStage}' en kan niet als uitslagen worden gefinaliseerd.`, 409);
     }
 
+    for (const bout of bouts ?? []) {
+      const klasse = pickFirst((bout as any).klasse, (bout as any).bout_klasse, (bout as any).partij_klasse);
+      if (!klasse) continue;
+      const { error: klasseErr } = await supabase
+        .from("uitslagen_resultaten")
+        .update({ klasse, updated_at: now })
+        .eq("matchmaking_id", matchmakingId)
+        .eq("uitslagen_bout_id", (bout as any).id)
+        .or("klasse.is.null,klasse.eq.");
+      if (klasseErr) return bad(klasseErr.message, 500);
+    }
+
     const { error: resultUpdateErr } = await supabase
       .from("uitslagen_resultaten")
       .update({
@@ -286,6 +389,12 @@ export async function POST(req: NextRequest) {
       .eq("matchmaking_id", matchmakingId);
 
     if (resultUpdateErr) return bad(resultUpdateErr.message, 500);
+
+    try {
+      await syncTalentstatusPartijen(supabase, matchmakingId);
+    } catch (syncErr: any) {
+      return bad(`Talentstatus-partijen synchroniseren mislukt: ${syncErr?.message ?? syncErr}`, 500);
+    }
 
     const { error: runStatusErr } = await supabase
       .from("uitslagen_runs")

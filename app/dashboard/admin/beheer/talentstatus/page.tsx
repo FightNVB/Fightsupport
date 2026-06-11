@@ -50,6 +50,7 @@ export default function TalentstatusPage() {
             <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer">Terug naar beheer</Link>
             <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/vechters">Talentstatus vechters</Link>
             <Link className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/vechters/nieuw">Vechter toevoegen</Link>
+            <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/partijen">J+ partijen</Link>
             <Link className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/partijen/nieuw">Partij inboeken</Link>
             <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/rapportage">Rapportage</Link>
           </div>

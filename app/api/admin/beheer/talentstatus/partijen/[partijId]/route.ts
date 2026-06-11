@@ -1,28 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { cleanVa, supabaseAdmin } from "@/lib/talentstatusAdmin";
 
 export const runtime = "nodejs";
+
+async function countTalentstatusPartijenForFighter(fighter: any) {
+  const fighterId = fighter?.id;
+  const fighterVa = cleanVa(fighter?.va_nummer);
+
+  if (!fighterId && !fighterVa) return 0;
+
+  const manualParts: string[] = [];
+  if (fighterId) manualParts.push(`vechter_id.eq.${fighterId}`, `tegenstander_id.eq.${fighterId}`);
+  if (fighterVa) manualParts.push(`vechter_va.eq.${fighterVa}`, `tegenstander_va.eq.${fighterVa}`);
+
+  const { count: manualCount } = await supabaseAdmin
+    .from("talentstatus_partijen")
+    .select("id", { count: "exact", head: true })
+    .or(manualParts.join(","));
+
+  let uitslagenCount = 0;
+  if (fighterVa) {
+    const { count } = await supabaseAdmin
+      .from("uitslagen_bouts")
+      .select("id", { count: "exact", head: true })
+      .eq("klasse", "J+")
+      .eq("verwijderd", false)
+      .or(`rood_va.eq.${fighterVa},blauw_va.eq.${fighterVa}`);
+    uitslagenCount = count ?? 0;
+  }
+
+  return (manualCount ?? 0) + uitslagenCount;
+}
 
 async function updateEvaluatieStatusForFighter(fighterId: string | null) {
   if (!fighterId) return;
 
   const { data: fighter } = await supabaseAdmin
     .from("talentstatus_vechters")
-    .select("id,status,talent_status,max_proef_partijen")
+    .select("id,va_nummer,status,talent_status,max_proef_partijen")
     .eq("id", fighterId)
     .maybeSingle();
 
   if (!fighter) return;
 
-  const { count } = await supabaseAdmin
-    .from("talentstatus_partijen")
-    .select("id", { count: "exact", head: true })
-    .or(`vechter_id.eq.${fighterId},tegenstander_id.eq.${fighterId}`);
-
   const max = Number(fighter.max_proef_partijen || 3);
-  const totaal = count ?? 0;
+  const totaal = await countTalentstatusPartijenForFighter(fighter);
 
-  // Als een partij is verwijderd en de vechter komt weer onder de evaluatiegrens,
+  // Als een handmatige partij is verwijderd en de vechter komt weer onder de evaluatiegrens,
   // zet alleen de automatische evaluatiestatus terug. Definitief/afgewezen blijven ongemoeid.
   if (totaal < max && fighter.status === "evaluatie_nodig" && fighter.talent_status === "voorlopig") {
     await supabaseAdmin

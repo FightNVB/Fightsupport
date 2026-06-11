@@ -103,6 +103,7 @@ function mapDiscipline(v: string | null) {
 
 function mapKlasse(v: string | null) {
   const s = String(v ?? "").trim().toLowerCase();
+  if (s === "j+" || s.includes("talentstatus")) return "J+ Talentstatus";
   if (s.includes("jeugd") || s.includes("youth") || s === "j") return "Jeugd/Youth";
   if (s.includes("nieuw") || s.includes("newcomer") || s === "n") return "Nieuweling/Newcomer";
   if (s.includes("mma amateur")) return "MMA Amateur";
@@ -293,7 +294,7 @@ export default function OfficialsUitslagenDetailPage() {
           .order("partij_nr", { ascending: true }),
         supabase
           .from("uitslagen_resultaten")
-          .select("uitslagen_bout_id, winnaar_hoek, methode, opmerkingen, uitslag_status")
+          .select("uitslagen_bout_id, winnaar_hoek, methode, opmerkingen, uitslag_status, klasse")
           .eq("matchmaking_id", matchmakingId),
       ]);
 
@@ -305,7 +306,7 @@ export default function OfficialsUitslagenDetailPage() {
         id: String(b.id),
         partij_nr: Number(b.partij_nr),
         discipline: b.discipline,
-        klasse: b.klasse,
+        klasse: pick(b.klasse, b.bout_klasse, b.partij_klasse, b.klasse_rood, b.klasse_blauw, (resultByBoutId.get(String(b.id)) as any)?.klasse),
 
         rood_naam: b.rood_naam,
         rood_gym: b.rood_gym,
@@ -441,6 +442,9 @@ export default function OfficialsUitslagenDetailPage() {
           winnaar_hoek: currentState.winnaar_hoek,
           methode: currentState.methode,
           opmerkingen: currentState.opmerkingen,
+          klasse: current.klasse,
+          bout_klasse: current.klasse,
+          partij_klasse: current.klasse,
           rood_minpunten: normalizeMinpuntValue(current.rood_minpunten),
           blauw_minpunten: normalizeMinpuntValue(current.blauw_minpunten),
           uitslag_status: "definitief",
