@@ -698,7 +698,10 @@ export async function POST(req: NextRequest) {
         uitslagen_run_id: uitslagenRunId,
         matchmaking_id: matchmakingId,
         bron_bout_id: row.id,
-        partij_nr: index + 1,
+        // Belangrijk: uitslagen moet het echte partijnummer uit de definitieve lineup behouden.
+        // Niet opnieuw nummeren met index + 1, want dan klopt de koppeling naar partij/detail/rapport niet meer
+        // zodra er partijen zijn overgeslagen door open meldingen of verbod.
+        partij_nr: n(row.partij_nr, index + 1),
         original_partij_nr: row.original_partij_nr ?? row.partij_nr,
         discipline: row.discipline ?? null,
         sub_discipline: row.sub_discipline ?? null,
