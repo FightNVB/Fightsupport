@@ -190,6 +190,104 @@ async function ensureOriginalPartijNrRaw(
   }
 }
 
+
+async function repairControleResultatenPartijNrByBoutId(
+  matchmakingId: string,
+  controleRunId: string
+) {
+  // Belangrijk na reorder:
+  // controle_resultaten.bout_id verwijst naar matchmaking_bouts_raw.bout_uid.
+  // Als bout_id gevuld is, is die leidend en mag partij_nr alleen daarvan afgeleid worden.
+  // Dit voorkomt dat een melding van partij 11 na reorder op partij 12 blijft hangen.
+  const { data: rawRows, error: rawErr } = await supabaseAdmin
+    .from("matchmaking_bouts_raw")
+    .select("bout_uid, partij_nr")
+    .eq("matchmaking_id", matchmakingId)
+    .or("verwijderd.is.null,verwijderd.eq.false");
+
+  if (rawErr) throw rawErr;
+
+  const partijNrByBoutUid = new Map<string, number>();
+
+  for (const row of rawRows ?? []) {
+    const partijNr = asPositiveInt((row as any)?.partij_nr);
+    const boutUid = norm((row as any)?.bout_uid);
+
+    if (partijNr == null || !boutUid) continue;
+    partijNrByBoutUid.set(boutUid, partijNr);
+  }
+
+  if (partijNrByBoutUid.size === 0) return;
+
+  const { data: controleRows, error: controleErr } = await supabaseAdmin
+    .from("controle_resultaten")
+    .select("id, bout_id, partij_nr")
+    .eq("matchmaking_id", matchmakingId)
+    .eq("controle_run_id", controleRunId)
+    .not("bout_id", "is", null);
+
+  if (controleErr) throw controleErr;
+
+  for (const row of controleRows ?? []) {
+    const id = norm((row as any)?.id);
+    const boutId = norm((row as any)?.bout_id);
+    const currentPartijNr = asPositiveInt((row as any)?.partij_nr);
+    const correctPartijNr = partijNrByBoutUid.get(boutId) ?? null;
+
+    if (!id || correctPartijNr == null || currentPartijNr === correctPartijNr) continue;
+
+    const { error: updErr } = await supabaseAdmin
+      .from("controle_resultaten")
+      .update({ partij_nr: correctPartijNr })
+      .eq("id", id)
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId);
+
+    if (updErr) throw updErr;
+  }
+}
+
+async function updateControleResultatenZonderBoutIdByOldToNewMap(
+  matchmakingId: string,
+  controleRunId: string,
+  mapping: { old_partij_nr: number; partij_nr: number }[]
+) {
+  // Alleen regels zonder bout_id mogen op partij_nr worden meeverplaatst.
+  // Regels met bout_id worden daarna herleid vanuit matchmaking_bouts_raw.bout_uid.
+  if (!mapping.length) return;
+
+  const maxTarget = Math.max(...mapping.map((x) => x.partij_nr), 0);
+  const tempBase = maxTarget + 10000;
+
+  for (let i = 0; i < mapping.length; i += 1) {
+    const item = mapping[i];
+
+    const { error } = await supabaseAdmin
+      .from("controle_resultaten")
+      .update({ partij_nr: tempBase + i + 1 })
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .eq("partij_nr", item.old_partij_nr)
+      .is("bout_id", null);
+
+    if (error) throw error;
+  }
+
+  for (let i = 0; i < mapping.length; i += 1) {
+    const item = mapping[i];
+
+    const { error } = await supabaseAdmin
+      .from("controle_resultaten")
+      .update({ partij_nr: item.partij_nr })
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .eq("partij_nr", tempBase + i + 1)
+      .is("bout_id", null);
+
+    if (error) throw error;
+  }
+}
+
 async function updatePartijNrSequenceByIds(
   table: string,
   idField: string,
@@ -418,9 +516,9 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    await updatePartijNrByOldToNewMap(
-      "controle_resultaten",
-      { controle_run_id: latestControleRunId },
+    await updateControleResultatenZonderBoutIdByOldToNewMap(
+      matchmakingId,
+      latestControleRunId,
       mapping
     );
 
@@ -452,22 +550,38 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-  const oldPartijNrs = mapping.map((x: { old_partij_nr: number }) => x.old_partij_nr);
-  await ensureOriginalPartijNrRaw(matchmakingId, oldPartijNrs);
+      const oldPartijNrs = mapping.map((x: { old_partij_nr: number }) => x.old_partij_nr);
+      await ensureOriginalPartijNrRaw(matchmakingId, oldPartijNrs);
 
-  await updatePartijNrByOldToNewMap(
-    "matchmaking_bouts_raw",
-    { matchmaking_id: matchmakingId },
-    mapping
-  );
-} catch (e) {
-  console.warn("matchmaking_bouts_raw reorder sync overgeslagen:", e);
-}
+      await updatePartijNrByOldToNewMap(
+        "matchmaking_bouts_raw",
+        { matchmaking_id: matchmakingId },
+        mapping
+      );
+    } catch (e) {
+      console.warn("matchmaking_bouts_raw reorder sync overgeslagen:", e);
+    }
+
+    try {
+      await repairControleResultatenPartijNrByBoutId(matchmakingId, latestControleRunId);
+    } catch (e) {
+      console.warn("controle_resultaten bout_id repair overgeslagen:", e);
+    }
+
+    try {
+      await updatePartijNrByOldToNewMap(
+        "weigh_in_bouts",
+        { matchmaking_id: matchmakingId },
+        mapping
+      );
+    } catch (e) {
+      console.warn("weigh_in_bouts reorder sync overgeslagen:", e);
+    }
 
     return NextResponse.json({
       ok: true,
       message:
-        "Lineup-volgorde opgeslagen. original_partij_nr is behouden en partij_nr is bijgewerkt op controle_bout_context, controle_resultaten, dispensatie_requests en matchmaking_bouts_raw.",
+        "Lineup-volgorde opgeslagen. original_partij_nr is behouden. controle_resultaten zonder bout_id zijn op partij_nr verplaatst; controle_resultaten met bout_id zijn hersteld via matchmaking_bouts_raw.bout_uid.",
       matchmaking_id: matchmakingId,
       controle_run_id: latestControleRunId,
       updated: resolved.length,

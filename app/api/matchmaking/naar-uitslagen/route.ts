@@ -89,6 +89,7 @@ type ControleRow = {
   actie_status: string | null;
   review_status?: string | null;
   hoek: string | null;
+  boodschap?: string | null;
 };
 
 type PartyDecision = {
@@ -97,32 +98,84 @@ type PartyDecision = {
   roodMinpunten: number;
   blauwMinpunten: number;
   hasControle: boolean;
+  roodWarning: boolean;
+  blauwWarning: boolean;
+  algemeneWarning: boolean;
+  warningReasons: string[];
 };
 
 function isApprovedOverride(row: ControleRow) {
   const actieStatus = norm(row.actie_status);
   const reviewStatus = norm(row.review_status);
   return [actieStatus, reviewStatus].some((status) =>
-    ["goedgekeurd", "approved", "akkoord", "ok"].includes(status)
+    ["goedgekeurd", "approved", "akkoord", "ok"].includes(status),
   );
+}
+
+function isResolvedControleRow(row: ControleRow) {
+  return (
+    isApprovedOverride(row) ||
+    norm(row.resultaat) === "ok" ||
+    norm(row.resultaat) === "info" ||
+    upper(row.rule_code) === "OK" ||
+    upper(row.severity) === "INFO"
+  );
+}
+
+function controleResolutionKey(row: ControleRow) {
+  const partijNr = n(row.partij_nr, 0);
+  const boutId = s(row.bout_id) || s(row.source_id);
+  const toernooiCode = tournamentCode(row.toernooi_code);
+  const va = normVa(row.toernooi_va_nummer) || normVa(row.va_nummer) || s(row.fighter_id);
+  const ruleKey = upper(row.rule_code) || upper(row.rule) || upper((row as any).boodschap);
+  const hoek = upper(row.hoek);
+
+  if (toernooiCode && va) return `T:${toernooiCode}:${va}:R:${ruleKey}:H:${hoek}`;
+  if (boutId) return `B:${boutId}:R:${ruleKey}:H:${hoek}`;
+  if (partijNr) return `P:${partijNr}:R:${ruleKey}:H:${hoek}`;
+  return `R:${ruleKey}:H:${hoek}`;
+}
+
+function activeControleRowsForDefinitieveLineup(rows: ControleRow[]) {
+  const resolvedKeys = new Set<string>();
+
+  for (const row of rows) {
+    if (isResolvedControleRow(row)) {
+      resolvedKeys.add(controleResolutionKey(row));
+    }
+  }
+
+  return rows.filter((row) => {
+    if (isResolvedControleRow(row)) return false;
+    if (resolvedKeys.has(controleResolutionKey(row))) return false;
+    return isLineupBlokkadeRow(row);
+  });
 }
 
 function isAfkeur(row: ControleRow) {
   const resultaat = norm(row.resultaat);
   const ruleCode = upper(row.rule_code);
-  return resultaat === "afkeur" || resultaat === "afgekeurd" || ruleCode === "AFKEUR";
+  return (
+    resultaat === "afkeur" || resultaat === "afgekeurd" || ruleCode === "AFKEUR"
+  );
 }
 
 function isDispensatie(row: ControleRow) {
   const rule = norm(row.rule);
   const code = upper(row.rule_code);
-  return rule.includes("dispensatie") || code.includes("DISPENSATIE") || code === "VERLEEND";
+  return (
+    rule.includes("dispensatie") ||
+    code.includes("DISPENSATIE") ||
+    code === "VERLEEND"
+  );
 }
 
 function isDispensatieVerleend(row: ControleRow) {
   const result = upper(row.resultaat);
   const code = upper(row.rule_code);
-  return result === "VERLEEND" || code === "VERLEEND" || isApprovedOverride(row);
+  return (
+    result === "VERLEEND" || code === "VERLEEND" || isApprovedOverride(row)
+  );
 }
 
 function isInfo(row: ControleRow) {
@@ -146,20 +199,44 @@ function hasVerbod(row: ControleRow) {
 function isHardNoRow(row: ControleRow) {
   const combined = `${upper(row.rule)} ${upper(row.rule_code)} ${upper(row.resultaat)} ${upper((row as any).boodschap)}`;
 
-  // Harde nee: mag nooit naar jury-lineup of uitslagen.
-  // Ook niet als er later een losse OK/INFO-regel of weegstation OK-regel bij dezelfde partij staat.
+  // Zelfde basis als voorlopige lineup: alleen verbod/startverbod houdt een partij volledig tegen.
+  // Licentie/keurmerk is geen harde blokkade voor de voorlopige set; die wordt pas hieronder
+  // gebruikt als open melding om uit de definitieve jury-lineup te filteren.
+  return combined.includes("STARTVERBOD") || combined.includes("VERBOD");
+}
+
+
+function isLicentieOfKeurmerkRow(row: ControleRow) {
+  const combined = `${upper(row.rule)} ${upper(row.rule_code)} ${upper(row.resultaat)} ${upper((row as any).boodschap)}`;
   return (
-    combined.includes("STARTVERBOD") ||
-    combined.includes("VERBOD") ||
-    combined.includes("LICENTIE_ONGELDIG") ||
+    combined.includes("LICENTIE") ||
+    combined.includes("KEURMERK") ||
     combined.includes("GEEN_LICENTIE") ||
-    combined.includes("LICENTIE ONGELDIG") ||
-    combined.includes("GEEN GELDIGE LICENTIE") ||
-    combined.includes("KEURMERK_ONGELDIG") ||
-    combined.includes("GEEN_KEURMERK") ||
-    combined.includes("KEURMERK ONGELDIG") ||
-    combined.includes("GEEN GELDIG KEURMERK")
+    combined.includes("GEEN_KEURMERK")
   );
+}
+
+function isOpenLicentieOfKeurmerkRow(row: ControleRow) {
+  if (!isLicentieOfKeurmerkRow(row)) return false;
+  if (isResolvedControleRow(row)) return false;
+  return true;
+}
+
+function warningHoek(row: ControleRow): "rood" | "blauw" | null {
+  const hoek = norm(row.hoek);
+  const combined = `${upper(row.rule)} ${upper(row.rule_code)} ${upper((row as any).boodschap)}`;
+  if (hoek === "rood" || combined.includes("ROOD")) return "rood";
+  if (hoek === "blauw" || combined.includes("BLAUW")) return "blauw";
+  return null;
+}
+
+function isLineupBlokkadeRow(row: ControleRow) {
+  if (isResolvedControleRow(row)) return false;
+
+  // Exact hetzelfde uitgangspunt als de voorlopige lineup:
+  // eerst mag alles mee behalve verbod/startverbod; daarna haalt de jury-lineup
+  // alleen de partijen met een open melding uit die voorlopige set.
+  return isHardNoRow(row) || hasVerbod(row) || isOpenLicentieOfKeurmerkRow(row);
 }
 
 function isActieMinpunt(row: ControleRow) {
@@ -194,7 +271,9 @@ function rowTournamentKey(row: ControleRow) {
 }
 
 function rawTournamentKeys(row: any) {
-  const code = tournamentCode(row.toernooi_code ?? parseRawJson(row.raw_json)?.toernooi_code);
+  const code = tournamentCode(
+    row.toernooi_code ?? parseRawJson(row.raw_json)?.toernooi_code,
+  );
   if (!code) return [];
 
   const ids = [
@@ -267,25 +346,46 @@ function mergeDecision(target: PartyDecision, source: PartyDecision) {
   target.hasControle = target.hasControle || source.hasControle;
   target.roodMinpunten += source.roodMinpunten;
   target.blauwMinpunten += source.blauwMinpunten;
+  target.roodWarning = target.roodWarning || source.roodWarning;
+  target.blauwWarning = target.blauwWarning || source.blauwWarning;
+  target.algemeneWarning = target.algemeneWarning || source.algemeneWarning;
   target.blockedReasons.push(...source.blockedReasons);
+  target.warningReasons.push(...source.warningReasons);
 }
 
 function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
   decision.hasControle = true;
 
   const resultaat = norm(row.resultaat);
-  const code = upper(row.rule_code);
-  const rule = norm(row.rule);
 
-  // Harde nee: licentie ongeldig/geen licentie, geen geldig keurmerk en startverbod/verbod
-  // mogen nooit door naar jury-lineup of uitslagen.
-  if (isHardNoRow(row)) {
-    decision.blocked = true;
-    decision.blockedReasons.push("Harde blokkade: licentie/keurmerk/startverbod/verbod");
+  // Goedgekeurde/naar OK gezette meldingen blokkeren niet en tellen niet als open melding.
+  if (isResolvedControleRow(row)) return;
+
+  // Open licentie/keurmerk-meldingen worden niet als harde blokkade behandeld voor de
+  // voorlopige set, maar zorgen er wel voor dat de partij uit de definitieve jury-lineup valt.
+  if (isOpenLicentieOfKeurmerkRow(row)) {
+    const hoek = warningHoek(row);
+    if (hoek === "rood") decision.roodWarning = true;
+    else if (hoek === "blauw") decision.blauwWarning = true;
+    else decision.algemeneWarning = true;
+
+    const msg = s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || "Open licentie/keurmerk melding";
+    const key = msg.replace(/\s+/g, " ").trim().toLowerCase();
+    const exists = decision.warningReasons.some(
+      (x) => x.replace(/\s+/g, " ").trim().toLowerCase() === key,
+    );
+    if (!exists) decision.warningReasons.push(msg);
     return;
   }
 
-  // ACTIE minpunt is de enige ACTIE die door mag. Deze telt als strafpunt, niet als blokkade.
+  // Alleen verbod/startverbod blokkeert de voorlopige set volledig.
+  if (isHardNoRow(row) || hasVerbod(row)) {
+    decision.blocked = true;
+    decision.blockedReasons.push("Verbod/startverbod aanwezig");
+    return;
+  }
+
+  // ACTIE minpunt mag door en telt alleen als strafpunt.
   if (isActieMinpunt(row)) {
     const hoek = minpuntHoek(row);
     if (hoek === "rood") decision.roodMinpunten += 1;
@@ -293,50 +393,9 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  // AFKEUR is nooit geschikt voor jury-lineup/uitslagen zolang het resultaat AFKEUR blijft.
-  // Wil je een afkeur toch laten doorgaan, dan moet die review-route de regel echt naar OK zetten.
-  if (isAfkeur(row)) {
-    decision.blocked = true;
-    decision.blockedReasons.push("AFKEUR aanwezig");
-    return;
-  }
-
-  // Goedgekeurde/naar OK gezette meldingen blokkeren niet meer.
-  // Een losse OK/INFO-regel mag geen andere open ACTIE/AFKEUR/DISPENSATIE opheffen.
-  if (isApprovedOverride(row)) return;
-
-  if (hasVerbod(row)) {
-    decision.blocked = true;
-    decision.blockedReasons.push("Verbod/startverbod aanwezig");
-    return;
-  }
-
-  if (isDispensatie(row) && !isDispensatieVerleend(row)) {
-    decision.blocked = true;
-    decision.blockedReasons.push("Dispensatie open/nodig/afgewezen");
-    return;
-  }
-
-  // OK en INFO zijn toegestaan. Dit moet vóór de open-review check staan,
-  // omdat oudere OK/NO_RULES regels soms review_status=open hebben.
-  // Losse ACTIE/AFKEUR/DISPENSATIE regels blijven alsnog blokkeren via hun eigen rij.
-  if (isOk(row) || isInfo(row) || isDispensatieVerleend(row)) return;
-
-  if (
-    resultaat === "actie" ||
-    isOpenReview(row.actie_status) ||
-    isOpenReview(row.review_status)
-  ) {
-    decision.blocked = true;
-    decision.blockedReasons.push("Open actiepunt of review aanwezig");
-    return;
-  }
-
-  const status = s(row.resultaat) || s(row.rule_code);
-  if (status) {
-    decision.blocked = true;
-    decision.blockedReasons.push(`Controle-status blokkeert: ${status}`);
-  }
+  // Alle andere oude/open controle-regels blokkeren hier niet, want de definitieve lineup
+  // moet gelijk zijn aan voorlopige lineup minus open meldingen.
+  if (resultaat === "actie" || isOpenReview(row.actie_status) || isOpenReview(row.review_status)) return;
 }
 
 function buildDecisions(rows: ControleRow[]) {
@@ -350,6 +409,10 @@ function buildDecisions(rows: ControleRow[]) {
       roodMinpunten: 0,
       blauwMinpunten: 0,
       hasControle: false,
+      roodWarning: false,
+      blauwWarning: false,
+      algemeneWarning: false,
+      warningReasons: [],
     };
   }
 
@@ -387,13 +450,17 @@ function buildDecisions(rows: ControleRow[]) {
   return { byKey, byTournamentFighter, newDecision };
 }
 
-function rawRowDecision(row: any, decisions: ReturnType<typeof buildDecisions>) {
+function rawRowDecision(
+  row: any,
+  decisions: ReturnType<typeof buildDecisions>,
+) {
   const partijNr = n(row.partij_nr, 0);
 
-  // Toernooi-vechters staan op partij_nr 0 en moeten per toernooi_code + VA/fighter_id geblokkeerd worden.
   if (
     partijNr === 0 ||
-    tournamentCode(row.toernooi_code ?? parseRawJson(row.raw_json)?.toernooi_code)
+    tournamentCode(
+      row.toernooi_code ?? parseRawJson(row.raw_json)?.toernooi_code,
+    )
   ) {
     const keys = rawTournamentKeys(row);
     const merged = decisions.newDecision();
@@ -404,8 +471,6 @@ function rawRowDecision(row: any, decisions: ReturnType<typeof buildDecisions>) 
     return merged.hasControle ? merged : null;
   }
 
-  // Reguliere partijen kunnen controle-regels hebben op bout_id/source_id/id én op partij_nr.
-  // Alle regels bij elkaar bepalen de totale status. Een weegstation OK mag dus nooit een rules-engine ACTIE/AFKEUR overschrijven.
   const merged = decisions.newDecision();
   for (const key of rawRowKeys(row)) {
     const found = decisions.byKey.get(key);
@@ -414,7 +479,6 @@ function rawRowDecision(row: any, decisions: ReturnType<typeof buildDecisions>) 
 
   return merged.hasControle ? merged : null;
 }
-
 
 function hasValue(v: any): boolean {
   return v != null && String(v).trim() !== "";
@@ -470,7 +534,7 @@ function rowStatusForUitslagen(row: any) {
       row?.status ??
       row?.resultaat ??
       parseRawJson(row?.raw_json)?.eindstatus ??
-      parseRawJson(row?.raw_json)?.status
+      parseRawJson(row?.raw_json)?.status,
   );
 }
 
@@ -483,21 +547,58 @@ function isEligibleForLineup(
   row: any,
   decisions: ReturnType<typeof buildDecisions>,
 ) {
-  // Uitslagen nemen dezelfde veilige selectie als de definitieve lineup:
-  // OK en INFO mogen door, zolang er geen blokkerende controle-regels zijn.
-  // Afkeur, verbod/startverbod, open actie en open/nodige/afgewezen dispensatie blokkeren.
+  // Definitieve lineup = voorlopige lineup minus partijen met echte open meldingen.
+  // Daarom niet opnieuw streng filteren op context/OK-status; alleen blokkades tellen.
   const decision = rawRowDecision(row, decisions);
-  if (decision?.blocked) return false;
+  return !decision?.blocked;
+}
 
-  // Als controle_resultaten expliciet OK/INFO voor deze partij bevatten, mag hij door.
-  // Dit is belangrijk na het weegstation: de OK staat daar vaak in controle_resultaten
-  // met source_table=weigh_in_bouts en wordt via partij_nr gekoppeld.
-  if (decision?.hasControle) return true;
+function warningText(decision: PartyDecision | null) {
+  if (!decision) return "";
+  const seen = new Set<string>();
+  const reasons: string[] = [];
 
-  if (isRowOkOrInfo(row)) return true;
+  for (const reason of decision.warningReasons) {
+    const clean = s(reason).replace(/\s+/g, " ").trim();
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key)) continue;
+    seen.add(key);
+    reasons.push(clean);
+  }
 
-  // Fallback voor oudere data zonder eindstatus: laat alleen complete context door.
-  return isContextCompleet(row);
+  return reasons.join(" | ");
+}
+
+function minpuntenFromDecision(
+  b: any,
+  decision: PartyDecision | null,
+): { rood: number; blauw: number } {
+  return {
+    rood:
+      n(
+        b.rood_minpunten ??
+          b.rood_min_punten ??
+          b.rood_strafpunten ??
+          b.gewicht_strafpunt_rood,
+        0,
+      ) + (decision?.roodMinpunten ?? 0),
+    blauw:
+      n(
+        b.blauw_minpunten ??
+          b.blauw_min_punten ??
+          b.blauw_strafpunten ??
+          b.gewicht_strafpunt_blauw,
+        0,
+      ) + (decision?.blauwMinpunten ?? 0),
+  };
+}
+
+function getMinPuntForLineup(b: any, decision: PartyDecision | null): string {
+  const mp = minpuntenFromDecision(b, decision);
+  const parts = [];
+  if (mp.rood > 0) parts.push(`Rood -${mp.rood}`);
+  if (mp.blauw > 0) parts.push(`Blauw -${mp.blauw}`);
+  return parts.join(" | ");
 }
 
 export async function POST(req: NextRequest) {
@@ -536,16 +637,26 @@ export async function POST(req: NextRequest) {
 
     if (controleErr) throw controleErr;
 
-    const decisions = buildDecisions((controleRows ?? []) as ControleRow[]);
-
-    const eligible = rawBouts.filter((row: any) =>
-      isEligibleForLineup(row, decisions),
+    const activeControleRows = activeControleRowsForDefinitieveLineup(
+      (controleRows ?? []) as ControleRow[],
     );
 
+    const decisions = buildDecisions(activeControleRows);
+
+    // Naar uitslagen moet exact dezelfde selectie en volgorde gebruiken als de definitieve jury-lineup.
+    // Definitieve lineup = rawBouts op partij_nr-volgorde minus partijen met verbod/startverbod
+    // en minus partijen met een echte open licentie/keurmerk-melding.
+    const eligible = rawBouts.filter((row: any) => {
+      if (!isEligibleForLineup(row, decisions)) return false;
+      const decision = rawRowDecision(row, decisions);
+      return !warningText(decision);
+    });
+
     if (!eligible.length) {
-      return jsonError("Geen partijen geschikt voor uitslagen. Alleen OK/INFO zonder afkeur, verbod/startverbod, open actie of open/nodige/afgewezen dispensatie worden meegenomen.", 409, {
+      return jsonError("Geen partijen geschikt voor uitslagen. De selectie is gelijk aan de definitieve jury-lineup.", 409, {
         total_count: rawBouts.length,
         controle_count: controleRows?.length ?? 0,
+        active_controle_count: activeControleRows.length,
       });
     }
 
@@ -659,13 +770,14 @@ export async function POST(req: NextRequest) {
       newOwnerBondteam: userBondteam || s(body?.bondteam) || null,
       actorUserId: userId,
       actorRole: role,
-      opmerking: `Alleen OK/INFO-partijen zonder blokkerende meldingen (${eligible.length}/${rawBouts.length}) zijn doorgestuurd naar uitslagen. Afkeur, verbod/startverbod, open actie of open/nodige/afgewezen dispensatie is overgeslagen: ${blockedCount}.`,
+      opmerking: `Definitieve jury-lineup is exact doorgestuurd naar uitslagen (${eligible.length}/${rawBouts.length}). Overgeslagen volgens jury-lineup-filter: ${blockedCount}.`,
       metadata: {
         route: "api/matchmaking/naar-uitslagen/route",
         eligible_count: eligible.length,
         total_count: rawBouts.length,
         blocked_count: blockedCount,
         controle_count: controleRows?.length ?? 0,
+        active_controle_count: activeControleRows.length,
       },
     });
 
@@ -698,7 +810,7 @@ export async function POST(req: NextRequest) {
       bouts: boutInsertRows.length,
       skipped: blockedCount,
       lifecycle,
-      message: "Alleen OK/INFO-partijen zonder blokkerende meldingen zijn omgezet naar uitslagenflow; alles anders is geblokkeerd en minpunten zijn meegenomen.",
+      message: "Definitieve jury-lineup is exact omgezet naar uitslagenflow; dezelfde partijen, dezelfde volgorde en minpunten zijn meegenomen.",
     });
   } catch (err: any) {
     console.error("matchmaking/naar-uitslagen POST error:", err);

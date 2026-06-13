@@ -1,7 +1,8 @@
-// app/api/rapport/jury-lineup-excel/route.ts
+// app/api/rapport/voorlopige-lineup-excel/route.ts
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import path from "path";
+import { existsSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -131,98 +132,6 @@ function n(v: unknown, fallback = 0) {
   return Number.isFinite(x) ? x : fallback;
 }
 
-function vaNumberOrBlank(v: unknown): number | string {
-  const digits = s(v).replace(/\D/g, "").replace(/^0+/, "");
-  if (!digits) return "";
-  const value = Number(digits);
-  return Number.isFinite(value) ? value : "";
-}
-
-function cloneExcelStyle(style: Partial<ExcelJS.Style> | undefined) {
-  return JSON.parse(JSON.stringify(style ?? {}));
-}
-
-function clearTemplateData(ws: ExcelJS.Worksheet, startRow = 2) {
-  const last = ws.rowCount;
-  if (last >= startRow) {
-    ws.spliceRows(startRow, last - startRow + 1);
-  }
-}
-
-function applyTemplateRowStyle(
-  ws: ExcelJS.Worksheet,
-  rowNumber: number,
-  templateStyles: Record<number, Partial<ExcelJS.Style>>,
-  templateHeight: number | undefined,
-) {
-  const row = ws.getRow(rowNumber);
-  if (templateHeight) row.height = templateHeight;
-
-  for (let col = 1; col <= 13; col += 1) {
-    const style = templateStyles[col];
-    if (style) row.getCell(col).style = cloneExcelStyle(style);
-  }
-}
-
-function setLineupCellValues(
-  ws: ExcelJS.Worksheet,
-  rowNumber: number,
-  values: {
-    partij_nr: string | number;
-    discipline: any;
-    klasse: any;
-    rood_naam: any;
-    rood_gym: any;
-    rood_va: any;
-    blauw_naam: any;
-    blauw_gym: any;
-    blauw_va: any;
-    rondes: any;
-    minpunt: any;
-    titelpartij?: any;
-    vs?: any;
-  },
-  templateStyles: Record<number, Partial<ExcelJS.Style>>,
-  templateHeight: number | undefined,
-) {
-  applyTemplateRowStyle(ws, rowNumber, templateStyles, templateHeight);
-
-  const row = ws.getRow(rowNumber);
-
-  // Definitieve lineup volgt exact het template A t/m M:
-  // A Partij, B Discipline, C Klasse, D Rood naam, E Rood sportschool,
-  // F Rood VA, G VS, H Blauw naam, I Blauw sportschool, J Blauw VA,
-  // K Titelpartij, L Ronde tijden, M Min punt.
-  row.getCell(1).value = values.partij_nr;
-  row.getCell(2).value = s(values.discipline);
-  row.getCell(3).value = s(values.klasse);
-  row.getCell(4).value = s(values.rood_naam);
-  row.getCell(5).value = s(values.rood_gym);
-  row.getCell(6).value = vaNumberOrBlank(values.rood_va);
-  row.getCell(7).value = s(values.vs ?? "VS");
-  row.getCell(8).value = s(values.blauw_naam);
-  row.getCell(9).value = s(values.blauw_gym);
-  row.getCell(10).value = vaNumberOrBlank(values.blauw_va);
-  row.getCell(11).value = s(values.titelpartij);
-  row.getCell(12).value = s(values.rondes);
-  row.getCell(13).value = s(values.minpunt);
-
-  // VA-kolommen als getal, zonder Excel-melding "getal opgeslagen als tekst".
-  row.getCell(6).numFmt = "0";
-  row.getCell(10).numFmt = "0";
-
-  // Template blijft leidend, maar deze kolommen moeten gecentreerd blijven.
-  [1, 3, 6, 7, 10, 11, 12, 13].forEach((col) => {
-    row.getCell(col).alignment = {
-      ...(row.getCell(col).alignment ?? {}),
-      horizontal: "center",
-      vertical: "middle",
-    };
-  });
-
-  row.commit();
-}
-
 type ControleRow = {
   partij_nr: number | string | null;
   bout_id?: string | null;
@@ -262,46 +171,6 @@ function isApprovedOverride(row: ControleRow) {
   );
 }
 
-function isResolvedControleRow(row: ControleRow) {
-  return (
-    isApprovedOverride(row) ||
-    norm(row.resultaat) === "ok" ||
-    norm(row.resultaat) === "info" ||
-    upper(row.rule_code) === "OK" ||
-    upper(row.severity) === "INFO"
-  );
-}
-
-function controleResolutionKey(row: ControleRow) {
-  const partijNr = n(row.partij_nr, 0);
-  const boutId = s(row.bout_id) || s(row.source_id);
-  const toernooiCode = tournamentCode(row.toernooi_code);
-  const va = normVa(row.toernooi_va_nummer) || normVa(row.va_nummer) || s(row.fighter_id);
-  const ruleKey = upper(row.rule_code) || upper(row.rule) || upper((row as any).boodschap);
-  const hoek = upper(row.hoek);
-
-  if (toernooiCode && va) return `T:${toernooiCode}:${va}:R:${ruleKey}:H:${hoek}`;
-  if (boutId) return `B:${boutId}:R:${ruleKey}:H:${hoek}`;
-  if (partijNr) return `P:${partijNr}:R:${ruleKey}:H:${hoek}`;
-  return `R:${ruleKey}:H:${hoek}`;
-}
-
-function activeControleRowsForDefinitieveLineup(rows: ControleRow[]) {
-  const resolvedKeys = new Set<string>();
-
-  for (const row of rows) {
-    if (isResolvedControleRow(row)) {
-      resolvedKeys.add(controleResolutionKey(row));
-    }
-  }
-
-  return rows.filter((row) => {
-    if (isResolvedControleRow(row)) return false;
-    if (resolvedKeys.has(controleResolutionKey(row))) return false;
-    return isLineupBlokkadeRow(row);
-  });
-}
-
 function isAfkeur(row: ControleRow) {
   const resultaat = norm(row.resultaat);
   const ruleCode = upper(row.rule_code);
@@ -336,6 +205,15 @@ function isOk(row: ControleRow) {
   return norm(row.resultaat) === "ok" || upper(row.rule_code) === "OK";
 }
 
+function isResolvedControleRow(row: ControleRow) {
+  return (
+    isApprovedOverride(row) ||
+    isOk(row) ||
+    isInfo(row) ||
+    isDispensatieVerleend(row)
+  );
+}
+
 function isOpenReview(v: unknown) {
   const x = upper(v);
   return x === "OPEN" || x === "PENDING" || x === "WACHT" || x === "WACHTEND";
@@ -349,12 +227,10 @@ function hasVerbod(row: ControleRow) {
 function isHardNoRow(row: ControleRow) {
   const combined = `${upper(row.rule)} ${upper(row.rule_code)} ${upper(row.resultaat)} ${upper((row as any).boodschap)}`;
 
-  // Zelfde basis als voorlopige lineup: alleen verbod/startverbod houdt een partij volledig tegen.
-  // Licentie/keurmerk is geen harde blokkade voor de voorlopige set; die wordt pas hieronder
-  // gebruikt als open melding om uit de definitieve jury-lineup te filteren.
+  // Voorlopige lineup: alleen verbod/startverbod blokkeert.
+  // Licentie/keurmerk/actie/afkeur/dispensatie mogen voorlopig mee, maar krijgen markering.
   return combined.includes("STARTVERBOD") || combined.includes("VERBOD");
 }
-
 
 function isLicentieOfKeurmerkRow(row: ControleRow) {
   const combined = `${upper(row.rule)} ${upper(row.rule_code)} ${upper(row.resultaat)} ${upper((row as any).boodschap)}`;
@@ -368,8 +244,46 @@ function isLicentieOfKeurmerkRow(row: ControleRow) {
 
 function isOpenLicentieOfKeurmerkRow(row: ControleRow) {
   if (!isLicentieOfKeurmerkRow(row)) return false;
+
+  // Alleen openstaande meldingen tonen.
+  // Alles wat door review is goedgekeurd of naar OK/INFO is gezet, mag niet meer
+  // als sterretje of melding in de voorlopige lineup terugkomen.
   if (isResolvedControleRow(row)) return false;
+
   return true;
+}
+
+function controleResolveKey(row: ControleRow) {
+  const partij = s(row.partij_nr);
+  const bout = s(row.bout_id);
+  const source = s(row.source_id);
+  const ruleCode = upper(row.rule_code || row.rule || "");
+  const hoek = norm(row.hoek || "");
+  const toernooi = upper(row.toernooi_code || "");
+  const fighter = s(row.fighter_id || row.va_nummer || row.toernooi_va_nummer || "");
+
+  // Eerst zo specifiek mogelijk, zodat goedkeuring niet per ongeluk een andere melding wegdrukt.
+  if (bout) return `BOUT:${bout}:RULE:${ruleCode}:HOEK:${hoek}`;
+  if (source) return `SRC:${source}:RULE:${ruleCode}:HOEK:${hoek}`;
+  if (toernooi && fighter) return `T:${toernooi}:F:${fighter}:RULE:${ruleCode}:HOEK:${hoek}`;
+  return `P:${partij}:RULE:${ruleCode}:HOEK:${hoek}`;
+}
+
+function filterOpenControleRows(rows: ControleRow[]) {
+  const resolvedKeys = new Set<string>();
+
+  for (const row of rows) {
+    // Alles met review_status goedgekeurd/approved/akkoord of resultaat OK/INFO is afgehandeld.
+    // Die regel zelf mag niet tonen én oudere regels met dezelfde melding mogen niet blijven hangen.
+    if (isResolvedControleRow(row)) {
+      resolvedKeys.add(controleResolveKey(row));
+    }
+  }
+
+  return rows.filter((row) => {
+    if (isResolvedControleRow(row)) return false;
+    return !resolvedKeys.has(controleResolveKey(row));
+  });
 }
 
 function warningHoek(row: ControleRow): "rood" | "blauw" | null {
@@ -378,15 +292,6 @@ function warningHoek(row: ControleRow): "rood" | "blauw" | null {
   if (hoek === "rood" || combined.includes("ROOD")) return "rood";
   if (hoek === "blauw" || combined.includes("BLAUW")) return "blauw";
   return null;
-}
-
-function isLineupBlokkadeRow(row: ControleRow) {
-  if (isResolvedControleRow(row)) return false;
-
-  // Exact hetzelfde uitgangspunt als de voorlopige lineup:
-  // eerst mag alles mee behalve verbod/startverbod; daarna haalt de jury-lineup
-  // alleen de partijen met een open melding uit die voorlopige set.
-  return isHardNoRow(row) || hasVerbod(row) || isOpenLicentieOfKeurmerkRow(row);
 }
 
 function isActieMinpunt(row: ControleRow) {
@@ -507,35 +412,28 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
   decision.hasControle = true;
 
   const resultaat = norm(row.resultaat);
+  const code = upper(row.rule_code);
+  const rule = norm(row.rule);
 
-  // Goedgekeurde/naar OK gezette meldingen blokkeren niet en tellen niet als open melding.
+  // Goedgekeurde/naar OK gezette regels mogen geen open melding of sterretje meer geven.
   if (isResolvedControleRow(row)) return;
 
-  // Open licentie/keurmerk-meldingen worden niet als harde blokkade behandeld voor de
-  // voorlopige set, maar zorgen er wel voor dat de partij uit de definitieve jury-lineup valt.
   if (isOpenLicentieOfKeurmerkRow(row)) {
     const hoek = warningHoek(row);
     if (hoek === "rood") decision.roodWarning = true;
     else if (hoek === "blauw") decision.blauwWarning = true;
     else decision.algemeneWarning = true;
-
-    const msg = s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || "Open licentie/keurmerk melding";
-    const key = msg.replace(/\s+/g, " ").trim().toLowerCase();
-    const exists = decision.warningReasons.some(
-      (x) => x.replace(/\s+/g, " ").trim().toLowerCase() === key,
-    );
-    if (!exists) decision.warningReasons.push(msg);
-    return;
+    decision.warningReasons.push(s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || "Open licentie/keurmerk melding");
   }
 
-  // Alleen verbod/startverbod blokkeert de voorlopige set volledig.
-  if (isHardNoRow(row) || hasVerbod(row)) {
+  // Voorlopige lineup blokkeert alleen verbod/startverbod.
+  if (isHardNoRow(row)) {
     decision.blocked = true;
-    decision.blockedReasons.push("Verbod/startverbod aanwezig");
+    decision.blockedReasons.push("Harde blokkade: licentie/keurmerk/startverbod/verbod");
     return;
   }
 
-  // ACTIE minpunt mag door en telt alleen als strafpunt.
+  // ACTIE minpunt is de enige ACTIE die door mag. Deze telt als strafpunt, niet als blokkade.
   if (isActieMinpunt(row)) {
     const hoek = minpuntHoek(row);
     if (hoek === "rood") decision.roodMinpunten += 1;
@@ -543,9 +441,35 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  // Alle andere oude/open controle-regels blokkeren hier niet, want de definitieve lineup
-  // moet gelijk zijn aan voorlopige lineup minus open meldingen.
-  if (resultaat === "actie" || isOpenReview(row.actie_status) || isOpenReview(row.review_status)) return;
+  // Voorlopige lineup: AFKEUR blokkeert niet, behalve als het verbod/startverbod is.
+  if (isAfkeur(row)) return;
+
+  // Goedgekeurde/naar OK gezette meldingen blokkeren niet meer.
+  // Een losse OK/INFO-regel mag geen andere open ACTIE/AFKEUR/DISPENSATIE opheffen.
+  if (isApprovedOverride(row)) return;
+
+  if (hasVerbod(row)) {
+    decision.blocked = true;
+    decision.blockedReasons.push("Verbod/startverbod aanwezig");
+    return;
+  }
+
+  // Voorlopige lineup: open dispensatie blokkeert niet.
+  if (isDispensatie(row) && !isDispensatieVerleend(row)) return;
+
+  // OK en INFO zijn toegestaan. Dit moet vóór de open-review check staan,
+  // omdat oudere OK/NO_RULES regels soms review_status=open hebben.
+  // Losse ACTIE/AFKEUR/DISPENSATIE regels blijven alsnog blokkeren via hun eigen rij.
+  if (isOk(row) || isInfo(row) || isDispensatieVerleend(row)) return;
+
+  // Voorlopige lineup: overige open actiepunten/reviews blokkeren niet.
+  if (
+    resultaat === "actie" ||
+    isOpenReview(row.actie_status) ||
+    isOpenReview(row.review_status)
+  ) return;
+
+  return;
 }
 
 function buildDecisions(rows: ControleRow[]) {
@@ -697,19 +621,23 @@ function isEligibleForLineup(
   row: any,
   decisions: ReturnType<typeof buildDecisions>,
 ) {
-  // Definitieve lineup = voorlopige lineup minus partijen met echte open meldingen.
-  // Daarom niet opnieuw streng filteren op context/OK-status; alleen blokkades tellen.
+  // Voorlopige lineup: alle partijen mogen mee, behalve verbod/startverbod.
   const decision = rawRowDecision(row, decisions);
   return !decision?.blocked;
 }
 
+function normalizeWarningText(v: unknown) {
+  return s(v).replace(/\s+/g, " ").trim();
+}
+
 function warningText(decision: PartyDecision | null) {
   if (!decision) return "";
+
   const seen = new Set<string>();
   const reasons: string[] = [];
 
   for (const reason of decision.warningReasons) {
-    const clean = s(reason).replace(/\s+/g, " ").trim();
+    const clean = normalizeWarningText(reason);
     const key = clean.toLowerCase();
     if (!clean || seen.has(key)) continue;
     seen.add(key);
@@ -717,6 +645,18 @@ function warningText(decision: PartyDecision | null) {
   }
 
   return reasons.join(" | ");
+}
+
+function warningTextOnce(
+  decision: PartyDecision | null,
+  shownWarningTexts: Set<string>,
+) {
+  const text = warningText(decision);
+  const key = normalizeWarningText(text).toLowerCase();
+  if (!key) return "";
+  if (shownWarningTexts.has(key)) return "";
+  shownWarningTexts.add(key);
+  return text;
 }
 
 function minpuntenFromDecision(
@@ -749,6 +689,91 @@ function getMinPuntForLineup(b: any, decision: PartyDecision | null): string {
   if (mp.rood > 0) parts.push(`Rood -${mp.rood}`);
   if (mp.blauw > 0) parts.push(`Blauw -${mp.blauw}`);
   return parts.join(" | ");
+}
+
+
+function cloneExcelStyle(style: Partial<ExcelJS.Style> | undefined) {
+  return JSON.parse(JSON.stringify(style ?? {}));
+}
+
+function asVaNumber(v: any): number | string {
+  const digits = s(v).replace(/\D/g, "").replace(/^0+/, "");
+  if (!digits) return "";
+  const value = Number(digits);
+  return Number.isFinite(value) ? value : digits;
+}
+
+function setTemplateCell(
+  ws: ExcelJS.Worksheet,
+  rowNumber: number,
+  colNumber: number,
+  value: any,
+  templateStyles: Record<number, Partial<ExcelJS.Style>>,
+) {
+  const cell = ws.getRow(rowNumber).getCell(colNumber);
+  cell.style = cloneExcelStyle(templateStyles[colNumber]);
+  cell.value = value;
+  return cell;
+}
+
+function forceCenter(cell: ExcelJS.Cell) {
+  cell.alignment = {
+    ...(cell.alignment ?? {}),
+    vertical: "middle",
+    horizontal: "center",
+  };
+}
+
+function fillTemplateRow(
+  ws: ExcelJS.Worksheet,
+  rowNumber: number,
+  values: {
+    partijNr: string | number;
+    discipline: any;
+    klasse: any;
+    roodNaam: any;
+    roodGym: any;
+    roodVa: any;
+    blauwNaam: any;
+    blauwGym: any;
+    blauwVa: any;
+    rondes: any;
+    minpunt: any;
+    melding: any;
+    vs?: any;
+  },
+  templateStyles: Record<number, Partial<ExcelJS.Style>>,
+  templateHeight: number | undefined,
+) {
+  const row = ws.getRow(rowNumber);
+  if (templateHeight) row.height = templateHeight;
+
+  setTemplateCell(ws, rowNumber, 1, values.partijNr, templateStyles);
+  setTemplateCell(ws, rowNumber, 2, s(values.discipline), templateStyles);
+  setTemplateCell(ws, rowNumber, 3, s(values.klasse), templateStyles);
+  setTemplateCell(ws, rowNumber, 4, s(values.roodNaam), templateStyles);
+  setTemplateCell(ws, rowNumber, 5, s(values.roodGym), templateStyles);
+  setTemplateCell(ws, rowNumber, 6, asVaNumber(values.roodVa), templateStyles);
+  setTemplateCell(ws, rowNumber, 7, s(values.vs ?? "VS"), templateStyles);
+  setTemplateCell(ws, rowNumber, 8, s(values.blauwNaam), templateStyles);
+  setTemplateCell(ws, rowNumber, 9, s(values.blauwGym), templateStyles);
+  setTemplateCell(ws, rowNumber, 10, asVaNumber(values.blauwVa), templateStyles);
+  setTemplateCell(ws, rowNumber, 11, s(values.rondes), templateStyles);
+  setTemplateCell(ws, rowNumber, 12, s(values.minpunt), templateStyles);
+  setTemplateCell(ws, rowNumber, 13, s(values.melding), templateStyles);
+
+  // Geforceerd, ook als het template per ongeluk anders staat.
+  for (const col of [1, 3, 6, 7, 10, 11]) {
+    forceCenter(row.getCell(col));
+  }
+
+  // VA als getal, zonder Excel-waarschuwing "getallen opgeslagen als tekst".
+  for (const col of [6, 10]) {
+    const cell = row.getCell(col);
+    if (typeof cell.value === "number") cell.numFmt = "0";
+  }
+
+  row.commit();
 }
 
 export async function GET(req: Request) {
@@ -784,21 +809,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: controleErr.message }, { status: 500 });
   }
 
-  const activeControleRows = activeControleRowsForDefinitieveLineup(
-    (controleRows ?? []) as ControleRow[],
+  const openControleRows = filterOpenControleRows((controleRows ?? []) as ControleRow[]);
+  const decisions = buildDecisions(openControleRows);
+  const bouts = (rawBouts ?? []).filter((b: any) =>
+    isEligibleForLineup(b, decisions),
   );
-  const decisions = buildDecisions(activeControleRows);
-  const bouts = (rawBouts ?? []).filter((b: any) => {
-    if (!isEligibleForLineup(b, decisions)) return false;
-    const decision = rawRowDecision(b, decisions);
-    return !warningText(decision);
-  });
 
   if (!bouts.length) {
     return NextResponse.json(
       {
         error:
-          "Geen partijen geschikt voor jury-lineup. Alleen partijen met echte open meldingen of verbod/startverbod worden overgeslagen.",
+          "Geen partijen geschikt voor voorlopige lineup. Partijen met verbod/startverbod worden niet meegenomen.",
         total_count: rawBouts?.length ?? 0,
         controle_count: controleRows?.length ?? 0,
       },
@@ -810,25 +831,35 @@ export async function GET(req: Request) {
     process.cwd(),
     "public",
     "templates",
-    "definitieve-lineup.xlsx",
+    "voorlopige-lineup.xlsx",
   );
+
+  if (!existsSync(templatePath)) {
+    return NextResponse.json(
+      {
+        error:
+          "Template ontbreekt: zet voorlopige-lineup.xlsx in public/templates/voorlopige-lineup.xlsx",
+      },
+      { status: 500 },
+    );
+  }
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(templatePath);
 
   const ws =
+    wb.getWorksheet("Voorlopige lineup") ??
     wb.getWorksheet("Jury lineup") ??
-    wb.getWorksheet("Definitieve lineup") ??
     wb.worksheets[0];
 
   if (!ws) {
     return NextResponse.json(
-      { error: "Template definitieve-lineup.xlsx heeft geen werkblad" },
+      { error: "Template bevat geen werkblad." },
       { status: 500 },
     );
   }
 
-  // Rij 2 is de template-datarij. Die stijl wordt doorgetrokken naar alle exportregels.
+  // Rij 2 is de template-datarij. Die stijl wordt doorgetrokken naar alle partijen.
   const templateRow = ws.getRow(2);
   const templateHeight = templateRow.height;
   const templateStyles: Record<number, Partial<ExcelJS.Style>> = {};
@@ -836,11 +867,15 @@ export async function GET(req: Request) {
     templateStyles[col] = cloneExcelStyle(templateRow.getCell(col).style);
   }
 
-  clearTemplateData(ws, 2);
+  // Oude/voorbeeldregels uit het template verwijderen, header en opmaak blijven bewaard.
+  if (ws.rowCount > 1) {
+    ws.spliceRows(2, ws.rowCount - 1);
+  }
 
   const seenToernooiFighters = new Set<string>();
+  const shownWarningTexts = new Set<string>();
   let exportPartijNr = 1;
-  let rowNumber = 2;
+  let targetRowNumber = 2;
 
   const gewonePartijen = bouts.filter((b: any) => !isToernooiBout(b));
   const toernooiPartijen = bouts.filter((b: any) => isToernooiBout(b));
@@ -856,21 +891,27 @@ export async function GET(req: Request) {
       titelpartij,
     });
 
-    setLineupCellValues(ws, rowNumber++, {
-      partij_nr: exportPartijNr++,
-      discipline: b.discipline,
-      klasse: b.klasse,
-      rood_naam: b.rood_naam,
-      rood_gym: b.rood_gym,
-      rood_va: b.va_rood ?? b.rood_va ?? b.rood_va_nummer,
-      blauw_naam: b.blauw_naam,
-      blauw_gym: b.blauw_gym,
-      blauw_va: b.va_blauw ?? b.blauw_va ?? b.blauw_va_nummer,
-      rondes,
-      minpunt: getMinPuntForLineup(b, decision),
-      titelpartij: titelpartij ? "Ja" : "",
-      vs: "VS",
-    }, templateStyles, templateHeight);
+    fillTemplateRow(
+      ws,
+      targetRowNumber++,
+      {
+        partijNr: exportPartijNr++,
+        discipline: b.discipline,
+        klasse: b.klasse,
+        roodNaam: b.rood_naam,
+        roodGym: b.rood_gym,
+        roodVa: b.va_rood ?? b.rood_va ?? b.rood_va_nummer,
+        blauwNaam: b.blauw_naam,
+        blauwGym: b.blauw_gym,
+        blauwVa: b.va_blauw ?? b.blauw_va ?? b.blauw_va_nummer,
+        rondes,
+        minpunt: getMinPuntForLineup(b, decision),
+        melding: warningTextOnce(decision, shownWarningTexts),
+        vs: "VS",
+      },
+      templateStyles,
+      templateHeight,
+    );
   }
 
   const toernooiGroups = new Map<string, any[]>();
@@ -908,33 +949,41 @@ export async function GET(req: Request) {
         if (seenToernooiFighters.has(key)) continue;
         seenToernooiFighters.add(key);
 
-        setLineupCellValues(ws, rowNumber++, {
-          partij_nr: toernooiCode,
-          discipline: b.discipline,
-          klasse: b.klasse,
-          rood_naam: fighter.naam,
-          rood_gym: fighter.gym,
-          rood_va: fighter.va,
-          blauw_naam: "",
-          blauw_gym: "",
-          blauw_va: "",
-          rondes,
-          minpunt: getMinPuntForLineup(b, decision),
-          titelpartij: titelpartij ? "Ja" : "",
-          vs: "",
-        }, templateStyles, templateHeight);
+        fillTemplateRow(
+          ws,
+          targetRowNumber++,
+          {
+            partijNr: toernooiCode,
+            discipline: b.discipline,
+            klasse: b.klasse,
+            roodNaam: fighter.naam,
+            roodGym: fighter.gym,
+            roodVa: fighter.va,
+            blauwNaam: "",
+            blauwGym: "",
+            blauwVa: "",
+            rondes,
+            minpunt: getMinPuntForLineup(b, decision),
+            melding: warningTextOnce(decision, shownWarningTexts),
+            vs: "",
+          },
+          templateStyles,
+          templateHeight,
+        );
       }
     }
   }
 
-  ws.pageSetup.printArea = `A1:M${Math.max(1, rowNumber - 1)}`;
+  // Printgebied volgt het template, maar wordt aangepast aan het aantal partijen.
+  ws.pageSetup.printArea = `A1:M${Math.max(1, targetRowNumber - 1)}`;
+
   const buffer = await wb.xlsx.writeBuffer();
 
   return new NextResponse(buffer, {
     headers: {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename=jury-lineup.xlsx`,
+      "Content-Disposition": `attachment; filename=voorlopige-lineup.xlsx`,
     },
   });
 }

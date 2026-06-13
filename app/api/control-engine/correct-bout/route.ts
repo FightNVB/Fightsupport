@@ -632,8 +632,9 @@ export async function POST(req: Request) {
       const { error: upErr } = await supabase
         .from("matchmaking_bouts_raw")
         .update(patch)
-        .eq("matchmaking_id", matchmaking_id)
-        .eq("partij_nr", partij_nr);
+        // Gebruik de stabiele raw-bout id. partij_nr kan wijzigen door reorder,
+        // waardoor discipline/klasse anders aan de oude positie blijft hangen.
+        .eq("id", existingBout.id);
 
       if (upErr) {
         console.error("DB update fout:", upErr);
@@ -675,8 +676,9 @@ export async function POST(req: Request) {
 
     // Final override na build + enrich:
     // buildControleBoutContext/enrich kunnen context opnieuw vullen vanuit raw/scrape.
-    // De bewerkvelden uit deze request moeten leidend blijven, inclusief lege VA's.
-    if (ctxFinal && (hasNewVaRood || hasNewVaBlauw)) {
+    // De bewerkvelden uit deze request moeten leidend blijven.
+    // Let op: controle_bout_context gebruikt *_mm kolommen voor namen/gym/gewicht.
+    if (ctxFinal) {
       const finalCtxPatch: Record<string, any> = {
         updated_at: new Date().toISOString(),
       };
@@ -691,16 +693,55 @@ export async function POST(req: Request) {
         finalCtxPatch.blauw_va_mm_prev = oldVaBlauw;
       }
 
-      const { error: finalCtxErr } = await supabase
-        .from("controle_bout_context")
-        .update(finalCtxPatch)
-        .eq("matchmaking_id", matchmaking_id)
-        .eq("controle_run_id", controle_run_id)
-        .eq("partij_nr", partij_nr);
+      if (canEditNames && hasOwn(body, "new_rood_naam")) {
+        finalCtxPatch.rood_naam_mm = patch.rood_naam ?? null;
+      }
 
-      if (finalCtxErr) throw finalCtxErr;
+      if (canEditNames && hasOwn(body, "new_blauw_naam")) {
+        finalCtxPatch.blauw_naam_mm = patch.blauw_naam ?? null;
+      }
 
-      ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+      if (hasOwn(body, "new_rood_gym")) {
+        finalCtxPatch.rood_gym_mm = patch.rood_gym ?? null;
+      }
+
+      if (hasOwn(body, "new_blauw_gym")) {
+        finalCtxPatch.blauw_gym_mm = patch.blauw_gym ?? null;
+      }
+
+      if (hasNewDiscipline || hasDiscipline) {
+        finalCtxPatch.discipline = patch.discipline ?? null;
+      }
+
+      if (hasNewKlasse || hasNewKlasseMm || hasKlasse) {
+        // controle_bout_context heeft geen kolom "klasse"; alleen "klasse_mm".
+        finalCtxPatch.klasse_mm = patch.klasse ?? null;
+      }
+
+      if (hasOwn(body, "new_max_gewicht") || hasOwn(body, "max_gewicht")) {
+        finalCtxPatch.max_gewicht = patch.max_gewicht ?? null;
+        finalCtxPatch.max_gewicht_notatie = patch.max_gewicht_notatie ?? null;
+        finalCtxPatch.max_gewicht_type = patch.max_gewicht_type ?? null;
+      }
+
+      if (hasOwn(body, "new_rood_gewicht")) {
+        finalCtxPatch.rood_gewicht_mm = patch.rood_gewicht ?? null;
+      }
+
+      if (hasOwn(body, "new_blauw_gewicht")) {
+        finalCtxPatch.blauw_gewicht_mm = patch.blauw_gewicht ?? null;
+      }
+
+      if (Object.keys(finalCtxPatch).length > 1) {
+        const { error: finalCtxErr } = await supabase
+          .from("controle_bout_context")
+          .update(finalCtxPatch)
+          .eq("id", ctxFinal.id);
+
+        if (finalCtxErr) throw finalCtxErr;
+
+        ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+      }
     }
 
     const ctxRows = ctxFinal ? [ctxFinal] : [];

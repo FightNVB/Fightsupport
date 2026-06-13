@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   UserRound,
   ClipboardCheck,
+  RefreshCw,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
@@ -47,6 +48,8 @@ type WeighInBout = {
   max_gewicht_notatie?: string | null;
   bout_id?: string | null;
   controle_run_id?: string | null;
+  is_toernooi?: boolean | string | number | null;
+  toernooi_code?: string | null;
 
   rood_naam: string | null;
   rood_gym: string | null;
@@ -449,7 +452,6 @@ function getWeightRangeForUi(
   };
 }
 
-
 function getWeightRangeTextForUi(
   klasse: string | null | undefined,
   fallbackMax: number | string | null | undefined,
@@ -805,8 +807,66 @@ function getDraftsFromRows(rows: WeighInBout[]): Record<string, DraftState> {
   return next;
 }
 
+function isToernooiRow(row: WeighInBout | null | undefined) {
+  if (!row) return false;
+  const anyRow = row as any;
+  const flag = String(anyRow.is_toernooi ?? "")
+    .trim()
+    .toLowerCase();
+  return (
+    flag === "true" || flag === "1" || !!safeText(anyRow.toernooi_code, "")
+  );
+}
+
+function getPartijLabel(row: WeighInBout | null | undefined) {
+  if (!row) return "-";
+  if (isToernooiRow(row))
+    return safeText((row as any).toernooi_code, "TOERNOOI");
+  return `#${row.partij_nr}`;
+}
+
+function sortWeegRows(a: WeighInBout, b: WeighInBout) {
+  const at = isToernooiRow(a);
+  const bt = isToernooiRow(b);
+  if (at !== bt) return at ? 1 : -1;
+
+  if (at && bt) {
+    const ac = safeText((a as any).toernooi_code, "");
+    const bc = safeText((b as any).toernooi_code, "");
+    if (ac !== bc) return ac.localeCompare(bc, "nl", { numeric: true });
+    return safeText(a.rood_naam, "").localeCompare(
+      safeText(b.rood_naam, ""),
+      "nl",
+      { numeric: true },
+    );
+  }
+
+  return Number(a.partij_nr) - Number(b.partij_nr);
+}
+
+function getRowGroupWeights(
+  row: WeighInBout,
+  allRows: WeighInBout[],
+  draftsMap: Record<string, DraftState>,
+) {
+  if (!isToernooiRow(row)) return [];
+  const code = safeText((row as any).toernooi_code, "");
+  if (!code) return [];
+
+  return allRows
+    .filter(
+      (item) =>
+        isToernooiRow(item) &&
+        safeText((item as any).toernooi_code, "") === code,
+    )
+    .map((item) => toNum(draftsMap[item.id]?.rood ?? item.rood_gewogen_gewicht))
+    .filter((v): v is number => v != null);
+}
+
 function getRowCompletionRank(row: WeighInBout) {
   const hasRood = row.rood_gewogen_gewicht != null;
+  if (isToernooiRow(row)) return hasRood ? 2 : 0;
+
   const hasBlauw = row.blauw_gewogen_gewicht != null;
   if (!hasRood && !hasBlauw) return 0;
   if (!hasRood || !hasBlauw) return 1;
@@ -817,7 +877,9 @@ function dedupeRows(rows: WeighInBout[]) {
   const map = new Map<string, WeighInBout>();
 
   for (const row of rows) {
-    const key = `${row.matchmaking_id}__${row.partij_nr}`;
+    const key = isToernooiRow(row)
+      ? `${row.matchmaking_id}__toernooi__${safeText((row as any).toernooi_code, "")}__${safeText(row.rood_va, "")}__${safeText(row.rood_naam, "")}`
+      : `${row.matchmaking_id}__partij__${row.partij_nr}`;
     const prev = map.get(key);
 
     if (!prev) {
@@ -843,7 +905,7 @@ function dedupeRows(rows: WeighInBout[]) {
     }
   }
 
-  return Array.from(map.values()).sort((a, b) => a.partij_nr - b.partij_nr);
+  return Array.from(map.values()).sort(sortWeegRows);
 }
 
 function statusChipFromRowOrEval(
@@ -934,7 +996,13 @@ function statusChipFromRowOrEval(
   }
 }
 
-function getLiveEval(row: WeighInBout, draft?: DraftState) {
+function getLiveEval(
+  row: WeighInBout,
+  draft?: DraftState,
+  allRows: WeighInBout[] = [],
+  draftsMap: Record<string, DraftState> = {},
+) {
+  const isToernooi = isToernooiRow(row);
   return evaluateWeighInBout({
     discipline: row.discipline,
     klasse_mm: row.klasse_mm,
@@ -942,12 +1010,23 @@ function getLiveEval(row: WeighInBout, draft?: DraftState) {
     max_gewicht: toNum(row.max_gewicht),
     max_gewicht_notatie: row.max_gewicht_notatie ?? null,
     rood_doorgegeven_gewicht: toNum(row.rood_doorgegeven_gewicht),
-    blauw_doorgegeven_gewicht: toNum(row.blauw_doorgegeven_gewicht),
-    rood_gewogen_gewicht: draft ? toNum(draft.rood) : toNum(row.rood_gewogen_gewicht),
-    blauw_gewogen_gewicht: draft
-      ? toNum(draft.blauw)
-      : toNum(row.blauw_gewogen_gewicht),
-    dispensatie_verleend: row.dispensatie_verleend,
+    blauw_doorgegeven_gewicht: isToernooi
+      ? null
+      : toNum(row.blauw_doorgegeven_gewicht),
+    rood_gewogen_gewicht: draft
+      ? toNum(draft.rood)
+      : toNum(row.rood_gewogen_gewicht),
+    blauw_gewogen_gewicht: isToernooi
+      ? null
+      : draft
+        ? toNum(draft.blauw)
+        : toNum(row.blauw_gewogen_gewicht),
+    dispensatie_verleend: isToernooi ? false : row.dispensatie_verleend,
+    is_toernooi: isToernooi,
+    toernooi_code: isToernooi ? ((row as any).toernooi_code ?? null) : null,
+    toernooi_group_gewichten: isToernooi
+      ? getRowGroupWeights(row, allRows, draftsMap)
+      : [],
   });
 }
 
@@ -1090,11 +1169,26 @@ function isStartverbodValue(value: unknown) {
   const s = String(value).trim().toLowerCase();
   if (!s) return false;
 
-  if (["0", "false", "nee", "no", "geen", "geen startverbod", "nvt", "n.v.t.", "ok"].includes(s)) {
+  if (
+    [
+      "0",
+      "false",
+      "nee",
+      "no",
+      "geen",
+      "geen startverbod",
+      "nvt",
+      "n.v.t.",
+      "ok",
+    ].includes(s)
+  ) {
     return false;
   }
 
-  return s.includes("startverbod") || ["1", "true", "ja", "yes", "actief"].includes(s);
+  return (
+    s.includes("startverbod") ||
+    ["1", "true", "ja", "yes", "actief"].includes(s)
+  );
 }
 
 function getFighterComplianceBadges(
@@ -1178,7 +1272,6 @@ function mergeBoutKeepingCompliance(
 
   return merged;
 }
-
 
 function ComplianceBadge({
   label,
@@ -1355,7 +1448,9 @@ export default function WeegstationDetailPage() {
     });
 
     return baseRows.map((row) => {
-      const rowControleRunId = String((row as any)?.controle_run_id ?? "").trim();
+      const rowControleRunId = String(
+        (row as any)?.controle_run_id ?? "",
+      ).trim();
       const rowBoutId = String((row as any)?.bout_id ?? "").trim();
       const rowPartijNr = Number(row.partij_nr);
 
@@ -1399,7 +1494,7 @@ export default function WeegstationDetailPage() {
     return nextRows;
   }
 
-  async function refreshRows(manual = false) {
+  async function buildRows() {
     if (!matchmakingId) return;
 
     setSyncing(true);
@@ -1407,7 +1502,7 @@ export default function WeegstationDetailPage() {
     setNotice(null);
 
     try {
-      const res = await authedFetch("/api/officials/weegstation/build", {
+      const res = await authedFetch("/api/officials/weegstation/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ matchmakingId }),
@@ -1417,15 +1512,44 @@ export default function WeegstationDetailPage() {
       if (!res.ok)
         throw new Error(json?.error || "Weeglijst opbouwen mislukt.");
 
-      // Na het opbouwen halen we de rijen opnieuw via fetchRows op.
-      // fetchRows verrijkt weigh_in_bouts met controle_bout_context,
-      // zodat licentie/keurmerk/startverbod badges niet leeg blijven.
       const nextRows = await hydrateRows(matchmakingId);
+      setNotice(`Weeglijst opgebouwd (${nextRows.length} partijen).`);
+    } catch (e: any) {
+      setError(e?.message ?? "Weeglijst opbouwen mislukt.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function refreshRows(manual = false) {
+    if (!matchmakingId) return;
+
+    setSyncing(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const res = await authedFetch("/api/officials/weegstation/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmakingId }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok)
+        throw new Error(json?.error || "Weeglijst verversen mislukt.");
+
+      const nextRows = await hydrateRows(matchmakingId);
+      setSelectedFighter((prev) => {
+        if (!prev) return prev;
+        const nextBout = nextRows.find((row) => row.id === prev.boutId);
+        return nextBout ? { ...prev, bout: nextBout } : null;
+      });
 
       setNotice(
         manual
-          ? `Weeglijst ververst (${nextRows.length} partijen).`
-          : `Weeglijst opgebouwd (${nextRows.length} partijen).`,
+          ? `Weeglijst ververst (${nextRows.length} partijen). Bestaande wegingen zijn bewaard.`
+          : `Weeglijst ververst (${nextRows.length} partijen).`,
       );
     } catch (e: any) {
       setError(e?.message ?? "Weeglijst verversen mislukt.");
@@ -1535,7 +1659,7 @@ export default function WeegstationDetailPage() {
 
         const existingRows = await hydrateRows(matchmakingId);
         if (existingRows.length === 0) {
-          await refreshRows(false);
+          await buildRows();
         }
       } catch (e: any) {
         setError(e?.message ?? "Fout bij laden van de weeglijst.");
@@ -1566,32 +1690,38 @@ export default function WeegstationDetailPage() {
         fighterVa: safeText(row.rood_va, ""),
         fighterDoorgegeven: toNum(row.rood_doorgegeven_gewicht),
         fighterGewogen: liveRood,
-        opponentName: safeText(row.blauw_naam, "-"),
-        opponentGym: safeText(row.blauw_gym, "-"),
-        opponentVa: safeText(row.blauw_va, "-"),
-        opponentGewogen: liveBlauw,
+        opponentName: isToernooiRow(row)
+          ? safeText((row as any).toernooi_code, "Toernooi")
+          : safeText(row.blauw_naam, "-"),
+        opponentGym: isToernooiRow(row)
+          ? "Toernooi"
+          : safeText(row.blauw_gym, "-"),
+        opponentVa: isToernooiRow(row) ? "" : safeText(row.blauw_va, "-"),
+        opponentGewogen: isToernooiRow(row) ? null : liveBlauw,
         discipline: row.discipline,
         klasse: row.klasse_mm,
         bout: row,
       });
 
-      list.push({
-        boutId: row.id,
-        partijNr: row.partij_nr,
-        corner: "blue",
-        fighterName: safeText(row.blauw_naam, ""),
-        fighterGym: safeText(row.blauw_gym, ""),
-        fighterVa: safeText(row.blauw_va, ""),
-        fighterDoorgegeven: toNum(row.blauw_doorgegeven_gewicht),
-        fighterGewogen: liveBlauw,
-        opponentName: safeText(row.rood_naam, "-"),
-        opponentGym: safeText(row.rood_gym, "-"),
-        opponentVa: safeText(row.rood_va, "-"),
-        opponentGewogen: liveRood,
-        discipline: row.discipline,
-        klasse: row.klasse_mm,
-        bout: row,
-      });
+      if (!isToernooiRow(row)) {
+        list.push({
+          boutId: row.id,
+          partijNr: row.partij_nr,
+          corner: "blue",
+          fighterName: safeText(row.blauw_naam, ""),
+          fighterGym: safeText(row.blauw_gym, ""),
+          fighterVa: safeText(row.blauw_va, ""),
+          fighterDoorgegeven: toNum(row.blauw_doorgegeven_gewicht),
+          fighterGewogen: liveBlauw,
+          opponentName: safeText(row.rood_naam, "-"),
+          opponentGym: safeText(row.rood_gym, "-"),
+          opponentVa: safeText(row.rood_va, "-"),
+          opponentGewogen: liveRood,
+          discipline: row.discipline,
+          klasse: row.klasse_mm,
+          bout: row,
+        });
+      }
     }
 
     return list;
@@ -1653,7 +1783,7 @@ export default function WeegstationDetailPage() {
 
     for (const row of rows) {
       const draft = getDraft(row.id);
-      const evalResult = getLiveEval(row, draft);
+      const evalResult = getLiveEval(row, draft, rows, drafts);
       const chip = statusChipFromRowOrEval(row, evalResult?.eindStatus);
       const dispDecision = getLiveDispState(row, evalResult);
 
@@ -1694,16 +1824,19 @@ export default function WeegstationDetailPage() {
 
   const selectedEval =
     selectedRow && selectedDraft
-      ? getLiveEval(selectedRow, selectedDraft)
+      ? getLiveEval(selectedRow, selectedDraft, rows, drafts)
       : null;
 
+  const selectedIsToernooi = isToernooiRow(selectedRow);
+
   const activeWeightValue =
-    selectedFighter?.corner === "red"
+    selectedIsToernooi || selectedFighter?.corner === "red"
       ? (selectedDraft?.rood ?? "")
       : (selectedDraft?.blauw ?? "");
 
-  const activePenaltyValue =
-    selectedFighter?.corner === "red"
+  const activePenaltyValue = selectedIsToernooi
+    ? "0"
+    : selectedFighter?.corner === "red"
       ? (selectedDraft?.strafpuntRood ?? "0")
       : (selectedDraft?.strafpuntBlauw ?? "0");
 
@@ -1741,6 +1874,7 @@ export default function WeegstationDetailPage() {
         ));
 
   const selectedEvalPenaltyApplies =
+    !selectedIsToernooi &&
     !!selectedEval &&
     !!selectedEval.canProceedWithPenalty &&
     !selectedEval.adminSanctieNodig &&
@@ -1750,6 +1884,7 @@ export default function WeegstationDetailPage() {
 
   const selectedCanAssignPenalty =
     !!selectedRow &&
+    !selectedIsToernooi &&
     (selectedIsOutsideWeightClass ||
       isTooLight ||
       (!selectedIsOpenHeavyClass && selectedEvalPenaltyApplies));
@@ -1772,12 +1907,13 @@ export default function WeegstationDetailPage() {
     setNotice(null);
 
     try {
-      const penaltyPayload = isHoofdofficialOrSuperadmin
-        ? {
-            gewicht_strafpunt_rood: toPenalty(selectedDraft.strafpuntRood),
-            gewicht_strafpunt_blauw: toPenalty(selectedDraft.strafpuntBlauw),
-          }
-        : {};
+      const penaltyPayload =
+        !selectedIsToernooi && isHoofdofficialOrSuperadmin
+          ? {
+              gewicht_strafpunt_rood: toPenalty(selectedDraft.strafpuntRood),
+              gewicht_strafpunt_blauw: toPenalty(selectedDraft.strafpuntBlauw),
+            }
+          : {};
 
       const res = await authedFetch("/api/officials/weegstation/update", {
         method: "POST",
@@ -1785,7 +1921,9 @@ export default function WeegstationDetailPage() {
         body: JSON.stringify({
           id: selectedRow.id,
           rood_gewogen_gewicht: toNum(selectedDraft.rood),
-          blauw_gewogen_gewicht: toNum(selectedDraft.blauw),
+          blauw_gewogen_gewicht: selectedIsToernooi
+            ? null
+            : toNum(selectedDraft.blauw),
           weging_notitie: selectedDraft.note,
           ...penaltyPayload,
         }),
@@ -1801,7 +1939,9 @@ export default function WeegstationDetailPage() {
 
       setRows((prev) =>
         prev.map((r) =>
-          r.id === safeUpdated.id ? mergeBoutKeepingCompliance(r, safeUpdated) : r,
+          r.id === safeUpdated.id
+            ? mergeBoutKeepingCompliance(r, safeUpdated)
+            : r,
         ),
       );
       setDrafts((prev) => ({
@@ -1816,12 +1956,12 @@ export default function WeegstationDetailPage() {
               ? String(safeUpdated.blauw_gewogen_gewicht)
               : "",
           note: safeUpdated.weging_notitie ?? "",
-          strafpuntRood: String(toPenalty(safeUpdated.gewicht_strafpunt_rood)) as
-            | "0"
-            | "1",
-          strafpuntBlauw: String(toPenalty(safeUpdated.gewicht_strafpunt_blauw)) as
-            | "0"
-            | "1",
+          strafpuntRood: String(
+            toPenalty(safeUpdated.gewicht_strafpunt_rood),
+          ) as "0" | "1",
+          strafpuntBlauw: String(
+            toPenalty(safeUpdated.gewicht_strafpunt_blauw),
+          ) as "0" | "1",
         },
       }));
 
@@ -1841,7 +1981,7 @@ export default function WeegstationDetailPage() {
         };
       });
 
-      setNotice(`Partij ${safeUpdated.partij_nr} opgeslagen.`);
+      setNotice(`${getPartijLabel(safeUpdated)} opgeslagen.`);
     } catch (e: any) {
       setError(e?.message ?? "Opslaan mislukt.");
     } finally {
@@ -1881,7 +2021,9 @@ export default function WeegstationDetailPage() {
 
       setRows((prev) =>
         prev.map((r) =>
-          r.id === safeUpdated.id ? mergeBoutKeepingCompliance(r, safeUpdated) : r,
+          r.id === safeUpdated.id
+            ? mergeBoutKeepingCompliance(r, safeUpdated)
+            : r,
         ),
       );
       setDrafts((prev) => ({
@@ -1896,12 +2038,12 @@ export default function WeegstationDetailPage() {
               ? String(safeUpdated.blauw_gewogen_gewicht)
               : "",
           note: safeUpdated.weging_notitie ?? "",
-          strafpuntRood: String(toPenalty(safeUpdated.gewicht_strafpunt_rood)) as
-            | "0"
-            | "1",
-          strafpuntBlauw: String(toPenalty(safeUpdated.gewicht_strafpunt_blauw)) as
-            | "0"
-            | "1",
+          strafpuntRood: String(
+            toPenalty(safeUpdated.gewicht_strafpunt_rood),
+          ) as "0" | "1",
+          strafpuntBlauw: String(
+            toPenalty(safeUpdated.gewicht_strafpunt_blauw),
+          ) as "0" | "1",
         },
       }));
       setSelectedFighter((prev) => {
@@ -2087,10 +2229,24 @@ export default function WeegstationDetailPage() {
                   ← Terug
                 </Link>
 
+                {!isMatchmakerOnly && (
+                  <ActionButton
+                    onClick={() => refreshRows(true)}
+                    disabled={syncing || loading}
+                    tone="dark"
+                    className="gap-2 px-3 py-1.5 text-[12px]"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`}
+                    />
+                    {syncing ? "Verversen..." : "Ververs"}
+                  </ActionButton>
+                )}
+
                 {isHoofdofficialOrSuperadmin && (
                   <ActionButton
                     onClick={completeWeighIn}
-                    disabled={finalizing}
+                    disabled={finalizing || syncing}
                     tone="orange"
                     className="px-3 py-1.5 text-[12px]"
                   >
@@ -2204,7 +2360,12 @@ export default function WeegstationDetailPage() {
                         selectedFighter?.corner === item.corner;
 
                       const draft = getDraft(item.bout.id);
-                      const evalResult = getLiveEval(item.bout, draft);
+                      const evalResult = getLiveEval(
+                        item.bout,
+                        draft,
+                        rows,
+                        drafts,
+                      );
                       const chip = statusChipFromRowOrEval(
                         item.bout,
                         evalResult?.eindStatus,
@@ -2233,10 +2394,9 @@ export default function WeegstationDetailPage() {
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <div className="text-[10px] font-bold tracking-[0.08em] text-white/45">
-                                PARTIJ #{item.partijNr} ·{" "}
-                                {item.corner === "red"
-                                  ? "RODE HOEK"
-                                  : "BLAUWE HOEK"}
+                                {isToernooiRow(item.bout)
+                                  ? `${getPartijLabel(item.bout)} · TOERNOOI`
+                                  : `PARTIJ #${item.partijNr} · ${item.corner === "red" ? "RODE HOEK" : "BLAUWE HOEK"}`}
                               </div>
 
                               <div className="mt-1 flex items-center gap-2">
@@ -2338,7 +2498,9 @@ export default function WeegstationDetailPage() {
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
                       <div className="text-lg font-black text-zinc-900">
-                        Partij #{selectedFighter.partijNr}
+                        {selectedRow
+                          ? getPartijLabel(selectedRow)
+                          : `#${selectedFighter.partijNr}`}
                       </div>
                       <div className="mt-1 text-sm text-zinc-600">
                         {safeText(selectedFighter.discipline)} ·{" "}
@@ -2570,7 +2732,8 @@ export default function WeegstationDetailPage() {
                             )}
                           </div>
                           <div className="mt-1 text-xs font-bold text-zinc-700">
-                            Toegestaan wegen: {getWeightRangeTextForUi(
+                            Toegestaan wegen:{" "}
+                            {getWeightRangeTextForUi(
                               selectedRow.klasse_mm,
                               selectedRow.max_gewicht_notatie ??
                                 selectedRow.max_gewicht,
@@ -2642,12 +2805,14 @@ export default function WeegstationDetailPage() {
                             selectedRow.max_gewicht_notatie ??
                               selectedRow.max_gewicht,
                           )}
-                          ). Toegestaan wegen: {getWeightRangeTextForUi(
+                          ). Toegestaan wegen:{" "}
+                          {getWeightRangeTextForUi(
                             selectedRow.klasse_mm,
                             selectedRow.max_gewicht_notatie ??
                               selectedRow.max_gewicht,
                             selectedRow.leeftijd_type,
-                          )}. Je kunt dus te zwaar én te licht zijn.
+                          )}
+                          . Je kunt dus te zwaar én te licht zijn.
                         </div>
                       )}
 
@@ -2694,7 +2859,9 @@ export default function WeegstationDetailPage() {
                             border: `1px solid ${FS_LINE_LIGHT}`,
                           }}
                         >
-                          Voor deze vechter is nu geen minpunt mogelijk. Minpunt kan alleen bij te zwaar of te licht wegen buiten de toegestane range.
+                          Voor deze vechter is nu geen minpunt mogelijk. Minpunt
+                          kan alleen bij te zwaar of te licht wegen buiten de
+                          toegestane range.
                         </div>
                       ) : !isHoofdofficialOrSuperadmin ? (
                         <div className="rounded-[8px] border border-orange-200 bg-orange-50 p-3 text-sm font-bold text-orange-800">
@@ -2909,7 +3076,7 @@ export default function WeegstationDetailPage() {
                     const draft = getDraft(row.id);
                     const liveRood = toNum(draft.rood);
                     const liveBlauw = toNum(draft.blauw);
-                    const evalResult = getLiveEval(row, draft);
+                    const evalResult = getLiveEval(row, draft, rows, drafts);
                     const chip = statusChipFromRowOrEval(
                       row,
                       evalResult?.eindStatus,

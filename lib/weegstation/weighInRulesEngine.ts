@@ -37,6 +37,9 @@ export type WeighEvalResult = {
   adminSanctieReason: string | null;
   isHeavyweightOpen: boolean;
   isMma: boolean;
+  isToernooi?: boolean;
+  toernooiCode?: string | null;
+  toernooiGroupDiff?: number | null;
 };
 
 const YOUTH_LOWER_OFFSET = 2.0;
@@ -44,7 +47,11 @@ const ADULT_LOWER_OFFSET = 3.0;
 const UPPER_TOLERANCE = 0.2;
 const HEAVY_OPEN_MIN = 95.0;
 
-const MMA_LIMITS: Array<{ match: RegExp; max: number | null; openMin?: number }> = [
+const MMA_LIMITS: Array<{
+  match: RegExp;
+  max: number | null;
+  openMin?: number;
+}> = [
   { match: /super\s*heavy/i, max: null, openMin: 120.2 },
   { match: /straw/i, max: 52.2 },
   { match: /fly/i, max: 56.7 },
@@ -61,7 +68,11 @@ const MMA_LIMITS: Array<{ match: RegExp; max: number | null; openMin?: number }>
   { match: /heavyweight/i, max: 120.2 },
 ];
 
-const KB_TM_MUAYTHAI_LIMITS: Array<{ match: RegExp; max: number | null; openMin?: number }> = [
+const KB_TM_MUAYTHAI_LIMITS: Array<{
+  match: RegExp;
+  max: number | null;
+  openMin?: number;
+}> = [
   { match: /super\s*heavy/i, max: null, openMin: 95.0 },
   { match: /junior\s*bantam/i, max: 52.16 },
   { match: /bantam/i, max: 53.52 },
@@ -69,12 +80,12 @@ const KB_TM_MUAYTHAI_LIMITS: Array<{ match: RegExp; max: number | null; openMin?
   { match: /feather/i, max: 57.15 },
   { match: /junior\s*lightweight/i, max: 58.97 },
   { match: /lightweight/i, max: 61.23 },
-  { match: /junior\s*welter/i, max: 63.50 },
+  { match: /junior\s*welter/i, max: 63.5 },
   { match: /welter/i, max: 66.68 },
   { match: /junior\s*middle/i, max: 69.85 },
   { match: /super\s*light\s*heavy/i, max: 82.55 },
   { match: /light\s*heavy/i, max: 79.38 },
-  { match: /middleweight\s*76(?:[.,]20)?/i, max: 76.20 },
+  { match: /middleweight\s*76(?:[.,]20)?/i, max: 76.2 },
   { match: /middleweight/i, max: 72.57 },
   { match: /cruiser/i, max: 86.18 },
   { match: /heavyweight/i, max: null, openMin: 95.0 },
@@ -91,6 +102,9 @@ export type WeighInEngineInput = {
   rood_gewogen_gewicht: number | null;
   blauw_gewogen_gewicht: number | null;
   dispensatie_verleend?: boolean;
+  is_toernooi?: boolean;
+  toernooi_code?: string | null;
+  toernooi_group_gewichten?: Array<number | null>;
 };
 
 function fmtKg(v: number | null | undefined) {
@@ -106,8 +120,12 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
-function parseKlasseMaxGewicht(label: string | null | undefined): number | null {
-  const s = String(label ?? "").trim().toLowerCase();
+function parseKlasseMaxGewicht(
+  label: string | null | undefined,
+): number | null {
+  const s = String(label ?? "")
+    .trim()
+    .toLowerCase();
   if (!s) return null;
 
   if (isHeavyweightOpenClass(label)) {
@@ -129,23 +147,26 @@ function parseKlasseMaxGewicht(label: string | null | undefined): number | null 
 }
 
 function isYouthClassCode(v: string | null | undefined): boolean {
-  const s = String(v ?? "").trim().toLowerCase();
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
   return s === "j" || s === "j+" || s.includes("jeugd") || s.includes("junior");
 }
 
 function inferLeeftijdType(
   leeftijdType: string | null | undefined,
-  klasse: string | null | undefined
+  klasse: string | null | undefined,
 ): "jeugd" | "volwassene" {
   // J en J+ zijn jeugd. Alle andere klassen/codes (N, R, A, C, B, A enz.)
   // vallen voor de weegmarge onder volwassenen: max - 3 kg t/m max + 0.2 kg.
-  if (isYouthClassCode(leeftijdType) || isYouthClassCode(klasse)) return "jeugd";
+  if (isYouthClassCode(leeftijdType) || isYouthClassCode(klasse))
+    return "jeugd";
   return "volwassene";
 }
 
 function getNamedClassLimit(
   klasse: string | null | undefined,
-  limits: Array<{ match: RegExp; max: number | null; openMin?: number }>
+  limits: Array<{ match: RegExp; max: number | null; openMin?: number }>,
 ): { max: number | null; openMin?: number } | null {
   const s = String(klasse ?? "").trim();
   if (!s) return null;
@@ -165,7 +186,9 @@ function getKbTmMuaythaiClassLimit(klasse: string | null | undefined) {
 }
 
 function isHeavyweightOpenClass(label: string | null | undefined): boolean {
-  const s = String(label ?? "").trim().toLowerCase();
+  const s = String(label ?? "")
+    .trim()
+    .toLowerCase();
   if (!s) return false;
 
   return (
@@ -176,10 +199,14 @@ function isHeavyweightOpenClass(label: string | null | undefined): boolean {
   );
 }
 
-function getOpenWeightMinimum(input: WeighInEngineInput, isMma: boolean): number {
+function getOpenWeightMinimum(
+  input: WeighInEngineInput,
+  isMma: boolean,
+): number {
   if (isMma) {
     const mmaLimit = getMmaClassLimit(input.klasse_mm);
-    if (mmaLimit?.max == null && mmaLimit?.openMin != null) return mmaLimit.openMin;
+    if (mmaLimit?.max == null && mmaLimit?.openMin != null)
+      return mmaLimit.openMin;
   }
 
   const kbLimit = getKbTmMuaythaiClassLimit(input.klasse_mm);
@@ -195,7 +222,13 @@ function getAllowedWeightRange(params: {
   isHeavyweightOpen: boolean;
   openMin?: number;
 }) {
-  const { leeftijdType, effectiveMaxGewicht, isMma, isHeavyweightOpen, openMin } = params;
+  const {
+    leeftijdType,
+    effectiveMaxGewicht,
+    isMma,
+    isHeavyweightOpen,
+    openMin,
+  } = params;
 
   if (isHeavyweightOpen) {
     return { min: openMin ?? HEAVY_OPEN_MIN, max: null };
@@ -234,7 +267,10 @@ function getAllowedWeightRange(params: {
   };
 }
 
-function getEffectiveMaxWeight(input: WeighInEngineInput, isMma: boolean): {
+function getEffectiveMaxWeight(
+  input: WeighInEngineInput,
+  isMma: boolean,
+): {
   value: number | null;
   source: "tabel" | "klasse" | "doorgegeven" | "mma-klasse" | "onbekend";
 } {
@@ -250,8 +286,15 @@ function getEffectiveMaxWeight(input: WeighInEngineInput, isMma: boolean): {
     }
   }
 
-  if (!isHeavyweightOpenClass(input.max_gewicht_notatie) && input.max_gewicht != null && Number.isFinite(input.max_gewicht)) {
-    return { value: Number(Math.abs(input.max_gewicht).toFixed(2)), source: "tabel" };
+  if (
+    !isHeavyweightOpenClass(input.max_gewicht_notatie) &&
+    input.max_gewicht != null &&
+    Number.isFinite(input.max_gewicht)
+  ) {
+    return {
+      value: Number(Math.abs(input.max_gewicht).toFixed(2)),
+      source: "tabel",
+    };
   }
 
   const notatieMax = parseKlasseMaxGewicht(input.max_gewicht_notatie);
@@ -264,18 +307,177 @@ function getEffectiveMaxWeight(input: WeighInEngineInput, isMma: boolean): {
     return { value: klasseMax, source: "klasse" };
   }
 
-  const declared = [input.rood_doorgegeven_gewicht, input.blauw_doorgegeven_gewicht]
+  const declared = [
+    input.rood_doorgegeven_gewicht,
+    input.blauw_doorgegeven_gewicht,
+  ]
     .map(toNum)
     .filter((v): v is number => v != null);
 
   if (declared.length > 0) {
-    return { value: Number(Math.max(...declared).toFixed(2)), source: "doorgegeven" };
+    return {
+      value: Number(Math.max(...declared).toFixed(2)),
+      source: "doorgegeven",
+    };
   }
 
   return { value: null, source: "onbekend" };
 }
 
-export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult {
+function evaluateToernooiFighter(params: {
+  input: WeighInEngineInput;
+  gewicht: number | null;
+  effectiveMaxInfo: {
+    value: number | null;
+    source: "tabel" | "klasse" | "doorgegeven" | "mma-klasse" | "onbekend";
+  };
+  isMma: boolean;
+  isHeavyweightOpen: boolean;
+  openMin: number;
+  leeftijdType: "jeugd" | "volwassene" | "onbekend";
+}): WeighEvalResult {
+  const {
+    input,
+    gewicht,
+    effectiveMaxInfo,
+    isMma,
+    isHeavyweightOpen,
+    openMin,
+    leeftijdType,
+  } = params;
+  const max = effectiveMaxInfo.value;
+  const minToelaatbaarGewicht = isHeavyweightOpen ? openMin : null;
+  const maxToelaatbaarGewicht =
+    isHeavyweightOpen || max == null
+      ? null
+      : Number((max + UPPER_TOLERANCE).toFixed(2));
+
+  const groupWeights = (input.toernooi_group_gewichten ?? [])
+    .map(toNum)
+    .filter((v): v is number => v != null);
+
+  const groupDiff =
+    groupWeights.length >= 2
+      ? Number(
+          (Math.max(...groupWeights) - Math.min(...groupWeights)).toFixed(2),
+        )
+      : null;
+
+  if (gewicht == null) {
+    return {
+      leeftijdType,
+      diff: groupDiff,
+      reglementStatus: "WACHT_OP_WEGEN",
+      praktijkStatus: "WACHT_OP_WEGEN",
+      eindStatus: "WACHT_OP_WEGEN",
+      dispensatieNodig: false,
+      dispensatieMogelijk: false,
+      messages: ["Toernooivechter nog niet gewogen."],
+      effectiveMaxGewicht: max,
+      minToelaatbaarGewicht,
+      maxToelaatbaarGewicht,
+      maxSource: effectiveMaxInfo.source,
+      withinRangeRood: false,
+      withinRangeBlauw: false,
+      nietOpGewichtRood: false,
+      nietOpGewichtBlauw: false,
+      teLichtRood: false,
+      teLichtBlauw: false,
+      teZwaarRood: false,
+      teZwaarBlauw: false,
+      hasAnyOffWeight: false,
+      canProceedWithPenalty: false,
+      adminSanctieNodig: false,
+      adminSanctieReason: null,
+      isHeavyweightOpen,
+      isMma,
+      isToernooi: true,
+      toernooiCode: input.toernooi_code ?? null,
+      toernooiGroupDiff: groupDiff,
+    };
+  }
+
+  const teLicht =
+    minToelaatbaarGewicht != null ? gewicht < minToelaatbaarGewicht : false;
+  const teZwaar =
+    maxToelaatbaarGewicht != null ? gewicht > maxToelaatbaarGewicht : false;
+  const nietOpGewicht = teLicht || teZwaar;
+  const groupTooWide = groupDiff != null && groupDiff > 3.0;
+  const messages: string[] = [];
+
+  if (isHeavyweightOpen) {
+    messages.push(
+      `Toernooi ${input.toernooi_code ?? ""}: minimaal ${fmtKg(minToelaatbaarGewicht ?? openMin)}.`,
+    );
+  } else if (maxToelaatbaarGewicht != null) {
+    messages.push(
+      `Toernooi ${input.toernooi_code ?? ""}: maximaal ${fmtKg(maxToelaatbaarGewicht)}.`,
+    );
+  } else {
+    messages.push(
+      `Toernooi ${input.toernooi_code ?? ""}: geen max gewicht gevonden.`,
+    );
+  }
+
+  if (teLicht)
+    messages.push("Vechter is te licht voor de open gewichtsklasse.");
+  if (teZwaar) messages.push("Vechter is te zwaar voor dit toernooi.");
+  if (groupDiff == null)
+    messages.push(
+      "Nog niet genoeg toernooivechters gewogen om onderling verschil te beoordelen.",
+    );
+  else
+    messages.push(
+      `Onderling verschil binnen ${input.toernooi_code ?? "toernooi"}: ${groupDiff.toFixed(1)} kg.`,
+    );
+
+  if (groupTooWide) {
+    messages.push(
+      "Toernooi kan niet automatisch door: deelnemers verschillen meer dan 3.0 kg.",
+    );
+  }
+
+  const eindStatus: WeighEindStatus =
+    !nietOpGewicht && !groupTooWide ? "OK" : "AFKEUR";
+
+  return {
+    leeftijdType,
+    diff: groupDiff,
+    reglementStatus: eindStatus,
+    praktijkStatus: eindStatus,
+    eindStatus,
+    dispensatieNodig: false,
+    dispensatieMogelijk: false,
+    messages,
+    effectiveMaxGewicht: max,
+    minToelaatbaarGewicht,
+    maxToelaatbaarGewicht,
+    maxSource: effectiveMaxInfo.source,
+    withinRangeRood: !nietOpGewicht,
+    withinRangeBlauw: true,
+    nietOpGewichtRood: nietOpGewicht,
+    nietOpGewichtBlauw: false,
+    teLichtRood: teLicht,
+    teLichtBlauw: false,
+    teZwaarRood: teZwaar,
+    teZwaarBlauw: false,
+    hasAnyOffWeight: nietOpGewicht,
+    canProceedWithPenalty: false,
+    adminSanctieNodig: groupTooWide,
+    adminSanctieReason: groupTooWide
+      ? "Toernooi-gewichtsverschil groter dan 3.0 kg."
+      : null,
+    isHeavyweightOpen,
+    isMma,
+    isToernooi: true,
+    toernooiCode: input.toernooi_code ?? null,
+    toernooiGroupDiff: groupDiff,
+  };
+}
+
+export function evaluateWeighInBout(
+  input: WeighInEngineInput,
+): WeighEvalResult {
   const messages: string[] = [];
   const rood = toNum(input.rood_gewogen_gewicht);
   const blauw = toNum(input.blauw_gewogen_gewicht);
@@ -284,7 +486,29 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
   const discipline = String(input.discipline ?? "").toLowerCase();
   const isMma = discipline.includes("mma");
   const initialIsHeavyweightOpen =
-    isHeavyweightOpenClass(input.klasse_mm) || isHeavyweightOpenClass(input.max_gewicht_notatie);
+    isHeavyweightOpenClass(input.klasse_mm) ||
+    isHeavyweightOpenClass(input.max_gewicht_notatie);
+
+  if (input.is_toernooi) {
+    const effectiveMaxInfo = getEffectiveMaxWeight(input, isMma);
+    const heavyByClass = isHeavyweightOpenClass(input.klasse_mm);
+    const heavyByNotation = isHeavyweightOpenClass(input.max_gewicht_notatie);
+    const isHeavyweightOpen =
+      heavyByClass ||
+      heavyByNotation ||
+      (effectiveMaxInfo.value == null &&
+        getMmaClassLimit(input.klasse_mm)?.openMin != null);
+    const openMin = getOpenWeightMinimum(input, isMma);
+    return evaluateToernooiFighter({
+      input,
+      gewicht: rood ?? blauw,
+      effectiveMaxInfo,
+      isMma,
+      isHeavyweightOpen,
+      openMin,
+      leeftijdType,
+    });
+  }
 
   if (rood == null && blauw == null) {
     return {
@@ -352,7 +576,11 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
   const effectiveMaxInfo = getEffectiveMaxWeight(input, isMma);
   const heavyByClass = isHeavyweightOpenClass(input.klasse_mm);
   const heavyByNotation = isHeavyweightOpenClass(input.max_gewicht_notatie);
-  const isHeavyweightOpen = heavyByClass || heavyByNotation || effectiveMaxInfo.value == null && getMmaClassLimit(input.klasse_mm)?.openMin != null;
+  const isHeavyweightOpen =
+    heavyByClass ||
+    heavyByNotation ||
+    (effectiveMaxInfo.value == null &&
+      getMmaClassLimit(input.klasse_mm)?.openMin != null);
   const openMin = getOpenWeightMinimum(input, isMma);
 
   const allowedRange = getAllowedWeightRange({
@@ -365,7 +593,8 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
 
   const minToelaatbaarGewicht = allowedRange.min;
   const maxToelaatbaarGewicht = allowedRange.max;
-  const hasKnownWeightRange = isHeavyweightOpen || effectiveMaxInfo.value != null;
+  const hasKnownWeightRange =
+    isHeavyweightOpen || effectiveMaxInfo.value != null;
 
   const teLichtRood =
     minToelaatbaarGewicht != null ? rood < minToelaatbaarGewicht : false;
@@ -387,30 +616,40 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
     (minToelaatbaarGewicht == null || blauw >= minToelaatbaarGewicht) &&
     (maxToelaatbaarGewicht == null || blauw <= maxToelaatbaarGewicht);
 
-  const nietOpGewichtRood = hasKnownWeightRange ? teLichtRood || teZwaarRood : false;
-  const nietOpGewichtBlauw = hasKnownWeightRange ? teLichtBlauw || teZwaarBlauw : false;
+  const nietOpGewichtRood = hasKnownWeightRange
+    ? teLichtRood || teZwaarRood
+    : false;
+  const nietOpGewichtBlauw = hasKnownWeightRange
+    ? teLichtBlauw || teZwaarBlauw
+    : false;
   const hasAnyOffWeight = nietOpGewichtRood || nietOpGewichtBlauw;
 
   if (!hasKnownWeightRange) {
     messages.push(
-      "Geen bruikbare bovengrens gevonden; verschilregels zijn wel toegepast, maar niet-op-gewicht kon niet automatisch worden beoordeeld."
+      "Geen bruikbare bovengrens gevonden; verschilregels zijn wel toegepast, maar niet-op-gewicht kon niet automatisch worden beoordeeld.",
     );
   } else if (isHeavyweightOpen) {
     messages.push(
-      `95+ klasse: beide vechters moeten minimaal ${fmtKg(minToelaatbaarGewicht ?? openMin)} wegen. Daarboven geldt geen bovengrens en maakt onderling gewichtsverschil niet meer uit.`
+      `95+ klasse: beide vechters moeten minimaal ${fmtKg(minToelaatbaarGewicht ?? openMin)} wegen. Daarboven geldt geen bovengrens en maakt onderling gewichtsverschil niet meer uit.`,
     );
   } else if (minToelaatbaarGewicht != null && maxToelaatbaarGewicht != null) {
     messages.push(
-      `Toegestaan gewicht ${fmtKg(minToelaatbaarGewicht)} t/m ${fmtKg(maxToelaatbaarGewicht)}.`
+      `Toegestaan gewicht ${fmtKg(minToelaatbaarGewicht)} t/m ${fmtKg(maxToelaatbaarGewicht)}.`,
     );
   } else if (maxToelaatbaarGewicht != null) {
-    messages.push(`Maximaal toegestaan gewicht: ${fmtKg(maxToelaatbaarGewicht)}.`);
+    messages.push(
+      `Maximaal toegestaan gewicht: ${fmtKg(maxToelaatbaarGewicht)}.`,
+    );
   }
 
-  if (teLichtRood) messages.push("Rood is te licht voor de afgesproken partij.");
-  if (teZwaarRood) messages.push("Rood is te zwaar voor de afgesproken partij.");
-  if (teLichtBlauw) messages.push("Blauw is te licht voor de afgesproken partij.");
-  if (teZwaarBlauw) messages.push("Blauw is te zwaar voor de afgesproken partij.");
+  if (teLichtRood)
+    messages.push("Rood is te licht voor de afgesproken partij.");
+  if (teZwaarRood)
+    messages.push("Rood is te zwaar voor de afgesproken partij.");
+  if (teLichtBlauw)
+    messages.push("Blauw is te licht voor de afgesproken partij.");
+  if (teZwaarBlauw)
+    messages.push("Blauw is te zwaar voor de afgesproken partij.");
 
   if (isMma) {
     if (diff <= 4.0) {
@@ -423,7 +662,10 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
         dispensatieNodig: false,
         dispensatieMogelijk: false,
         messages: hasAnyOffWeight
-          ? [...messages, "MMA: verschil is toegestaan, maar minimaal één vechter zit buiten klasse."]
+          ? [
+              ...messages,
+              "MMA: verschil is toegestaan, maar minimaal één vechter zit buiten klasse.",
+            ]
           : [...messages, "MMA: verschil binnen 4.0 kg."],
         effectiveMaxGewicht: effectiveMaxInfo.value,
         minToelaatbaarGewicht,
@@ -454,7 +696,10 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       eindStatus: "AFKEUR",
       dispensatieNodig: false,
       dispensatieMogelijk: false,
-      messages: [...messages, "MMA: verschil groter dan 4.0 kg, partij kan niet doorgaan."],
+      messages: [
+        ...messages,
+        "MMA: verschil groter dan 4.0 kg, partij kan niet doorgaan.",
+      ],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,
       maxToelaatbaarGewicht,
@@ -490,8 +735,14 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       dispensatieNodig: false,
       dispensatieMogelijk: false,
       messages: hasAnyOffWeight
-        ? [...messages, "95+ klasse: minimaal één vechter weegt onder 95 kg. Niet-op-gewicht; minpunt mogelijk."]
-        : [...messages, "95+ klasse toegestaan. Onderling gewichtsverschil speelt hier geen rol."],
+        ? [
+            ...messages,
+            "95+ klasse: minimaal één vechter weegt onder 95 kg. Niet-op-gewicht; minpunt mogelijk.",
+          ]
+        : [
+            ...messages,
+            "95+ klasse toegestaan. Onderling gewichtsverschil speelt hier geen rol.",
+          ],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,
       maxToelaatbaarGewicht,
@@ -557,8 +808,14 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       dispensatieNodig: false,
       dispensatieMogelijk: false,
       messages: hasAnyOffWeight
-        ? [...messages, "Verschil is toegestaan. Niet-op-gewicht kan een minpunt opleveren."]
-        : [...messages, `Verschil binnen normale marge (${okMax.toFixed(1)} kg).`],
+        ? [
+            ...messages,
+            "Verschil is toegestaan. Niet-op-gewicht kan een minpunt opleveren.",
+          ]
+        : [
+            ...messages,
+            `Verschil binnen normale marge (${okMax.toFixed(1)} kg).`,
+          ],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,
       maxToelaatbaarGewicht,
@@ -586,13 +843,17 @@ export function evaluateWeighInBout(input: WeighInEngineInput): WeighEvalResult 
       diff,
       reglementStatus: hasAnyOffWeight ? "AFWIJKING_GEWICHT" : "AFWIJKING_DIFF",
       praktijkStatus: "DISPENSATIE_NODIG",
-      eindStatus: dispVerleend ? "GOEDGEKEURD_MET_DISPENSATIE" : "DISPENSATIE_NODIG",
+      eindStatus: dispVerleend
+        ? "GOEDGEKEURD_MET_DISPENSATIE"
+        : "DISPENSATIE_NODIG",
       dispensatieNodig: true,
       dispensatieMogelijk: true,
       messages: [
         ...messages,
         `Gewichtsverschil vraagt dispensatie (${okMax.toFixed(1)} t/m ${dispMax.toFixed(1)} kg).`,
-        ...(hasAnyOffWeight ? ["Niet-op-gewicht kan daarnaast ook een minpunt opleveren."] : []),
+        ...(hasAnyOffWeight
+          ? ["Niet-op-gewicht kan daarnaast ook een minpunt opleveren."]
+          : []),
       ],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,

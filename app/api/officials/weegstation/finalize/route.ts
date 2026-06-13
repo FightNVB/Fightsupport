@@ -119,6 +119,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const matchmakingId = s(body?.matchmakingId);
     const absentStatus = s(body?.mark_absent_as || "NIET_VERSCHENEN").toUpperCase();
+    // Standaard is finalize een tussentijdse verwerking naar lineup.
+    // Ongewogen/deels gewogen partijen worden dan NIET als niet verschenen gemarkeerd.
+    // Stuur definitief: true mee als de weging echt helemaal klaar is.
+    const definitiefAfsluiten = body?.definitief === true;
 
     if (!matchmakingId) {
       return NextResponse.json(
@@ -172,6 +176,28 @@ export async function POST(req: NextRequest) {
       const blauwGewogen = toNum(row.blauw_gewogen_gewicht);
       const sourceId = s(row.id) || null;
       const controleRunId = await getControleRunIdForWeighRow(row, matchmakingId);
+      const volledigGewogen = roodGewogen != null && blauwGewogen != null;
+
+      if (!volledigGewogen && !definitiefAfsluiten) {
+        const wachtStatus =
+          roodGewogen == null && blauwGewogen == null
+            ? "WACHT_OP_WEGEN"
+            : "DEELS_GEWOGEN";
+
+        const { error: weighWaitErr } = await supabaseAdmin
+          .from("weigh_in_bouts")
+          .update({
+            eindstatus: wachtStatus,
+            praktijk_status: wachtStatus,
+            reglement_status: wachtStatus,
+            laatste_bewerking_op: nowIso,
+          })
+          .eq("id", row.id);
+
+        if (weighWaitErr) throw weighWaitErr;
+
+        continue;
+      }
 
       let eindstatus = absentStatus;
       let praktijkStatus = absentStatus;
@@ -418,8 +444,9 @@ export async function POST(req: NextRequest) {
       matchmaking_id: matchmakingId,
       updated_bouts: weighRows.length,
       stadium: "weegstation_verwerkt",
-      message:
-        "Weging definitief afgesloten. Eigenaar blijft bondteam en weegstation-statussen zijn als aparte controle_resultaten teruggezet voor de definitieve lineup.",
+      message: definitiefAfsluiten
+        ? "Weging definitief afgesloten. Niet gewogen partijen zijn verwerkt volgens mark_absent_as."
+        : "Weging tussentijds verwerkt voor lineup. Ongewogen partijen zijn bewaard voor later wegen.",
       open_url: `/dashboard/officials/controle/${matchmakingId}`,
     });
   } catch (err: any) {

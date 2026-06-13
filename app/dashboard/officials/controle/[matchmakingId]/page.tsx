@@ -2282,6 +2282,13 @@ export default function ControleMatchmakingPage() {
     );
   }
 
+  function openVoorlopigeLineupExcel() {
+    window.open(
+      `/api/rapport/voorlopige-lineup-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+      "_blank",
+    );
+  }
+
   function openOfficialExcel() {
     window.open(
       `/api/rapport/official-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
@@ -2651,6 +2658,36 @@ export default function ControleMatchmakingPage() {
         throw new Error(json?.error ?? "Retour naar matchmaker mislukt.");
 
       setMsg(json?.message ?? "✅ Matchmaking is teruggezet naar matchmaker.");
+      setReloadTick((x) => x + 1);
+    });
+  }
+
+  async function heropenWeegstation() {
+    await withHeaderBusy("heropen-weegstation", async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/officials/weegstation/reopen", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmakingId,
+          matchmaking_id: matchmakingId,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(json?.error ?? "Heropenen van weegstation mislukt.");
+      }
+
+      setMsg(
+        json?.message ??
+          "✅ Weegstation is heropend. Bestaande wegingen zijn behouden.",
+      );
       setReloadTick((x) => x + 1);
     });
   }
@@ -3607,6 +3644,27 @@ export default function ControleMatchmakingPage() {
                     }
                   />
 
+                  <DarkActionButton
+                    label={
+                      headerBusy === "voorlopige-lineup"
+                        ? "Bezig..."
+                        : "Voorlopige"
+                    }
+                    tone="orange"
+                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
+                    onClick={() =>
+                      withHeaderBusy("voorlopige-lineup", async () =>
+                        openVoorlopigeLineupExcel(),
+                      )
+                    }
+                    disabled={lineupMode || !!headerBusy}
+                    title={
+                      lineupMode
+                        ? "Niet tijdens lineup bouwen."
+                        : "Voorlopige lineup inclusief open licentie- en keurmerkmeldingen."
+                    }
+                  />
+
                   <span className="mx-1 hidden h-6 w-px bg-white/15 sm:inline-block" />
                   <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-blue-100/70">
                     Official
@@ -3665,6 +3723,22 @@ export default function ControleMatchmakingPage() {
                       lineupMode
                         ? "Sla eerst de lineup-volgorde op of annuleer."
                         : "Retour naar matchmaker."
+                    }
+                  />
+                  <DarkActionButton
+                    label={
+                      headerBusy === "heropen-weegstation"
+                        ? "Bezig..."
+                        : "Heropen weegstation"
+                    }
+                    tone="orange"
+                    icon={<Scale className="h-3.5 w-3.5" />}
+                    onClick={heropenWeegstation}
+                    disabled={lineupMode || !!headerBusy}
+                    title={
+                      lineupMode
+                        ? "Sla eerst de lineup-volgorde op of annuleer."
+                        : "Open bestaand weegstation opnieuw zonder gewichten te verwijderen."
                     }
                   />
                   <DarkActionButton
