@@ -256,6 +256,93 @@ function makeEvaluatedPayload(
   };
 }
 
+
+function newestTimestamp(row: any): number {
+  return new Date(row?.updated_at ?? row?.laatste_bewerking_op ?? row?.created_at ?? 0).getTime();
+}
+
+function fighterWeighKey(va: unknown, name?: unknown): string | null {
+  const vaText = cleanText(va);
+  if (vaText) return `va:${vaText}`;
+  const nameText = cleanText(name)?.toLowerCase();
+  return nameText ? `naam:${nameText}` : null;
+}
+
+function matchupKey(roodVa: unknown, blauwVa: unknown, roodNaam?: unknown, blauwNaam?: unknown): string | null {
+  const a = fighterWeighKey(roodVa, roodNaam);
+  const b = fighterWeighKey(blauwVa, blauwNaam);
+  if (!a || !b) return null;
+  return [a, b].sort().join("__vs__");
+}
+
+function matchupKeyFromBase(base: any): string | null {
+  const isToernooi = Number(base?.original_partij_nr) === 0 && !cleanText(base?.blauw_naam);
+  if (isToernooi) return null;
+  return matchupKey(base?.rood_va, base?.blauw_va, base?.rood_naam, base?.blauw_naam);
+}
+
+function matchupKeyFromRow(row: any): string | null {
+  const isToernooi = isSyntheticToernooiRow(row);
+  if (isToernooi) return null;
+  return matchupKey(row?.rood_va, row?.blauw_va, row?.rood_naam, row?.blauw_naam);
+}
+
+type PreservedFighterWeighing = {
+  gewicht: number | null;
+  strafpunt: 0 | 1;
+  laatste_bewerking_door: string | null;
+  laatste_bewerking_op: string | null;
+  sourceRow: any;
+};
+
+function rememberFighterWeighing(
+  map: Map<string, PreservedFighterWeighing>,
+  key: string | null,
+  value: PreservedFighterWeighing,
+) {
+  if (!key || value.gewicht == null) return;
+  const prev = map.get(key);
+  if (!prev || newestTimestamp(value.sourceRow) >= newestTimestamp(prev.sourceRow)) {
+    map.set(key, value);
+  }
+}
+
+function makeExistingWithMappedWeighing(
+  base: any,
+  targetRow: any,
+  exactMatchRow: any,
+  fighterWeights: Map<string, PreservedFighterWeighing>,
+) {
+  const existing = exactMatchRow ? { ...exactMatchRow } : { ...(targetRow ?? {}) };
+  const roodKey = fighterWeighKey(base?.rood_va, base?.rood_naam);
+  const blauwKey = fighterWeighKey(base?.blauw_va, base?.blauw_naam);
+  const rood = roodKey ? fighterWeights.get(roodKey) : null;
+  const blauw = blauwKey ? fighterWeights.get(blauwKey) : null;
+  const isToernooi = Number(base?.original_partij_nr) === 0 && !cleanText(base?.blauw_naam);
+
+  existing.rood_gewogen_gewicht = rood?.gewicht ?? null;
+  existing.gewicht_strafpunt_rood = rood?.strafpunt ?? 0;
+  existing.blauw_gewogen_gewicht = isToernooi ? null : (blauw?.gewicht ?? null);
+  existing.gewicht_strafpunt_blauw = isToernooi ? 0 : (blauw?.strafpunt ?? 0);
+
+  const latestEdit = [rood, blauw]
+    .filter(Boolean)
+    .sort((a: any, b: any) => newestTimestamp(b.sourceRow) - newestTimestamp(a.sourceRow))[0] as PreservedFighterWeighing | undefined;
+
+  existing.laatste_bewerking_door = latestEdit?.laatste_bewerking_door ?? exactMatchRow?.laatste_bewerking_door ?? targetRow?.laatste_bewerking_door ?? null;
+  existing.laatste_bewerking_op = latestEdit?.laatste_bewerking_op ?? exactMatchRow?.laatste_bewerking_op ?? targetRow?.laatste_bewerking_op ?? null;
+
+  if (!exactMatchRow) {
+    existing.dispensatie_verleend = false;
+    existing.dispensatie_reason = null;
+    existing.weging_notitie = null;
+    existing.admin_sanctie_nodig = false;
+    existing.admin_sanctie_reason = null;
+  }
+
+  return existing;
+}
+
 function didChange(existing: any, payload: Record<string, unknown>) {
   for (const [key, value] of Object.entries(payload)) {
     if (key === "updated_at") continue;
@@ -363,31 +450,58 @@ export async function POST(req: Request) {
     if (existingErr) throw existingErr;
 
     const existingByPartij = new Map<number, any>();
-    const existingByBoutId = new Map<string, any>();
+    const existingByMatchup = new Map<string, any>();
     const existingByToernooi = new Map<string, any>();
+    const fighterWeights = new Map<string, PreservedFighterWeighing>();
 
     function rememberNewest(map: Map<any, any>, key: any, row: any) {
       if (key == null || key === "") return;
       const prev = map.get(key);
       if (!prev) return map.set(key, row);
-      const prevUpdated = new Date(
-        prev.updated_at ?? prev.created_at ?? 0,
-      ).getTime();
-      const nextUpdated = new Date(
-        row.updated_at ?? row.created_at ?? 0,
-      ).getTime();
-      if (nextUpdated >= prevUpdated) map.set(key, row);
+      if (newestTimestamp(row) >= newestTimestamp(prev)) map.set(key, row);
     }
 
     for (const row of existingRows ?? []) {
       const isToernooi = isSyntheticToernooiRow(row);
       const partijNr = Number(row.partij_nr);
-      if (!isToernooi && Number.isFinite(partijNr))
+      if (!isToernooi && Number.isFinite(partijNr)) {
         rememberNewest(existingByPartij, partijNr, row);
+      }
+
+      const matchKey = matchupKeyFromRow(row);
+      if (matchKey) rememberNewest(existingByMatchup, matchKey, row);
+
+      rememberFighterWeighing(
+        fighterWeights,
+        fighterWeighKey(row.rood_va, row.rood_naam),
+        {
+          gewicht: toNum(row.rood_gewogen_gewicht),
+          strafpunt: Number(row.gewicht_strafpunt_rood) === 1 ? 1 : 0,
+          laatste_bewerking_door: cleanText(row.laatste_bewerking_door),
+          laatste_bewerking_op: cleanText(row.laatste_bewerking_op),
+          sourceRow: row,
+        },
+      );
+
+      if (!isToernooi) {
+        rememberFighterWeighing(
+          fighterWeights,
+          fighterWeighKey(row.blauw_va, row.blauw_naam),
+          {
+            gewicht: toNum(row.blauw_gewogen_gewicht),
+            strafpunt: Number(row.gewicht_strafpunt_blauw) === 1 ? 1 : 0,
+            laatste_bewerking_door: cleanText(row.laatste_bewerking_door),
+            laatste_bewerking_op: cleanText(row.laatste_bewerking_op),
+            sourceRow: row,
+          },
+        );
+      }
+
       const code = getToernooiCodeFromPartijNr(row.partij_nr);
       const va = cleanText(row.rood_va);
-      if (isToernooi && code && va)
+      if (isToernooi && code && va) {
         rememberNewest(existingByToernooi, `${code}__${va}`, row);
+      }
     }
 
     const touchedIds = new Set<string>();
@@ -428,20 +542,31 @@ export async function POST(req: Request) {
 
     for (const ctx of boutRows) {
       const partijNr = Number(ctx.partij_nr);
-      const existing = existingByPartij.get(partijNr) ?? null;
-      await upsertPayload(makeBoutBasePayload(ctx, fallbackBondteam), existing);
+      const basePayload = makeBoutBasePayload(ctx, fallbackBondteam);
+      const exactMatchRow = existingByMatchup.get(matchupKeyFromBase(basePayload) ?? "") ?? null;
+      const targetRow = exactMatchRow ?? existingByPartij.get(partijNr) ?? null;
+      const existing = makeExistingWithMappedWeighing(
+        basePayload,
+        targetRow,
+        exactMatchRow,
+        fighterWeights,
+      );
+      await upsertPayload(basePayload, existing);
     }
 
     let tIndex = 1;
     for (const ctx of toernooiRows) {
       const code = cleanText(ctx.toernooi_code);
       const va = cleanText(ctx.va_nummer ?? ctx.fighter_id);
-      const existing =
-        code && va ? existingByToernooi.get(`${code}__${va}`) : null;
-      await upsertPayload(
-        makeToernooiBasePayload(ctx, fallbackBondteam, tIndex++),
-        existing,
+      const basePayload = makeToernooiBasePayload(ctx, fallbackBondteam, tIndex++);
+      const targetRow = code && va ? existingByToernooi.get(`${code}__${va}`) : null;
+      const existing = makeExistingWithMappedWeighing(
+        basePayload,
+        targetRow,
+        targetRow,
+        fighterWeights,
       );
+      await upsertPayload(basePayload, existing);
     }
 
     const staleRows = (existingRows ?? []).filter(

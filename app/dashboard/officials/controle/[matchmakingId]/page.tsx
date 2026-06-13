@@ -2425,7 +2425,26 @@ export default function ControleMatchmakingPage() {
             ? Number(r.partij_nr.trim())
             : null,
       partij_nr: index + 1,
+
+      // Hoekwissel moet naar de API mee, anders wordt rood/blauw alleen lokaal
+      // in React gewisseld en na opslaan/reload weer teruggezet.
       swap_corners: !!r?.__swapped_corners,
+      swapped_corners: !!r?.__swapped_corners,
+
+      // Stuur de actuele hoekwaarden mee zoals ze nu in de lineup staan.
+      // De reorder-route kan hiermee controle_bout_context en raw syncen.
+      rood_naam_mm: r?.rood_naam_mm ?? r?.rood_naam ?? null,
+      blauw_naam_mm: r?.blauw_naam_mm ?? r?.blauw_naam ?? null,
+      rood_gym_mm: r?.rood_gym_mm ?? r?.rood_gym ?? null,
+      blauw_gym_mm: r?.blauw_gym_mm ?? r?.blauw_gym ?? null,
+      rood_va_mm: r?.rood_va_mm ?? r?.va_rood ?? null,
+      blauw_va_mm: r?.blauw_va_mm ?? r?.va_blauw ?? null,
+      va_rood: r?.va_rood ?? r?.rood_va_mm ?? null,
+      va_blauw: r?.va_blauw ?? r?.blauw_va_mm ?? null,
+      rood_gewicht: r?.rood_gewicht ?? null,
+      blauw_gewicht: r?.blauw_gewicht ?? null,
+      rood_geboortedatum_mm: r?.rood_geboortedatum_mm ?? null,
+      blauw_geboortedatum_mm: r?.blauw_geboortedatum_mm ?? null,
     }));
 
     const invalid = items.find(

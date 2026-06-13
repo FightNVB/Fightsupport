@@ -9,7 +9,7 @@
 // FULLFIGHTER -> fighters_raw
 // UITSLAGEN  -> uitslagen_raw snapshot per (mm, run, va)
 // ⚠️ DB verwachting fighters unique:
-// UNIQUE (matchmaking_id, controle_run_id, va_nummer)
+// UNIQUE (matchmaking_id, va_nummer)
 // ⚠️ DB verwachting uitslagen unique:
 // UNIQUE (matchmaking_id, controle_run_id, va_nummer, datum, evenement, tegenstander)
 
@@ -446,7 +446,7 @@ async function saveFighterRaw(requestedVA, header, details, zero, matchmaking_id
   };
 
   const { error } = await supabase.from("fighters_raw").upsert(payload, {
-    onConflict: "matchmaking_id,controle_run_id,va_nummer",
+    onConflict: "matchmaking_id,va_nummer",
   });
 
   if (error) console.log("[fullfighter] ❌ fighters_raw upsert fout:", error.message);

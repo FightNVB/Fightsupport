@@ -21,12 +21,10 @@ async function cleanupOldWeegstationData(admin: any, matchmakingId: string) {
 
   if (oldWeegResultsByRuleErr) throw oldWeegResultsByRuleErr;
 
-  const { error: oldWeighInBoutsErr } = await admin
-    .from("weigh_in_bouts")
-    .delete()
-    .eq("matchmaking_id", matchmakingId);
-
-  if (oldWeighInBoutsErr) throw oldWeighInBoutsErr;
+  // We verwijderen weigh_in_bouts hier bewust niet.
+  // Refresh bouwt de actuele rijen opnieuw op en koppelt bestaande wegingen
+  // per vechter/VA terug aan de juiste hoek. Als build eerst alles wist,
+  // zijn die gewichten niet meer veilig te herstellen.
 }
 
 export async function POST(req: Request) {

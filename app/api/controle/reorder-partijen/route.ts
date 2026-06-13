@@ -23,6 +23,9 @@ type ReorderItem = {
   ctx_row_id: string;
   old_partij_nr: number | null;
   partij_nr: number;
+  swap_hoeken: boolean;
+  rood_va: string | null;
+  blauw_va: string | null;
 };
 
 type ResolvedReorderItem = ReorderItem & {
@@ -373,6 +376,248 @@ async function updatePartijNrByOldToNewMap(
   }
 }
 
+function hasOwn(row: any, key: string) {
+  return row != null && Object.prototype.hasOwnProperty.call(row, key);
+}
+
+function pickExisting(row: any, keys: string[]) {
+  for (const key of keys) {
+    if (hasOwn(row, key)) return row[key];
+  }
+  return undefined;
+}
+
+function setIfExists(patch: Record<string, any>, row: any, key: string, value: any) {
+  if (hasOwn(row, key)) patch[key] = value;
+}
+
+function shouldSwapHoeken(item: any, row: any): boolean {
+  const explicit =
+    item?.swap_hoeken === true ||
+    item?.swapHoeken === true ||
+    item?.hoek_gewisseld === true ||
+    item?.hoeken_gewisseld === true ||
+    item?.swapped === true ||
+    item?.swap === true;
+
+  if (explicit) return true;
+
+  const nextRoodVa = norm(item?.rood_va ?? item?.va_rood ?? item?.roodVa ?? item?.vaRood);
+  const nextBlauwVa = norm(item?.blauw_va ?? item?.va_blauw ?? item?.blauwVa ?? item?.vaBlauw);
+
+  if (!nextRoodVa || !nextBlauwVa) return false;
+
+  const currentRoodVa = norm(
+    pickExisting(row, ["rood_va_mm", "rood_va", "va_rood"])
+  );
+  const currentBlauwVa = norm(
+    pickExisting(row, ["blauw_va_mm", "blauw_va", "va_blauw"])
+  );
+
+  return !!currentRoodVa && !!currentBlauwVa && nextRoodVa === currentBlauwVa && nextBlauwVa === currentRoodVa;
+}
+
+function makeSwapPatch(row: any, pairs: [string, string][]) {
+  const patch: Record<string, any> = {};
+
+  for (const [roodKey, blauwKey] of pairs) {
+    if (!hasOwn(row, roodKey) && !hasOwn(row, blauwKey)) continue;
+
+    const roodValue = hasOwn(row, roodKey) ? row[roodKey] : null;
+    const blauwValue = hasOwn(row, blauwKey) ? row[blauwKey] : null;
+
+    setIfExists(patch, row, roodKey, blauwValue);
+    setIfExists(patch, row, blauwKey, roodValue);
+  }
+
+  return patch;
+}
+
+const CONTEXT_HOEK_PAIRS: [string, string][] = [
+  ["rood_naam_mm", "blauw_naam_mm"],
+  ["rood_naam_fp", "blauw_naam_fp"],
+  ["rood_naam", "blauw_naam"],
+  ["rood_gym_mm", "blauw_gym_mm"],
+  ["rood_gym_fp", "blauw_gym_fp"],
+  ["rood_gym", "blauw_gym"],
+  ["rood_va_mm", "blauw_va_mm"],
+  ["rood_va_fp", "blauw_va_fp"],
+  ["rood_va", "blauw_va"],
+  ["va_rood", "va_blauw"],
+  ["rood_geboortedatum_mm", "blauw_geboortedatum_mm"],
+  ["rood_geboortedatum_fp", "blauw_geboortedatum_fp"],
+  ["rood_geboortedatum", "blauw_geboortedatum"],
+  ["rood_leeftijd_mm", "blauw_leeftijd_mm"],
+  ["rood_leeftijd_fp", "blauw_leeftijd_fp"],
+  ["rood_leeftijd_event", "blauw_leeftijd_event"],
+  ["rood_gewicht_mm", "blauw_gewicht_mm"],
+  ["rood_gewicht_fp", "blauw_gewicht_fp"],
+  ["rood_doorgegeven_gewicht", "blauw_doorgegeven_gewicht"],
+  ["rood_gewogen_gewicht", "blauw_gewogen_gewicht"],
+  ["gewicht_strafpunt_rood", "gewicht_strafpunt_blauw"],
+];
+
+const RAW_HOEK_PAIRS: [string, string][] = [
+  ["rood_naam", "blauw_naam"],
+  ["naam_rood", "naam_blauw"],
+  ["rood_gym", "blauw_gym"],
+  ["gym_rood", "gym_blauw"],
+  ["va_rood", "va_blauw"],
+  ["rood_va", "blauw_va"],
+  ["rood_geboortedatum", "blauw_geboortedatum"],
+  ["geboortedatum_rood", "geboortedatum_blauw"],
+  ["rood_leeftijd", "blauw_leeftijd"],
+  ["leeftijd_rood", "leeftijd_blauw"],
+  ["rood_gewicht", "blauw_gewicht"],
+  ["gewicht_rood", "gewicht_blauw"],
+  ["rood_doorgegeven_gewicht", "blauw_doorgegeven_gewicht"],
+  ["rood_gewogen_gewicht", "blauw_gewogen_gewicht"],
+  ["gewicht_strafpunt_rood", "gewicht_strafpunt_blauw"],
+];
+
+const WEIGH_HOEK_PAIRS: [string, string][] = [
+  ["rood_naam", "blauw_naam"],
+  ["rood_gym", "blauw_gym"],
+  ["rood_va", "blauw_va"],
+  ["rood_geboortedatum", "blauw_geboortedatum"],
+  ["rood_leeftijd_event", "blauw_leeftijd_event"],
+  ["rood_doorgegeven_gewicht", "blauw_doorgegeven_gewicht"],
+  ["rood_gewogen_gewicht", "blauw_gewogen_gewicht"],
+  ["gewicht_strafpunt_rood", "gewicht_strafpunt_blauw"],
+];
+
+async function applyHoekSwapToControleContext(
+  matchmakingId: string,
+  controleRunId: string,
+  resolved: ResolvedReorderItem[],
+  ctxById: Map<string, any>
+) {
+  const swaps = resolved.filter((x) => x.swap_hoeken);
+  if (!swaps.length) return 0;
+
+  let updated = 0;
+
+  for (const item of swaps) {
+    const row = ctxById.get(item.ctx_row_id);
+    if (!row?.id) continue;
+
+    const patch = makeSwapPatch(row, CONTEXT_HOEK_PAIRS);
+    if (Object.keys(patch).length === 0) continue;
+
+    const { error } = await supabaseAdmin
+      .from("controle_bout_context")
+      .update(patch)
+      .eq("id", item.ctx_row_id)
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId);
+
+    if (error) throw error;
+    updated++;
+  }
+
+  return updated;
+}
+
+async function applyHoekSwapByPartijNr(
+  table: string,
+  matchmakingId: string,
+  swaps: ResolvedReorderItem[],
+  pairs: [string, string][]
+) {
+  if (!swaps.length) return 0;
+
+  const oldPartijNrs = swaps
+    .map((x) => x.old_partij_nr)
+    .filter((v): v is number => v != null);
+
+  if (!oldPartijNrs.length) return 0;
+
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select("*")
+    .eq("matchmaking_id", matchmakingId)
+    .in("partij_nr", oldPartijNrs);
+
+  if (error) throw error;
+
+  const rowsByPartij = new Map<number, any>();
+  for (const row of data ?? []) {
+    const partijNr = asPositiveInt((row as any)?.partij_nr);
+    if (partijNr != null) rowsByPartij.set(partijNr, row);
+  }
+
+  let updated = 0;
+
+  for (const item of swaps) {
+    if (item.old_partij_nr == null) continue;
+    const row = rowsByPartij.get(item.old_partij_nr);
+    if (!row) continue;
+
+    const patch = makeSwapPatch(row, pairs);
+    if (Object.keys(patch).length === 0) continue;
+
+    let q = supabaseAdmin
+      .from(table)
+      .update(patch)
+      .eq("matchmaking_id", matchmakingId)
+      .eq("partij_nr", item.old_partij_nr);
+
+    if (hasOwn(row, "id") && row.id) q = q.eq("id", row.id);
+
+    const { error: updErr } = await q;
+    if (updErr) throw updErr;
+    updated++;
+  }
+
+  return updated;
+}
+
+async function swapControleResultatenHoek(
+  matchmakingId: string,
+  controleRunId: string,
+  swaps: ResolvedReorderItem[]
+) {
+  if (!swaps.length) return 0;
+
+  let updated = 0;
+
+  for (const item of swaps) {
+    if (item.old_partij_nr == null) continue;
+    const tempHoek = `__swap_${Date.now()}_${item.old_partij_nr}`;
+
+    const { error: tempErr } = await supabaseAdmin
+      .from("controle_resultaten")
+      .update({ hoek: tempHoek })
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .eq("partij_nr", item.old_partij_nr)
+      .eq("hoek", "rood");
+    if (tempErr) throw tempErr;
+
+    const { error: roodErr } = await supabaseAdmin
+      .from("controle_resultaten")
+      .update({ hoek: "rood" })
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .eq("partij_nr", item.old_partij_nr)
+      .eq("hoek", "blauw");
+    if (roodErr) throw roodErr;
+
+    const { error: blauwErr } = await supabaseAdmin
+      .from("controle_resultaten")
+      .update({ hoek: "blauw" })
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .eq("partij_nr", item.old_partij_nr)
+      .eq("hoek", tempHoek);
+    if (blauwErr) throw blauwErr;
+
+    updated++;
+  }
+
+  return updated;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { user, error: userError } = await getUserFromBearer(req);
@@ -409,6 +654,15 @@ export async function POST(req: NextRequest) {
         ctx_row_id: norm(x?.ctx_row_id),
         old_partij_nr: asPositiveInt(x?.old_partij_nr),
         partij_nr: asPositiveInt(x?.partij_nr),
+        swap_hoeken:
+          x?.swap_hoeken === true ||
+          x?.swapHoeken === true ||
+          x?.hoek_gewisseld === true ||
+          x?.hoeken_gewisseld === true ||
+          x?.swapped === true ||
+          x?.swap === true,
+        rood_va: norm(x?.rood_va ?? x?.va_rood ?? x?.roodVa ?? x?.vaRood) || null,
+        blauw_va: norm(x?.blauw_va ?? x?.va_blauw ?? x?.blauwVa ?? x?.vaBlauw) || null,
       }))
       .filter((x: any): x is ReorderItem => x.partij_nr != null && (x.ctx_row_id || x.old_partij_nr != null));
 
@@ -435,7 +689,7 @@ export async function POST(req: NextRequest) {
 
     const { data: ctxRows, error: ctxErr } = await supabaseAdmin
       .from("controle_bout_context")
-      .select("id, matchmaking_id, controle_run_id, partij_nr, original_partij_nr")
+      .select("*")
       .eq("matchmaking_id", matchmakingId)
       .eq("controle_run_id", latestControleRunId)
       .order("partij_nr", { ascending: true });
@@ -478,6 +732,9 @@ export async function POST(req: NextRequest) {
         old_partij_nr: currentPartijNr ?? item.old_partij_nr,
         partij_nr: item.partij_nr,
         original_partij_nr: originalPartijNr ?? currentPartijNr ?? item.old_partij_nr,
+        swap_hoeken: item.swap_hoeken || shouldSwapHoeken(item, row),
+        rood_va: item.rood_va,
+        blauw_va: item.blauw_va,
       };
     });
 
@@ -502,6 +759,45 @@ export async function POST(req: NextRequest) {
       old_partij_nr: x.old_partij_nr!,
       partij_nr: x.partij_nr,
     }));
+
+    const hoekSwaps = resolved.filter((x: ResolvedReorderItem) => x.swap_hoeken);
+
+    const swappedControleContext = await applyHoekSwapToControleContext(
+      matchmakingId,
+      latestControleRunId,
+      resolved,
+      ctxById
+    );
+
+    const swappedControleResultaten = await swapControleResultatenHoek(
+      matchmakingId,
+      latestControleRunId,
+      hoekSwaps
+    );
+
+    let swappedRaw = 0;
+    try {
+      swappedRaw = await applyHoekSwapByPartijNr(
+        "matchmaking_bouts_raw",
+        matchmakingId,
+        hoekSwaps,
+        RAW_HOEK_PAIRS
+      );
+    } catch (e) {
+      console.warn("matchmaking_bouts_raw hoekwissel sync overgeslagen:", e);
+    }
+
+    let swappedWeighIn = 0;
+    try {
+      swappedWeighIn = await applyHoekSwapByPartijNr(
+        "weigh_in_bouts",
+        matchmakingId,
+        hoekSwaps,
+        WEIGH_HOEK_PAIRS
+      );
+    } catch (e) {
+      console.warn("weigh_in_bouts hoekwissel sync overgeslagen:", e);
+    }
 
     await updatePartijNrSequenceByIds(
       "controle_bout_context",
@@ -581,15 +877,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       message:
-        "Lineup-volgorde opgeslagen. original_partij_nr is behouden. controle_resultaten zonder bout_id zijn op partij_nr verplaatst; controle_resultaten met bout_id zijn hersteld via matchmaking_bouts_raw.bout_uid.",
+        "Lineup-volgorde en hoekwissels opgeslagen. original_partij_nr is behouden. controle_resultaten zonder bout_id zijn op partij_nr verplaatst; controle_resultaten met bout_id zijn hersteld via matchmaking_bouts_raw.bout_uid.",
       matchmaking_id: matchmakingId,
       controle_run_id: latestControleRunId,
       updated: resolved.length,
+      hoek_swaps: hoekSwaps.length,
+      swapped_controle_context: swappedControleContext,
+      swapped_controle_resultaten: swappedControleResultaten,
+      swapped_matchmaking_bouts_raw: swappedRaw,
+      swapped_weigh_in_bouts: swappedWeighIn,
       items: resolved.map((x: ResolvedReorderItem) => ({
         ctx_row_id: x.ctx_row_id,
         original_partij_nr: x.original_partij_nr,
         old_partij_nr: x.old_partij_nr,
         new_partij_nr: x.partij_nr,
+        swap_hoeken: x.swap_hoeken,
       })),
     });
   } catch (e: any) {
