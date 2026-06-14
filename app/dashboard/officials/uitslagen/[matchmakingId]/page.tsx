@@ -320,16 +320,11 @@ function CornerCard({
             {gym || "-"}
           </div>
 
-          <span
-            className={[
-              "shrink-0 rounded-none border-2 px-3 py-[6px] text-[12px] font-black",
-              activeMin
-                ? "border-[#ff4d00] bg-black text-[#ffb067]"
-                : "border-[#777c85] bg-black text-zinc-400",
-            ].join(" ")}
-          >
-            Minpunten {fmtMinpunten(minpunten)}
-          </span>
+          {activeMin && (
+            <span className="shrink-0 rounded-none border-2 border-[#ff4d00] bg-black px-3 py-[6px] text-[12px] font-black text-[#ffb067]">
+              Minpunten {fmtMinpunten(minpunten)}
+            </span>
+          )}
         </div>
       </div>
 
