@@ -37,6 +37,12 @@ function mapDiscipline(v: unknown) {
   return raw || "Kickboksen/Kickboxing";
 }
 
+function isBoksenDiscipline(v: unknown) {
+  const s = clean(v).toLowerCase();
+  if (!s) return false;
+  return s === "boksen" || s === "boxing" || s.includes("boksen") || s.includes("boxing");
+}
+
 function mapKlasse(v: unknown) {
   const raw = clean(v);
   const s = raw.toLowerCase();
@@ -163,9 +169,12 @@ async function handleExport(req: NextRequest) {
         if (!result) return null;
         if (clean(result.uitslag_status).toLowerCase() === "concept") return null;
 
+        const disciplineValue = pick(b.discipline, result.discipline);
+        if (isBoksenDiscipline(disciplineValue)) return null;
+
         return {
           partij_nr: Number(b.partij_nr ?? result.partij_nr ?? index + 1),
-          discipline: mapDiscipline(pick(b.discipline, result.discipline)),
+          discipline: mapDiscipline(disciplineValue),
           klasse: mapKlasse(pick(b.klasse, result.klasse)),
           rood_va: normalizeVa(pick(b.rood_va, b.rood_va_nummer, b.va_rood, b.rood_va_mm)),
           rood_naam: clean(pick(b.rood_naam, b.rood_volledige_naam, b.rood_fighter_naam)),
@@ -177,7 +186,7 @@ async function handleExport(req: NextRequest) {
       .filter(Boolean) as AnyRow[];
 
     if (exportRows.length === 0) {
-      return NextResponse.json({ ok: false, error: "Geen definitieve uitslagen gevonden voor deze matchmaking." }, { status: 404 });
+      return NextResponse.json({ ok: false, error: "Geen definitieve niet-boksen uitslagen gevonden voor deze matchmaking." }, { status: 404 });
     }
 
     const workbook = new ExcelJS.Workbook();

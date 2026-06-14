@@ -63,6 +63,23 @@ function isJPlus(v: unknown) {
   return s === "J+" || s.includes("J+TALENTSTATUS") || s.includes("TALENTSTATUS");
 }
 
+function isBoksenDiscipline(v: unknown) {
+  const raw = clean(v).toLowerCase();
+  if (!raw) return false;
+  return raw === "boksen" || raw === "boxing" || raw.includes("boksen") || raw.includes("boxing");
+}
+
+function isBoksenBout(bout: any) {
+  return isBoksenDiscipline(
+    pickFirst(
+      bout?.discipline,
+      bout?.discipline_mm,
+      bout?.sub_discipline,
+      bout?.sub_discipline_mm,
+    ),
+  );
+}
+
 function winnerName(result: any, bout: any) {
   const hoek = clean(result?.winnaar_hoek).toLowerCase();
   if (hoek === "rood") return clean(bout?.rood_naam) || null;
@@ -177,8 +194,11 @@ export async function POST(req: NextRequest) {
 
     if (boutErr) return bad(boutErr.message, 500);
 
-    const total = bouts?.length ?? 0;
-    if (total <= 0) return bad("Geen partijen gevonden om te finaliseren.");
+    const exportBouts = (bouts ?? []).filter((bout: any) => !isBoksenBout(bout));
+    const exportBoutIds = exportBouts.map((bout: any) => String(bout.id)).filter(Boolean);
+
+    const total = exportBouts.length;
+    if (total <= 0) return bad("Geen niet-boksen partijen gevonden om te finaliseren.");
 
     const { data: results, error: resultErr } = await supabase
       .from("uitslagen_resultaten")
@@ -188,9 +208,12 @@ export async function POST(req: NextRequest) {
 
     if (resultErr) return bad(resultErr.message, 500);
 
-    const filled = results?.length ?? 0;
+    const filled = (results ?? []).filter((result: any) =>
+      exportBoutIds.includes(String(result.uitslagen_bout_id)),
+    ).length;
+
     if (filled < total) {
-      return bad(`Nog niet alle uitslagen zijn ingevuld (${filled}/${total}).`);
+      return bad(`Nog niet alle uitslagen zijn ingevuld (${filled}/${total}). Boksen telt niet mee voor de FightPassport Excel.`);
     }
 
     // In de uitslagenfase controleren we bewust niet meer op oude controle_resultaten.
@@ -232,7 +255,7 @@ export async function POST(req: NextRequest) {
       return bad(`Deze matchmaking staat op '${currentStage}' en kan niet als uitslagen worden gefinaliseerd.`, 409);
     }
 
-    for (const bout of bouts ?? []) {
+    for (const bout of exportBouts) {
       const klasse = pickFirst((bout as any).klasse, (bout as any).bout_klasse, (bout as any).partij_klasse);
       if (!klasse) continue;
       const { error: klasseErr } = await supabase
@@ -250,7 +273,8 @@ export async function POST(req: NextRequest) {
         uitslag_status: "definitief",
         updated_at: now,
       })
-      .eq("matchmaking_id", matchmakingId);
+      .eq("matchmaking_id", matchmakingId)
+      .in("uitslagen_bout_id", exportBoutIds);
 
     if (resultUpdateErr) return bad(resultUpdateErr.message, 500);
 
@@ -320,6 +344,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       matchmaking_id: matchmakingId,
       partijen: total,
+      boksen_overgeslagen: (bouts?.length ?? 0) - total,
       ingevuld: filled,
       status: "uitslagen_definitief",
     });

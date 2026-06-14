@@ -328,11 +328,48 @@ function newestTimestamp(row: any): number {
   return new Date(row?.updated_at ?? row?.laatste_bewerking_op ?? row?.created_at ?? 0).getTime();
 }
 
+function normalizeVaKey(va: unknown): string | null {
+  const raw = cleanText(va);
+  if (!raw) return null;
+
+  const digits = raw.replace(/\D/g, "").replace(/^0+/, "");
+  if (digits) return `va:${digits}`;
+
+  return `va:${raw.toLowerCase()}`;
+}
+
+function normalizeNameKey(name: unknown): string | null {
+  const raw = cleanText(name)
+    ?.toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return raw ? `naam:${raw}` : null;
+}
+
+function fighterWeighKeys(va: unknown, name?: unknown): string[] {
+  const keys = [normalizeVaKey(va), normalizeNameKey(name)].filter(
+    (key): key is string => !!key,
+  );
+
+  return Array.from(new Set(keys));
+}
+
 function fighterWeighKey(va: unknown, name?: unknown): string | null {
-  const vaText = cleanText(va);
-  if (vaText) return `va:${vaText}`;
-  const nameText = cleanText(name)?.toLowerCase();
-  return nameText ? `naam:${nameText}` : null;
+  return fighterWeighKeys(va, name)[0] ?? null;
+}
+
+function getRememberedFighterWeighing(
+  map: Map<string, PreservedFighterWeighing>,
+  va: unknown,
+  name?: unknown,
+): PreservedFighterWeighing | null {
+  for (const key of fighterWeighKeys(va, name)) {
+    const found = map.get(key);
+    if (found) return found;
+  }
+
+  return null;
 }
 
 function matchupKey(roodVa: unknown, blauwVa: unknown, roodNaam?: unknown, blauwNaam?: unknown): string | null {
@@ -374,6 +411,17 @@ function rememberFighterWeighing(
   }
 }
 
+function rememberFighterWeighings(
+  map: Map<string, PreservedFighterWeighing>,
+  va: unknown,
+  name: unknown,
+  value: PreservedFighterWeighing,
+) {
+  for (const key of fighterWeighKeys(va, name)) {
+    rememberFighterWeighing(map, key, value);
+  }
+}
+
 function makeExistingWithMappedWeighing(
   base: any,
   targetRow: any,
@@ -381,16 +429,43 @@ function makeExistingWithMappedWeighing(
   fighterWeights: Map<string, PreservedFighterWeighing>,
 ) {
   const existing = exactMatchRow ? { ...exactMatchRow } : { ...(targetRow ?? {}) };
-  const roodKey = fighterWeighKey(base?.rood_va, base?.rood_naam);
-  const blauwKey = fighterWeighKey(base?.blauw_va, base?.blauw_naam);
-  const rood = roodKey ? fighterWeights.get(roodKey) : null;
-  const blauw = blauwKey ? fighterWeights.get(blauwKey) : null;
+  const rood = getRememberedFighterWeighing(
+    fighterWeights,
+    base?.rood_va,
+    base?.rood_naam,
+  );
+  const blauw = getRememberedFighterWeighing(
+    fighterWeights,
+    base?.blauw_va,
+    base?.blauw_naam,
+  );
   const isToernooi = Number(base?.original_partij_nr) === 0 && !cleanText(base?.blauw_naam);
 
-  existing.rood_gewogen_gewicht = rood?.gewicht ?? null;
-  existing.gewicht_strafpunt_rood = rood?.strafpunt ?? 0;
-  existing.blauw_gewogen_gewicht = isToernooi ? null : (blauw?.gewicht ?? null);
-  existing.gewicht_strafpunt_blauw = isToernooi ? 0 : (blauw?.strafpunt ?? 0);
+  // Refresh mag gewogen waarden nooit wissen als de fighter-key door scraper/context
+  // net anders is geworden. Eerst op vechter/VA mappen, daarna terugvallen op exact
+  // dezelfde rij of de bestaande partijrij.
+  existing.rood_gewogen_gewicht =
+    rood?.gewicht ??
+    toNum(exactMatchRow?.rood_gewogen_gewicht) ??
+    toNum(targetRow?.rood_gewogen_gewicht) ??
+    null;
+  existing.gewicht_strafpunt_rood =
+    rood?.strafpunt ??
+    (exactMatchRow ? (Number(exactMatchRow?.gewicht_strafpunt_rood) === 1 ? 1 : 0) : undefined) ??
+    (targetRow ? (Number(targetRow?.gewicht_strafpunt_rood) === 1 ? 1 : 0) : undefined) ??
+    0;
+  existing.blauw_gewogen_gewicht = isToernooi
+    ? null
+    : (blauw?.gewicht ??
+      toNum(exactMatchRow?.blauw_gewogen_gewicht) ??
+      toNum(targetRow?.blauw_gewogen_gewicht) ??
+      null);
+  existing.gewicht_strafpunt_blauw = isToernooi
+    ? 0
+    : (blauw?.strafpunt ??
+      (exactMatchRow ? (Number(exactMatchRow?.gewicht_strafpunt_blauw) === 1 ? 1 : 0) : undefined) ??
+      (targetRow ? (Number(targetRow?.gewicht_strafpunt_blauw) === 1 ? 1 : 0) : undefined) ??
+      0);
 
   const latestEdit = [rood, blauw]
     .filter(Boolean)
@@ -538,9 +613,10 @@ export async function POST(req: Request) {
       const matchKey = matchupKeyFromRow(row);
       if (matchKey) rememberNewest(existingByMatchup, matchKey, row);
 
-      rememberFighterWeighing(
+      rememberFighterWeighings(
         fighterWeights,
-        fighterWeighKey(row.rood_va, row.rood_naam),
+        row.rood_va,
+        row.rood_naam,
         {
           gewicht: toNum(row.rood_gewogen_gewicht),
           strafpunt: Number(row.gewicht_strafpunt_rood) === 1 ? 1 : 0,
@@ -551,9 +627,10 @@ export async function POST(req: Request) {
       );
 
       if (!isToernooi) {
-        rememberFighterWeighing(
+        rememberFighterWeighings(
           fighterWeights,
-          fighterWeighKey(row.blauw_va, row.blauw_naam),
+          row.blauw_va,
+          row.blauw_naam,
           {
             gewicht: toNum(row.blauw_gewogen_gewicht),
             strafpunt: Number(row.gewicht_strafpunt_blauw) === 1 ? 1 : 0,
