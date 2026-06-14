@@ -25,6 +25,17 @@ function firstText(...values: unknown[]): string | null {
   return null;
 }
 
+
+function parseRawJson(v: any): any {
+  if (!v) return {};
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return {};
+  }
+}
+
 function isYouthClassCode(v: unknown): boolean {
   const s = String(v ?? "")
     .trim()
