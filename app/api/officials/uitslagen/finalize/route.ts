@@ -66,7 +66,7 @@ function isJPlus(v: unknown) {
 function isBoksenDiscipline(v: unknown) {
   const raw = clean(v).toLowerCase();
   if (!raw) return false;
-  return raw === "boksen" || raw === "boxing" || raw.includes("boksen") || raw.includes("boxing");
+  return raw === "boksen" || raw === "boxing";
 }
 
 function isBoksenBout(bout: any) {
