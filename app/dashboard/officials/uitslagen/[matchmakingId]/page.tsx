@@ -19,12 +19,18 @@ type Row = {
   rood_va: string | null;
   rood_gewicht: string | number | null;
   rood_minpunten: string | number | null;
+  rood_geboortedatum: string | null;
+  rood_leeftijd: number | null;
 
   blauw_naam: string | null;
   blauw_gym: string | null;
   blauw_va: string | null;
   blauw_gewicht: string | number | null;
   blauw_minpunten: string | number | null;
+  blauw_geboortedatum: string | null;
+  blauw_leeftijd: number | null;
+
+  evenement_datum: string | null;
 };
 
 type State = {
@@ -50,6 +56,79 @@ function pick(...vals: any[]) {
     if (v !== null && v !== undefined && String(v).trim() !== "") return v;
   }
   return null;
+}
+
+function getScraperGeboortedatum(ctx: any, corner: "rood" | "blauw") {
+  if (!ctx) return null;
+
+  if (corner === "rood") {
+    return pick(
+      ctx.rood_geboortedatum,
+      ctx.rood_geboortedatum_fp,
+      ctx.rood_geboortedatum_scraper,
+      ctx.rood_dob,
+      ctx.rood_birthdate,
+      ctx.geboortedatum_rood,
+      ctx.fighter_rood_geboortedatum,
+      ctx.rood_fighter_geboortedatum,
+      ctx.raw_json?.rood_geboortedatum,
+      ctx.raw_json?.rood_birthdate
+    );
+  }
+
+  return pick(
+    ctx.blauw_geboortedatum,
+    ctx.blauw_geboortedatum_fp,
+    ctx.blauw_geboortedatum_scraper,
+    ctx.blauw_dob,
+    ctx.blauw_birthdate,
+    ctx.geboortedatum_blauw,
+    ctx.fighter_blauw_geboortedatum,
+    ctx.blauw_fighter_geboortedatum,
+    ctx.raw_json?.blauw_geboortedatum,
+    ctx.raw_json?.blauw_birthdate
+  );
+}
+
+
+function parseRawJsonSafe(v: any): any {
+  if (!v) return {};
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return {};
+  }
+}
+
+function parseDateOnly(v: any): Date | null {
+  const raw = String(v ?? "").trim();
+  if (!raw) return null;
+
+  // YYYY-MM-DD veilig als lokale datum parsen, zodat leeftijd niet door timezone verschuift.
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function calcAgeOnEventDate(birthDate: any, eventDate: any): number | null {
+  const birth = parseDateOnly(birthDate);
+  const event = parseDateOnly(eventDate);
+  if (!birth || !event) return null;
+
+  let age = event.getFullYear() - birth.getFullYear();
+  const monthDiff = event.getMonth() - birth.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && event.getDate() < birth.getDate())) {
+    age -= 1;
+  }
+
+  return age >= 0 && Number.isFinite(age) ? age : null;
 }
 
 function toNumberLoose(v: any): number | null {
@@ -164,6 +243,7 @@ function CornerCard({
   gym,
   va,
   weight,
+  age,
   minpunten,
   selected,
   onSelect,
@@ -173,6 +253,7 @@ function CornerCard({
   gym: string | null;
   va: string | null;
   weight: string | number | null;
+  age: number | null;
   minpunten: string | number | null;
   selected: boolean;
   onSelect: () => void;
@@ -220,29 +301,51 @@ function CornerCard({
         </span>
       </div>
 
-      <div className={`relative pb-16 ${isRed ? "text-left" : "text-right"}`}>
+      <div className={`relative pb-20 ${isRed ? "text-left" : "text-right"}`}>
         <div className="text-[32px] font-black uppercase leading-tight tracking-[1px] text-white [text-shadow:2px_2px_0_#ff4d00]">
           {name || "-"}
         </div>
-        <div className={`mt-3 inline-block max-w-full border-l-4 border-[#ff4d00] bg-black/55 px-4 py-[7px] text-[16px] font-black uppercase tracking-[1px] text-[#ffb067] ${isRed ? "" : "border-l-0 border-r-4"}`}>
-          {gym || "-"}
+
+        <div
+          className={`mt-3 flex max-w-full items-center gap-2 ${
+            isRed ? "justify-start" : "justify-end"
+          }`}
+        >
+          <div
+            className={`min-w-0 max-w-[72%] truncate border-l-4 border-[#ff4d00] bg-black/55 px-3 py-[6px] text-[14px] font-black uppercase tracking-[1px] text-[#ffb067] ${
+              isRed ? "" : "border-l-0 border-r-4"
+            }`}
+            title={gym || "-"}
+          >
+            {gym || "-"}
+          </div>
+
+          <span
+            className={[
+              "shrink-0 rounded-none border-2 px-3 py-[6px] text-[12px] font-black",
+              activeMin
+                ? "border-[#ff4d00] bg-black text-[#ffb067]"
+                : "border-[#777c85] bg-black text-zinc-400",
+            ].join(" ")}
+          >
+            Minpunten {fmtMinpunten(minpunten)}
+          </span>
         </div>
       </div>
 
-      <div className={`absolute bottom-4 flex flex-wrap gap-2 ${isRed ? "left-8 right-6 justify-start" : "left-6 right-8 justify-end"}`}>
-        <span className="rounded-none border-2 border-[#d1d4da] bg-black px-3 py-[7px] text-[13px] font-black text-zinc-100">
+      <div
+        className={`absolute bottom-4 flex gap-2 ${
+          isRed ? "left-8 right-6 justify-start" : "left-6 right-8 justify-end"
+        }`}
+      >
+        <span className="min-w-0 rounded-none border-2 border-[#d1d4da] bg-black px-3 py-[6px] text-[12px] font-black text-zinc-100">
           VA {fmt(va)}
         </span>
-        <span className="rounded-none border-2 border-[#d1d4da] bg-black px-3 py-[7px] text-[13px] font-black text-zinc-100">
+        <span className="min-w-0 rounded-none border-2 border-[#d1d4da] bg-black px-3 py-[6px] text-[12px] font-black text-zinc-100">
           Gewicht {fmt(weight, " kg")}
         </span>
-        <span
-          className={[
-            "rounded-none border-2 px-4 py-2 text-sm font-black",
-            activeMin ? "border-[#ff4d00] bg-black text-[#ffb067]" : "border-[#777c85] bg-black text-zinc-400",
-          ].join(" ")}
-        >
-          Minpunten {fmtMinpunten(minpunten)}
+        <span className="min-w-0 rounded-none border-2 border-[#d1d4da] bg-black px-3 py-[6px] text-[12px] font-black text-zinc-100">
+          Leeftijd {age ?? "-"}
         </span>
       </div>
     </button>
@@ -286,7 +389,13 @@ export default function OfficialsUitslagenDetailPage() {
     try {
       setSendMsg(null);
 
-      const [{ data: bouts }, { data: resultRows }] = await Promise.all([
+      const [
+        { data: bouts },
+        { data: resultRows },
+        { data: matchmaking },
+        { data: upload },
+        { data: controleContextRows },
+      ] = await Promise.all([
         supabase
           .from("uitslagen_bouts")
           .select("*")
@@ -296,17 +405,102 @@ export default function OfficialsUitslagenDetailPage() {
           .from("uitslagen_resultaten")
           .select("uitslagen_bout_id, winnaar_hoek, methode, opmerkingen, uitslag_status, klasse")
           .eq("matchmaking_id", matchmakingId),
+        supabase
+          .from("matchmakings")
+          .select("*")
+          .eq("id", matchmakingId)
+          .maybeSingle(),
+        supabase
+          .from("matchmaking_uploads")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .maybeSingle(),
+        supabase
+          .from("controle_bout_context")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .order("created_at", { ascending: false }),
       ]);
 
       const resultByBoutId = new Map(
         (resultRows ?? []).map((r: any) => [String(r.uitslagen_bout_id), r])
       );
 
-      const nextRows = (bouts ?? []).map((b: any) => ({
+      const contextByPartijNr = new Map<string, any>();
+      const contextByBoutId = new Map<string, any>();
+
+      for (const ctx of controleContextRows ?? []) {
+        const partijKey = String(ctx?.partij_nr ?? "").trim();
+        const boutKey = String(ctx?.bout_id ?? "").trim();
+
+        if (partijKey && !contextByPartijNr.has(partijKey)) {
+          contextByPartijNr.set(partijKey, ctx);
+        }
+
+        if (boutKey && !contextByBoutId.has(boutKey)) {
+          contextByBoutId.set(boutKey, ctx);
+        }
+      }
+
+      const nextRows = (bouts ?? []).map((b: any) => {
+        const ctx =
+          contextByBoutId.get(String(b.bout_id ?? b.bron_bout_id ?? "").trim()) ??
+          contextByPartijNr.get(String(b.partij_nr ?? "").trim()) ??
+          null;
+        const raw = parseRawJsonSafe(b.raw_json);
+        const eventDate = pick(
+          b.evenement_datum,
+          b.event_datum,
+          b.datum_event,
+          b.datum,
+          raw.evenement_datum,
+          raw.event_datum,
+          raw.datum_event,
+          raw.datum,
+          (matchmaking as any)?.evenement_datum,
+          (matchmaking as any)?.event_datum,
+          (matchmaking as any)?.datum_event,
+          (matchmaking as any)?.datum,
+          (upload as any)?.evenement_datum,
+          (upload as any)?.event_datum,
+          (upload as any)?.datum_event,
+          (upload as any)?.datum
+        );
+
+        const roodGeboortedatum = pick(
+          b.rood_geboortedatum,
+          b.rood_geboortedatum_fp,
+          b.rood_geboortedatum_mm,
+          b.geboortedatum_rood,
+          b.rood_birthdate,
+          raw.rood_geboortedatum,
+          raw.rood_geboortedatum_fp,
+          raw.rood_geboortedatum_mm,
+          raw.geboortedatum_rood,
+          raw.rood_birthdate,
+          getScraperGeboortedatum(ctx, "rood")
+        );
+
+        const blauwGeboortedatum = pick(
+          b.blauw_geboortedatum,
+          b.blauw_geboortedatum_fp,
+          b.blauw_geboortedatum_mm,
+          b.geboortedatum_blauw,
+          b.blauw_birthdate,
+          raw.blauw_geboortedatum,
+          raw.blauw_geboortedatum_fp,
+          raw.blauw_geboortedatum_mm,
+          raw.geboortedatum_blauw,
+          raw.blauw_birthdate,
+          getScraperGeboortedatum(ctx, "blauw")
+        );
+
+        return {
         id: String(b.id),
         partij_nr: Number(b.partij_nr),
         discipline: b.discipline,
         klasse: pick(b.klasse, b.bout_klasse, b.partij_klasse, b.klasse_rood, b.klasse_blauw, (resultByBoutId.get(String(b.id)) as any)?.klasse),
+        evenement_datum: eventDate ? String(eventDate) : null,
 
         rood_naam: b.rood_naam,
         rood_gym: b.rood_gym,
@@ -327,6 +521,8 @@ export default function OfficialsUitslagenDetailPage() {
           b.gewicht_strafpunt_rood,
           b.rood_gewicht_strafpunt
         ),
+        rood_geboortedatum: roodGeboortedatum ? String(roodGeboortedatum) : null,
+        rood_leeftijd: calcAgeOnEventDate(roodGeboortedatum, eventDate),
 
         blauw_naam: b.blauw_naam,
         blauw_gym: b.blauw_gym,
@@ -347,7 +543,10 @@ export default function OfficialsUitslagenDetailPage() {
           b.gewicht_strafpunt_blauw,
           b.blauw_gewicht_strafpunt
         ),
-      }));
+        blauw_geboortedatum: blauwGeboortedatum ? String(blauwGeboortedatum) : null,
+        blauw_leeftijd: calcAgeOnEventDate(blauwGeboortedatum, eventDate),
+      };
+      });
 
       setRows(nextRows);
 
@@ -551,6 +750,7 @@ export default function OfficialsUitslagenDetailPage() {
                   gym={current.rood_gym}
                   va={current.rood_va}
                   weight={current.rood_gewicht}
+                  age={current.rood_leeftijd}
                   minpunten={current.rood_minpunten}
                   selected={currentState?.winnaar_hoek === "rood"}
                   onSelect={() => chooseWinner("rood")}
@@ -573,6 +773,7 @@ export default function OfficialsUitslagenDetailPage() {
                   gym={current.blauw_gym}
                   va={current.blauw_va}
                   weight={current.blauw_gewicht}
+                  age={current.blauw_leeftijd}
                   minpunten={current.blauw_minpunten}
                   selected={currentState?.winnaar_hoek === "blauw"}
                   onSelect={() => chooseWinner("blauw")}

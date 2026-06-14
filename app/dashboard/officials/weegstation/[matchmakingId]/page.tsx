@@ -1191,100 +1191,111 @@ type FighterComplianceBadges = {
   keurmerkLabel: string;
 };
 
-function firstFilledValue(...values: unknown[]) {
-  for (const value of values) {
-    const s = String(value ?? "").trim();
-    if (s) return value;
-  }
+type ComplianceIssueKind = "licentie" | "keurmerk" | "startverbod";
+
+type ComplianceIssue = {
+  id: string;
+  bout_id: string | null;
+  partij_nr: number | null;
+  hoek: "rood" | "blauw" | null;
+  kind: ComplianceIssueKind;
+};
+
+function normalizeCorner(v: unknown): "rood" | "blauw" | null {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (s === "rood" || s === "red") return "rood";
+  if (s === "blauw" || s === "blue") return "blauw";
   return null;
 }
 
-function isLicentieOk(value: unknown) {
-  // controle_bout_context gebruikt rood_licentie/blauw_licentie als tekst.
-  // Alleen Ja/true/1 telt als geldige licentie. Nee, null, leeg of onbekend is fout.
-  if (value === true || value === 1) return true;
-  if (value === false || value === 0 || value == null) return false;
-
-  const s = String(value).trim().toLowerCase();
-  return s === "ja" || s === "true" || s === "1" || s === "yes";
+function normalizeReviewStatus(v: unknown) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase();
 }
 
-function isKeurmerkOk(value: unknown) {
-  // Keurmerk komt uit controle_bout_context.keurmerk_rood/keurmerk_blauw.
-  // Alleen echte true is goed. false, null, leeg of onbekend is fout.
-  if (value === true || value === 1) return true;
-  if (value === false || value === 0 || value == null) return false;
+function isOpenControleResult(row: any) {
+  const reviewStatus = normalizeReviewStatus(row?.review_status);
+  const resultaat = String(row?.resultaat ?? "")
+    .trim()
+    .toLowerCase();
+  const actieStatus = normalizeReviewStatus(row?.actie_status);
 
-  const s = String(value).trim().toLowerCase();
-  return s === "true" || s === "1" || s === "ja" || s === "yes";
-}
-
-function isStartverbodValue(value: unknown) {
-  if (value === true) return true;
-  if (value === false || value == null) return false;
-
-  const s = String(value).trim().toLowerCase();
-  if (!s) return false;
+  if (["ok", "goedgekeurd", "approved", "gesloten", "closed"].includes(resultaat)) {
+    return false;
+  }
 
   if (
     [
-      "0",
-      "false",
-      "nee",
-      "no",
-      "geen",
-      "geen startverbod",
-      "nvt",
-      "n.v.t.",
-      "ok",
-    ].includes(s)
+      "approved",
+      "goedgekeurd",
+      "akkoord",
+      "afgehandeld",
+      "resolved",
+      "gesloten",
+      "closed",
+      "done",
+    ].includes(reviewStatus)
   ) {
     return false;
   }
 
-  return (
-    s.includes("startverbod") ||
-    ["1", "true", "ja", "yes", "actief"].includes(s)
+  if (
+    [
+      "approved",
+      "goedgekeurd",
+      "akkoord",
+      "afgehandeld",
+      "resolved",
+      "gesloten",
+      "closed",
+      "done",
+    ].includes(actieStatus)
+  ) {
+    return false;
+  }
+
+  // NULL/leeg en expliciet open tellen als open melding.
+  return !reviewStatus || ["open", "pending", "actie", "nieuw"].includes(reviewStatus);
+}
+
+function getControleIssueKind(row: any): ComplianceIssueKind | null {
+  const text = normalizeSearchText(
+    [row?.rule_code, row?.rule, row?.boodschap, row?.original_resultaat].join(" "),
   );
+
+  if (!text) return null;
+  if (text.includes("startverbod") || text.includes("start verbod")) {
+    return "startverbod";
+  }
+  if (text.includes("keurmerk")) return "keurmerk";
+  if (text.includes("licentie")) return "licentie";
+
+  return null;
 }
 
 function getFighterComplianceBadges(
   row: WeighInBout,
   corner: "red" | "blue",
 ): FighterComplianceBadges {
-  const anyRow = row as any;
-  const nlPrefix = corner === "red" ? "rood" : "blauw";
-
-  const licentieValue = firstFilledValue(
-    anyRow[`${nlPrefix}_licentie`],
-    anyRow[`${nlPrefix}_heeft_licentie`],
-    anyRow[`licentie_${nlPrefix}`],
+  const issues = (((row as any)._open_compliance_issues ?? []) as ComplianceIssue[]).filter(
+    (issue) => !issue.hoek || issue.hoek === (corner === "red" ? "rood" : "blauw"),
   );
 
-  const keurmerkValue = firstFilledValue(
-    anyRow[`keurmerk_${nlPrefix}`],
-    anyRow[`${nlPrefix}_keurmerk`],
-    anyRow[`${nlPrefix}_heeft_keurmerk`],
-  );
-
-  const startverbodValue = firstFilledValue(
-    anyRow[`${nlPrefix}_heeft_startverbod`],
-    anyRow[`startverbod_${nlPrefix}`],
-    anyRow[`${nlPrefix}_startverbod`],
-    anyRow[`${nlPrefix}_start_verbod`],
-  );
-
-  const licentieOk = isLicentieOk(licentieValue);
-  const startverbod = isStartverbodValue(startverbodValue);
-  const keurmerkOk = isKeurmerkOk(keurmerkValue);
+  const hasLicentieIssue = issues.some((issue) => issue.kind === "licentie");
+  const hasKeurmerkIssue = issues.some((issue) => issue.kind === "keurmerk");
+  const hasStartverbodIssue = issues.some((issue) => issue.kind === "startverbod");
 
   return {
-    licentieOk,
-    licentieLabel: licentieOk ? "Licentie OK" : "Geen licentie",
-    startverbod,
-    startverbodLabel: startverbod ? "STARTVERBOD" : "Geen startverbod",
-    keurmerkOk,
-    keurmerkLabel: keurmerkOk ? "Keurmerk OK" : "Geen keurmerk",
+    licentieOk: !hasLicentieIssue,
+    licentieLabel: hasLicentieIssue ? "Geen licentie" : "Licentie OK",
+    startverbod: hasStartverbodIssue,
+    startverbodLabel: hasStartverbodIssue ? "STARTVERBOD" : "Geen startverbod",
+    keurmerkOk: !hasKeurmerkIssue,
+    keurmerkLabel: hasKeurmerkIssue ? "Geen keurmerk" : "Keurmerk OK",
   };
 }
 
@@ -1460,87 +1471,69 @@ export default function WeegstationDetailPage() {
       ),
     );
 
-    let controleQuery = supabase
-      .from("controle_bout_context")
+    let resultatenQuery = supabase
+      .from("controle_resultaten")
       .select(
-        "id, controle_run_id, bout_id, partij_nr, created_at, updated_at, rood_licentie, blauw_licentie, rood_heeft_startverbod, blauw_heeft_startverbod, keurmerk_rood, keurmerk_blauw",
+        "id, controle_run_id, run_id, bout_id, partij_nr, rule, rule_code, resultaat, original_resultaat, boodschap, hoek, review_status, actie_status, created_at",
       )
       .eq("matchmaking_id", mmId)
       .order("created_at", { ascending: false });
 
-    // Wanneer weigh_in_bouts aan een controle_run gekoppeld is, gebruik dan exact
-    // die run. Zo pakken we niet per ongeluk een oude contextregel zonder badges.
+    // Gebruik dezelfde controlerun als de weeglijst wanneer die bekend is.
+    // Zonder run-id vallen we terug op alle controle_resultaten van deze matchmaking.
     if (controleRunIds.length > 0) {
-      controleQuery = controleQuery.in("controle_run_id", controleRunIds);
+      resultatenQuery = resultatenQuery.or(
+        `controle_run_id.in.(${controleRunIds.join(",")}),run_id.in.(${controleRunIds.join(",")})`,
+      );
     }
 
-    const { data: controleRows, error: controleErr } = await controleQuery;
+    const { data: controleResultaten, error: resultatenErr } =
+      await resultatenQuery;
 
-    if (controleErr) {
+    if (resultatenErr) {
       console.warn(
-        "Controle context voor weegstation badges kon niet geladen worden:",
-        controleErr.message,
+        "Controle resultaten voor weegstation badges konden niet geladen worden:",
+        resultatenErr.message,
       );
       return baseRows;
     }
 
-    const hasUsableBadgeData = (ctx: any) =>
-      ctx?.rood_licentie != null ||
-      ctx?.blauw_licentie != null ||
-      ctx?.rood_heeft_startverbod != null ||
-      ctx?.blauw_heeft_startverbod != null ||
-      ctx?.keurmerk_rood != null ||
-      ctx?.keurmerk_blauw != null;
+    const openComplianceIssues = (controleResultaten ?? [])
+      .filter((result: any) => isOpenControleResult(result))
+      .map((result: any): ComplianceIssue | null => {
+        const kind = getControleIssueKind(result);
+        if (!kind) return null;
 
-    const applyControleBadges = (row: WeighInBout, ctx: any): WeighInBout => ({
-      ...row,
-      rood_licentie: ctx.rood_licentie ?? row.rood_licentie,
-      blauw_licentie: ctx.blauw_licentie ?? row.blauw_licentie,
-      rood_heeft_startverbod:
-        ctx.rood_heeft_startverbod ?? row.rood_heeft_startverbod,
-      blauw_heeft_startverbod:
-        ctx.blauw_heeft_startverbod ?? row.blauw_heeft_startverbod,
-      keurmerk_rood: ctx.keurmerk_rood ?? row.keurmerk_rood,
-      keurmerk_blauw: ctx.keurmerk_blauw ?? row.keurmerk_blauw,
-    });
+        return {
+          id: String(result?.id ?? ""),
+          bout_id: result?.bout_id ? String(result.bout_id) : null,
+          partij_nr:
+            result?.partij_nr == null || Number.isNaN(Number(result.partij_nr))
+              ? null
+              : Number(result.partij_nr),
+          hoek: normalizeCorner(result?.hoek),
+          kind,
+        };
+      })
+      .filter((issue): issue is ComplianceIssue => !!issue);
 
     return baseRows.map((row) => {
-      const rowControleRunId = String(
-        (row as any)?.controle_run_id ?? "",
-      ).trim();
       const rowBoutId = String((row as any)?.bout_id ?? "").trim();
       const rowPartijNr = Number(row.partij_nr);
 
-      // 1. Beste match: dezelfde controle_run + bout_id.
-      // 2. Daarna: dezelfde controle_run + partij_nr.
-      // 3. Fallback: bout_id of partij_nr, maar alleen als er bruikbare badge-data is.
-      const ctx =
-        (controleRows ?? []).find((c: any) => {
-          const sameRun =
-            !rowControleRunId ||
-            String(c?.controle_run_id ?? "").trim() === rowControleRunId;
-          const sameBout =
-            rowBoutId && String(c?.bout_id ?? "").trim() === rowBoutId;
-          return sameRun && sameBout && hasUsableBadgeData(c);
-        }) ??
-        (controleRows ?? []).find((c: any) => {
-          const sameRun =
-            !rowControleRunId ||
-            String(c?.controle_run_id ?? "").trim() === rowControleRunId;
-          const samePartij = Number(c?.partij_nr) === rowPartijNr;
-          return sameRun && samePartij && hasUsableBadgeData(c);
-        }) ??
-        (controleRows ?? []).find((c: any) => {
-          const sameBout =
-            rowBoutId && String(c?.bout_id ?? "").trim() === rowBoutId;
-          return sameBout && hasUsableBadgeData(c);
-        }) ??
-        (controleRows ?? []).find((c: any) => {
-          const samePartij = Number(c?.partij_nr) === rowPartijNr;
-          return samePartij && hasUsableBadgeData(c);
-        });
+      const rowIssues = openComplianceIssues.filter((issue) => {
+        const sameBout =
+          rowBoutId && issue.bout_id && String(issue.bout_id).trim() === rowBoutId;
+        const samePartij =
+          issue.partij_nr != null && Number(issue.partij_nr) === rowPartijNr;
 
-      return ctx ? applyControleBadges(row, ctx) : row;
+        return sameBout || samePartij;
+      });
+
+      return {
+        ...row,
+        _open_compliance_issues: rowIssues,
+      } as WeighInBout;
     });
   }
 
@@ -1866,8 +1859,8 @@ export default function WeegstationDetailPage() {
 
   function selectFighter(item: FighterResult) {
     // Gebruik altijd de meest actuele row uit state. Daarmee krijgt de geselecteerde
-    // vechter direct de verrijkte licentie/keurmerk/startverbod badges uit
-    // controle_bout_context, ook vóór de eerste keer opslaan.
+    // vechter direct de open controle_resultaten badges. Goedgekeurde meldingen
+    // tellen hier niet meer mee.
     const currentRow = rows.find((row) => row.id === item.boutId) ?? item.bout;
     setSelectedFighter({ ...item, bout: currentRow });
     setTimeout(() => activeInputRef.current?.focus(), 40);

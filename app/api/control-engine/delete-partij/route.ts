@@ -13,7 +13,7 @@ const supabaseAdmin = createClient(
 function asUuid(v: any): string | null {
   const s = String(v ?? "").trim();
   if (!s) return null;
-  const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+  const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
   return ok ? s : null;
 }
 
@@ -21,13 +21,30 @@ function asUuid(v: any): string | null {
  * Voer een supabase query uit, maar negeer fouten (best effort).
  * Handig voor "kolom bestaat niet" of "tabel bestaat niet" scenario's.
  */
-async function bestEffort<T>(promise: any): Promise<null> {
+async function bestEffort(promise: any): Promise<boolean> {
   try {
     await promise;
+    return true;
   } catch {
     // bewust negeren
+    return false;
   }
-  return null;
+}
+
+async function getControleRunIds(matchmaking_id: string, controle_run_id: string | null) {
+  const ids = new Set<string>();
+  if (controle_run_id) ids.add(controle_run_id);
+
+  const { data } = await supabaseAdmin
+    .from("controle_runs")
+    .select("id")
+    .eq("matchmaking_id", matchmaking_id);
+
+  for (const run of data ?? []) {
+    if (run?.id) ids.add(String(run.id));
+  }
+
+  return [...ids];
 }
 
 export async function POST(req: Request) {
@@ -52,6 +69,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "partij_nr ontbreekt." }, { status: 400 });
     }
 
+    const controleRunIds = await getControleRunIds(matchmaking_id, controle_run_id);
+
+    /**
+     * BELANGRIJK:
+     * Een verwijderde partij mag NIET zorgen dat partij_nr's opschuiven.
+     * Daarom doen we hier nergens een update zoals partij_nr = partij_nr - 1.
+     * We ruimen alleen data op van exact dit partij_nr / bout_id.
+     */
+
     // 1) dispensatie_requests
     await bestEffort(
       supabaseAdmin
@@ -62,99 +88,242 @@ export async function POST(req: Request) {
         .throwOnError()
     );
 
-    // 2) controle_resultaten
-    if (controle_run_id) {
-      await bestEffort(
-        supabaseAdmin
-          .from("controle_resultaten")
-          .delete()
-          .eq("controle_run_id", controle_run_id)
-          .eq("partij_nr", partij_nr)
-          .throwOnError()
-      );
-    } else {
-      await bestEffort(
-        supabaseAdmin
-          .from("controle_resultaten")
-          .delete()
-          .eq("matchmaking_id", matchmaking_id)
-          .eq("partij_nr", partij_nr)
-          .throwOnError()
-      );
-
-      // fallback voor oudere data waar matchmaking_id niet op controle_resultaten staat:
-      const { data: runs } = await supabaseAdmin
-        .from("controle_runs")
-        .select("id")
-        .eq("matchmaking_id", matchmaking_id);
-
-      for (const run of runs ?? []) {
-        await bestEffort(
-          supabaseAdmin
-            .from("controle_resultaten")
-            .delete()
-            .eq("controle_run_id", run.id)
-            .eq("partij_nr", partij_nr)
-            .throwOnError()
-        );
-      }
-    }
-
-    // 3) controle_bout_context
-    {
-      let q = supabaseAdmin
-        .from("controle_bout_context")
-        .delete()
-        .eq("matchmaking_id", matchmaking_id)
-        .eq("partij_nr", partij_nr);
-
-      if (controle_run_id) q = q.eq("controle_run_id", controle_run_id);
-
-      await bestEffort(q.throwOnError());
-    }
-
-    // 4) controle_audit_events  <-- BELANGRIJK voor VA gewijzigd / oude rapportregels
-    if (controle_run_id) {
-      await bestEffort(
-        supabaseAdmin
-          .from("controle_audit_events")
-          .delete()
-          .eq("matchmaking_id", matchmaking_id)
-          .eq("controle_run_id", controle_run_id)
-          .eq("partij_nr", partij_nr)
-          .throwOnError()
-      );
-    } else {
-      await bestEffort(
-        supabaseAdmin
-          .from("controle_audit_events")
-          .delete()
-          .eq("matchmaking_id", matchmaking_id)
-          .eq("partij_nr", partij_nr)
-          .throwOnError()
-      );
-    }
-
-    // 5) matchmaking_bouts_raw
     if (bout_id) {
       await bestEffort(
         supabaseAdmin
-          .from("matchmaking_bouts_raw")
+          .from("dispensatie_requests")
           .delete()
-          // @ts-ignore
-          .or(`bout_uid.eq.${bout_id},id.eq.${bout_id}`)
+          .eq("matchmaking_id", matchmaking_id)
+          // @ts-ignore oudere database kan bout_id missen
+          .eq("bout_id", bout_id)
           .throwOnError()
       );
     }
 
+    // 2) controle_resultaten: altijd alle runs van deze matchmaking opschonen.
+    // Dit voorkomt dat oude resultaten van partij 12 later aan een andere partij 12 lijken te hangen.
     await bestEffort(
       supabaseAdmin
-        .from("matchmaking_bouts_raw")
+        .from("controle_resultaten")
         .delete()
         .eq("matchmaking_id", matchmaking_id)
         .eq("partij_nr", partij_nr)
         .throwOnError()
     );
+
+    for (const runId of controleRunIds) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_resultaten")
+          .delete()
+          .eq("controle_run_id", runId)
+          .eq("partij_nr", partij_nr)
+          .throwOnError()
+      );
+    }
+
+    if (bout_id) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_resultaten")
+          .delete()
+          // @ts-ignore oudere database kan bout_id missen
+          .eq("bout_id", bout_id)
+          .throwOnError()
+      );
+    }
+
+    // 3) controle_bout_context
+    await bestEffort(
+      supabaseAdmin
+        .from("controle_bout_context")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("partij_nr", partij_nr)
+        .throwOnError()
+    );
+
+    for (const runId of controleRunIds) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_bout_context")
+          .delete()
+          .eq("controle_run_id", runId)
+          .eq("partij_nr", partij_nr)
+          .throwOnError()
+      );
+    }
+
+    if (bout_id) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_bout_context")
+          .delete()
+          // @ts-ignore oudere database kan bout_id missen
+          .eq("bout_id", bout_id)
+          .throwOnError()
+      );
+    }
+
+    // 4) controle_uitslagen: ook opschonen, anders kan de oude context blijven terugkomen.
+    await bestEffort(
+      supabaseAdmin
+        .from("controle_uitslagen")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("partij_nr", partij_nr)
+        .throwOnError()
+    );
+
+    for (const runId of controleRunIds) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_uitslagen")
+          .delete()
+          .eq("controle_run_id", runId)
+          .eq("partij_nr", partij_nr)
+          .throwOnError()
+      );
+    }
+
+    if (bout_id) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_uitslagen")
+          .delete()
+          // @ts-ignore oudere database kan bout_id missen
+          .eq("bout_id", bout_id)
+          .throwOnError()
+      );
+    }
+
+    // 5) controle_audit_events  <-- BELANGRIJK voor VA gewijzigd / oude rapportregels
+    await bestEffort(
+      supabaseAdmin
+        .from("controle_audit_events")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("partij_nr", partij_nr)
+        .throwOnError()
+    );
+
+    for (const runId of controleRunIds) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_audit_events")
+          .delete()
+          .eq("matchmaking_id", matchmaking_id)
+          .eq("controle_run_id", runId)
+          .eq("partij_nr", partij_nr)
+          .throwOnError()
+      );
+    }
+
+    if (bout_id) {
+      await bestEffort(
+        supabaseAdmin
+          .from("controle_audit_events")
+          .delete()
+          .eq("matchmaking_id", matchmaking_id)
+          // @ts-ignore oudere database kan bout_id missen
+          .eq("bout_id", bout_id)
+          .throwOnError()
+      );
+    }
+
+    // 6) weegstation / uitslagen data voor exact deze partij verwijderen.
+    await bestEffort(
+      supabaseAdmin
+        .from("weigh_in_bouts")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("partij_nr", partij_nr)
+        .throwOnError()
+    );
+
+    await bestEffort(
+      supabaseAdmin
+        .from("uitslagen_bouts")
+        .delete()
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("partij_nr", partij_nr)
+        .throwOnError()
+    );
+
+    if (bout_id) {
+      await bestEffort(
+        supabaseAdmin
+          .from("weigh_in_bouts")
+          .delete()
+          // @ts-ignore oudere database kan bout_id missen
+          .eq("bout_id", bout_id)
+          .throwOnError()
+      );
+
+      await bestEffort(
+        supabaseAdmin
+          .from("uitslagen_bouts")
+          .delete()
+          // @ts-ignore oudere database kan bout_id missen
+          .eq("bout_id", bout_id)
+          .throwOnError()
+      );
+    }
+
+    /**
+     * 7) matchmaking_bouts_raw
+     * Soft delete is bewust beter dan fysiek verwijderen:
+     * - partij_nr 12 blijft historisch partij_nr 12
+     * - partij_nr 13 wordt dus NIET ineens 12
+     * - schermen die .neq("verwijderd", true) gebruiken tonen hem niet meer
+     *
+     * Als de kolom "verwijderd" in een oude database niet bestaat, doen we daarna
+     * alsnog een fysieke delete als fallback.
+     */
+    const softDeletedByPartijNr = await bestEffort(
+      supabaseAdmin
+        .from("matchmaking_bouts_raw")
+        .update({ verwijderd: true })
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("partij_nr", partij_nr)
+        .throwOnError()
+    );
+
+    let softDeletedByBoutId = false;
+    if (bout_id) {
+      softDeletedByBoutId = await bestEffort(
+        supabaseAdmin
+          .from("matchmaking_bouts_raw")
+          .update({ verwijderd: true })
+          // @ts-ignore
+          .or(`bout_uid.eq.${bout_id},id.eq.${bout_id},bout_id.eq.${bout_id}`)
+          .throwOnError()
+      );
+    }
+
+    // Fallback: alleen voor databases zonder soft-delete kolom.
+    // Geen enkele hernummering uitvoeren.
+    if (!softDeletedByPartijNr && !softDeletedByBoutId) {
+      await bestEffort(
+        supabaseAdmin
+          .from("matchmaking_bouts_raw")
+          .delete()
+          .eq("matchmaking_id", matchmaking_id)
+          .eq("partij_nr", partij_nr)
+          .throwOnError()
+      );
+
+      if (bout_id) {
+        await bestEffort(
+          supabaseAdmin
+            .from("matchmaking_bouts_raw")
+            .delete()
+            // @ts-ignore
+            .or(`bout_uid.eq.${bout_id},id.eq.${bout_id},bout_id.eq.${bout_id}`)
+            .throwOnError()
+        );
+      }
+    }
 
     return NextResponse.json({
       ok: true,
@@ -162,7 +331,9 @@ export async function POST(req: Request) {
         matchmaking_id,
         partij_nr,
         controle_run_id: controle_run_id ?? null,
+        controle_run_ids: controleRunIds,
         bout_id: bout_id ?? null,
+        renumbered: false,
       },
       by: {
         user_id: user?.userId ?? user?.user?.id ?? null,

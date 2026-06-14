@@ -121,6 +121,64 @@ async function getLatestToernooiContextRows(admin: any, matchmakingId: string) {
   });
 }
 
+
+function getScraperGeboortedatum(ctx: any, side: "rood" | "blauw"): string | null {
+  const raw = parseRawJson(ctx?.raw_json);
+
+  // Geboortedatum hoort uit de scraper/FightPassport te komen.
+  // Gebruik daarom eerst alle *_fp / scraper-varianten en pas daarna oude fallbackvelden.
+  return firstText(
+    ctx?.[`${side}_geboortedatum_fp`],
+    ctx?.[`${side}_geboortedatum_fightpassport`],
+    ctx?.[`${side}_birthdate_fp`],
+    ctx?.[`${side}_birth_date_fp`],
+    ctx?.[`${side}_dob_fp`],
+    raw?.[`${side}_geboortedatum_fp`],
+    raw?.[`${side}_geboortedatum_fightpassport`],
+    raw?.[`${side}_birthdate_fp`],
+    raw?.[`${side}_birth_date_fp`],
+    raw?.[`${side}_dob_fp`],
+    ctx?.[`${side}_geboortedatum`],
+    ctx?.[`geboortedatum_${side}`],
+    ctx?.[`${side}_birthdate`],
+    ctx?.[`${side}_birth_date`],
+    ctx?.[`${side}_dob`],
+    raw?.[`${side}_geboortedatum`],
+    raw?.[`geboortedatum_${side}`],
+    raw?.[`${side}_birthdate`],
+    raw?.[`${side}_birth_date`],
+    raw?.[`${side}_dob`],
+    ctx?.[`${side}_geboortedatum_mm`]
+  );
+}
+
+function getToernooiScraperGeboortedatum(ctx: any): string | null {
+  const raw = parseRawJson(ctx?.raw_json);
+
+  return firstText(
+    ctx?.geboortedatum_fp,
+    ctx?.fighter_geboortedatum_fp,
+    ctx?.birthdate_fp,
+    ctx?.birth_date_fp,
+    ctx?.dob_fp,
+    raw?.geboortedatum_fp,
+    raw?.fighter_geboortedatum_fp,
+    raw?.birthdate_fp,
+    raw?.birth_date_fp,
+    raw?.dob_fp,
+    ctx?.geboortedatum,
+    ctx?.fighter_geboortedatum,
+    ctx?.birthdate,
+    ctx?.birth_date,
+    ctx?.dob,
+    raw?.geboortedatum,
+    raw?.fighter_geboortedatum,
+    raw?.birthdate,
+    raw?.birth_date,
+    raw?.dob
+  );
+}
+
 function makeBoutBasePayload(ctx: any, fallbackBondteam: string | null) {
   const leeftijdType = getLeeftijdType(ctx);
 
@@ -141,16 +199,14 @@ function makeBoutBasePayload(ctx: any, fallbackBondteam: string | null) {
     rood_naam: firstText(ctx.rood_naam_mm, ctx.rood_naam_fp),
     rood_gym: cleanText(ctx.rood_gym_mm),
     rood_va: cleanText(ctx.rood_va_mm),
-    rood_geboortedatum:
-      ctx.rood_geboortedatum_mm ?? ctx.rood_geboortedatum_fp ?? null,
+    rood_geboortedatum: getScraperGeboortedatum(ctx, "rood"),
     rood_leeftijd_event:
       ctx.rood_leeftijd_event ?? ctx.rood_leeftijd_mm ?? null,
     rood_doorgegeven_gewicht: ctx.rood_gewicht_mm ?? null,
     blauw_naam: firstText(ctx.blauw_naam_mm, ctx.blauw_naam_fp),
     blauw_gym: cleanText(ctx.blauw_gym_mm),
     blauw_va: cleanText(ctx.blauw_va_mm),
-    blauw_geboortedatum:
-      ctx.blauw_geboortedatum_mm ?? ctx.blauw_geboortedatum_fp ?? null,
+    blauw_geboortedatum: getScraperGeboortedatum(ctx, "blauw"),
     blauw_leeftijd_event:
       ctx.blauw_leeftijd_event ?? ctx.blauw_leeftijd_mm ?? null,
     blauw_doorgegeven_gewicht: ctx.blauw_gewicht_mm ?? null,
@@ -184,7 +240,7 @@ function makeToernooiBasePayload(
     rood_naam: firstText(ctx.naam_mm, ctx.naam_fp, ctx.naam),
     rood_gym: cleanText(ctx.sportschool_mm ?? ctx.sportschool),
     rood_va: cleanText(ctx.va_nummer ?? ctx.fighter_id),
-    rood_geboortedatum: ctx.geboortedatum ?? null,
+    rood_geboortedatum: getToernooiScraperGeboortedatum(ctx),
     rood_leeftijd_event: ctx.leeftijd_event ?? null,
     rood_doorgegeven_gewicht: ctx.gewicht ?? null,
     blauw_naam: null,

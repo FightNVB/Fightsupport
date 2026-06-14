@@ -1540,6 +1540,13 @@ function getBoutIdForReorder(r: AnyRow): string | null {
   return null;
 }
 
+function getRealPartijNr(r: AnyRow): number | null {
+  const raw = r?.partij_nr;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) return Number(raw.trim());
+  return null;
+}
+
 function arrayMove<T>(list: T[], from: number, to: number): T[] {
   const copy = [...list];
   const [item] = copy.splice(from, 1);
@@ -2346,17 +2353,19 @@ export default function ControleMatchmakingPage() {
   }
 
   function getVisualPartijNr(row: AnyRow, indexInView: number) {
-    if (!lineupMode) return Number(row?.partij_nr ?? indexInView + 1);
-    return indexInView + 1;
+    // Partijnummers zijn historische sleutels voor controle_resultaten.
+    // Na verwijderen mag een gat blijven bestaan: nummer 5 moet verdwijnen,
+    // niet visueel of bij opslaan opnieuw aan partij 6 gekoppeld worden.
+    return getRealPartijNr(row) ?? indexInView + 1;
   }
 
   function hasOrderChanges() {
     if (orderedRows.length !== rows.length) return false;
 
     for (let i = 0; i < orderedRows.length; i += 1) {
-      const visualNr = i + 1;
-      const currentNr = Number(orderedRows[i]?.partij_nr ?? 0);
-      if (currentNr !== visualNr) return true;
+      const originalKey = getStableRowKey(rows[i] ?? {});
+      const currentKey = getStableRowKey(orderedRows[i] ?? {});
+      if (originalKey !== currentKey) return true;
       if (orderedRows[i]?.__swapped_corners) return true;
     }
 
@@ -2418,13 +2427,12 @@ export default function ControleMatchmakingPage() {
     const items = orderedRows.map((r, index) => ({
       ctx_row_id: getControleContextId(r),
       bout_id: getBoutIdForReorder(r),
-      old_partij_nr:
-        typeof r?.partij_nr === "number"
-          ? r.partij_nr
-          : typeof r?.partij_nr === "string" && /^\d+$/.test(r.partij_nr.trim())
-            ? Number(r.partij_nr.trim())
-            : null,
-      partij_nr: index + 1,
+      old_partij_nr: getRealPartijNr(r),
+      // Niet dichtnummeren na verwijderen. partij_nr blijft dezelfde sleutel,
+      // anders kunnen oude controle_resultaten aan een andere partij gaan hangen.
+      partij_nr: getRealPartijNr(r),
+      lineup_position: index + 1,
+      sort_order: index + 1,
 
       // Hoekwissel moet naar de API mee, anders wordt rood/blauw alleen lokaal
       // in React gewisseld en na opslaan/reload weer teruggezet.

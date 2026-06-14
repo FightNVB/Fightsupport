@@ -164,11 +164,66 @@ function clearTemplateData(ws: ExcelJS.Worksheet, startRow = 2) {
   }
 }
 
+
+function headerText(ws: ExcelJS.Worksheet, col: number): string {
+  const value = ws.getRow(1).getCell(col).value;
+  if (value == null) return "";
+  if (typeof value === "object" && "richText" in (value as any)) {
+    return String((value as any).richText?.map((x: any) => x.text).join("") ?? "")
+      .trim()
+      .toLowerCase();
+  }
+  return String(value).trim().toLowerCase();
+}
+
+function findHeaderColumn(
+  ws: ExcelJS.Worksheet,
+  predicate: (header: string) => boolean,
+): number | null {
+  const maxCol = Math.max(ws.columnCount || 0, 13);
+  for (let col = 1; col <= maxCol; col += 1) {
+    const h = headerText(ws, col);
+    if (h && predicate(h)) return col;
+  }
+  return null;
+}
+
+function getLineupColumns(ws: ExcelJS.Worksheet) {
+  const rondesCol =
+    findHeaderColumn(
+      ws,
+      (h) =>
+        (h.includes("ronde") || h.includes("rondes") || h.includes("tijd")) &&
+        !h.includes("minpunt") &&
+        !h.includes("min punt") &&
+        !h.includes("minpunten"),
+    ) ?? 12;
+
+  const minpuntCol =
+    findHeaderColumn(
+      ws,
+      (h) =>
+        h.includes("minpunt") ||
+        h.includes("min punt") ||
+        h.includes("minpunten") ||
+        h.includes("strafpunt") ||
+        h.includes("straf punt"),
+    ) ?? 13;
+
+  const titelpartijCol = findHeaderColumn(
+    ws,
+    (h) => h.includes("titel") || h.includes("title"),
+  );
+
+  return { rondesCol, minpuntCol, titelpartijCol };
+}
+
 function applyTemplateRowStyle(
   ws: ExcelJS.Worksheet,
   rowNumber: number,
   templateStyles: Record<number, Partial<ExcelJS.Style>>,
   templateHeight: number | undefined,
+  columns?: { rondesCol: number; minpuntCol: number; titelpartijCol: number | null },
 ) {
   const row = ws.getRow(rowNumber);
   if (templateHeight) row.height = templateHeight;
@@ -204,10 +259,11 @@ function setLineupCellValues(
 
   const row = ws.getRow(rowNumber);
 
-  // Definitieve lineup volgt exact het template A t/m M:
-  // A Partij, B Discipline, C Klasse, D Rood naam, E Rood sportschool,
-  // F Rood VA, G VS, H Blauw naam, I Blauw sportschool, J Blauw VA,
-  // K Titelpartij, L Ronde tijden, M Min punt.
+  // Definitieve lineup volgt de template-koptekst voor de laatste kolommen.
+  // Daardoor blijven rondetijden en minpunten goed staan, ook als de template
+  // geen titelpartij-kolom heeft of kolommen anders gepositioneerd zijn.
+  const lineupColumns = columns ?? getLineupColumns(ws);
+
   row.getCell(1).value = values.partij_nr;
   row.getCell(2).value = s(values.discipline);
   row.getCell(3).value = s(values.klasse);
@@ -218,9 +274,14 @@ function setLineupCellValues(
   row.getCell(8).value = s(values.blauw_naam);
   row.getCell(9).value = s(values.blauw_gym);
   row.getCell(10).value = vaNumberOrBlank(values.blauw_va);
-  row.getCell(11).value = s(values.titelpartij);
-  row.getCell(12).value = s(values.rondes);
-  row.getCell(13).value = s(values.minpunt);
+
+  if (lineupColumns.titelpartijCol) {
+    row.getCell(lineupColumns.titelpartijCol).value = s(values.titelpartij);
+  }
+
+  // Eerst rondetijden, daarna pas minpunten.
+  row.getCell(lineupColumns.rondesCol).value = s(values.rondes);
+  row.getCell(lineupColumns.minpuntCol).value = s(values.minpunt);
 
   // VA-kolommen als getal, zonder Excel-melding "getal opgeslagen als tekst".
   row.getCell(6).numFmt = "0";
@@ -845,6 +906,8 @@ export async function GET(req: Request) {
     templateStyles[col] = cloneExcelStyle(templateRow.getCell(col).style);
   }
 
+  const lineupColumns = getLineupColumns(ws);
+
   clearTemplateData(ws, 2);
 
   const seenToernooiFighters = new Set<string>();
@@ -879,7 +942,7 @@ export async function GET(req: Request) {
       minpunt: getMinPuntForLineup(b, decision),
       titelpartij: titelpartij ? "Ja" : "",
       vs: "VS",
-    }, templateStyles, templateHeight);
+    }, templateStyles, templateHeight, lineupColumns);
   }
 
   const toernooiGroups = new Map<string, any[]>();
@@ -931,7 +994,7 @@ export async function GET(req: Request) {
           minpunt: getMinPuntForLineup(b, decision),
           titelpartij: titelpartij ? "Ja" : "",
           vs: "",
-        }, templateStyles, templateHeight);
+        }, templateStyles, templateHeight, lineupColumns);
       }
     }
   }
