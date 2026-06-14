@@ -233,10 +233,11 @@ function warningHoek(row: ControleRow): "rood" | "blauw" | null {
 function isLineupBlokkadeRow(row: ControleRow) {
   if (isResolvedControleRow(row)) return false;
 
-  // Exact hetzelfde uitgangspunt als de voorlopige lineup:
-  // eerst mag alles mee behalve verbod/startverbod; daarna haalt de jury-lineup
-  // alleen de partijen met een open melding uit die voorlopige set.
-  return isHardNoRow(row) || hasVerbod(row) || isOpenLicentieOfKeurmerkRow(row);
+  // Definitieve/jury lineup en naar-uitslagen = voorlopige lineup minus ALLE open meldingen.
+  // Alleen een echte minpunt-regel mag mee, want dat is een strafpunt en geen blokkade/melding.
+  if (isActieMinpunt(row)) return false;
+
+  return true;
 }
 
 function isActieMinpunt(row: ControleRow) {
@@ -353,39 +354,23 @@ function mergeDecision(target: PartyDecision, source: PartyDecision) {
   target.warningReasons.push(...source.warningReasons);
 }
 
+function addWarningReason(decision: PartyDecision, row: ControleRow, fallback = "Open melding") {
+  const msg = s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || fallback;
+  const key = msg.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!key) return;
+  const exists = decision.warningReasons.some(
+    (x) => x.replace(/\s+/g, " ").trim().toLowerCase() === key,
+  );
+  if (!exists) decision.warningReasons.push(msg);
+}
+
 function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
   decision.hasControle = true;
 
-  const resultaat = norm(row.resultaat);
-
-  // Goedgekeurde/naar OK gezette meldingen blokkeren niet en tellen niet als open melding.
+  // Goedgekeurde/naar OK/INFO gezette regels zijn afgehandeld en mogen niet meer als melding meetellen.
   if (isResolvedControleRow(row)) return;
 
-  // Open licentie/keurmerk-meldingen worden niet als harde blokkade behandeld voor de
-  // voorlopige set, maar zorgen er wel voor dat de partij uit de definitieve jury-lineup valt.
-  if (isOpenLicentieOfKeurmerkRow(row)) {
-    const hoek = warningHoek(row);
-    if (hoek === "rood") decision.roodWarning = true;
-    else if (hoek === "blauw") decision.blauwWarning = true;
-    else decision.algemeneWarning = true;
-
-    const msg = s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || "Open licentie/keurmerk melding";
-    const key = msg.replace(/\s+/g, " ").trim().toLowerCase();
-    const exists = decision.warningReasons.some(
-      (x) => x.replace(/\s+/g, " ").trim().toLowerCase() === key,
-    );
-    if (!exists) decision.warningReasons.push(msg);
-    return;
-  }
-
-  // Alleen verbod/startverbod blokkeert de voorlopige set volledig.
-  if (isHardNoRow(row) || hasVerbod(row)) {
-    decision.blocked = true;
-    decision.blockedReasons.push("Verbod/startverbod aanwezig");
-    return;
-  }
-
-  // ACTIE minpunt mag door en telt alleen als strafpunt.
+  // Minpunt is geen open melding voor lineup-filtering; dit gaat alleen naar de kolom Min punt.
   if (isActieMinpunt(row)) {
     const hoek = minpuntHoek(row);
     if (hoek === "rood") decision.roodMinpunten += 1;
@@ -393,11 +378,20 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  // Alle andere oude/open controle-regels blokkeren hier niet, want de definitieve lineup
-  // moet gelijk zijn aan voorlopige lineup minus open meldingen.
-  if (resultaat === "actie" || isOpenReview(row.actie_status) || isOpenReview(row.review_status)) return;
-}
+  // Iedere andere open regel is een melding: zichtbaar in voorlopige lineup en reden om
+  // de partij uit definitieve/jury lineup en naar-uitslagen te houden.
+  const hoek = warningHoek(row);
+  if (hoek === "rood") decision.roodWarning = true;
+  else if (hoek === "blauw") decision.blauwWarning = true;
+  else decision.algemeneWarning = true;
 
+  addWarningReason(decision, row, "Open melding");
+
+  if (isHardNoRow(row) || hasVerbod(row)) {
+    decision.blocked = true;
+    decision.blockedReasons.push("Verbod/startverbod aanwezig");
+  }
+}
 function buildDecisions(rows: ControleRow[]) {
   const byKey = new Map<string, PartyDecision>();
   const byTournamentFighter = new Map<string, PartyDecision>();
@@ -618,17 +612,19 @@ export async function POST(req: NextRequest) {
       return jsonError("Alleen bondteam/officiële gebruikers of admin mogen naar uitslagen sturen.", 403);
     }
 
-    const { data: rawBouts, error: rawErr } = await supabaseAdmin
-      .from("matchmaking_bouts_raw")
+    const { data: weighRows, error: weighErr } = await supabaseAdmin
+      .from("weigh_in_bouts")
       .select("*")
       .eq("matchmaking_id", matchmakingId)
-      .or("verwijderd.is.null,verwijderd.eq.false")
       .order("partij_nr", { ascending: true });
 
-    if (rawErr) throw rawErr;
-    if (!rawBouts?.length) {
-      return jsonError("Geen actieve partijen gevonden in matchmaking_bouts_raw.", 404);
+    if (weighErr) throw weighErr;
+    if (!weighRows?.length) {
+      return jsonError("Geen partijen gevonden in weegstation. Bouw/ververs eerst het weegstation.", 404);
     }
+
+    // Naar uitslagen gebruikt exact dezelfde lijst, volgorde en context als het weegstation.
+    const rawBouts = weighRows;
 
     const { data: controleRows, error: controleErr } = await supabaseAdmin
       .from("controle_resultaten")
@@ -697,29 +693,29 @@ export async function POST(req: NextRequest) {
       return {
         uitslagen_run_id: uitslagenRunId,
         matchmaking_id: matchmakingId,
-        bron_bout_id: row.id,
+        bron_bout_id: row.bron_bout_id ?? row.matchmaking_bout_id ?? row.raw_bout_id ?? row.bout_id ?? row.id,
         // Belangrijk: uitslagen moet het echte partijnummer uit de definitieve lineup behouden.
         // Niet opnieuw nummeren met index + 1, want dan klopt de koppeling naar partij/detail/rapport niet meer
         // zodra er partijen zijn overgeslagen door open meldingen of verbod.
         partij_nr: n(row.partij_nr, index + 1),
         original_partij_nr: row.original_partij_nr ?? row.partij_nr,
-        discipline: row.discipline ?? null,
-        sub_discipline: row.sub_discipline ?? null,
-        klasse: row.klasse ?? null,
-        leeftijd_type: row.leeftijd_type ?? null,
-        geslacht: row.geslacht ?? null,
-        rood_naam: row.rood_naam ?? null,
-        rood_gym: row.rood_gym ?? null,
-        rood_va: row.va_rood ?? row.rood_va ?? row.rood_va_nummer ?? null,
-        rood_geboortedatum: row.rood_geboortedatum ?? null,
-        rood_gewicht_opgegeven: row.rood_gewicht ?? null,
-        rood_gewicht_gewogen: row.rood_gewogen_gewicht ?? null,
-        blauw_naam: row.blauw_naam ?? null,
-        blauw_gym: row.blauw_gym ?? null,
-        blauw_va: row.va_blauw ?? row.blauw_va ?? row.blauw_va_nummer ?? null,
-        blauw_geboortedatum: row.blauw_geboortedatum ?? null,
-        blauw_gewicht_opgegeven: row.blauw_gewicht ?? null,
-        blauw_gewicht_gewogen: row.blauw_gewogen_gewicht ?? null,
+        discipline: row.discipline ?? row.discipline_mm ?? null,
+        sub_discipline: row.sub_discipline ?? row.sub_discipline_mm ?? null,
+        klasse: row.klasse ?? row.klasse_mm ?? null,
+        leeftijd_type: row.leeftijd_type ?? row.leeftijd_type_mm ?? null,
+        geslacht: row.geslacht ?? row.geslacht_mm ?? null,
+        rood_naam: row.rood_naam ?? row.rood_naam_mm ?? row.rood_naam_fp ?? null,
+        rood_gym: row.rood_gym ?? row.rood_gym_mm ?? row.rood_gym_fp ?? null,
+        rood_va: row.va_rood ?? row.rood_va ?? row.rood_va_mm ?? row.rood_va_fp ?? row.rood_va_nummer ?? null,
+        rood_geboortedatum: row.rood_geboortedatum ?? row.rood_geboortedatum_mm ?? row.rood_geboortedatum_fp ?? null,
+        rood_gewicht_opgegeven: row.rood_gewicht_opgegeven ?? row.rood_gewicht ?? row.rood_doorgegeven_gewicht ?? row.rood_gewicht_mm ?? null,
+        rood_gewicht_gewogen: row.rood_gewicht_gewogen ?? row.rood_gewogen_gewicht ?? null,
+        blauw_naam: row.blauw_naam ?? row.blauw_naam_mm ?? row.blauw_naam_fp ?? null,
+        blauw_gym: row.blauw_gym ?? row.blauw_gym_mm ?? row.blauw_gym_fp ?? null,
+        blauw_va: row.va_blauw ?? row.blauw_va ?? row.blauw_va_mm ?? row.blauw_va_fp ?? row.blauw_va_nummer ?? null,
+        blauw_geboortedatum: row.blauw_geboortedatum ?? row.blauw_geboortedatum_mm ?? row.blauw_geboortedatum_fp ?? null,
+        blauw_gewicht_opgegeven: row.blauw_gewicht_opgegeven ?? row.blauw_gewicht ?? row.blauw_doorgegeven_gewicht ?? row.blauw_gewicht_mm ?? null,
+        blauw_gewicht_gewogen: row.blauw_gewicht_gewogen ?? row.blauw_gewogen_gewicht ?? null,
         max_gewicht: row.max_gewicht ?? null,
         max_gewicht_notatie: row.max_gewicht_notatie ?? null,
         max_gewicht_type: row.max_gewicht_type ?? null,

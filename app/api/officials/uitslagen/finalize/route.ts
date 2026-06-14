@@ -50,17 +50,6 @@ function missingColumn(error: any) {
   return msg.includes("could not find") || msg.includes("schema cache") || msg.includes("column") || msg.includes("42703");
 }
 
-function isOpenReview(v: unknown) {
-  const s = upper(v);
-  return s === "OPEN" || s === "PENDING" || s === "WACHT" || s === "WACHTEND";
-}
-
-function isApprovedStatus(v: unknown) {
-  const s = upper(v);
-  return ["GOEDGEKEURD", "APPROVED", "AKKOORD", "OK", "OPGELOST", "RESOLVED"].includes(s);
-}
-
-
 function pickFirst(...vals: any[]) {
   for (const v of vals) {
     const s = clean(v);
@@ -161,94 +150,6 @@ async function syncTalentstatusPartijen(supabase: any, matchmakingId: string) {
   return synced;
 }
 
-function blocksByControleResult(row: any) {
-  const rule = upper(row.rule);
-  const result = upper(row.resultaat);
-  const ruleCode = upper(row.rule_code);
-  const severity = upper(row.severity);
-  const reviewStatus = upper(row.review_status);
-  const actieStatus = upper(row.actie_status);
-  const boodschap = upper(row.boodschap);
-  const combined = `${rule} ${result} ${ruleCode} ${severity} ${reviewStatus} ${actieStatus} ${boodschap}`;
-
-  const isMinpunt =
-    rule.includes("MINPUNT") ||
-    ruleCode.includes("MINPUNT") ||
-    boodschap.includes("MINPUNT");
-
-  const isPureOk = result === "OK" || ruleCode === "OK" || isApprovedStatus(reviewStatus);
-  const isPureInfo = result === "INFO" || severity === "INFO";
-
-  // Weegstation status OK/INFO mag nooit blokkeren door een oude review_status=open.
-  // Weegstation status AFKEUR/AFGEKEURD blijft wel een harde blokkade.
-  if (rule === "WEEGSTATION_STATUS") {
-    return (
-      result === "AFKEUR" ||
-      result === "AFGEKEURD" ||
-      ruleCode === "AFKEUR" ||
-      ruleCode === "AFGEKEURD" ||
-      combined.includes("STARTVERBOD") ||
-      combined.includes("VERBOD")
-    );
-  }
-
-  // ACTIE minpunt rood/blauw is de enige ACTIE die door mag.
-  // Die moet als strafpunt mee naar uitslagen, maar mag finaliseren niet blokkeren.
-  if ((result === "ACTIE" || ruleCode.includes("ACTIE")) && isMinpunt) {
-    return false;
-  }
-
-  // OK en INFO mogen door, tenzij dezelfde regel expliciet een harde blokkade noemt.
-  if ((isPureOk || isPureInfo) && !(combined.includes("STARTVERBOD") || combined.includes("VERBOD"))) {
-    if (result !== "AFKEUR" && result !== "AFGEKEURD" && ruleCode !== "AFKEUR" && ruleCode !== "AFGEKEURD") {
-      return false;
-    }
-  }
-
-  // Startverbod / verbod altijd blokkeren.
-  if (combined.includes("STARTVERBOD") || combined.includes("VERBOD")) return true;
-
-  // Harde afkeur blokkeert.
-  if (result === "AFKEUR" || result === "AFGEKEURD" || ruleCode === "AFKEUR" || ruleCode === "AFGEKEURD") return true;
-
-  // Open/nodige dispensatie blokkeert. Verleend/goedgekeurd mag door.
-  const isDispensatie =
-    result === "DISPENSATIE" ||
-    rule.includes("DISPENSATIE") ||
-    ruleCode.includes("DISPENSATIE") ||
-    rule === "WEEGSTATION_DISPENSATIE";
-  const isVerleend =
-    result === "VERLEEND" ||
-    ruleCode === "VERLEEND" ||
-    combined.includes("DISPENSATIE VERLEEND") ||
-    isApprovedStatus(reviewStatus) ||
-    isApprovedStatus(actieStatus);
-  const isAfgewezen =
-    result === "AFGEWEZEN" ||
-    result === "AFGEKEURD" ||
-    ruleCode === "AFGEWEZEN" ||
-    combined.includes("AFGEWEZEN") ||
-    combined.includes("GEWEIGERD") ||
-    combined.includes("NIET VERLEEND");
-  const isNodig = result === "NODIG" || ruleCode === "NODIG" || result === "DISPENSATIE";
-
-  if (isAfgewezen) return true;
-  if (isDispensatie && !isVerleend) return true;
-  if (isNodig && !isVerleend) return true;
-
-  // Alle overige ACTIE/open review blokkeert.
-  if (
-    (result === "ACTIE" && !isMinpunt) ||
-    (ruleCode.includes("ACTIE") && !isMinpunt) ||
-    isOpenReview(reviewStatus) ||
-    isOpenReview(actieStatus)
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const userId = await getUserIdFromBearer(req);
@@ -276,21 +177,6 @@ export async function POST(req: NextRequest) {
 
     if (boutErr) return bad(boutErr.message, 500);
 
-    // uitslagen_bouts.partij_nr is opnieuw genummerd voor de uitslagenflow.
-    // controle_resultaten.partij_nr verwijst nog naar het originele matchmaking-partijnummer.
-    // Daarom controleren we hieronder op original_partij_nr, maar tonen we in meldingen
-    // het zichtbare uitslagen-partijnummer dat de official op deze pagina ziet.
-    const uitslagenNrByOriginal = new Map<number, number>();
-
-    for (const b of bouts ?? []) {
-      const originalNr = Number((b as any).original_partij_nr ?? (b as any).partij_nr);
-      const uitslagenNr = Number((b as any).partij_nr);
-
-      if (Number.isFinite(originalNr) && Number.isFinite(uitslagenNr)) {
-        uitslagenNrByOriginal.set(originalNr, uitslagenNr);
-      }
-    }
-
     const total = bouts?.length ?? 0;
     if (total <= 0) return bad("Geen partijen gevonden om te finaliseren.");
 
@@ -307,41 +193,9 @@ export async function POST(req: NextRequest) {
       return bad(`Nog niet alle uitslagen zijn ingevuld (${filled}/${total}).`);
     }
 
-    const controlePartijNrs = Array.from(
-      new Set(
-        (bouts ?? [])
-          .map((b: any) => Number((b as any).original_partij_nr ?? (b as any).partij_nr))
-          .filter((n) => Number.isFinite(n))
-      )
-    );
-
-    const { data: controles, error: ctrlErr } = await supabase
-      .from("controle_resultaten")
-      .select("id, partij_nr, bout_id, rule, resultaat, rule_code, severity, actie_status, review_status, boodschap")
-      .eq("matchmaking_id", matchmakingId)
-      .in("partij_nr", controlePartijNrs);
-
-    if (ctrlErr) return bad(ctrlErr.message, 500);
-
-    const blocked = (controles ?? []).filter(blocksByControleResult);
-
-    if (blocked.length > 0) {
-      const uniquePartijen = Array.from(
-        new Set(
-          blocked
-            .map((r: any) => {
-              const originalNr = Number(r.partij_nr);
-              return uitslagenNrByOriginal.get(originalNr) ?? originalNr;
-            })
-            .filter((n) => Number.isFinite(n))
-        )
-      ).sort((a, b) => a - b);
-      const preview = uniquePartijen.slice(0, 12).join(", ");
-      const extra = uniquePartijen.length > 12 ? ` + ${uniquePartijen.length - 12} meer` : "";
-      return bad(
-        `Niet naar admin gestuurd: ${uniquePartijen.length} partij(en) hebben nog afkeur, verbod, open actiepunt of open dispensatie. Partij(en): ${preview}${extra}.`
-      );
-    }
+    // In de uitslagenfase controleren we bewust niet meer op oude controle_resultaten.
+    // Open actiepunten/dispensaties/afkeuren zijn al afgehandeld vóór de definitieve lineup.
+    // Finaliseren blokkeert hier alleen nog als niet alle uitslagen zijn ingevuld.
 
     const now = new Date().toISOString();
 

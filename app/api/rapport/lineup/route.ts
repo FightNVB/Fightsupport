@@ -74,12 +74,14 @@ function getRondeTijden({
 
   if (titelpartij) return "5 rondes";
 
-  if (k.includes("J")) {
+  // Kickboksen jeugd/J/J+: alleen als beide vechters 16 jaar of ouder zijn 3x1,5 minuut.
+  // Zodra één van beide vechters jonger dan 16 is, blijft het 3x1 minuut.
+  if (k.includes("J") || k.includes("JEUGD")) {
     if (rAge >= 16 && bAge >= 16) return "3x1.5 min";
     return "3x1 min";
   }
 
-  if (k.includes("R")) return "3x1.5 min";
+  if (k.includes("R")) return "3x1 min";
   if (k.includes("N") || k.includes("NIEUWELING") || k.includes("NEWCOMER")) {
     return "3x1.5 min";
   }
@@ -89,6 +91,19 @@ function getRondeTijden({
   if (k.includes("A")) return "3x3 min";
 
   return "";
+}
+
+function getLeeftijdVoorRondetijd(b: any, side: "rood" | "blauw") {
+  return (
+    b?.[`${side}_leeftijd_event`] ??
+    b?.[`${side}_leeftijd`] ??
+    b?.[`${side}_leeftijd_mm`] ??
+    b?.[`${side}_leeftijd_fp`] ??
+    b?.[`${side}_age`] ??
+    parseRawJson(b?.raw_json)?.[`${side}_leeftijd_event`] ??
+    parseRawJson(b?.raw_json)?.[`${side}_leeftijd`] ??
+    0
+  );
 }
 
 function isToernooiBout(b: any): boolean {
@@ -383,10 +398,11 @@ function warningHoek(row: ControleRow): "rood" | "blauw" | null {
 function isLineupBlokkadeRow(row: ControleRow) {
   if (isResolvedControleRow(row)) return false;
 
-  // Exact hetzelfde uitgangspunt als de voorlopige lineup:
-  // eerst mag alles mee behalve verbod/startverbod; daarna haalt de jury-lineup
-  // alleen de partijen met een open melding uit die voorlopige set.
-  return isHardNoRow(row) || hasVerbod(row) || isOpenLicentieOfKeurmerkRow(row);
+  // Definitieve/jury lineup en naar-uitslagen = voorlopige lineup minus ALLE open meldingen.
+  // Alleen een echte minpunt-regel mag mee, want dat is een strafpunt en geen blokkade/melding.
+  if (isActieMinpunt(row)) return false;
+
+  return true;
 }
 
 function isActieMinpunt(row: ControleRow) {
@@ -503,39 +519,23 @@ function mergeDecision(target: PartyDecision, source: PartyDecision) {
   target.warningReasons.push(...source.warningReasons);
 }
 
+function addWarningReason(decision: PartyDecision, row: ControleRow, fallback = "Open melding") {
+  const msg = s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || fallback;
+  const key = msg.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!key) return;
+  const exists = decision.warningReasons.some(
+    (x) => x.replace(/\s+/g, " ").trim().toLowerCase() === key,
+  );
+  if (!exists) decision.warningReasons.push(msg);
+}
+
 function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
   decision.hasControle = true;
 
-  const resultaat = norm(row.resultaat);
-
-  // Goedgekeurde/naar OK gezette meldingen blokkeren niet en tellen niet als open melding.
+  // Goedgekeurde/naar OK/INFO gezette regels zijn afgehandeld en mogen niet meer als melding meetellen.
   if (isResolvedControleRow(row)) return;
 
-  // Open licentie/keurmerk-meldingen worden niet als harde blokkade behandeld voor de
-  // voorlopige set, maar zorgen er wel voor dat de partij uit de definitieve jury-lineup valt.
-  if (isOpenLicentieOfKeurmerkRow(row)) {
-    const hoek = warningHoek(row);
-    if (hoek === "rood") decision.roodWarning = true;
-    else if (hoek === "blauw") decision.blauwWarning = true;
-    else decision.algemeneWarning = true;
-
-    const msg = s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || "Open licentie/keurmerk melding";
-    const key = msg.replace(/\s+/g, " ").trim().toLowerCase();
-    const exists = decision.warningReasons.some(
-      (x) => x.replace(/\s+/g, " ").trim().toLowerCase() === key,
-    );
-    if (!exists) decision.warningReasons.push(msg);
-    return;
-  }
-
-  // Alleen verbod/startverbod blokkeert de voorlopige set volledig.
-  if (isHardNoRow(row) || hasVerbod(row)) {
-    decision.blocked = true;
-    decision.blockedReasons.push("Verbod/startverbod aanwezig");
-    return;
-  }
-
-  // ACTIE minpunt mag door en telt alleen als strafpunt.
+  // Minpunt is geen open melding voor lineup-filtering; dit gaat alleen naar de kolom Min punt.
   if (isActieMinpunt(row)) {
     const hoek = minpuntHoek(row);
     if (hoek === "rood") decision.roodMinpunten += 1;
@@ -543,11 +543,20 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  // Alle andere oude/open controle-regels blokkeren hier niet, want de definitieve lineup
-  // moet gelijk zijn aan voorlopige lineup minus open meldingen.
-  if (resultaat === "actie" || isOpenReview(row.actie_status) || isOpenReview(row.review_status)) return;
-}
+  // Iedere andere open regel is een melding: zichtbaar in voorlopige lineup en reden om
+  // de partij uit definitieve/jury lineup en naar-uitslagen te houden.
+  const hoek = warningHoek(row);
+  if (hoek === "rood") decision.roodWarning = true;
+  else if (hoek === "blauw") decision.blauwWarning = true;
+  else decision.algemeneWarning = true;
 
+  addWarningReason(decision, row, "Open melding");
+
+  if (isHardNoRow(row) || hasVerbod(row)) {
+    decision.blocked = true;
+    decision.blockedReasons.push("Verbod/startverbod aanwezig");
+  }
+}
 function buildDecisions(rows: ControleRow[]) {
   const byKey = new Map<string, PartyDecision>();
   const byTournamentFighter = new Map<string, PartyDecision>();
@@ -851,8 +860,8 @@ export async function GET(req: Request) {
     const rondes = getRondeTijden({
       discipline: b.discipline,
       klasse: b.klasse,
-      rood_leeftijd: b.rood_leeftijd,
-      blauw_leeftijd: b.blauw_leeftijd,
+      rood_leeftijd: getLeeftijdVoorRondetijd(b, "rood"),
+      blauw_leeftijd: getLeeftijdVoorRondetijd(b, "blauw"),
       titelpartij,
     });
 
@@ -887,8 +896,8 @@ export async function GET(req: Request) {
       const rondes = getRondeTijden({
         discipline: b.discipline,
         klasse: b.klasse,
-        rood_leeftijd: b.rood_leeftijd,
-        blauw_leeftijd: b.blauw_leeftijd,
+        rood_leeftijd: getLeeftijdVoorRondetijd(b, "rood"),
+        blauw_leeftijd: getLeeftijdVoorRondetijd(b, "blauw"),
         titelpartij,
       });
 

@@ -1487,7 +1487,14 @@ export default function PartijDetailPage() {
   }
 
   function canApproveRule(r: ControleResultaatRow) {
-    return canReviewResultaatForRoles(r, roleNames);
+    // Niet meer verbergen door client-side rol-detectie.
+    // De server/API controleert de echte rechten; de UI toont de knoppen voor elke open/niet-OK melding.
+    const res = normResultaat(r?.resultaat);
+    const reviewStatus = String(r?.review_status ?? "").trim().toLowerCase();
+    if (isApprovedOverride(r)) return false;
+    if (res === "ok") return false;
+    if (reviewStatus === "goedgekeurd" || reviewStatus === "approved") return false;
+    return true;
   }
 
   async function saveAantekeningen(resultaatId: string, text: string) {
@@ -1606,22 +1613,6 @@ export default function PartijDetailPage() {
     try {
       const row = regels.find((r) => r.id === resultaatId);
       if (row && !canApproveRule(row)) {
-        throw new Error("Je hebt geen rechten om deze melding goed te keuren.");
-      }
-
-      const res = normResultaat(row?.resultaat);
-
-      if (!isSuperadmin && res === "dispensatie") {
-        throw new Error("Dispensatie kan hier niet. Gaat naar dispensatie-module.");
-      }
-
-      if (!isSuperadmin && res !== "actie" && res !== "afgekeurd" && res !== "dispensatie") {
-        throw new Error(
-          "Alleen ACTIE of AFKEUR kan hier worden goedgekeurd. Superadmin mag hier alles goedkeuren."
-        );
-      }
-
-      if (isSuperadmin && (!res || res === "ok")) {
         throw new Error("Deze melding staat al op OK of heeft geen goed te keuren resultaat.");
       }
 
@@ -1665,22 +1656,6 @@ export default function PartijDetailPage() {
     try {
       const row = regels.find((r) => r.id === resultaatId);
       if (row && !canApproveRule(row)) {
-        throw new Error("Je hebt geen rechten om deze melding af te keuren.");
-      }
-
-      const res = normResultaat(row?.resultaat);
-
-      if (!isSuperadmin && res === "dispensatie") {
-        throw new Error("Dispensatie kan hier niet. Gaat naar dispensatie-module.");
-      }
-
-      if (!isSuperadmin && res !== "actie" && res !== "afgekeurd" && res !== "dispensatie") {
-        throw new Error(
-          "Alleen ACTIE of AFKEUR kan hier worden afgekeurd. Superadmin mag hier alles afkeuren."
-        );
-      }
-
-      if (isSuperadmin && (!res || res === "ok")) {
         throw new Error("Deze melding staat al op OK of heeft geen af te keuren resultaat.");
       }
 

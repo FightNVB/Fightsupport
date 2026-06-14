@@ -730,23 +730,27 @@ export default function WeegstationOverzichtPage() {
                   </tr>
                 ) : (
                   filteredRows.map((row, index) => {
-                    const darkRow = index % 2 === 1;
+                    const darkRow = index % 2 === 0;
                     const matchmakingId = String(row.id ?? "").trim();
 
                     return (
                       <tr
                         key={matchmakingId}
-                        className={
-                          darkRow
-                            ? "bg-[#202020] text-white"
-                            : "bg-[#171717] text-white"
-                        }
+                        className="transition-colors"
+                        style={{
+                          background: darkRow ? "#171717" : "#f4f4f5",
+                          color: darkRow ? "#ffffff" : "#111827",
+                        }}
                       >
                         <td className="border border-zinc-800 px-4 py-3">
                           <b className="text-[#ff4d00]">
                             {safeText(row.naam, "Onbekend evenement")}
                           </b>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500">
+                          <div
+                            className={`mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs ${
+                              darkRow ? "text-zinc-400" : "text-zinc-700"
+                            }`}
+                          >
                             <span className="inline-flex items-center gap-1">
                               <Swords className="h-3.5 w-3.5" /> Matchmaking
                             </span>
@@ -756,7 +760,11 @@ export default function WeegstationOverzichtPage() {
                             ) : null}
                           </div>
                         </td>
-                        <td className="border border-zinc-800 px-4 py-3 font-black">
+                        <td
+                          className={`border border-zinc-800 px-4 py-3 font-black ${
+                            darkRow ? "text-white" : "text-black"
+                          }`}
+                        >
                           <span className="inline-flex items-center gap-1.5">
                             <CalendarDays className="h-4 w-4 text-[#ff4d00]" />
                             {formatDate(row.datum)}
@@ -767,14 +775,18 @@ export default function WeegstationOverzichtPage() {
                             className="inline-flex items-center rounded-[4px] px-2 py-1 text-[11px] font-black uppercase"
                             style={getBondteamBadgeStyle(
                               effectiveBondteam(row),
-                              true,
+                              darkRow,
                             )}
                           >
                             <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
                             {safeText(effectiveBondteam(row))}
                           </span>
                         </td>
-                        <td className="border border-zinc-800 px-4 py-3 text-xs font-black uppercase tracking-[0.04em] text-zinc-200">
+                        <td
+                          className={`border border-zinc-800 px-4 py-3 text-xs font-black uppercase tracking-[0.04em] ${
+                            darkRow ? "text-zinc-100" : "text-black"
+                          }`}
+                        >
                           {displayStage(row)}
                         </td>
                         <td className="border border-zinc-800 px-4 py-3">

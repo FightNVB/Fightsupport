@@ -9,6 +9,7 @@ import { authedFetch } from "@/lib/api/authedFetch";
 import { useAuth } from "@/context/AuthContext";
 
 const API_ME_PROFILE = "/api/me/profile";
+const NVB_BONDTEAM = "NVB";
 
 type Row = {
   matchmaking_id: string;
@@ -77,7 +78,7 @@ export default function OfficialsUitslagenPage() {
     [profileRoles],
   );
 
-  const canSeeAllBonds = isSuperadmin && norm(myBondteam) === "NVB";
+  const canSeeAllBonds = isSuperadmin && norm(myBondteam) === NVB_BONDTEAM;
 
   async function loadMyProfile() {
     const res = await authedFetch(API_ME_PROFILE, {
@@ -108,6 +109,7 @@ export default function OfficialsUitslagenPage() {
     try {
       const profileBondteam = await loadMyProfileBondteam();
       setMyBondteam(profileBondteam);
+      const userCanSeeAllBonds = isSuperadmin && profileBondteam === NVB_BONDTEAM;
 
       if (!profileBondteam) {
         setRows([]);
@@ -164,7 +166,10 @@ export default function OfficialsUitslagenPage() {
           upload?.bondteam || mm?.huidige_eigenaar_bondteam || mm?.bondteam,
         );
 
-        if (!canSeeAllBonds && rowBondteam !== profileBondteam) continue;
+        // NVB-superadmin ziet alles. Alle andere gebruikers, ook superadmins
+        // van bondteams zoals NKF/WPKL/IRO/VON/MMAAN/FOG/UMC/WMTA, zien alleen
+        // het eigen bondteam.
+        if (!userCanSeeAllBonds && rowBondteam !== profileBondteam) continue;
 
         byRun.set(runId, {
           matchmaking_id: mmid,
@@ -402,40 +407,60 @@ export default function OfficialsUitslagenPage() {
                     return (
                       <tr
                         key={row.matchmaking_id}
-                        className={
-                          index % 2 === 0
-                            ? "bg-[#171717] text-white"
-                            : "bg-[#202020] text-white"
-                        }
+                        style={{
+                          background: index % 2 === 0 ? "#171717" : "#f4f4f5",
+                          color: index % 2 === 0 ? "#ffffff" : "#111827",
+                        }}
                       >
                         <td className="border border-zinc-800 px-4 py-3">
                           <b className="text-[#ff4d00]">
                             {row.evenement_naam || "-"}
                           </b>
-                          <div className="mt-1 text-xs text-zinc-500">
+                          <div
+                            className="mt-1 text-xs"
+                            style={{
+                              color: index % 2 === 0 ? "#a1a1aa" : "#374151",
+                            }}
+                          >
                             {row.matchmaking_id}
                           </div>
                         </td>
                         <td className="border border-zinc-800 px-4 py-3 font-black text-[#ff4d00]">
                           {row.bondteam || "-"}
                         </td>
-                        <td className="border border-zinc-800 px-4 py-3">
+                        <td
+                          className="border border-zinc-800 px-4 py-3"
+                          style={{
+                            color: index % 2 === 0 ? "#ffffff" : "#111827",
+                          }}
+                        >
                           {formatDate(row.evenement_datum)}
                         </td>
-                        <td className="border border-zinc-800 px-4 py-3 font-black">
+                        <td
+                          className="border border-zinc-800 px-4 py-3 font-black"
+                          style={{
+                            color: index % 2 === 0 ? "#ffffff" : "#111827",
+                          }}
+                        >
                           {row.partijen}
                         </td>
                         <td className="border border-zinc-800 px-4 py-3">
                           <div className="mb-2 flex items-center justify-between text-xs">
-                            <span className="text-zinc-400">
+                            <span
+                              style={{
+                                color: index % 2 === 0 ? "#a1a1aa" : "#111827",
+                              }}
+                            >
                               {row.ingevuld} ingevuld
                             </span>
                             <span
-                              className={
-                                finalized
-                                  ? "font-black text-emerald-300"
-                                  : "font-black text-[#ff4d00]"
-                              }
+                              className="font-black"
+                              style={{
+                                color:
+                                  index % 2 === 0 && finalized
+                                    ? "#6ee7b7"
+                                    : "#ff4d00",
+                              }}
                             >
                               {finalized ? "Definitief" : `${pct}%`}
                             </span>

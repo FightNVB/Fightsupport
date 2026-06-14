@@ -88,7 +88,7 @@ const KB_TM_MUAYTHAI_LIMITS: Array<{
   { match: /middleweight\s*76(?:[.,]20)?/i, max: 76.2 },
   { match: /middleweight/i, max: 72.57 },
   { match: /cruiser/i, max: 86.18 },
-  { match: /heavyweight/i, max: null, openMin: 95.0 },
+  { match: /heavyweight/i, max: 95.0 },
 ];
 
 export type WeighInEngineInput = {
@@ -118,6 +118,46 @@ function toNum(v: unknown): number | null {
   if (!s) return null;
   const n = Number(s);
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+}
+
+function hasExplicitPlusWeightNotation(
+  label: string | null | undefined,
+): boolean {
+  const s = String(label ?? "")
+    .trim()
+    .toLowerCase();
+  if (!s) return false;
+
+  return (
+    /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)/i.test(s) ||
+    /\+\s*95(?:[.,]0+)?/i.test(s)
+  );
+}
+
+function parseExplicitMaxWeightNotation(
+  label: string | null | undefined,
+): number | null {
+  const s = String(label ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(",", ".");
+  if (!s || hasExplicitPlusWeightNotation(label)) return null;
+
+  const minusMatch = s.match(/(?:^|\s)-\s*(\d+(?:\.\d+)?)(?:\s|kg|$)/);
+  if (minusMatch?.[1]) {
+    const n = Number(minusMatch[1]);
+    return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+  }
+
+  const maxMatch = s.match(
+    /(?:tot|max|onder|t\/m)\s*(\d+(?:\.\d+)?)(?:\s*kg)?/,
+  );
+  if (maxMatch?.[1]) {
+    const n = Number(maxMatch[1]);
+    return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+  }
+
+  return null;
 }
 
 function parseKlasseMaxGewicht(
@@ -192,7 +232,7 @@ function isHeavyweightOpenClass(label: string | null | undefined): boolean {
   if (!s) return false;
 
   return (
-    /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)/i.test(s) ||
+    hasExplicitPlusWeightNotation(label) ||
     /super\s*heavy/i.test(s) ||
     /superzwaar/i.test(s) ||
     /open\s*(klasse|class)/i.test(s)
@@ -274,6 +314,16 @@ function getEffectiveMaxWeight(
   value: number | null;
   source: "tabel" | "klasse" | "doorgegeven" | "mma-klasse" | "onbekend";
 } {
+  // Expliciete notatie is leidend: -95 / max 95 is een maxklasse,
+  // 95+ is de open super-heavyweight klasse.
+  const explicitNotationMax =
+    parseExplicitMaxWeightNotation(input.max_gewicht_notatie) ??
+    parseExplicitMaxWeightNotation(input.klasse_mm);
+
+  if (explicitNotationMax != null) {
+    return { value: explicitNotationMax, source: "tabel" };
+  }
+
   if (isMma) {
     const mmaLimit = getMmaClassLimit(input.klasse_mm);
     if (mmaLimit) {
@@ -402,7 +452,8 @@ function evaluateToernooiFighter(params: {
   const teZwaar =
     maxToelaatbaarGewicht != null ? gewicht > maxToelaatbaarGewicht : false;
   const nietOpGewicht = teLicht || teZwaar;
-  const groupTooWide = groupDiff != null && groupDiff > 3.0;
+  const groupTooWide =
+    !isHeavyweightOpen && groupDiff != null && groupDiff > 3.0;
   const messages: string[] = [];
 
   if (isHeavyweightOpen) {
@@ -422,7 +473,11 @@ function evaluateToernooiFighter(params: {
   if (teLicht)
     messages.push("Vechter is te licht voor de open gewichtsklasse.");
   if (teZwaar) messages.push("Vechter is te zwaar voor dit toernooi.");
-  if (groupDiff == null)
+  if (isHeavyweightOpen) {
+    messages.push(
+      "95+ toernooi: onderling gewichtsverschil is onbeperkt toegestaan.",
+    );
+  } else if (groupDiff == null)
     messages.push(
       "Nog niet genoeg toernooivechters gewogen om onderling verschil te beoordelen.",
     );
@@ -729,19 +784,19 @@ export function evaluateWeighInBout(
     return {
       leeftijdType,
       diff,
-      reglementStatus: hasAnyOffWeight ? "AFWIJKING_GEWICHT" : "OK",
-      praktijkStatus: "OK",
-      eindStatus: "OK",
+      reglementStatus: hasAnyOffWeight ? "AFKEUR" : "OK",
+      praktijkStatus: hasAnyOffWeight ? "AFKEUR" : "OK",
+      eindStatus: hasAnyOffWeight ? "AFKEUR" : "OK",
       dispensatieNodig: false,
       dispensatieMogelijk: false,
       messages: hasAnyOffWeight
         ? [
             ...messages,
-            "95+ klasse: minimaal één vechter weegt onder 95 kg. Niet-op-gewicht; minpunt mogelijk.",
+            "95+ klasse: minimaal één vechter weegt onder 95 kg en valt dus niet in deze klasse.",
           ]
         : [
             ...messages,
-            "95+ klasse toegestaan. Onderling gewichtsverschil speelt hier geen rol.",
+            "95+ klasse toegestaan. Onderling gewichtsverschil is onbeperkt toegestaan.",
           ],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,

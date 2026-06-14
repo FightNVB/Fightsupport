@@ -273,6 +273,46 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
+function hasExplicitPlusWeightNotation(
+  label: string | null | undefined,
+): boolean {
+  const s = String(label ?? "")
+    .trim()
+    .toLowerCase();
+  if (!s) return false;
+
+  return (
+    /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)/i.test(s) ||
+    /\+\s*95(?:[.,]0+)?/i.test(s)
+  );
+}
+
+function parseExplicitMaxWeightNotation(
+  label: string | null | undefined,
+): number | null {
+  const s = String(label ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(",", ".");
+  if (!s || hasExplicitPlusWeightNotation(label)) return null;
+
+  const minusMatch = s.match(/(?:^|\s)-\s*(\d+(?:\.\d+)?)(?:\s|kg|$)/);
+  if (minusMatch?.[1]) {
+    const n = Number(minusMatch[1]);
+    return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+  }
+
+  const maxMatch = s.match(
+    /(?:tot|max|onder|t\/m)\s*(\d+(?:\.\d+)?)(?:\s*kg)?/,
+  );
+  if (maxMatch?.[1]) {
+    const n = Number(maxMatch[1]);
+    return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+  }
+
+  return null;
+}
+
 function toPenalty(v: unknown): 0 | 1 {
   return Number(String(v ?? "0").trim()) === 1 ? 1 : 0;
 }
@@ -330,9 +370,7 @@ function parseWeightClass(
     .trim();
 
   if (normalized) {
-    const plus95 =
-      /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)/i.test(normalized) ||
-      /\+\s*95(?:[.,]0+)?/i.test(normalized);
+    const plus95 = hasExplicitPlusWeightNotation(normalized);
     if (
       plus95 ||
       normalized.includes("super heavyweight") ||
@@ -342,6 +380,15 @@ function parseWeightClass(
         kind: "heavy",
         threshold: 95,
         label: raw || "95+",
+      };
+    }
+
+    const explicitMax = parseExplicitMaxWeightNotation(raw);
+    if (explicitMax != null) {
+      return {
+        kind: "max",
+        max: explicitMax,
+        label: raw,
       };
     }
 
@@ -390,9 +437,9 @@ function parseWeightClass(
     .trim();
 
   if (normalizedFallbackLabel) {
-    const fallbackPlus95 =
-      /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)/i.test(normalizedFallbackLabel) ||
-      /\+\s*95(?:[.,]0+)?/i.test(normalizedFallbackLabel);
+    const fallbackPlus95 = hasExplicitPlusWeightNotation(
+      normalizedFallbackLabel,
+    );
 
     if (fallbackPlus95) {
       return {
@@ -401,6 +448,15 @@ function parseWeightClass(
         label: fallbackLabel || raw || "95+",
       };
     }
+  }
+
+  const explicitFallbackMax = parseExplicitMaxWeightNotation(fallbackLabel);
+  if (explicitFallbackMax != null) {
+    return {
+      kind: "max",
+      max: explicitFallbackMax,
+      label: raw || fallbackLabel || `-${explicitFallbackMax}`,
+    };
   }
 
   const fallback = toNum(fallbackMax);
@@ -517,7 +573,7 @@ function getWeightClassHint(
   const parsed = parseWeightClass(klasse, fallbackMax);
 
   if (parsed.kind === "heavy") {
-    return `${parsed.threshold}+ kg (heavyweight, minimum ${parsed.threshold} kg)`;
+    return `${parsed.threshold}+ kg (super heavyweight, minimaal ${parsed.threshold} kg, geen onderling maximumverschil)`;
   }
 
   if (parsed.kind === "max") {
@@ -543,7 +599,8 @@ function getWeightRuleValue(row: WeighInBout | null) {
     row.klasse_mm,
     row.max_gewicht_notatie ?? row.max_gewicht,
   );
-  if (parsed.kind === "heavy") return `${parsed.threshold}+ heavyweight`;
+  if (parsed.kind === "heavy")
+    return `${parsed.threshold}+ kg super heavyweight`;
   if (parsed.kind === "max") return `${parsed.max.toFixed(1)} kg`;
   return safeText(row.max_gewicht_notatie ?? row.klasse_mm ?? row.max_gewicht);
 }
@@ -2765,12 +2822,21 @@ export default function WeegstationDetailPage() {
                         <div className="text-lg font-black text-zinc-900">
                           Verschil: {fmtKg(selectedEval?.diff ?? null)}
                         </div>
-                        <div className="mt-1 text-xs text-zinc-500">
-                          Jeugd: OK ≤ 2.5 / Disp. 2.6–3.9 / Afkeur ≥ 4.0
-                        </div>
-                        <div className="text-xs text-zinc-500">
-                          Volwassen: OK ≤ 3.5 / Disp. 3.6–6.9 / Afkeur ≥ 7.0
-                        </div>
+                        {selectedIsOpenHeavyClass ? (
+                          <div className="mt-1 text-xs text-zinc-500">
+                            95+: beide vechters minimaal 95.0 kg. Onderling
+                            verschil onbeperkt toegestaan.
+                          </div>
+                        ) : (
+                          <>
+                            <div className="mt-1 text-xs text-zinc-500">
+                              Jeugd: OK ≤ 2.5 / Disp. 2.6–3.9 / Afkeur ≥ 4.0
+                            </div>
+                            <div className="text-xs text-zinc-500">
+                              Volwassen: OK ≤ 3.5 / Disp. 3.6–6.9 / Afkeur ≥ 7.0
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       <div className="space-y-2">

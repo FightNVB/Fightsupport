@@ -75,12 +75,14 @@ function getRondeTijden({
 
   if (titelpartij) return "5 rondes";
 
-  if (k.includes("J")) {
+  // Kickboksen jeugd/J/J+: alleen als beide vechters 16 jaar of ouder zijn 3x1,5 minuut.
+  // Zodra één van beide vechters jonger dan 16 is, blijft het 3x1 minuut.
+  if (k.includes("J") || k.includes("JEUGD")) {
     if (rAge >= 16 && bAge >= 16) return "3x1.5 min";
     return "3x1 min";
   }
 
-  if (k.includes("R")) return "3x1.5 min";
+  if (k.includes("R")) return "3x1 min";
   if (k.includes("N") || k.includes("NIEUWELING") || k.includes("NEWCOMER")) {
     return "3x1.5 min";
   }
@@ -90,6 +92,19 @@ function getRondeTijden({
   if (k.includes("A")) return "3x3 min";
 
   return "";
+}
+
+function getLeeftijdVoorRondetijd(b: any, side: "rood" | "blauw") {
+  return (
+    b?.[`${side}_leeftijd_event`] ??
+    b?.[`${side}_leeftijd`] ??
+    b?.[`${side}_leeftijd_mm`] ??
+    b?.[`${side}_leeftijd_fp`] ??
+    b?.[`${side}_age`] ??
+    parseRawJson(b?.raw_json)?.[`${side}_leeftijd_event`] ??
+    parseRawJson(b?.raw_json)?.[`${side}_leeftijd`] ??
+    0
+  );
 }
 
 function isToernooiBout(b: any): boolean {
@@ -408,32 +423,23 @@ function mergeDecision(target: PartyDecision, source: PartyDecision) {
   target.warningReasons.push(...source.warningReasons);
 }
 
+function addWarningReason(decision: PartyDecision, row: ControleRow, fallback = "Open melding") {
+  const msg = s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || fallback;
+  const key = msg.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!key) return;
+  const exists = decision.warningReasons.some(
+    (x) => x.replace(/\s+/g, " ").trim().toLowerCase() === key,
+  );
+  if (!exists) decision.warningReasons.push(msg);
+}
+
 function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
   decision.hasControle = true;
 
-  const resultaat = norm(row.resultaat);
-  const code = upper(row.rule_code);
-  const rule = norm(row.rule);
-
-  // Goedgekeurde/naar OK gezette regels mogen geen open melding of sterretje meer geven.
+  // Goedgekeurde/naar OK/INFO gezette regels zijn afgehandeld en mogen niet meer als melding meetellen.
   if (isResolvedControleRow(row)) return;
 
-  if (isOpenLicentieOfKeurmerkRow(row)) {
-    const hoek = warningHoek(row);
-    if (hoek === "rood") decision.roodWarning = true;
-    else if (hoek === "blauw") decision.blauwWarning = true;
-    else decision.algemeneWarning = true;
-    decision.warningReasons.push(s((row as any).boodschap) || s(row.rule) || s(row.rule_code) || "Open licentie/keurmerk melding");
-  }
-
-  // Voorlopige lineup blokkeert alleen verbod/startverbod.
-  if (isHardNoRow(row)) {
-    decision.blocked = true;
-    decision.blockedReasons.push("Harde blokkade: licentie/keurmerk/startverbod/verbod");
-    return;
-  }
-
-  // ACTIE minpunt is de enige ACTIE die door mag. Deze telt als strafpunt, niet als blokkade.
+  // Minpunt is geen open melding voor lineup-filtering; dit gaat alleen naar de kolom Min punt.
   if (isActieMinpunt(row)) {
     const hoek = minpuntHoek(row);
     if (hoek === "rood") decision.roodMinpunten += 1;
@@ -441,37 +447,20 @@ function applyControleRowToDecision(row: ControleRow, decision: PartyDecision) {
     return;
   }
 
-  // Voorlopige lineup: AFKEUR blokkeert niet, behalve als het verbod/startverbod is.
-  if (isAfkeur(row)) return;
+  // Iedere andere open regel is een melding: zichtbaar in voorlopige lineup en reden om
+  // de partij uit definitieve/jury lineup en naar-uitslagen te houden.
+  const hoek = warningHoek(row);
+  if (hoek === "rood") decision.roodWarning = true;
+  else if (hoek === "blauw") decision.blauwWarning = true;
+  else decision.algemeneWarning = true;
 
-  // Goedgekeurde/naar OK gezette meldingen blokkeren niet meer.
-  // Een losse OK/INFO-regel mag geen andere open ACTIE/AFKEUR/DISPENSATIE opheffen.
-  if (isApprovedOverride(row)) return;
+  addWarningReason(decision, row, "Open melding");
 
-  if (hasVerbod(row)) {
+  if (isHardNoRow(row) || hasVerbod(row)) {
     decision.blocked = true;
     decision.blockedReasons.push("Verbod/startverbod aanwezig");
-    return;
   }
-
-  // Voorlopige lineup: open dispensatie blokkeert niet.
-  if (isDispensatie(row) && !isDispensatieVerleend(row)) return;
-
-  // OK en INFO zijn toegestaan. Dit moet vóór de open-review check staan,
-  // omdat oudere OK/NO_RULES regels soms review_status=open hebben.
-  // Losse ACTIE/AFKEUR/DISPENSATIE regels blijven alsnog blokkeren via hun eigen rij.
-  if (isOk(row) || isInfo(row) || isDispensatieVerleend(row)) return;
-
-  // Voorlopige lineup: overige open actiepunten/reviews blokkeren niet.
-  if (
-    resultaat === "actie" ||
-    isOpenReview(row.actie_status) ||
-    isOpenReview(row.review_status)
-  ) return;
-
-  return;
 }
-
 function buildDecisions(rows: ControleRow[]) {
   const byKey = new Map<string, PartyDecision>();
   const byTournamentFighter = new Map<string, PartyDecision>();
@@ -621,9 +610,8 @@ function isEligibleForLineup(
   row: any,
   decisions: ReturnType<typeof buildDecisions>,
 ) {
-  // Voorlopige lineup: alle partijen mogen mee, behalve verbod/startverbod.
-  const decision = rawRowDecision(row, decisions);
-  return !decision?.blocked;
+  // Voorlopige lineup = alle actieve partijen. Open meldingen komen in de laatste kolom.
+  return true;
 }
 
 function normalizeWarningText(v: unknown) {
@@ -737,6 +725,7 @@ function fillTemplateRow(
     blauwNaam: any;
     blauwGym: any;
     blauwVa: any;
+    titelpartij?: any;
     rondes: any;
     minpunt: any;
     melding: any;
@@ -758,12 +747,13 @@ function fillTemplateRow(
   setTemplateCell(ws, rowNumber, 8, s(values.blauwNaam), templateStyles);
   setTemplateCell(ws, rowNumber, 9, s(values.blauwGym), templateStyles);
   setTemplateCell(ws, rowNumber, 10, asVaNumber(values.blauwVa), templateStyles);
-  setTemplateCell(ws, rowNumber, 11, s(values.rondes), templateStyles);
-  setTemplateCell(ws, rowNumber, 12, s(values.minpunt), templateStyles);
-  setTemplateCell(ws, rowNumber, 13, s(values.melding), templateStyles);
+  setTemplateCell(ws, rowNumber, 11, s(values.titelpartij), templateStyles);
+  setTemplateCell(ws, rowNumber, 12, s(values.rondes), templateStyles);
+  setTemplateCell(ws, rowNumber, 13, s(values.minpunt), templateStyles);
+  setTemplateCell(ws, rowNumber, 14, s(values.melding), templateStyles);
 
   // Geforceerd, ook als het template per ongeluk anders staat.
-  for (const col of [1, 3, 6, 7, 10, 11]) {
+  for (const col of [1, 3, 6, 7, 10, 11, 12, 13]) {
     forceCenter(row.getCell(col));
   }
 
@@ -863,8 +853,8 @@ export async function GET(req: Request) {
   const templateRow = ws.getRow(2);
   const templateHeight = templateRow.height;
   const templateStyles: Record<number, Partial<ExcelJS.Style>> = {};
-  for (let col = 1; col <= 13; col += 1) {
-    templateStyles[col] = cloneExcelStyle(templateRow.getCell(col).style);
+  for (let col = 1; col <= 14; col += 1) {
+    templateStyles[col] = cloneExcelStyle(templateRow.getCell(col).style || templateRow.getCell(13).style);
   }
 
   // Oude/voorbeeldregels uit het template verwijderen, header en opmaak blijven bewaard.
@@ -886,8 +876,8 @@ export async function GET(req: Request) {
     const rondes = getRondeTijden({
       discipline: b.discipline,
       klasse: b.klasse,
-      rood_leeftijd: b.rood_leeftijd,
-      blauw_leeftijd: b.blauw_leeftijd,
+      rood_leeftijd: getLeeftijdVoorRondetijd(b, "rood"),
+      blauw_leeftijd: getLeeftijdVoorRondetijd(b, "blauw"),
       titelpartij,
     });
 
@@ -904,9 +894,10 @@ export async function GET(req: Request) {
         blauwNaam: b.blauw_naam,
         blauwGym: b.blauw_gym,
         blauwVa: b.va_blauw ?? b.blauw_va ?? b.blauw_va_nummer,
+        titelpartij: titelpartij ? "Ja" : "",
         rondes,
         minpunt: getMinPuntForLineup(b, decision),
-        melding: warningTextOnce(decision, shownWarningTexts),
+        melding: warningText(decision),
         vs: "VS",
       },
       templateStyles,
@@ -928,8 +919,8 @@ export async function GET(req: Request) {
       const rondes = getRondeTijden({
         discipline: b.discipline,
         klasse: b.klasse,
-        rood_leeftijd: b.rood_leeftijd,
-        blauw_leeftijd: b.blauw_leeftijd,
+        rood_leeftijd: getLeeftijdVoorRondetijd(b, "rood"),
+        blauw_leeftijd: getLeeftijdVoorRondetijd(b, "blauw"),
         titelpartij,
       });
 
@@ -962,9 +953,10 @@ export async function GET(req: Request) {
             blauwNaam: "",
             blauwGym: "",
             blauwVa: "",
+            titelpartij: titelpartij ? "Ja" : "",
             rondes,
             minpunt: getMinPuntForLineup(b, decision),
-            melding: warningTextOnce(decision, shownWarningTexts),
+            melding: warningText(decision),
             vs: "",
           },
           templateStyles,
@@ -975,7 +967,7 @@ export async function GET(req: Request) {
   }
 
   // Printgebied volgt het template, maar wordt aangepast aan het aantal partijen.
-  ws.pageSetup.printArea = `A1:M${Math.max(1, targetRowNumber - 1)}`;
+  ws.pageSetup.printArea = `A1:N${Math.max(1, targetRowNumber - 1)}`;
 
   const buffer = await wb.xlsx.writeBuffer();
 

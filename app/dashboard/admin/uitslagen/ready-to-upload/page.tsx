@@ -359,74 +359,77 @@ export default function AdminReadyToUploadPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {rows.map((row, idx) => (
-                            <tr
-                              key={row.matchmaking_id}
-                              className={
-                                idx % 2 === 0 ? "bg-[#171717]" : "bg-[#0f0f0f]"
-                              }
-                            >
-                              <td className="border border-zinc-800 px-2 py-2 align-middle">
-                                <div
-                                  className="truncate font-black uppercase tracking-[0.02em] text-[#ff4d00]"
-                                  title={row.evenement_naam || "-"}
-                                >
-                                  {row.evenement_naam || "-"}
-                                </div>
-                                <div
-                                  className="mt-0.5 truncate text-[10px] font-semibold text-zinc-400"
-                                  title={row.matchmaking_id}
-                                >
-                                  {row.matchmaking_id.slice(0, 8)}
-                                </div>
-                              </td>
-                              <td className="border border-zinc-800 px-2 py-2 align-middle font-bold text-white whitespace-nowrap">
-                                {formatDate(row.evenement_datum)}
-                              </td>
-                              <td className="border border-zinc-800 px-2 py-2 align-middle font-black text-white whitespace-nowrap">
-                                {row.bondteam || "-"}
-                              </td>
-                              <td className="border border-zinc-800 px-2 py-2 text-center align-middle font-black text-white">
-                                {row.partijen}
-                              </td>
-                              <td className="border border-zinc-800 px-2 py-2 text-center align-middle font-black text-white whitespace-nowrap">
-                                {row.ingevuld}/{row.partijen}
-                              </td>
-                              <td className="border border-zinc-800 px-2 py-2 align-middle">
-                                <div className="flex flex-wrap justify-end gap-1">
-                                  <a
-                                    href={`/api/officials/uitslagen/export?matchmaking_id=${encodeURIComponent(row.matchmaking_id)}`}
-                                    className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-2 py-1 text-[10px] font-black uppercase !text-black"
+                          {rows.map((row, idx) => {
+                            const isLightRow = idx % 2 === 1;
+                            const rowBg = isLightRow ? "bg-zinc-100" : "bg-[#171717]";
+                            const border = isLightRow ? "border-zinc-300" : "border-zinc-800";
+                            const mainText = isLightRow ? "text-black" : "text-white";
+                            const subText = isLightRow ? "text-zinc-700" : "text-zinc-400";
+
+                            return (
+                              <tr key={row.matchmaking_id} className={rowBg}>
+                                <td className={`border ${border} px-2 py-2 align-middle`}>
+                                  <div
+                                    className="truncate font-black uppercase tracking-[0.02em] text-[#ff4d00]"
+                                    title={row.evenement_naam || "-"}
                                   >
-                                    Excel
-                                  </a>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      router.push(
-                                        `/dashboard/officials/uitslagen/inzien/${row.matchmaking_id}`
-                                      )
-                                    }
-                                    className="border border-sky-400 bg-sky-500 px-2 py-1 text-[10px] font-black uppercase text-black"
+                                    {row.evenement_naam || "-"}
+                                  </div>
+                                  <div
+                                    className={`mt-0.5 truncate text-[10px] font-semibold ${subText}`}
+                                    title={row.matchmaking_id}
                                   >
-                                    Inzien
-                                  </button>
-                                  {isSuperadmin ? (
+                                    {row.matchmaking_id.slice(0, 8)}
+                                  </div>
+                                </td>
+                                <td className={`border ${border} px-2 py-2 align-middle font-bold ${mainText} whitespace-nowrap`}>
+                                  {formatDate(row.evenement_datum)}
+                                </td>
+                                <td className={`border ${border} px-2 py-2 align-middle font-black ${mainText} whitespace-nowrap`}>
+                                  {row.bondteam || "-"}
+                                </td>
+                                <td className={`border ${border} px-2 py-2 text-center align-middle font-black ${mainText}`}>
+                                  {row.partijen}
+                                </td>
+                                <td className={`border ${border} px-2 py-2 text-center align-middle font-black ${mainText} whitespace-nowrap`}>
+                                  {row.ingevuld}/{row.partijen}
+                                </td>
+                                <td className={`border ${border} px-2 py-2 align-middle`}>
+                                  <div className="flex flex-wrap justify-end gap-1">
+                                    <a
+                                      href={`/api/officials/uitslagen/export?matchmaking_id=${encodeURIComponent(row.matchmaking_id)}`}
+                                      className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-2 py-1 text-[10px] font-black uppercase !text-black"
+                                    >
+                                      Excel
+                                    </a>
                                     <button
                                       type="button"
                                       onClick={() =>
-                                        heropen(row.matchmaking_id)
+                                        router.push(
+                                          `/dashboard/officials/uitslagen/inzien/${row.matchmaking_id}`
+                                        )
                                       }
-                                      disabled={busyId === row.matchmaking_id}
-                                      className="border border-[#ff4d00] bg-[#ff4d00] px-2 py-1 text-[10px] font-black uppercase !text-black disabled:opacity-50"
+                                      className="border border-sky-400 bg-sky-500 px-2 py-1 text-[10px] font-black uppercase text-black"
                                     >
-                                      Edit
+                                      Inzien
                                     </button>
-                                  ) : null}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                                    {isSuperadmin ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          heropen(row.matchmaking_id)
+                                        }
+                                        disabled={busyId === row.matchmaking_id}
+                                        className="border border-[#ff4d00] bg-[#ff4d00] px-2 py-1 text-[10px] font-black uppercase !text-black disabled:opacity-50"
+                                      >
+                                        Edit
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     )}

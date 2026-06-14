@@ -343,19 +343,17 @@ export default function DashboardPage() {
   const isMatchmaker = role === "matchmaker";
   const isTrainerOrSportschool = role === "trainer" || role === "sportschool";
 
-  const isRootAdmin = (isAdmin || isSuperadmin) && isNvbOrNoBondteam;
-  const isOtherBondAdmin = isAdmin && !isNvbOrNoBondteam;
-  const isAnySuperadmin = isSuperadmin;
+  // Alleen NVB-admin/superadmin mag het Admin-menu en Dispensatie-menu zien.
+  // Superadmins van andere bondteams zijn dus géén root-admin op dit dashboard.
+  const isNvbAdmin = isAdmin && bondteam === "NVB";
+  const isNvbSuperadmin = isSuperadmin && bondteam === "NVB";
+  const isRootAdmin = isNvbAdmin || isNvbSuperadmin;
+  const isOtherBondAdmin = (isAdmin || isSuperadmin) && !isRootAdmin;
 
-  const canOpenAdmin = isRootAdmin || isAnySuperadmin;
-  const canOpenDispensatie = isRootAdmin || isAnySuperadmin;
-  const canOpenOfficial =
-    isRootAdmin || isAnySuperadmin || isOtherBondAdmin || isOfficialPortalRole;
-  const canOpenMatchmaker =
-    isRootAdmin ||
-    isAnySuperadmin ||
-    isOtherBondAdmin ||
-    isMatchmaker;
+  const canOpenAdmin = isRootAdmin;
+  const canOpenDispensatie = isRootAdmin;
+  const canOpenOfficial = isRootAdmin || isOtherBondAdmin || isOfficialPortalRole;
+  const canOpenMatchmaker = isRootAdmin || isOtherBondAdmin || isMatchmaker;
   const canOpenSportscholen = isRootAdmin || isTrainerOrSportschool;
 
   const actions: PortalAction[] = [
