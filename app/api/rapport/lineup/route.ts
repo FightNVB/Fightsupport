@@ -254,8 +254,9 @@ function setLineupCellValues(
   },
   templateStyles: Record<number, Partial<ExcelJS.Style>>,
   templateHeight: number | undefined,
+  columns?: { rondesCol: number; minpuntCol: number; titelpartijCol: number | null },
 ) {
-  applyTemplateRowStyle(ws, rowNumber, templateStyles, templateHeight);
+  applyTemplateRowStyle(ws, rowNumber, templateStyles, templateHeight, columns);
 
   const row = ws.getRow(rowNumber);
 
