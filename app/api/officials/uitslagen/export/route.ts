@@ -37,10 +37,20 @@ function mapDiscipline(v: unknown) {
   return raw || "Kickboksen/Kickboxing";
 }
 
+function normalizeDisciplineKey(v: unknown) {
+  return clean(v)
+    .toLowerCase()
+    .replace(/[\s_\-/]+/g, " ")
+    .trim();
+}
+
 function isBoksenDiscipline(v: unknown) {
-  const s = clean(v).toLowerCase();
+  const s = normalizeDisciplineKey(v);
   if (!s) return false;
-  return s === "boksen" || s === "boxing" || s.includes("boksen") || s.includes("boxing");
+
+  // Alleen exact boksen/boxing uitsluiten.
+  // Niet zoeken met includes("boxing"), want dan valt "kickboxing" ook foutief weg.
+  return s === "boksen" || s === "boxing" || s === "boksen boxing";
 }
 
 function mapKlasse(v: unknown) {
@@ -154,20 +164,37 @@ async function handleExport(req: NextRequest) {
     if (resultsErr) throw resultsErr;
 
     const resultByBoutId = new Map<string, AnyRow>();
+    const resultByBronBoutId = new Map<string, AnyRow>();
     const resultByPartij = new Map<string, AnyRow>();
+    const resultByOriginalPartij = new Map<string, AnyRow>();
 
     for (const r of (results ?? []) as AnyRow[]) {
       const boutId = clean(pick(r.uitslagen_bout_id, r.bout_id));
       if (boutId) resultByBoutId.set(boutId, r);
+
+      const bronBoutId = clean(pick(r.bron_bout_id, r.original_bout_id));
+      if (bronBoutId) resultByBronBoutId.set(bronBoutId, r);
+
       const partij = clean(r.partij_nr);
       if (partij) resultByPartij.set(partij, r);
+
+      const originalPartij = clean(r.original_partij_nr);
+      if (originalPartij) resultByOriginalPartij.set(originalPartij, r);
     }
 
     const exportRows = ((bouts ?? []) as AnyRow[])
+      .filter((b) => !b.verwijderd)
       .map((b, index) => {
-        const result = resultByBoutId.get(clean(b.id)) ?? resultByPartij.get(clean(b.partij_nr));
+        const result =
+          resultByBoutId.get(clean(b.id)) ??
+          resultByBronBoutId.get(clean(b.bron_bout_id)) ??
+          resultByPartij.get(clean(b.partij_nr)) ??
+          resultByOriginalPartij.get(clean(b.original_partij_nr));
+
         if (!result) return null;
-        if (clean(result.uitslag_status).toLowerCase() === "concept") return null;
+
+        const status = clean(pick(result.uitslag_status, result.status));
+        if (status.toLowerCase() === "concept") return null;
 
         const disciplineValue = pick(b.discipline, result.discipline);
         if (isBoksenDiscipline(disciplineValue)) return null;
