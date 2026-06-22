@@ -1004,6 +1004,13 @@ if (scopedPartijNr != null) {
     uitslagen: uitslagenToInsert.length,
     duplicates: duplicateSummary.length,
   });
+
+  // Build doet altijd beide contexten:
+  // - volledige run: alle toernooi-deelnemers
+  // - scoped partij: alleen de toernooi-deelnemers die uit die partij/toernooi-rij komen
+  await buildToernooiContext(matchmaking_id, controle_run_id, {
+    partij_nr: scopedPartijNr,
+  });
 }
 // -----------------------------------------------------------------------------
 // TOERNOOI FLOW
@@ -1015,17 +1022,27 @@ if (scopedPartijNr != null) {
 export async function buildToernooiContext(
   matchmaking_id: string,
   controle_run_id: string,
-  opts?: { toernooi_code?: string | null; fighter_id?: string | null; va_nummer?: string | null }
+  opts?: {
+    partij_nr?: number | null;
+    toernooi_code?: string | null;
+    fighter_id?: string | null;
+    va_nummer?: string | null;
+  }
 ) {
   if (!matchmaking_id) throw new Error("[buildToernooiContext] matchmaking_id ontbreekt");
   if (!controle_run_id) throw new Error("[buildToernooiContext] controle_run_id ontbreekt");
 
   const scopedToernooiCode = toNullableStr(opts?.toernooi_code)?.toUpperCase() ?? null;
   const scopedVa = firstValidVa(opts?.fighter_id, opts?.va_nummer) ?? null;
+  const scopedPartijNr =
+    opts?.partij_nr != null && Number.isFinite(Number(opts.partij_nr))
+      ? Number(opts.partij_nr)
+      : null;
 
   console.log("[buildToernooiContext] start", {
     matchmaking_id,
     controle_run_id,
+    partij_nr: scopedPartijNr,
     toernooi_code: scopedToernooiCode,
     fighter_id: scopedVa,
   });
@@ -1034,7 +1051,59 @@ export async function buildToernooiContext(
   const evenement_datum = evInfo.evenement_datum;
   const evenement_naam = evInfo.evenement_naam;
 
-  // 1) Bestaande deelnemers van DEZE run lezen, zodat handmatig toegevoegde losse
+  // 1) Eerst de raw toernooi-bronnen bepalen.
+  // Bij een scoped partij rebuild gebruiken we partij_nr als scope, maar
+  // controle_toernooi_context zelf heeft partij_nr = 0. Daarom vertalen we
+  // partij_nr eerst naar toernooi_code + VA's en gebruiken we díe als delete/update-scope.
+  let rawBoutsQuery = supabaseAdmin
+    .from("matchmaking_bouts_raw")
+    .select("*")
+    .eq("matchmaking_id", matchmaking_id)
+    .order("partij_nr", { ascending: true });
+
+  if (scopedPartijNr != null) {
+    rawBoutsQuery = rawBoutsQuery.eq("partij_nr", scopedPartijNr);
+  }
+
+  const { data: rawBouts, error: rawBoutErr } = await rawBoutsQuery;
+  if (rawBoutErr) throw rawBoutErr;
+
+  const scopedToernooiCodesFromPartij = new Set<string>();
+  const scopedVasFromPartij = new Set<string>();
+
+  if (scopedPartijNr != null) {
+    for (const partij of rawBouts ?? []) {
+      const tCode = resolveToernooiCode(partij);
+      if (!tCode) continue;
+      scopedToernooiCodesFromPartij.add(tCode);
+
+      const r = pickVA(partij, "rood");
+      const b = pickVA(partij, "blauw");
+      if (r) scopedVasFromPartij.add(r);
+      if (b) scopedVasFromPartij.add(b);
+    }
+
+    // Scoped partij, maar geen toernooi-bron in deze partij: niets aan toernooi-context doen.
+    // Dit voorkomt dat een gewone wedstrijdcorrectie alle toernooi-rijen verwijdert.
+    if (scopedToernooiCodesFromPartij.size === 0 && !scopedToernooiCode && !scopedVa) {
+      console.log("[buildToernooiContext] scoped partij heeft geen toernooi-context", {
+        matchmaking_id,
+        controle_run_id,
+        partij_nr: scopedPartijNr,
+      });
+      return [];
+    }
+  }
+
+  const effectiveToernooiCode =
+    scopedToernooiCode ??
+    (scopedToernooiCodesFromPartij.size === 1 ? [...scopedToernooiCodesFromPartij][0] : null);
+
+  const effectiveVa =
+    scopedVa ??
+    (scopedVasFromPartij.size === 1 ? [...scopedVasFromPartij][0] : null);
+
+  // 2) Bestaande deelnemers van DEZE run lezen, zodat handmatig toegevoegde losse
   // toernooi-vechters niet verdwijnen als ze niet in matchmaking_bouts_raw staan.
   // Daarna verwijderen we de oude snapshot voor dezelfde run/scope. Zo kun je dezelfde
   // controle meerdere keren scrapen/builden zonder unique-constraint conflicten.
@@ -1046,8 +1115,17 @@ export async function buildToernooiContext(
     .order("toernooi_code", { ascending: true })
     .order("naam", { ascending: true });
 
-  if (scopedToernooiCode) bestaandeQuery = bestaandeQuery.eq("toernooi_code", scopedToernooiCode);
-  if (scopedVa) bestaandeQuery = bestaandeQuery.or(`fighter_id.eq.${scopedVa},va_nummer.eq.${scopedVa}`);
+  if (effectiveToernooiCode) {
+    bestaandeQuery = bestaandeQuery.eq("toernooi_code", effectiveToernooiCode);
+  } else if (scopedToernooiCodesFromPartij.size > 1) {
+    bestaandeQuery = bestaandeQuery.in("toernooi_code", [...scopedToernooiCodesFromPartij]);
+  }
+
+  if (effectiveVa) {
+    bestaandeQuery = bestaandeQuery.or(`fighter_id.eq.${effectiveVa},va_nummer.eq.${effectiveVa}`);
+  } else if (scopedVasFromPartij.size > 1) {
+    bestaandeQuery = bestaandeQuery.in("va_nummer", [...scopedVasFromPartij]);
+  }
 
   const { data: bestaandeDeelnemers, error: bestaandeErr } = await bestaandeQuery;
 
@@ -1065,8 +1143,17 @@ export async function buildToernooiContext(
     .eq("matchmaking_id", matchmaking_id)
     .eq("controle_run_id", controle_run_id);
 
-  if (scopedToernooiCode) deleteOldQuery = deleteOldQuery.eq("toernooi_code", scopedToernooiCode);
-  if (scopedVa) deleteOldQuery = deleteOldQuery.or(`fighter_id.eq.${scopedVa},va_nummer.eq.${scopedVa}`);
+  if (effectiveToernooiCode) {
+    deleteOldQuery = deleteOldQuery.eq("toernooi_code", effectiveToernooiCode);
+  } else if (scopedToernooiCodesFromPartij.size > 1) {
+    deleteOldQuery = deleteOldQuery.in("toernooi_code", [...scopedToernooiCodesFromPartij]);
+  }
+
+  if (effectiveVa) {
+    deleteOldQuery = deleteOldQuery.or(`fighter_id.eq.${effectiveVa},va_nummer.eq.${effectiveVa}`);
+  } else if (scopedVasFromPartij.size > 1) {
+    deleteOldQuery = deleteOldQuery.in("va_nummer", [...scopedVasFromPartij]);
+  }
 
   const { error: deleteOldErr } = await deleteOldQuery;
   if (deleteOldErr) throw deleteOldErr;
@@ -1074,21 +1161,13 @@ export async function buildToernooiContext(
   console.log("[buildToernooiContext] oude toernooi_context verwijderd", {
     matchmaking_id,
     controle_run_id,
-    toernooi_code: scopedToernooiCode,
-    fighter_id: scopedVa,
+    toernooi_code: effectiveToernooiCode ?? scopedToernooiCode,
+    fighter_id: effectiveVa ?? scopedVa,
     bestaande_rows: bestaandeDeelnemers?.length ?? 0,
   });
 
-  // 2) De echte bron voor toernooi-deelnemers is matchmaking_bouts_raw.
+  // 3) De echte bron voor toernooi-deelnemers is matchmaking_bouts_raw.
   // Daar staan toernooi_code + VA's + MM-naam/sportschool/gewicht/discipline/klasse.
-  const { data: rawBouts, error: rawBoutErr } = await supabaseAdmin
-    .from("matchmaking_bouts_raw")
-    .select("*")
-    .eq("matchmaking_id", matchmaking_id)
-    .order("partij_nr", { ascending: true });
-
-  if (rawBoutErr) throw rawBoutErr;
-
   const rawSourceByKey = new Map<string, any>();
   const derivedByKey = new Map<string, any>();
 
@@ -1099,14 +1178,18 @@ export async function buildToernooiContext(
     const va = firstValidVa((oldRow as any)?.fighter_id, (oldRow as any)?.va_nummer);
     if (!tCode || !va) continue;
     if (!toernooiParticipantHasRealData(oldRow)) continue;
-    if (scopedToernooiCode && tCode !== scopedToernooiCode) continue;
-    if (scopedVa && va !== scopedVa) continue;
+    if (effectiveToernooiCode && tCode !== effectiveToernooiCode) continue;
+    if (!effectiveToernooiCode && scopedToernooiCodesFromPartij.size > 0 && !scopedToernooiCodesFromPartij.has(tCode)) continue;
+    if (effectiveVa && va !== effectiveVa) continue;
+    if (!effectiveVa && scopedVasFromPartij.size > 0 && !scopedVasFromPartij.has(va)) continue;
+
+    const nowIso = new Date().toISOString();
 
     derivedByKey.set(`${tCode}:${va}`, {
       ...(oldRow as any),
-      id: undefined,
-      created_at: undefined,
-      updated_at: undefined,
+      id: toNullableStr((oldRow as any)?.id) ?? crypto.randomUUID(),
+      created_at: toNullableStr((oldRow as any)?.created_at) ?? nowIso,
+      updated_at: toNullableStr((oldRow as any)?.updated_at) ?? nowIso,
       controle_run_id,
       matchmaking_id,
       // Toernooi-context is per deelnemer, niet per mogelijke partij.
@@ -1123,7 +1206,8 @@ export async function buildToernooiContext(
   for (const partij of rawBouts ?? []) {
     const tCode = resolveToernooiCode(partij);
     if (!tCode) continue;
-    if (scopedToernooiCode && tCode !== scopedToernooiCode) continue;
+    if (effectiveToernooiCode && tCode !== effectiveToernooiCode) continue;
+    if (!effectiveToernooiCode && scopedToernooiCodesFromPartij.size > 0 && !scopedToernooiCodesFromPartij.has(tCode)) continue;
 
     const candidates = [
       {
@@ -1146,7 +1230,8 @@ export async function buildToernooiContext(
 
     for (const c of candidates) {
       if (!c.va) continue;
-      if (scopedVa && c.va !== scopedVa) continue;
+      if (effectiveVa && c.va !== effectiveVa) continue;
+      if (!effectiveVa && scopedVasFromPartij.size > 0 && !scopedVasFromPartij.has(c.va)) continue;
 
       const key = `${tCode}:${c.va}`;
 
@@ -1175,7 +1260,12 @@ export async function buildToernooiContext(
       if (!rawSourceByKey.has(key)) rawSourceByKey.set(key, source);
 
       if (!derivedByKey.has(key)) {
+        const nowIso = new Date().toISOString();
+
         derivedByKey.set(key, {
+          id: crypto.randomUUID(),
+          created_at: nowIso,
+          updated_at: nowIso,
           controle_run_id,
           matchmaking_id,
           bout_id: null,
@@ -1209,11 +1299,23 @@ export async function buildToernooiContext(
     derived_deelnemers: derivedByKey.size,
   });
 
-  const deelnemersToInsert = [...derivedByKey.values()].filter((r) => {
-    const tCode = toNullableStr(r?.toernooi_code)?.toUpperCase();
-    const va = firstValidVa(r?.fighter_id, r?.va_nummer);
-    return !!(tCode && va && toernooiParticipantHasRealData(r));
-  });
+  const deelnemersToInsert = [...derivedByKey.values()]
+    .filter((r) => {
+      const tCode = toNullableStr(r?.toernooi_code)?.toUpperCase();
+      const va = firstValidVa(r?.fighter_id, r?.va_nummer);
+      return !!(tCode && va && toernooiParticipantHasRealData(r));
+    })
+    .map((r) => {
+      const nowIso = new Date().toISOString();
+      return {
+        ...r,
+        // controle_toernooi_context heeft bij jou geen database-defaults voor id/created_at.
+        // Daarom altijd client-side vullen bij nieuwe insert.
+        id: toNullableStr(r?.id) ?? crypto.randomUUID(),
+        created_at: toNullableStr(r?.created_at) ?? nowIso,
+        updated_at: toNullableStr(r?.updated_at) ?? nowIso,
+      };
+    });
 
   if (deelnemersToInsert.length > 0) {
     const { error: insertErr } = await supabaseAdmin
@@ -1237,8 +1339,17 @@ export async function buildToernooiContext(
     .order("toernooi_code", { ascending: true })
     .order("naam", { ascending: true });
 
-  if (scopedToernooiCode) deelnemersQuery = deelnemersQuery.eq("toernooi_code", scopedToernooiCode);
-  if (scopedVa) deelnemersQuery = deelnemersQuery.or(`fighter_id.eq.${scopedVa},va_nummer.eq.${scopedVa}`);
+  if (effectiveToernooiCode) {
+    deelnemersQuery = deelnemersQuery.eq("toernooi_code", effectiveToernooiCode);
+  } else if (scopedToernooiCodesFromPartij.size > 1) {
+    deelnemersQuery = deelnemersQuery.in("toernooi_code", [...scopedToernooiCodesFromPartij]);
+  }
+
+  if (effectiveVa) {
+    deelnemersQuery = deelnemersQuery.or(`fighter_id.eq.${effectiveVa},va_nummer.eq.${effectiveVa}`);
+  } else if (scopedVasFromPartij.size > 1) {
+    deelnemersQuery = deelnemersQuery.in("va_nummer", [...scopedVasFromPartij]);
+  }
 
   const { data: deelnemers, error: deelnemersErr } = await deelnemersQuery;
   if (deelnemersErr) throw deelnemersErr;
@@ -1326,13 +1437,19 @@ export async function buildToernooiContext(
     .delete()
     .eq("matchmaking_id", matchmaking_id);
 
-  if (scopedToernooiCode) {
-    delUitslagen = delUitslagen.eq("toernooi_code", scopedToernooiCode);
+  if (effectiveToernooiCode) {
+    delUitslagen = delUitslagen.eq("toernooi_code", effectiveToernooiCode);
+  } else if (scopedToernooiCodesFromPartij.size > 1) {
+    delUitslagen = delUitslagen.in("toernooi_code", [...scopedToernooiCodesFromPartij]);
   } else {
     delUitslagen = delUitslagen.not("toernooi_code", "is", null);
   }
 
-  if (scopedVa) delUitslagen = delUitslagen.eq("va_nummer", scopedVa);
+  if (effectiveVa) {
+    delUitslagen = delUitslagen.eq("va_nummer", effectiveVa);
+  } else if (scopedVasFromPartij.size > 1) {
+    delUitslagen = delUitslagen.in("va_nummer", [...scopedVasFromPartij]);
+  }
 
   const { error: delUitslagenErr } = await delUitslagen;
   if (delUitslagenErr) throw delUitslagenErr;
@@ -1543,8 +1660,8 @@ export async function buildToernooiContext(
   console.log("[buildToernooiContext] klaar", {
     matchmaking_id,
     controle_run_id,
-    toernooi_code: scopedToernooiCode,
-    fighter_id: scopedVa,
+    toernooi_code: effectiveToernooiCode ?? scopedToernooiCode,
+    fighter_id: effectiveVa ?? scopedVa,
     rows: updates.length,
     uitslagen: uitslagenToInsert.length,
   });

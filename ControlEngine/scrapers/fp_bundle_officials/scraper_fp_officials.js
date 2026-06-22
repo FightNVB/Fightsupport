@@ -324,60 +324,147 @@ async function openTile(page, va, title) {
 }
 
 async function scrapeDetails(page, va) {
-  return await page.evaluate((va) => {
-    const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
-    if (!tab) return null;
+  // FightPassport rendert de DETAILS-tegel soms later dan de header.
+  // Daarom niet direct na de klik uitlezen, maar kort pollen tot Licentie/Wedstrijden zichtbaar is.
+  let last = null;
 
-    const tile = tab.querySelector(`div[title="DETAILS"]`);
-    if (!tile) return null;
+  for (let attempt = 1; attempt <= 12; attempt++) {
+    last = await page.evaluate((va) => {
+      const tab = document.querySelector(`.internal_tab.va_vechter_${va}`);
+      if (!tab) return null;
 
-    const p = [...tile.querySelectorAll("ul.get_tile_content p")];
+      const detailTiles = [...tab.querySelectorAll(`div[title="DETAILS"], .tile`)].filter((el) => {
+        const title = String(el.getAttribute("title") || "").trim().toUpperCase();
+        const header = String(el.querySelector(".tileHeader")?.innerText || "").trim().toUpperCase();
+        const text = String(el.innerText || el.textContent || "").trim().toUpperCase();
+        return title === "DETAILS" || header === "DETAILS" || text.startsWith("DETAILS");
+      });
 
-    let licentie = null;
-    let totaal = null;
-    let gewonnen = null;
-    let heeft_startverbod = false;
+      const tile = detailTiles[0] || null;
+      if (!tile) return null;
 
-    for (const row of p) {
-      const raw = row.innerText || "";
-      const txt = raw.toLowerCase().trim();
+      const contentNodes = tile.querySelectorAll(
+        "ul.get_tile_content p, ul.get_tile_content li, ul.get_tile_content div, .get_tile_content p, .get_tile_content li, .get_tile_content div"
+      );
 
-      if (txt.startsWith("licentie")) {
-        const parts = raw.split(":");
-        licentie = (parts[1] ?? "").trim() || null;
+      let detailText = [...contentNodes]
+        .map((el) => el.innerText || el.textContent || "")
+        .join("\n");
+
+      // Fallback: in sommige FP-renders staat de tekst direct in de tile.
+      if (!String(detailText || "").trim()) {
+        detailText = tile.innerText || tile.textContent || "";
       }
 
-      if (txt.startsWith("wedstrijden")) {
-        const m = raw.match(/\d+/);
+      detailText = String(detailText || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\r/g, "\n");
+
+      const lines = detailText
+        .split(/\n+/g)
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .filter((x) => x.toUpperCase() !== "DETAILS");
+
+      const allText = lines.join("\n");
+
+      let licentie = null;
+      let totaal = null;
+      let gewonnen = null;
+      let heeft_startverbod = false;
+
+      function valueAfterLabel(text, labels) {
+        const escaped = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+        const re = new RegExp(`(?:^|\\n|\\s)(?:${escaped})\\s*:?\\s*([^\\n]+)`, "i");
+        const m = String(text || "").match(re);
+        return (m?.[1] || "").trim() || null;
+      }
+
+      function normalizeJaNee(v) {
+        const s = String(v || "").trim().toLowerCase();
+        if (!s) return null;
+        if (/^(ja|j|yes|true|geldig)\b/.test(s)) return "Ja";
+        if (/^(nee|n|no|false|ongeldig)\b/.test(s)) return "Nee";
+        return String(v || "").trim() || null;
+      }
+
+      licentie = normalizeJaNee(valueAfterLabel(allText, ["Licentie", "Geldige licentie", "License"]));
+
+      const wedstrijdenRaw = valueAfterLabel(allText, ["Wedstrijden", "Totaal wedstrijden", "Aantal wedstrijden"]);
+      if (wedstrijdenRaw) {
+        const m = wedstrijdenRaw.match(/\d+/);
         totaal = m ? parseInt(m[0], 10) : null;
       }
 
-      if (txt.startsWith("gewonnen")) {
-        const m = raw.match(/\d+/);
+      const gewonnenRaw = valueAfterLabel(allText, ["Gewonnen", "Wins"]);
+      if (gewonnenRaw) {
+        const m = gewonnenRaw.match(/\d+/);
         gewonnen = m ? parseInt(m[0], 10) : null;
       }
 
-      if (txt.includes("startverbod")) {
-        if (txt.includes("nee") || txt.includes("geen")) {
-          heeft_startverbod = false;
-        } else if (txt.includes("ja") || txt.includes("actief")) {
-          heeft_startverbod = true;
-        } else {
-          const hasDate = /\d{2}-\d{2}-\d{4}/.test(raw);
-          if (hasDate) heeft_startverbod = true;
+      for (const line of lines) {
+        const txt = line.toLowerCase().trim();
+
+        if (licentie == null && txt.includes("licentie")) {
+          const rawValue = line.includes(":") ? line.split(":").slice(1).join(":") : line.replace(/licentie/ig, "");
+          licentie = normalizeJaNee(rawValue);
+        }
+
+        if (totaal == null && txt.startsWith("wedstrijden")) {
+          const m = line.match(/\d+/);
+          totaal = m ? parseInt(m[0], 10) : null;
+        }
+
+        if (gewonnen == null && txt.startsWith("gewonnen")) {
+          const m = line.match(/\d+/);
+          gewonnen = m ? parseInt(m[0], 10) : null;
+        }
+
+        if (txt.includes("startverbod")) {
+          if (txt.includes("nee") || txt.includes("geen")) {
+            heeft_startverbod = false;
+          } else if (txt.includes("ja") || txt.includes("actief")) {
+            heeft_startverbod = true;
+          } else {
+            const hasDate = /\d{2}-\d{2}-\d{4}/.test(line);
+            if (hasDate) heeft_startverbod = true;
+          }
         }
       }
+
+      return {
+        licentie,
+        totaal,
+        gewonnen,
+        heeft_startverbod: heeft_startverbod ? "Ja" : "Nee",
+        _raw_lines: lines.slice(0, 8),
+      };
+    }, va);
+
+    if (last?.licentie != null || last?.totaal != null || last?.gewonnen != null) {
+      const { _raw_lines, ...clean } = last;
+      return clean;
     }
 
-    return {
-      licentie,
-      totaal,
-      gewonnen,
-      heeft_startverbod: heeft_startverbod ? "Ja" : "Nee",
-    };
-  }, va);
-}
+    if (attempt === 4 || attempt === 8) {
+      await openTile(page, va, "DETAILS");
+    }
 
+    await wait(250);
+  }
+
+  console.log("[fullfighter] ⚠️ DETAILS niet volledig geladen/gelezen", {
+    va: String(va),
+    raw: last?._raw_lines ?? null,
+  });
+
+  if (last) {
+    const { _raw_lines, ...clean } = last;
+    return clean;
+  }
+
+  return null;
+}
 async function scrapeZeroMeting(page) {
   const exists = await page.$("input.dnva_nulmetingaantalwedstr");
   if (!exists) {

@@ -337,7 +337,7 @@ export async function POST(req: Request) {
     const workers = clampInt(body?.workers ?? 8, 8, 1, 20);
     const stagger_ms = clampInt(body?.stagger_ms ?? 250, 250, 0, 5000);
     const tab_attempts = clampInt(body?.tab_attempts ?? 8, 8, 1, 30);
-    const soft_wait_ms = clampInt(body?.soft_wait_ms ?? 900, 900, 200, 5000);
+    const soft_wait_ms = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);
     const between_attempts_ms = clampInt(
       body?.between_attempts_ms ?? 450,
       450,
@@ -346,8 +346,8 @@ export async function POST(req: Request) {
     );
 
     const fullfighter_timeout_ms = clampInt(
-      body?.fullfighter_timeout_ms ?? 35000,
-      35000,
+      body?.fullfighter_timeout_ms ?? 45000,
+      45000,
       5000,
       180000
     );

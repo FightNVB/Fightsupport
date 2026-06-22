@@ -50,6 +50,17 @@ function isExcelFilename(name: string) {
   return n.endsWith(".xlsx") || n.endsWith(".xls");
 }
 
+function getUploadedFile(fd: FormData): File | null {
+  const keys = ["file", "excel", "bestand", "aanmeldingen", "aanmeldingen_file"];
+
+  for (const key of keys) {
+    const value = fd.get(key);
+    if (value instanceof File) return value;
+  }
+
+  return null;
+}
+
 function safeFileName(name: string) {
   const cleaned = String(name ?? "")
     .replace(/[^\w.\-() ]+/g, "_")
@@ -172,6 +183,17 @@ function normalizeNullableNumber(v: unknown) {
         );
 
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeWeightNumber(v: unknown) {
+  const n = normalizeNullableNumber(v);
+  return n == null ? null : Math.abs(n);
+}
+
+function normalizeWeightType(v: unknown): "exact" | "up_to" | "open_above" | null {
+  const x = s(v).toLowerCase();
+  if (x === "exact" || x === "up_to" || x === "open_above") return x;
+  return null;
 }
 
 function onlyDigits(v: unknown) {
@@ -579,6 +601,18 @@ async function deleteUploadArtifacts(uploadBatchId: string, matchmakingId: strin
   }
 }
 
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204 });
+}
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    endpoint: "submit-aanmeldingen",
+    methods: ["POST", "DELETE"],
+  });
+}
+
 export async function POST(req: Request) {
   const uploadId = crypto.randomUUID();
   let uploadedStoragePath = "";
@@ -610,7 +644,7 @@ export async function POST(req: Request) {
 
     const matchmaking_id = s(fd.get("matchmaking_id"));
     cleanupMatchmakingId = matchmaking_id;
-    const file = fd.get("file");
+    const file = getUploadedFile(fd);
 
     if (!uploaded_by) {
       return NextResponse.json(
@@ -626,7 +660,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!file || !(file instanceof File)) {
+    if (!file) {
       return NextResponse.json(
         { error: "Excel bestand ontbreekt" },
         { status: 400 },
@@ -696,7 +730,7 @@ export async function POST(req: Request) {
       upload_id: uploadId,
       upload_filename: raw_filename,
       storage_path: uploadedStoragePath || null,
-    } as any);
+    });
 
     if (!fighters.length) {
       return NextResponse.json(
@@ -741,7 +775,15 @@ export async function POST(req: Request) {
         va_nummer: textOrNull(f.va_nummer),
 
         geboortedatum: textOrNull(f.geboortedatum),
-        gewicht: normalizeNullableNumber(f.gewicht),
+
+        // Gewichtsklassen:
+        // -95 = maximaal 95 kg (up_to), dus opslaan/sorteren als 95 en notatie bewaren.
+        // 95+ = open heavyweight (open_above), minimaal 95 kg en géén max.
+        gewicht: normalizeWeightNumber(f.gewicht),
+        gewicht_notatie: textOrNull(f.gewicht_notatie),
+        gewicht_type: normalizeWeightType(f.gewicht_type),
+        min_gewicht: normalizeWeightNumber(f.min_gewicht),
+        max_gewicht: normalizeWeightNumber(f.max_gewicht),
 
         win: normalizeNullableNumber(f.win),
         loss: normalizeNullableNumber(f.loss),
@@ -762,6 +804,10 @@ export async function POST(req: Request) {
           upload_filename: raw_filename,
           storage_path: uploadedStoragePath || null,
           parsed_naam: naam,
+          gewicht_notatie: textOrNull(f.gewicht_notatie),
+          gewicht_type: normalizeWeightType(f.gewicht_type),
+          min_gewicht: normalizeWeightNumber(f.min_gewicht),
+          max_gewicht: normalizeWeightNumber(f.max_gewicht),
         },
       };
     });

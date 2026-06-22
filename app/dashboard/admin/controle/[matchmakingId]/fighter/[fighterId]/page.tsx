@@ -125,6 +125,21 @@ function dedupeRules(rows: FighterRuleResultRow[]) {
   });
 }
 
+function isOpenRule(row: FighterRuleResultRow) {
+  const review = String(row.review_status ?? "").trim().toLowerCase();
+  const resultaat = String(row.resultaat ?? "").trim().toLowerCase();
+  return resultaat !== "ok" && resultaat !== "goedgekeurd" && (!review || review === "open");
+}
+
+function isLicentieRule(row: FighterRuleResultRow) {
+  const text = `${row.rule_code ?? ""} ${row.rule ?? ""} ${row.boodschap ?? ""}`.toLowerCase();
+  return text.includes("licentie") || text.includes("license");
+}
+
+function hasOpenLicentieRule(rows: FighterRuleResultRow[]) {
+  return rows.some((row) => isOpenRule(row) && isLicentieRule(row));
+}
+
 
 function calcAgeAtDate(birth?: string | null, at?: string | null) {
   if (!birth || !at) return null;
@@ -308,6 +323,96 @@ function hasStartverbod(fighter: any) {
   );
 }
 
+function tournamentClassToken(v: unknown) {
+  const x = String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  if (!x) return "";
+  if (x.includes("j+") || x.includes("talent")) return "J+";
+  if (x.includes("jeugd") || x.includes("youth") || x === "j" || x.startsWith("j ")) return "J";
+  if (x.includes("recreant") || x === "r" || x.includes("r klasse") || x.includes("r class")) return "R";
+  if (x.includes("nieuweling") || x.includes("newcomer") || x.includes("novice") || x === "n" || x.includes("n klasse") || x.includes("n class")) return "N";
+  if (x === "c" || x.includes("c klasse") || x.includes("c class")) return "C";
+  if (x === "b" || x.includes("b klasse") || x.includes("b class")) return "B";
+  if (x === "a" || x.includes("a klasse") || x.includes("a class") || x.includes("elite")) return "A";
+  return x.toUpperCase();
+}
+
+
+function isRelevantKickboxingDiscipline(v: unknown) {
+  const s = String(v ?? "").trim().toLowerCase();
+  return s.includes("kick") || s.includes("muay") || s.includes("thai") || s.includes("k1");
+}
+
+function isJeugdKlasseForHistory(v: unknown) {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return s === "j" || s.includes("jeugd") || s.includes("youth");
+}
+
+function effectiveClassFromUitslagenOrNulmeting(fighter: any, uitslagenRows: Uitslag[]) {
+  let best = "";
+  let bestRank = 0;
+
+  for (const row of uitslagenRows ?? []) {
+    if (!isRelevantKickboxingDiscipline(row?.discipline)) continue;
+    if (isJeugdKlasseForHistory(row?.klasse)) continue;
+
+    const token = tournamentClassToken(row?.klasse);
+    const rankMap: Record<string, number> = { R: 1, N: 2, C: 3, B: 4, A: 5 };
+    const rank = rankMap[token] ?? 0;
+
+    if (rank > bestRank) {
+      best = token;
+      bestRank = rank;
+    }
+  }
+
+  return best || tournamentClassToken(fighter?.nulmeting_klasse);
+}
+
+function hasClassMismatchRule(rows: FighterRuleResultRow[]) {
+  return rows.some((row) => {
+    const text = `${row.rule_code ?? ""} ${row.rule ?? ""} ${row.boodschap ?? ""}`.toLowerCase();
+    return text.includes("toernooi-klasse") || text.includes("toernooiklasse") || text.includes("klasse");
+  });
+}
+
+function buildSyntheticClassMismatchRule(fighter: any, uitslagenRows: Uitslag[]): FighterRuleResultRow | null {
+  const toernooiKlasseRaw = fighter?.klasse;
+  const toernooiKlasse = tournamentClassToken(toernooiKlasseRaw);
+  const fighterKlasse = effectiveClassFromUitslagenOrNulmeting(fighter, uitslagenRows);
+  const hasRelevantUitslagen = (uitslagenRows ?? []).some((row) =>
+    isRelevantKickboxingDiscipline(row?.discipline) && !isJeugdKlasseForHistory(row?.klasse) && !!tournamentClassToken(row?.klasse)
+  );
+  const fighterKlasseRaw = hasRelevantUitslagen ? fighterKlasse : fighter?.nulmeting_klasse;
+
+  if (!toernooiKlasse || !fighterKlasse || toernooiKlasse === fighterKlasse) return null;
+
+  const va = normalizeVa(fighter?.va_nummer ?? fighter?.fighter_id);
+  return {
+    id: `synthetic-class-${fighter?.toernooi_code ?? "T"}-${va || fighter?.id || "fighter"}`,
+    controle_run_id: fighter?.controle_run_id ?? null,
+    fighter_id: va || fighter?.fighter_id || null,
+    va_nummer: va || fighter?.va_nummer || null,
+    rule: "Toernooi klasse",
+    rule_code: "TOERNOOI_KLASSE_MISMATCH",
+    resultaat: "actie",
+    severity: "warning",
+    boodschap: `Zit niet in toernooi-klasse (${safe(fighterKlasseRaw, fighterKlasse)} in ${safe(toernooiKlasseRaw, toernooiKlasse)})`,
+    review_status: null,
+  };
+}
+
+
 export default function FighterDetailPage() {
   const params = useParams<{ matchmakingId: string; fighterId: string }>();
   const router = useRouter();
@@ -450,6 +555,7 @@ export default function FighterDetailPage() {
         gewicht: toNum(ctx?.gewicht ?? raw?.gewicht ?? raw?.gewicht_kg ?? rawBout?.rood_gewicht ?? rawBout?.blauw_gewicht),
         discipline: firstFilled(ctx?.discipline, rawBout?.discipline),
         klasse: firstFilled(ctx?.klasse_mm, ctx?.klasse, rawBout?.klasse, raw?.nulmeting_klasse),
+        nulmeting_klasse: firstFilled(ctx?.nulmeting_klasse, raw?.nulmeting_klasse),
         gym: firstFilled(ctx?.sportschool, ctx?.sportschool_mm, raw?.sportschool, raw?.sportschool_naam, rawBout?.rood_gym, rawBout?.blauw_gym),
         va_nummer: va,
         licentie: firstFilled(ctx?.licentie, raw?.licentie),
@@ -458,7 +564,6 @@ export default function FighterDetailPage() {
         verloren: toNum(ctx?.verloren ?? raw?.verloren ?? raw?.losses) ?? 0,
         onbeslist: toNum(ctx?.draw ?? raw?.draw ?? raw?.draws ?? raw?.gelijk) ?? 0,
         totaal_wedstrijden: toNum(ctx?.totaal_wedstrijden ?? raw?.totaal_wedstrijden ?? raw?.totaal ?? ctx?.nulmeting_totaal) ?? 0,
-        nulmeting_klasse: firstFilled(ctx?.nulmeting_klasse, raw?.nulmeting_klasse),
         nulmeting_totaal: toNum(ctx?.nulmeting_totaal ?? raw?.nulmeting_totaal) ?? 0,
         nulmeting_opmerking: firstFilled(ctx?.nulmeting_opmerking, raw?.nulmeting_opmerking),
         heeft_keurmerk: firstFilled(ctx?.heeft_keurmerk, ctx?.keurmerk_status, ctx?.keurmerk_ok),
@@ -489,24 +594,43 @@ export default function FighterDetailPage() {
       if (nextFighter.toernooi_code || va) {
         let q = supabase
           .from("controle_resultaten")
-          .select("id,controle_run_id,fighter_id,toernooi_va_nummer,rule,rule_code,resultaat,severity,boodschap,review_status,toernooi_code,partij_nr,bout_id")
+          .select("id,controle_run_id,fighter_id,toernooi_va_nummer,va_nummer,rule,rule_code,resultaat,severity,boodschap,review_status,toernooi_code,partij_nr,bout_id,hoek")
           .eq("matchmaking_id", matchmakingId)
           .order("created_at", { ascending: true });
 
         if (nextFighter.controle_run_id) q = q.eq("controle_run_id", nextFighter.controle_run_id);
         if (nextFighter.toernooi_code) q = q.eq("toernooi_code", nextFighter.toernooi_code);
-        if (va) {
-          const ruleFilters = [`toernooi_va_nummer.eq.${va}`];
-          // fighter_id kan in sommige omgevingen UUID zijn. Nooit een VA op fighter_id filteren.
-          if (isUuid(fighterId)) ruleFilters.push(`fighter_id.eq.${fighterId}`);
-          q = q.or(ruleFilters.join(","));
-        }
 
+        // Toernooi-meldingen zijn niet altijd hetzelfde gevuld:
+        // soms staat de VA in toernooi_va_nummer, soms in va_nummer en soms als tekst in fighter_id.
+        // Daarom halen we de T1/T2-meldingen breed op en koppelen we lokaal op genormaliseerde VA.
+        // Zo vermijden we ook PostgREST/UUID-fouten door een numerieke VA op een UUID-kolom te filteren.
         const res = await q;
         if (res.error) throw res.error;
-        rules = (res.data ?? []) as FighterRuleResultRow[];
+
+        const allRules = (res.data ?? []) as FighterRuleResultRow[];
+        const wantedVa = normalizeVa(va);
+        const wantedUuid = isUuid(fighterId) ? String(fighterId).trim().toLowerCase() : "";
+
+        rules = allRules.filter((row: any) => {
+          if (!wantedVa && !wantedUuid) return true;
+
+          const rowToernooi = String(row?.toernooi_code ?? "").trim().toUpperCase();
+          const fighterToernooi = String(nextFighter.toernooi_code ?? "").trim().toUpperCase();
+          if (fighterToernooi && rowToernooi && rowToernooi !== fighterToernooi) return false;
+
+          const rowVa = normalizeVa(
+            firstFilled(row?.toernooi_va_nummer, row?.va_nummer, row?.fighter_id),
+          );
+          if (wantedVa && rowVa && rowVa === wantedVa) return true;
+
+          const rowFighterId = String(row?.fighter_id ?? "").trim().toLowerCase();
+          if (wantedUuid && rowFighterId && rowFighterId === wantedUuid) return true;
+
+          return false;
+        });
       }
-      setMeldingen(dedupeRules(rules));
+      let rulesForDisplay = rules;
 
       if (va) {
         let res = await supabase
@@ -531,9 +655,17 @@ export default function FighterDetailPage() {
         }
 
         setUitslagen(rows);
+
+        // Klassemeldingen komen uit controle_resultaten/rulesEngine.
+        // Niet meer frontend-only synthetisch toevoegen, anders wijken overzicht/detail/toernooi van elkaar af.
       } else {
         setUitslagen([]);
+
+        // Klassemeldingen komen uit controle_resultaten/rulesEngine.
+        // Niet meer frontend-only synthetisch toevoegen.
       }
+
+      setMeldingen(dedupeRules(rulesForDisplay));
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Toernooi-vechter laden mislukt");
@@ -708,7 +840,8 @@ export default function FighterDetailPage() {
     : displayClassToken(fighter?.nulmeting_klasse ?? raw?.nulmeting?.klasse ?? fighter?.klasse);
   const klasseControleBron = hoogsteUitslagenKlasse ? "uitslagen" : "nulmeting";
 
-  const hasLicense = yes(fighter?.licentie);
+  const openLicentieMelding = hasOpenLicentieRule(meldingen);
+  const hasLicense = !openLicentieMelding && yes(fighter?.licentie);
   const startverbod = yes(fighter?.heeft_startverbod, ["ja", "yes", "true"]);
   const age = calcAgeAtDate(fighter?.fp_geboortedatum ?? fighter?.geboortedatum, matchmaking?.datum);
   const canCorrectBout = !!fighter?.toernooi_code && !!fighter?.va_nummer;

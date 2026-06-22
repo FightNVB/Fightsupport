@@ -99,7 +99,7 @@ function formatMinutesToClock(minutes: number | null): string | null {
 
 function leeftijdOpEventGetal(
   ctx: AnyRow | null | undefined,
-  side: "rood" | "blauw",
+  side: "rood" | "blauw"
 ): number | null {
   if (!ctx) return null;
 
@@ -107,7 +107,7 @@ function leeftijdOpEventGetal(
     ctx?.[`${side}_leeftijd_event`] ??
       ctx?.[`${side}_leeftijd_op_event`] ??
       ctx?.[`${side}_age_event`] ??
-      ctx?.[`${side}_age`],
+      ctx?.[`${side}_age`]
   );
   if (direct != null) return direct;
 
@@ -116,14 +116,16 @@ function leeftijdOpEventGetal(
     ctx?.[`${side}_geboortedatum_fp`] ??
       ctx?.[`${side}_geboortedatum_mm`] ??
       ctx?.[`${side}_geboortedatum`] ??
-      ctx?.[`${side}_dob`],
+      ctx?.[`${side}_dob`]
   );
 
   if (!eventDate || !birthDate) return null;
   return calcAgeYearsOnDate(eventDate, birthDate);
 }
 
-function wedstrijddetailsFromCtx(ctx: AnyRow | null | undefined): {
+function wedstrijddetailsFromCtx(
+  ctx: AnyRow | null | undefined
+): {
   rondeTijd: string | null;
   format: string | null;
   rustTijd: string | null;
@@ -137,7 +139,7 @@ function wedstrijddetailsFromCtx(ctx: AnyRow | null | undefined): {
   const roodLeeftijd = leeftijdOpEventGetal(ctx, "rood");
   const blauwLeeftijd = leeftijdOpEventGetal(ctx, "blauw");
   const knownAges = [roodLeeftijd, blauwLeeftijd].filter(
-    (v): v is number => typeof v === "number",
+    (v): v is number => typeof v === "number"
   );
   const jongste = knownAges.length ? Math.min(...knownAges) : null;
 
@@ -236,16 +238,16 @@ function wedstrijddetailsFromCtx(ctx: AnyRow | null | undefined): {
 }
 
 function metalFrameStyle(
-  accent: "none" | "orange" | "red" | "blue" = "none",
+  accent: "none" | "orange" | "red" | "blue" = "none"
 ): CSSProperties {
   const accentGlow =
     accent === "red"
       ? "radial-gradient(520px 260px at 0% 0%, rgba(220,38,38,0.22), transparent 62%)"
       : accent === "blue"
-        ? "radial-gradient(520px 260px at 100% 0%, rgba(37,99,235,0.22), transparent 62%)"
-        : accent === "orange"
-          ? "radial-gradient(640px 320px at 50% 0%, rgba(255,77,0,0.20), transparent 62%)"
-          : "radial-gradient(640px 320px at 50% 0%, rgba(255,255,255,0.06), transparent 62%)";
+      ? "radial-gradient(520px 260px at 100% 0%, rgba(37,99,235,0.22), transparent 62%)"
+      : accent === "orange"
+      ? "radial-gradient(640px 320px at 50% 0%, rgba(255,77,0,0.20), transparent 62%)"
+      : "radial-gradient(640px 320px at 50% 0%, rgba(255,255,255,0.06), transparent 62%)";
 
   const brushed =
     "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, rgba(255,255,255,0.02) 1px, rgba(255,255,255,0.02) 4px)";
@@ -351,26 +353,24 @@ function Badge({
         ? "bg-green-700 text-white border-green-800"
         : "bg-green-50 text-green-800 border-green-300"
       : tone === "warn"
-        ? invert
-          ? "bg-yellow-500 text-black border-yellow-700"
-          : "bg-yellow-50 text-yellow-900 border-yellow-300"
-        : tone === "disp"
-          ? invert
-            ? "bg-orange-600 text-white border-orange-700"
-            : "bg-orange-50 text-orange-900 border-orange-300"
-          : tone === "info"
-            ? invert
-              ? "bg-blue-700 text-white border-blue-800"
-              : "bg-blue-50 text-blue-900 border-blue-300"
-            : invert
-              ? "bg-red-700 text-white border-red-800"
-              : "bg-red-50 text-red-900 border-red-300";
+      ? invert
+        ? "bg-yellow-500 text-black border-yellow-700"
+        : "bg-yellow-50 text-yellow-900 border-yellow-300"
+      : tone === "disp"
+      ? invert
+        ? "bg-orange-600 text-white border-orange-700"
+        : "bg-orange-50 text-orange-900 border-orange-300"
+      : tone === "info"
+      ? invert
+        ? "bg-blue-700 text-white border-blue-800"
+        : "bg-blue-50 text-blue-900 border-blue-300"
+      : invert
+      ? "bg-red-700 text-white border-red-800"
+      : "bg-red-50 text-red-900 border-red-300";
 
   return (
     <span
-      className={
-        "inline-flex items-center px-2.5 py-1 text-xs border rounded " + cls
-      }
+      className={"inline-flex items-center px-2.5 py-1 text-xs border rounded " + cls}
     >
       {text}
     </span>
@@ -380,8 +380,11 @@ function Badge({
 function useLogoFallback(candidates: string[]) {
   const [idx, setIdx] = useState(0);
   const src =
-    candidates[idx] ?? candidates[0] ?? "/branding/fightsupport/logo-dark.png";
-  const onError = () => setIdx((i) => Math.min(i + 1, candidates.length - 1));
+    candidates[idx] ??
+    candidates[0] ??
+    "/branding/fightsupport/logo-dark.png";
+  const onError = () =>
+    setIdx((i) => Math.min(i + 1, candidates.length - 1));
   return { src, onError };
 }
 
@@ -421,10 +424,10 @@ function PlateHeader({
     dot === "red"
       ? "bg-red-500"
       : dot === "blue"
-        ? "bg-blue-500"
-        : dot === "orange"
-          ? "bg-[var(--brand-orange)]"
-          : "bg-white/25";
+      ? "bg-blue-500"
+      : dot === "orange"
+      ? "bg-[var(--brand-orange)]"
+      : "bg-white/25";
 
   return (
     <div className="relative px-4 py-3" style={plateHeaderStyle()}>
@@ -632,8 +635,8 @@ function BruteHeaderA({
                         src={
                           typeof logo === "string"
                             ? logo
-                            : ((logo as any)?.src ??
-                              "/branding/fightsupport/logo-dark.png")
+                            : (logo as any)?.src ??
+                              "/branding/fightsupport/logo-dark.png"
                         }
                         alt="FightSupport"
                         width={66}
@@ -665,9 +668,7 @@ function BruteHeaderA({
             <div className="mt-2 flex md:justify-end gap-2 flex-wrap">
               <Badge
                 text={`RUN: ${(runStatus ?? "-").toUpperCase()}`}
-                tone={
-                  runStatus === "klaar" ? "ok" : runStatus ? "warn" : "info"
-                }
+                tone={runStatus === "klaar" ? "ok" : runStatus ? "warn" : "info"}
               />
             </div>
 
@@ -818,10 +819,7 @@ function FighterMetalCard({
             "linear-gradient(180deg, rgba(24,24,27,0.92) 0%, rgba(10,10,12,0.96) 100%)",
         }}
       >
-        <div
-          className="text-3xl font-black leading-tight"
-          style={{ color: NVB_ORANGE }}
-        >
+        <div className="text-3xl font-black leading-tight" style={{ color: NVB_ORANGE }}>
           {naam || "-"}
         </div>
         <div className="text-white/70">{gym || "-"}</div>
@@ -848,14 +846,13 @@ function FighterMetalCard({
           </div>
         </div>
 
+
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-white/75">
           <div>
-            Geboortedatum:{" "}
-            <span className="text-white">{fmtDateOnlyNL(dob)}</span>
+            Geboortedatum: <span className="text-white">{fmtDateOnlyNL(dob)}</span>
           </div>
           <div>
-            Leeftijd (event):{" "}
-            <span className="text-white">{leeftijdEvent}</span>
+            Leeftijd (event): <span className="text-white">{leeftijdEvent}</span>
           </div>
           <div>
             Geslacht: <span className="text-white">{geslacht || "-"}</span>
@@ -877,11 +874,9 @@ function FighterMetalCard({
         >
           <div className="text-xs text-white/60 mb-1">Extra / nulmeting</div>
           <div className="text-sm text-white/75">
-            Klasse (nulmeting):{" "}
-            <span className="text-white">{nulKlasse || "-"}</span>
+            Klasse (nulmeting): <span className="text-white">{nulKlasse || "-"}</span>
             <span className="text-white/40"> • </span>
-            Totaal (nulmeting):{" "}
-            <span className="text-white">{nulTotaal ?? "-"}</span>
+            Totaal (nulmeting): <span className="text-white">{nulTotaal ?? "-"}</span>
           </div>
           <div className="mt-1 text-sm text-white/85 whitespace-pre-wrap">
             {nulOpmerking ? nulOpmerking : "-"}
@@ -909,7 +904,7 @@ function addMonthsUTC(date: Date, add: number): Date {
   const day = date.getUTCDate();
 
   const ty = y + Math.floor((m + add) / 12);
-  const tm = (((m + add) % 12) + 12) % 12;
+  const tm = ((m + add) % 12 + 12) % 12;
 
   const last = new Date(Date.UTC(ty, tm + 1, 0)).getUTCDate();
   const dd = Math.min(day, last);
@@ -966,15 +961,19 @@ function fmtDateOnlyNL(d?: any) {
 function calcAgeYearsOnDate(eventDate: Date, birthDate: Date): number | null {
   let years = eventDate.getFullYear() - birthDate.getFullYear();
   const m = eventDate.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && eventDate.getDate() < birthDate.getDate()))
-    years -= 1;
+  if (m < 0 || (m === 0 && eventDate.getDate() < birthDate.getDate())) years -= 1;
   if (years < 0 || !Number.isFinite(years)) return null;
   return years;
 }
 
 function ageYearsAtEvent(ctx: AnyRow, side: "rood" | "blauw"): string {
-  const direct = leeftijdOpEventGetal(ctx, side);
-  return direct == null ? "-" : `${direct} jaar`;
+  const event = parseISODateOnly(ctx?.evenement_datum);
+  const birth = parseISODateOnly(
+    ctx?.[`${side}_geboortedatum_fp`] ?? ctx?.[`${side}_geboortedatum_mm`]
+  );
+  if (!event || !birth) return "-";
+  const years = calcAgeYearsOnDate(event, birth);
+  return years == null ? "-" : `${years} jaar`;
 }
 
 function toInt(v: any): number | null {
@@ -994,9 +993,7 @@ function toNumKg(v: any): number | null {
 function parseJaNee(v: any): "ja" | "nee" | null {
   if (v === true) return "ja";
   if (v === false) return "nee";
-  const s = String(v ?? "")
-    .trim()
-    .toLowerCase();
+  const s = String(v ?? "").trim().toLowerCase();
   if (!s) return null;
   if (["ja", "yes", "true", "1"].includes(s)) return "ja";
   if (["nee", "no", "false", "0"].includes(s)) return "nee";
@@ -1004,9 +1001,7 @@ function parseJaNee(v: any): "ja" | "nee" | null {
 }
 
 function normResultaat(v: any): string {
-  const s = String(v ?? "")
-    .trim()
-    .toLowerCase();
+  const s = String(v ?? "").trim().toLowerCase();
   if (!s) return "";
   if (
     s === "afkeur" ||
@@ -1030,9 +1025,8 @@ function asUuid(v: any): string | null {
 
 function isApprovedOverride(row: ControleResultaatRow): boolean {
   return (
-    String(row?.review_status ?? "")
-      .trim()
-      .toLowerCase() === "goedgekeurd" || normResultaat(row?.resultaat) === "ok"
+    String(row?.review_status ?? "").trim().toLowerCase() === "goedgekeurd" ||
+    normResultaat(row?.resultaat) === "ok"
   );
 }
 
@@ -1076,80 +1070,26 @@ function displayResultaat(row: ControleResultaatRow): {
   return { label: String(r).toUpperCase(), tone: "info" };
 }
 
-function rowHasVerbod(row: ControleResultaatRow): boolean {
-  const hay = [
-    row?.rule_code,
-    row?.rule,
-    row?.boodschap,
-    row?.aantekeningen,
-    row?.review_note,
-    row?.severity,
-  ]
-    .map((v) => String(v ?? "").toLowerCase())
-    .join(" ");
-
-  return hay.includes("startverbod") || hay.includes("verbod");
-}
-
-function rowReviewType(row: ControleResultaatRow): "info" | "actie" | "afkeur" | "dispensatie" | "ok" | "anders" {
+function canReviewResultaatForRoles(row: ControleResultaatRow, roleNames: string[]): boolean {
   const res = normResultaat(row?.resultaat);
-  const code = String(row?.rule_code ?? "").toUpperCase();
-  const msg = String(row?.boodschap ?? "").toLowerCase();
-
-  if (!res || res === "ok") return "ok";
-  if (res === "dispensatie") return "dispensatie";
-  if (res === "afgekeurd") return "afkeur";
-  if (res === "actie") return "actie";
-  if (res === "info" || msg.includes("geen data") || msg.includes("no data") || msg.includes("missing")) {
-    return "info";
-  }
-
-  // Belgische keurmerkregels zijn in deze page informatief/actie, niet echte afkeur.
-  if (code.startsWith("KEURMERK_BE_")) return "info";
-
-  return "anders";
-}
-
-function canReviewResultaatForRoles(
-  row: ControleResultaatRow,
-  roleNames: string[],
-  decision: "approve" | "reject",
-): boolean {
-  const type = rowReviewType(row);
-  if (type === "ok") return false;
+  if (!res || res === "ok") return false;
 
   const roles = (roleNames ?? []).map((r) => String(r).trim().toLowerCase());
   const isSuperadmin = roles.includes("superadmin");
   const isMatchmaker = roles.includes("matchmaker");
-  const isOfficial = roles.includes("official");
-  const isHoofdofficial = roles.includes("hoofdofficial");
-  const isAdminRole = roles.includes("admin") || isHoofdofficial;
+  const isAdminRole = roles.includes("admin") || roles.includes("hoofdofficial");
   const isDispensatieAdmin = roles.includes("dispensatie_admin");
 
-  // Verbod/startverbod mag alleen door superadmin goed- of afgekeurd worden.
-  if (rowHasVerbod(row) && !isSuperadmin) return false;
-
   if (isSuperadmin) return true;
-
-  // Optionele bestaande rol behouden: alleen dispensaties reviewen.
-  if (isDispensatieAdmin) return type === "dispensatie";
-
-  // Hoofdofficial/admin: info, actie en afkeur goed- of afkeuren.
-  if (isAdminRole) {
-    return type === "info" || type === "actie" || type === "afkeur";
-  }
-
-  // Matchmaker/official: info en actie alleen goedkeuren, niet afkeuren.
-  if ((isMatchmaker || isOfficial) && decision === "approve") {
-    return type === "info" || type === "actie";
-  }
-
+  if (isDispensatieAdmin) return res === "dispensatie";
+  if (isAdminRole) return res === "actie" || res === "afgekeurd";
+  if (isMatchmaker) return res === "actie";
   return false;
 }
 
 function rowMatchesSide(
   row: ControleResultaatRow,
-  side: "rood" | "blauw",
+  side: "rood" | "blauw"
 ): boolean {
   const sideToken = side.toLowerCase();
   const otherToken = side === "rood" ? "blauw" : "rood";
@@ -1164,18 +1104,11 @@ function rowMatchesSide(
     .map((v) => String(v ?? "").toLowerCase())
     .filter(Boolean);
 
-  if (
-    fields.some((v) => v.includes(sideToken)) &&
-    !fields.some((v) => v.includes(otherToken))
-  ) {
+  if (fields.some((v) => v.includes(sideToken)) && !fields.some((v) => v.includes(otherToken))) {
     return true;
   }
 
-  if (
-    String(row?.hoek ?? "")
-      .trim()
-      .toLowerCase() === sideToken
-  ) {
+  if (String(row?.hoek ?? "").trim().toLowerCase() === sideToken) {
     return true;
   }
 
@@ -1184,17 +1117,9 @@ function rowMatchesSide(
 
 function buildSideResultBadges(
   rows: ControleResultaatRow[],
-  side: "rood" | "blauw",
-): Array<{
-  key: string;
-  text: string;
-  tone: "ok" | "warn" | "disp" | "err" | "info";
-}> {
-  const out: Array<{
-    key: string;
-    text: string;
-    tone: "ok" | "warn" | "disp" | "err" | "info";
-  }> = [];
+  side: "rood" | "blauw"
+): Array<{ key: string; text: string; tone: "ok" | "warn" | "disp" | "err" | "info" }> {
+  const out: Array<{ key: string; text: string; tone: "ok" | "warn" | "disp" | "err" | "info" }> = [];
   const seen = new Set<string>();
 
   for (const row of rows ?? []) {
@@ -1261,16 +1186,14 @@ function UitslagenTable({
                   Geen uitslagen gevonden.
                 </td>
               </tr>
-              {Array.from({ length: Math.max(0, pageSize - 1) }).map(
-                (_, idx) => (
-                  <tr key={`empty-${idx}`}>
-                    <td className="px-3 py-2 w-32">&nbsp;</td>
-                    <td className="px-3 py-2 w-48">&nbsp;</td>
-                    <td className="px-3 py-2 w-16">&nbsp;</td>
-                    <td className="px-3 py-2">&nbsp;</td>
-                  </tr>
-                ),
-              )}
+              {Array.from({ length: Math.max(0, pageSize - 1) }).map((_, idx) => (
+                <tr key={`empty-${idx}`}>
+                  <td className="px-3 py-2 w-32">&nbsp;</td>
+                  <td className="px-3 py-2 w-48">&nbsp;</td>
+                  <td className="px-3 py-2 w-16">&nbsp;</td>
+                  <td className="px-3 py-2">&nbsp;</td>
+                </tr>
+              ))}
             </>
           ) : (
             <>
@@ -1378,7 +1301,7 @@ export default function PartijDetailPage() {
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const isSuperadmin = useMemo(
     () => roleNames.map((r) => r.toLowerCase()).includes("superadmin"),
-    [roleNames],
+    [roleNames]
   );
   const isAdmin = useMemo(() => {
     const lower = roleNames.map((r) => r.toLowerCase());
@@ -1438,41 +1361,37 @@ export default function PartijDetailPage() {
 
     const va = String(ctx?.[`${side}_va_mm`] ?? "").trim();
     const naam = String(
-      ctx?.[`${side}_naam_mm`] ?? ctx?.[`${side}_naam_fp`] ?? "",
+      ctx?.[`${side}_naam_mm`] ?? ctx?.[`${side}_naam_fp`] ?? ""
     ).trim();
     const gym = String(ctx?.[`${side}_gym_mm`] ?? "").trim();
+    const gewicht = String(
+      ctx?.[`${side}_gewicht_mm`] ??
+        ctx?.[`${side}_gewicht`] ??
+        ctx?.[`gewicht_${side}_mm`] ??
+        ""
+    ).trim();
 
     setEditVa(va);
     setEditNaam(naam);
     setEditGym(gym);
+    setEditGewicht(gewicht);
 
     const d = String(ctx?.discipline ?? ctx?.discipline_mm ?? "").trim();
     const k = String(ctx?.klasse_mm ?? ctx?.klasse ?? "").trim();
+    const g = String(ctx?.geslacht ?? ctx?.[`${side}_geslacht_mm`] ?? ctx?.[`${side}_geslacht`] ?? "").trim();
+    const maxG = String(
+      ctx?.max_gewicht ??
+        ctx?.max_gewicht_mm ??
+        ctx?.gewicht_max_mm ??
+        ctx?.matchmaking_bouts_raw_max_gewicht ??
+        ""
+    ).trim();
     setEditBoutDiscipline(d);
     setEditBoutKlasse(k);
+    setEditGeslacht(g);
+    setEditMaxGewicht(maxG);
 
-    const gewicht = String(
-      ctx?.[`${side}_gewicht_mm`] ??
-        ctx?.[`${side}_gewicht`] ??
-        "",
-    ).trim();
-    const geslacht = String(ctx?.geslacht ?? "").trim();
-    const maxGewicht = String(ctx?.max_gewicht ?? "").trim();
-
-    setEditGewicht(gewicht);
-    setEditGeslacht(geslacht);
-    setEditMaxGewicht(maxGewicht);
-
-    editDraftRef.current = {
-      va,
-      naam,
-      gym,
-      discipline: d,
-      klasse: k,
-      gewicht,
-      geslacht,
-      max_gewicht: maxGewicht,
-    };
+    editDraftRef.current = { va, naam, gym, discipline: d, klasse: k, gewicht, geslacht: g, max_gewicht: maxG };
     setEditMountKey((x) => x + 1);
     setEditOpen(side);
   }
@@ -1518,7 +1437,7 @@ export default function PartijDetailPage() {
   }
 
   function severityFromResultaat(
-    resultaat: "actie" | "afgekeurd" | "dispensatie" | "ok",
+    resultaat: "actie" | "afgekeurd" | "dispensatie" | "ok"
   ) {
     if (resultaat === "afgekeurd") return "error";
     if (resultaat === "dispensatie") return "warning";
@@ -1544,9 +1463,7 @@ export default function PartijDetailPage() {
       return { uid, roles: [] as string[] };
     }
 
-    const roleIds = (ur ?? [])
-      .map((x: any) => x.role_id)
-      .filter(Boolean) as string[];
+    const roleIds = (ur ?? []).map((x: any) => x.role_id).filter(Boolean) as string[];
     if (roleIds.length === 0) {
       setRoleNames([]);
       return { uid, roles: [] as string[] };
@@ -1570,11 +1487,14 @@ export default function PartijDetailPage() {
   }
 
   function canApproveRule(r: ControleResultaatRow) {
-    return canReviewResultaatForRoles(r, roleNames, "approve");
-  }
-
-  function canRejectRule(r: ControleResultaatRow) {
-    return canReviewResultaatForRoles(r, roleNames, "reject");
+    // Niet meer verbergen door client-side rol-detectie.
+    // De server/API controleert de echte rechten; de UI toont de knoppen voor elke open/niet-OK melding.
+    const res = normResultaat(r?.resultaat);
+    const reviewStatus = String(r?.review_status ?? "").trim().toLowerCase();
+    if (isApprovedOverride(r)) return false;
+    if (res === "ok") return false;
+    if (reviewStatus === "goedgekeurd" || reviewStatus === "approved") return false;
+    return true;
   }
 
   async function saveAantekeningen(resultaatId: string, text: string) {
@@ -1589,9 +1509,7 @@ export default function PartijDetailPage() {
       if (updErr) throw updErr;
 
       setRegels((prev) =>
-        prev.map((r) =>
-          r.id === resultaatId ? { ...r, aantekeningen: text } : r,
-        ),
+        prev.map((r) => (r.id === resultaatId ? { ...r, aantekeningen: text } : r))
       );
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -1614,17 +1532,102 @@ export default function PartijDetailPage() {
     }
   }
 
+  function dedupeControleResultatenRows(rows: ControleResultaatRow[]) {
+    const map = new Map<string, ControleResultaatRow>();
+
+    for (const row of rows ?? []) {
+      const id = String(row?.id ?? "").trim();
+      const fallback = [
+        row?.controle_run_id,
+        row?.run_id,
+        row?.matchmaking_id,
+        row?.bout_id,
+        row?.partij_nr,
+        row?.hoek,
+        row?.rule_code,
+        row?.rule,
+        row?.boodschap,
+        row?.created_at,
+      ]
+        .map((v) => String(v ?? "").trim().toLowerCase())
+        .join("|");
+
+      const key = id || fallback;
+      if (!key || map.has(key)) continue;
+      map.set(key, row);
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const ta = new Date(String(a?.created_at ?? "")).getTime();
+      const tb = new Date(String(b?.created_at ?? "")).getTime();
+      if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+      return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+    });
+  }
+
+  async function fetchRegelsVoorPartij(opts: {
+    runId: string;
+    partijNr: number;
+    ctxRow?: AnyRow | null;
+  }): Promise<ControleResultaatRow[]> {
+    const { runId, partijNr, ctxRow } = opts;
+    const boutId = asUuid(ctxRow?.bout_id);
+    const mmId = String(matchmakingId ?? "").trim();
+
+    const queries = [
+      supabase
+        .from("controle_resultaten")
+        .select("*")
+        .eq("controle_run_id", runId)
+        .eq("partij_nr", partijNr),
+      supabase
+        .from("controle_resultaten")
+        .select("*")
+        .eq("run_id", runId)
+        .eq("partij_nr", partijNr),
+    ];
+
+    // Weegstation-meldingen staan ook in controle_resultaten, maar kunnen
+    // vanuit een andere flow met alleen matchmaking_id/partij_nr of bout_id zijn opgeslagen.
+    // Daarom halen we die bewust mee, zonder de rest van deze goed werkende pagina te veranderen.
+    if (mmId) {
+      queries.push(
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("matchmaking_id", mmId)
+          .eq("partij_nr", partijNr)
+      );
+    }
+
+    if (mmId && boutId) {
+      queries.push(
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("matchmaking_id", mmId)
+          .eq("bout_id", boutId)
+      );
+    }
+
+    const results = await Promise.all(queries);
+    const allRows: ControleResultaatRow[] = [];
+
+    for (const res of results) {
+      if (res.error) throw res.error;
+      allRows.push(...(((res.data ?? []) as unknown) as ControleResultaatRow[]));
+    }
+
+    return dedupeControleResultatenRows(allRows);
+  }
+
   async function reloadRegels() {
     if (!run?.id || !partijNr) return;
-    const { data: resRows, error: resErr } = await supabase
-      .from("controle_resultaten")
-      .select("*")
-      .eq("controle_run_id", run.id)
-      .eq("partij_nr", partijNr)
-      .order("created_at", { ascending: true });
-
-    if (resErr) throw resErr;
-    const rows = (resRows ?? []) as ControleResultaatRow[];
+    const rows = await fetchRegelsVoorPartij({
+      runId: run.id,
+      partijNr,
+      ctxRow: ctx,
+    });
     setRegels(rows);
     primeNoteDrafts(rows);
   }
@@ -1637,7 +1640,7 @@ export default function PartijDetailPage() {
     const customResultaat = customDraftRef.current.resultaat;
     const boodschap = String(customDraftRef.current.boodschap ?? "").trim();
     const aantekeningen = String(
-      customDraftRef.current.aantekeningen ?? "",
+      customDraftRef.current.aantekeningen ?? ""
     ).trim();
 
     if (!boodschap) {
@@ -1695,7 +1698,7 @@ export default function PartijDetailPage() {
     try {
       const row = regels.find((r) => r.id === resultaatId);
       if (row && !canApproveRule(row)) {
-        throw new Error("Je hebt geen rechten om deze melding goed te keuren.");
+        throw new Error("Deze melding staat al op OK of heeft geen goed te keuren resultaat.");
       }
 
       const reason = String(getNoteFor(resultaatId) ?? "").trim();
@@ -1737,14 +1740,14 @@ export default function PartijDetailPage() {
 
     try {
       const row = regels.find((r) => r.id === resultaatId);
-      if (row && !canRejectRule(row)) {
-        throw new Error("Je hebt geen rechten om deze melding af te keuren.");
+      if (row && !canApproveRule(row)) {
+        throw new Error("Deze melding staat al op OK of heeft geen af te keuren resultaat.");
       }
 
       const reason = String(getNoteFor(resultaatId) ?? "").trim();
       if (!reason) {
         throw new Error(
-          "Vul eerst een reden in bij Aantekeningen (verplicht bij afkeuren).",
+          "Vul eerst een reden in bij Aantekeningen (verplicht bij afkeuren)."
         );
       }
 
@@ -1825,9 +1828,7 @@ export default function PartijDetailPage() {
 
         const { data: runs, error: runErr } = await supabase
           .from("controle_runs")
-          .select(
-            "id, matchmaking_id, status, gestart_op, afgerond_op, run_type",
-          )
+          .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type")
           .eq("matchmaking_id", matchmakingId)
           .order("gestart_op", { ascending: false })
           .limit(1);
@@ -1835,37 +1836,9 @@ export default function PartijDetailPage() {
         if (runErr) throw runErr;
 
         const latestRun = (runs?.[0] ?? null) as ControleRun | null;
-        let latestControleRunId = latestRun?.id ? String(latestRun.id) : null;
+        setRun(latestRun);
 
-        if (!latestControleRunId) {
-          const { data: lastCtxRows, error: lastCtxErr } = await supabase
-            .from("controle_bout_context")
-            .select("controle_run_id, created_at")
-            .eq("matchmaking_id", matchmakingId)
-            .order("created_at", { ascending: false })
-            .limit(1);
-
-          if (lastCtxErr) throw lastCtxErr;
-          latestControleRunId = lastCtxRows?.[0]?.controle_run_id
-            ? String(lastCtxRows[0].controle_run_id)
-            : null;
-        }
-
-        setRun(
-          latestRun ??
-            (latestControleRunId
-              ? ({
-                  id: latestControleRunId,
-                  matchmaking_id: String(matchmakingId),
-                  status: "unknown",
-                  gestart_op: null,
-                  afgerond_op: null,
-                  run_type: null,
-                } as ControleRun)
-              : null),
-        );
-
-        if (!latestControleRunId) {
+        if (!latestRun?.id) {
           setCtx(null);
           setRegels([]);
           setUitslagenRood([]);
@@ -1877,7 +1850,7 @@ export default function PartijDetailPage() {
         const { data: pnRows, error: pnErr } = await supabase
           .from("controle_bout_context")
           .select("partij_nr")
-          .eq("controle_run_id", latestControleRunId)
+          .eq("controle_run_id", latestRun.id)
           .order("partij_nr", { ascending: true });
 
         if (pnErr) throw pnErr;
@@ -1886,8 +1859,8 @@ export default function PartijDetailPage() {
           new Set(
             (pnRows ?? [])
               .map((r: any) => Number(r.partij_nr))
-              .filter((n: number) => Number.isFinite(n) && n > 0),
-          ),
+              .filter((n: number) => Number.isFinite(n) && n > 0)
+          )
         ).sort((a, b) => a - b);
 
         setAllPartijNrs(pnList);
@@ -1895,41 +1868,21 @@ export default function PartijDetailPage() {
         const { data: ctxRows, error: ctxErr } = await supabase
           .from("controle_bout_context")
           .select("*")
-          .eq("controle_run_id", latestControleRunId)
+          .eq("controle_run_id", latestRun.id)
           .eq("partij_nr", partijNr)
           .limit(1);
 
         if (ctxErr) throw ctxErr;
 
-        const rowRaw = (ctxRows?.[0] ?? null) as AnyRow | null;
-        const row: AnyRow | null = rowRaw
-          ? {
-              ...rowRaw,
-              evenement_naam: rowRaw.evenement_naam ?? evenementNaam ?? null,
-              evenement_datum: rowRaw.evenement_datum ?? evenementDatum ?? null,
-            }
-          : null;
-
-        if (row?.evenement_naam && !evenementNaam) {
-          setEvenementNaam(String(row.evenement_naam));
-        }
-        if (row?.evenement_datum && !evenementDatum) {
-          setEvenementDatum(String(row.evenement_datum));
-        }
-
+        const row = (ctxRows?.[0] ?? null) as AnyRow | null;
         setCtx(row);
 
-        const { data: resRows, error: resErr } = await supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("controle_run_id", latestControleRunId)
-          .eq("partij_nr", partijNr)
-          .order("created_at", { ascending: true });
-
-        if (resErr) throw resErr;
-
         {
-          const rows = (resRows ?? []) as ControleResultaatRow[];
+          const rows = await fetchRegelsVoorPartij({
+            runId: latestRun.id,
+            partijNr,
+            ctxRow: row,
+          });
           setRegels(rows);
           primeNoteDrafts(rows);
         }
@@ -1948,7 +1901,7 @@ export default function PartijDetailPage() {
                   .from("controle_uitslagen")
                   .select("datum, discipline, klasse, uitslag")
                   .eq("matchmaking_id", matchmakingId)
-                  .eq("controle_run_id", latestControleRunId)
+                  .eq("controle_run_id", latestRun.id)
                   .eq("partij_nr", partijNrNum)
                   .eq("hoek", "rood")
                   .eq("va_nummer", vaR)
@@ -1960,7 +1913,7 @@ export default function PartijDetailPage() {
                   .from("controle_uitslagen")
                   .select("datum, discipline, klasse, uitslag")
                   .eq("matchmaking_id", matchmakingId)
-                  .eq("controle_run_id", latestControleRunId)
+                  .eq("controle_run_id", latestRun.id)
                   .eq("partij_nr", partijNrNum)
                   .eq("hoek", "blauw")
                   .eq("va_nummer", vaB)
@@ -1994,8 +1947,7 @@ export default function PartijDetailPage() {
     const discipline = ctx?.discipline ?? "-";
     const klasseMM = ctx?.klasse_mm ?? "-";
 
-    const roodDob =
-      ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm ?? null;
+    const roodDob = ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm ?? null;
     const blauwDob =
       ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm ?? null;
 
@@ -2033,10 +1985,10 @@ export default function PartijDetailPage() {
 
     const eventDate = parseISODateOnly(ctx?.evenement_datum);
     const rBirth = parseISODateOnly(
-      ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm,
+      ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm
     );
     const bBirth = parseISODateOnly(
-      ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm,
+      ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm
     );
 
     const leeftijdDiff =
@@ -2050,8 +2002,7 @@ export default function PartijDetailPage() {
     const blauwPartijen = toInt(ctx?.blauw_totaal_wedstrijden_scrape);
 
     const roodDemo = toInt(ctx?.rood_demo_totaal) ?? countDemo(uitslagenRood);
-    const blauwDemo =
-      toInt(ctx?.blauw_demo_totaal) ?? countDemo(uitslagenBlauw);
+    const blauwDemo = toInt(ctx?.blauw_demo_totaal) ?? countDemo(uitslagenBlauw);
 
     const roodEffectief =
       roodPartijen != null
@@ -2077,10 +2028,10 @@ export default function PartijDetailPage() {
       blauwDemo,
       partijenVerschil,
       roodNulmetingTotaal: toInt(
-        ctx?.rood_totaal_nulmeting_totaal ?? ctx?.rood_nulmeting_totaal,
+        ctx?.rood_totaal_nulmeting_totaal ?? ctx?.rood_nulmeting_totaal
       ),
       blauwNulmetingTotaal: toInt(
-        ctx?.blauw_totaal_nulmeting_totaal ?? ctx?.blauw_nulmeting_totaal,
+        ctx?.blauw_totaal_nulmeting_totaal ?? ctx?.blauw_nulmeting_totaal
       ),
     };
   }, [ctx, uitslagenRood, uitslagenBlauw]);
@@ -2097,17 +2048,14 @@ export default function PartijDetailPage() {
         .replace(/\s+/g, " ")
         .trim();
 
-    const rKg = toNumKg(
-      ctx?.rood_gewicht_mm ?? ctx?.rood_gewicht ?? ctx?.gewicht_rood_mm,
-    );
-    const bKg = toNumKg(
-      ctx?.blauw_gewicht_mm ?? ctx?.blauw_gewicht ?? ctx?.gewicht_blauw_mm,
-    );
+    const rKg = toNumKg(ctx?.rood_gewicht_mm ?? ctx?.rood_gewicht ?? ctx?.gewicht_rood_mm);
+    const bKg =
+      toNumKg(ctx?.blauw_gewicht_mm ?? ctx?.blauw_gewicht ?? ctx?.gewicht_blauw_mm);
     const explicitMaxKg = toNumKg(
       ctx?.max_gewicht ??
         ctx?.max_gewicht_mm ??
         ctx?.gewicht_max_mm ??
-        ctx?.matchmaking_bouts_raw_max_gewicht,
+        ctx?.matchmaking_bouts_raw_max_gewicht
     );
 
     const discipline = norm(ctx?.discipline ?? ctx?.discipline_mm);
@@ -2117,7 +2065,7 @@ export default function PartijDetailPage() {
     const roodLeeftijd = leeftijdOpEventGetal(ctx, "rood");
     const blauwLeeftijd = leeftijdOpEventGetal(ctx, "blauw");
     const knownAges = [roodLeeftijd, blauwLeeftijd].filter(
-      (v): v is number => typeof v === "number",
+      (v): v is number => typeof v === "number"
     );
     const jongste = knownAges.length ? Math.min(...knownAges) : null;
 
@@ -2170,16 +2118,16 @@ export default function PartijDetailPage() {
     const findClass = (kg: number | null) => {
       if (kg == null) return null;
       const hit = classes.find((c) =>
-        c.max == null ? kg >= c.min : kg >= c.min && kg <= c.max,
+        c.max == null ? kg >= c.min : kg >= c.min && kg <= c.max
       );
       return hit ?? null;
     };
 
     const diffKg = rKg != null && bKg != null ? Math.abs(rKg - bKg) : null;
     const zwaarsteKg =
-      rKg != null && bKg != null ? Math.max(rKg, bKg) : (rKg ?? bKg ?? null);
+      rKg != null && bKg != null ? Math.max(rKg, bKg) : rKg ?? bKg ?? null;
     const lichtsteKg =
-      rKg != null && bKg != null ? Math.min(rKg, bKg) : (rKg ?? bKg ?? null);
+      rKg != null && bKg != null ? Math.min(rKg, bKg) : rKg ?? bKg ?? null;
 
     let inferredMaxKg: number | null = null;
     let inferredKlasseNaam: string | null = null;
@@ -2196,7 +2144,7 @@ export default function PartijDetailPage() {
       const kandidaatMax =
         lichtsteKg != null && zwaarsteKg != null
           ? Math.min(zwaarsteKg, lichtsteKg + marge)
-          : (zwaarsteKg ?? lichtsteKg ?? null);
+          : zwaarsteKg ?? lichtsteKg ?? null;
 
       inferredMaxKg = kandidaatMax;
       inferredKlasseNaam = isJeugd
@@ -2222,27 +2170,19 @@ export default function PartijDetailPage() {
 
     const roodOk =
       ctx?.keurmerk_rood ??
-      (String(ctx?.heeft_keurmerk_rood ?? "")
-        .trim()
-        .toLowerCase() === "ja"
+      (String(ctx?.heeft_keurmerk_rood ?? "").trim().toLowerCase() === "ja"
         ? true
-        : String(ctx?.heeft_keurmerk_rood ?? "")
-              .trim()
-              .toLowerCase() === "nee"
-          ? false
-          : null);
+        : String(ctx?.heeft_keurmerk_rood ?? "").trim().toLowerCase() === "nee"
+        ? false
+        : null);
 
     const blauwOk =
       ctx?.keurmerk_blauw ??
-      (String(ctx?.heeft_keurmerk_blauw ?? "")
-        .trim()
-        .toLowerCase() === "ja"
+      (String(ctx?.heeft_keurmerk_blauw ?? "").trim().toLowerCase() === "ja"
         ? true
-        : String(ctx?.heeft_keurmerk_blauw ?? "")
-              .trim()
-              .toLowerCase() === "nee"
-          ? false
-          : null);
+        : String(ctx?.heeft_keurmerk_blauw ?? "").trim().toLowerCase() === "nee"
+        ? false
+        : null);
 
     return {
       rood: {
@@ -2272,10 +2212,7 @@ export default function PartijDetailPage() {
   }, [regels]);
 
   function buildRecordFromUitslagen(rows: UitslagRow[], preferredKlasse?: any) {
-    const norm = (s: any) =>
-      String(s ?? "")
-        .trim()
-        .toLowerCase();
+    const norm = (s: any) => String(s ?? "").trim().toLowerCase();
     const isAllowedDiscipline = (d: any) => {
       const s = norm(d);
       return (
@@ -2296,13 +2233,11 @@ export default function PartijDetailPage() {
       return dt ? dt.getTime() : 0;
     };
 
-    const sorted = [...(rows ?? [])].sort(
-      (a, b) => parseDate(b.datum) - parseDate(a.datum),
-    );
+    const sorted = [...(rows ?? [])].sort((a, b) => parseDate(b.datum) - parseDate(a.datum));
     const prefNorm = norm(preferredKlasse);
     const activeKlasse = prefNorm
       ? preferredKlasse
-      : (sorted.find((r) => norm(r.klasse))?.klasse ?? null);
+      : sorted.find((r) => norm(r.klasse))?.klasse ?? null;
 
     let wins = 0;
     let loss = 0;
@@ -2313,27 +2248,16 @@ export default function PartijDetailPage() {
     let historieCount = 0;
 
     const classifyResult = (
-      u: any,
+      u: any
     ): "win" | "loss" | "draw" | "demo" | "nc" | "unknown" => {
       const s = norm(u);
       if (!s) return "unknown";
       if (s.includes("demo") || s.includes("demonstr")) return "demo";
-      if (
-        s.includes("draw") ||
-        s.includes("gelijk") ||
-        s.includes("onbeslist") ||
-        s === "d"
-      )
+      if (s.includes("draw") || s.includes("gelijk") || s.includes("onbeslist") || s === "d")
         return "draw";
       if (s.includes("win") || s.includes("winst") || s === "w") return "win";
-      if (s.includes("loss") || s.includes("verlies") || s === "l")
-        return "loss";
-      if (
-        s.includes("no contest") ||
-        s.includes("n/c") ||
-        s === "nc" ||
-        s.includes("contest")
-      )
+      if (s.includes("loss") || s.includes("verlies") || s === "l") return "loss";
+      if (s.includes("no contest") || s.includes("n/c") || s === "nc" || s.includes("contest"))
         return "nc";
       return "unknown";
     };
@@ -2400,20 +2324,12 @@ export default function PartijDetailPage() {
   }
 
   const recordRood = useMemo(
-    () =>
-      buildRecordFromUitslagen(
-        uitslagenRood,
-        ctx?.klasse_mm ?? ctx?.klasse ?? null,
-      ),
-    [uitslagenRood, ctx?.klasse_mm, ctx?.klasse],
+    () => buildRecordFromUitslagen(uitslagenRood, ctx?.klasse_mm ?? ctx?.klasse ?? null),
+    [uitslagenRood, ctx?.klasse_mm, ctx?.klasse]
   );
   const recordBlauw = useMemo(
-    () =>
-      buildRecordFromUitslagen(
-        uitslagenBlauw,
-        ctx?.klasse_mm ?? ctx?.klasse ?? null,
-      ),
-    [uitslagenBlauw, ctx?.klasse_mm, ctx?.klasse],
+    () => buildRecordFromUitslagen(uitslagenBlauw, ctx?.klasse_mm ?? ctx?.klasse ?? null),
+    [uitslagenBlauw, ctx?.klasse_mm, ctx?.klasse]
   );
 
   async function sendToDispensatie() {
@@ -2429,7 +2345,7 @@ export default function PartijDetailPage() {
       const bout_id = asUuid((ctx as any)?.bout_id);
       if (!bout_id) {
         throw new Error(
-          "bout_id ontbreekt/ongeldig in context (controle_bout_context).",
+          "bout_id ontbreekt/ongeldig in context (controle_bout_context)."
         );
       }
 
@@ -2439,21 +2355,19 @@ export default function PartijDetailPage() {
         normResultaat(x?.resultaat) === "afgekeurd"
           ? 4
           : normResultaat(x?.resultaat) === "dispensatie"
-            ? 3
-            : normResultaat(x?.resultaat) === "actie"
-              ? 2
-              : normResultaat(x?.resultaat) === "ok"
-                ? 1
-                : 0;
+          ? 3
+          : normResultaat(x?.resultaat) === "actie"
+          ? 2
+          : normResultaat(x?.resultaat) === "ok"
+          ? 1
+          : 0;
 
       const best = [...(regels ?? [])]
         .filter((r: any) => Number(r.partij_nr) === partij)
         .sort((a: any, b: any) => prio(b) - prio(a))[0];
 
       if (!best?.rule_code) {
-        throw new Error(
-          "Geen controle-melding gevonden om als reden mee te sturen.",
-        );
+        throw new Error("Geen controle-melding gevonden om als reden mee te sturen.");
       }
 
       const r = await authedFetch("/api/dispensatie/upsert", {
@@ -2672,9 +2586,7 @@ export default function PartijDetailPage() {
   }
 
   const Shell = ({ children }: { children: any }) => (
-    <div
-      className={`${inter.className} min-h-screen bg-zinc-100 text-zinc-900`}
-    >
+    <div className={`${inter.className} min-h-screen bg-zinc-100 text-zinc-900`}>
       <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6 py-6 space-y-4">
         <div className="fs-shell">{children}</div>
       </div>
@@ -2720,20 +2632,16 @@ export default function PartijDetailPage() {
           matchmakingId={matchmakingId}
           runStatus={run?.status ?? null}
           onBack={() => router.back()}
-          onBackToMatchmaking={() => router.push(`/dashboard/matchmaker/controle/${matchmakingId}`)}
+          onBackToMatchmaking={() => router.push(`/dashboard/admin/controle/${matchmakingId}`)}
           navPrev={nav.prev ?? null}
           navNext={nav.next ?? null}
           onPrev={() =>
             nav.prev &&
-            router.push(
-              `/dashboard/admin/controle/${matchmakingId}/partij/${nav.prev}`,
-            )
+            router.push(`/dashboard/admin/controle/${matchmakingId}/partij/${nav.prev}`)
           }
           onNext={() =>
             nav.next &&
-            router.push(
-              `/dashboard/admin/controle/${matchmakingId}/partij/${nav.next}`,
-            )
+            router.push(`/dashboard/admin/controle/${matchmakingId}/partij/${nav.next}`)
           }
         />
 
@@ -2845,9 +2753,7 @@ export default function PartijDetailPage() {
                     {(() => {
                       const details = wedstrijddetailsFromCtx(ctx as any);
                       const fallback = String(
-                        (ctx as any)?.ronde_tijd ??
-                          (ctx as any)?.rondetijd ??
-                          "",
+                        (ctx as any)?.ronde_tijd ?? (ctx as any)?.rondetijd ?? ""
                       ).trim();
                       return details.rondeTijd ?? (fallback || "-");
                     })()}
@@ -2923,15 +2829,15 @@ export default function PartijDetailPage() {
                           keurmerkInfo?.rood.ok === true
                             ? "Geldig"
                             : keurmerkInfo?.rood.ok === false
-                              ? "Ongeldig"
-                              : "Geen data"
+                            ? "Ongeldig"
+                            : "Geen data"
                         }
                         tone={
                           keurmerkInfo?.rood.ok === true
                             ? "ok"
                             : keurmerkInfo?.rood.ok === false
-                              ? "err"
-                              : "warn"
+                            ? "err"
+                            : "warn"
                         }
                         invert
                       />
@@ -2978,15 +2884,15 @@ export default function PartijDetailPage() {
                           keurmerkInfo?.blauw.ok === true
                             ? "Geldig"
                             : keurmerkInfo?.blauw.ok === false
-                              ? "Ongeldig"
-                              : "Geen data"
+                            ? "Ongeldig"
+                            : "Geen data"
                         }
                         tone={
                           keurmerkInfo?.blauw.ok === true
                             ? "ok"
                             : keurmerkInfo?.blauw.ok === false
-                              ? "err"
-                              : "warn"
+                            ? "err"
+                            : "warn"
                         }
                         invert
                       />
@@ -3057,9 +2963,7 @@ export default function PartijDetailPage() {
                   </span>{" "}
                   • Blauw{" "}
                   <span className="text-white">
-                    {recordBlauw?.winPct != null
-                      ? `${recordBlauw.winPct}%`
-                      : "-"}
+                    {recordBlauw?.winPct != null ? `${recordBlauw.winPct}%` : "-"}
                   </span>
                   <span className="text-white/45">
                     {" "}
@@ -3079,29 +2983,19 @@ export default function PartijDetailPage() {
                   <div>
                     Gewicht Rood (MM):{" "}
                     <span className="text-white font-extrabold">
-                      {gewichtInfo?.rKg != null
-                        ? `${gewichtInfo.rKg.toFixed(1)} kg`
-                        : "-"}
+                      {gewichtInfo?.rKg != null ? `${gewichtInfo.rKg.toFixed(1)} kg` : "-"}
                     </span>
                     {gewichtInfo?.rKlasse ? (
-                      <span className="text-white/60">
-                        {" "}
-                        — {gewichtInfo.rKlasse}
-                      </span>
+                      <span className="text-white/60"> — {gewichtInfo.rKlasse}</span>
                     ) : null}
                   </div>
                   <div>
                     Gewicht Blauw (MM):{" "}
                     <span className="text-white font-extrabold">
-                      {gewichtInfo?.bKg != null
-                        ? `${gewichtInfo.bKg.toFixed(1)} kg`
-                        : "-"}
+                      {gewichtInfo?.bKg != null ? `${gewichtInfo.bKg.toFixed(1)} kg` : "-"}
                     </span>
                     {gewichtInfo?.bKlasse ? (
-                      <span className="text-white/60">
-                        {" "}
-                        — {gewichtInfo.bKlasse}
-                      </span>
+                      <span className="text-white/60"> — {gewichtInfo.bKlasse}</span>
                     ) : null}
                   </div>
                   <div>
@@ -3122,9 +3016,7 @@ export default function PartijDetailPage() {
                   <div>
                     Verschil:{" "}
                     <span className="text-white font-extrabold">
-                      {gewichtInfo?.diffKg != null
-                        ? `${gewichtInfo.diffKg.toFixed(1)} kg`
-                        : "-"}
+                      {gewichtInfo?.diffKg != null ? `${gewichtInfo.diffKg.toFixed(1)} kg` : "-"}
                     </span>
                   </div>
                 </div>
@@ -3170,9 +3062,7 @@ export default function PartijDetailPage() {
                         <th className="text-left px-3 py-2 w-40">Resultaat</th>
                         <th className="text-left px-3 py-2 w-64">Regel</th>
                         <th className="text-left px-3 py-2">Reden</th>
-                        <th className="text-left px-3 py-2 w-72">
-                          Aantekeningen
-                        </th>
+                        <th className="text-left px-3 py-2 w-72">Aantekeningen</th>
                         <th className="text-left px-3 py-2 w-40">Actie</th>
                       </tr>
                     </thead>
@@ -3181,24 +3071,18 @@ export default function PartijDetailPage() {
                       {regels.map((r) => {
                         const disp = displayResultaat(r);
                         const canApprove = canApproveRule(r);
-                        const canReject = canRejectRule(r);
 
                         return (
                           <tr key={r.id}>
                             <td className="px-3 py-2 align-top">
                               <div className="flex flex-col gap-1">
-                                <Badge
-                                  text={disp.label}
-                                  tone={disp.tone}
-                                  invert
-                                />
+                                <Badge text={disp.label} tone={disp.tone} invert />
                                 {!isApprovedOverride(r) &&
                                 r.original_resultaat &&
                                 String(r.original_resultaat).toLowerCase() !==
                                   String(r.resultaat ?? "").toLowerCase() ? (
                                   <span className="text-[10px] opacity-70">
-                                    Origineel:{" "}
-                                    {String(r.original_resultaat).toUpperCase()}
+                                    Origineel: {String(r.original_resultaat).toUpperCase()}
                                   </span>
                                 ) : null}
                                 {r.review_status ? (
@@ -3208,12 +3092,8 @@ export default function PartijDetailPage() {
                                 ) : null}
                                 {r.reviewed_by || r.reviewed_at ? (
                                   <span className="text-[10px] opacity-70">
-                                    {r.reviewed_by
-                                      ? `door ${r.reviewed_by}`
-                                      : ""}
-                                    {r.reviewed_at
-                                      ? ` • ${fmtDateOnlyNL(r.reviewed_at)}`
-                                      : ""}
+                                    {r.reviewed_by ? `door ${r.reviewed_by}` : ""}
+                                    {r.reviewed_at ? ` • ${fmtDateOnlyNL(r.reviewed_at)}` : ""}
                                   </span>
                                 ) : null}
                               </div>
@@ -3229,11 +3109,7 @@ export default function PartijDetailPage() {
 
                             <td className="px-3 py-2 align-top">
                               <textarea
-                                defaultValue={
-                                  (noteDraftRef.current[r.id] ??
-                                    r.aantekeningen ??
-                                    "") as any
-                                }
+                                defaultValue={(noteDraftRef.current[r.id] ?? r.aantekeningen ?? "") as any}
                                 onChange={(e) => {
                                   noteDraftRef.current[r.id] = e.target.value;
                                 }}
@@ -3249,29 +3125,25 @@ export default function PartijDetailPage() {
                             </td>
 
                             <td className="px-3 py-2 align-top">
-                              {canApprove || canReject ? (
+                              {canApprove ? (
                                 <div className="flex flex-col gap-2">
-                                  {canApprove ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => approveSingle(r.id)}
-                                      disabled={approving}
-                                      className="px-3 py-1 text-xs rounded bg-[var(--brand-orange)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
-                                    >
-                                      Goedkeuren
-                                    </button>
-                                  ) : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => approveSingle(r.id)}
+                                    disabled={approving}
+                                    className="px-3 py-1 text-xs rounded bg-[var(--brand-orange)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
+                                  >
+                                    Goedkeuren
+                                  </button>
 
-                                  {canReject ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => rejectSingle(r.id)}
-                                      disabled={approving}
-                                      className="px-3 py-1 text-xs rounded font-semibold hover:opacity-90 disabled:opacity-50 bg-[#2a2a2e] text-white"
-                                    >
-                                      Afkeuren
-                                    </button>
-                                  ) : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => rejectSingle(r.id)}
+                                    disabled={approving}
+                                    className="px-3 py-1 text-xs rounded font-semibold hover:opacity-90 disabled:opacity-50 bg-[#2a2a2e] text-white"
+                                  >
+                                    Afkeuren
+                                  </button>
                                 </div>
                               ) : (
                                 <span className="text-xs text-zinc-400">—</span>
@@ -3292,9 +3164,7 @@ export default function PartijDetailPage() {
                   disabled={rescraping}
                   className="inline-flex items-center px-4 py-2 rounded bg-[var(--brand-orange)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
                 >
-                  {rescraping
-                    ? "Fightpaspoort check…"
-                    : "Controleer Fightpaspoort"}
+                  {rescraping ? "Fightpaspoort check…" : "Controleer Fightpaspoort"}
                 </button>
 
                 <button
@@ -3302,16 +3172,14 @@ export default function PartijDetailPage() {
                   onClick={sendToDispensatie}
                   disabled={sendingDisp}
                   className={`inline-flex items-center px-4 py-2 rounded font-semibold transition ${
-                    sendingDisp
-                      ? "opacity-60 cursor-not-allowed"
-                      : "hover:opacity-90"
+                    sendingDisp ? "opacity-60 cursor-not-allowed" : "hover:opacity-90"
                   } ${dispSent ? "bg-green-700 text-white" : "bg-[#2a2a2e] text-white"}`}
                 >
                   {sendingDisp
                     ? "Bezig… (versturen)"
                     : dispSent
-                      ? "Verstuurd ✓"
-                      : "Stuur naar dispensatie"}
+                    ? "Verstuurd ✓"
+                    : "Stuur naar dispensatie"}
                 </button>
               </div>
             </div>
@@ -3510,9 +3378,7 @@ export default function PartijDetailPage() {
 
               <div className="mt-3 space-y-3">
                 <div>
-                  <div className="text-xs text-zinc-600 mb-1">
-                    Titel / regel
-                  </div>
+                  <div className="text-xs text-zinc-600 mb-1">Titel / regel</div>
                   <input
                     defaultValue={customDraftRef.current.rule}
                     onChange={(e) => {
@@ -3528,11 +3394,8 @@ export default function PartijDetailPage() {
                   <select
                     defaultValue={customDraftRef.current.resultaat}
                     onChange={(e) => {
-                      customDraftRef.current.resultaat = e.target.value as
-                        | "actie"
-                        | "afgekeurd"
-                        | "dispensatie"
-                        | "ok";
+                      customDraftRef.current.resultaat = e.target
+                        .value as "actie" | "afgekeurd" | "dispensatie" | "ok";
                     }}
                     className="w-full px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                   >
@@ -3544,9 +3407,7 @@ export default function PartijDetailPage() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-zinc-600 mb-1">
-                    Melding / boodschap
-                  </div>
+                  <div className="text-xs text-zinc-600 mb-1">Melding / boodschap</div>
                   <textarea
                     defaultValue={customDraftRef.current.boodschap}
                     onChange={(e) => {
@@ -3558,9 +3419,7 @@ export default function PartijDetailPage() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-zinc-600 mb-1">
-                    Aantekeningen
-                  </div>
+                  <div className="text-xs text-zinc-600 mb-1">Aantekeningen</div>
                   <textarea
                     defaultValue={customDraftRef.current.aantekeningen}
                     onChange={(e) => {

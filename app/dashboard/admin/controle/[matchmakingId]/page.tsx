@@ -59,6 +59,17 @@ type ResRow = {
   boodschap: string | null;
   review_status?: string | null;
   original_resultaat?: string | null;
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  toernooi_va_nummer?: string | null;
+  va_nummer?: string | null;
+};
+
+type UitslagClassRow = {
+  va_nummer?: string | number | null;
+  discipline?: string | null;
+  klasse?: string | null;
+  uitslag?: string | null;
 };
 
 type FilterKey =
@@ -484,6 +495,14 @@ function isLicentieRow(r: Partial<ResRow> | null | undefined): boolean {
   return (
     code.includes("LICENT") || rule.includes("LICENT") || msg.includes("LICENT")
   );
+}
+
+function isOpenLicentieMeldingRow(r: ResRow): boolean {
+  return isLicentieRow(r) && isActiveMeldingRow(r);
+}
+
+function hasOpenLicentieMelding(rows: ResRow[] | undefined): boolean {
+  return (rows ?? []).some(isOpenLicentieMeldingRow);
 }
 
 function isActiveMeldingRow(r: ResRow): boolean {
@@ -1498,13 +1517,87 @@ function getTournamentClassFromRow(row: AnyRow): string {
   return normalizeTournamentClass(row?.klasse_mm ?? row?.klasse ?? "");
 }
 
+function adultTournamentClassRank(v: string): number {
+  const s = normalizeTournamentClass(v);
+  if (s === "r") return 1;
+  if (s === "n") return 2;
+  if (s === "c") return 3;
+  if (s === "b") return 4;
+  if (s === "a") return 5;
+  return 0;
+}
+
+function isRelevantTournamentUitslagDiscipline(v: any): boolean {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  if (!s) return false;
+  return s.includes("kick") || s.includes("k1") || s.includes("muay") || s.includes("thai");
+}
+
+function isJeugdTournamentClassText(v: any): boolean {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  return s === "j" || s.includes("j+") || s.includes("jeugd") || s.includes("youth");
+}
+
+function highestTournamentClassFromUitslagen(rows: UitslagClassRow[]): string {
+  let best = "";
+  let bestRank = 0;
+
+  for (const row of rows ?? []) {
+    if (!isRelevantTournamentUitslagDiscipline(row?.discipline)) continue;
+    if (isJeugdTournamentClassText(row?.klasse)) continue;
+
+    const k = normalizeTournamentClass(row?.klasse);
+    const rank = adultTournamentClassRank(k);
+    if (rank > bestRank) {
+      best = k;
+      bestRank = rank;
+    }
+  }
+
+  return best;
+}
+
+function displayTournamentClass(v: any): string {
+  const s = normalizeTournamentClass(v);
+  if (s === "r") return "R";
+  if (s === "n") return "N";
+  if (s === "c") return "C";
+  if (s === "b") return "B";
+  if (s === "a") return "A";
+  if (s === "jeugd") return "Jeugd/Youth";
+  return String(v ?? "").trim() || "-";
+}
+
 function getFighterClassFromRow(row: AnyRow, side: "rood" | "blauw"): string {
+  // Eerst uitslagen gebruiken. Nulmeting is alleen fallback als er geen bruikbare uitslagen zijn.
+  const klasseUitUitslagen = row?.[`__${side}_uitslagen_klasse`];
+  if (klasseUitUitslagen) return normalizeTournamentClass(klasseUitUitslagen);
+
   return normalizeTournamentClass(
     row?.[`${side}_nulmeting_klasse`] ??
       row?.[`${side}_klasse_fp`] ??
       row?.[`${side}_klasse_mm`] ??
       row?.[`${side}_klasse`] ??
       "",
+  );
+}
+
+function getFighterClassLabelFromRow(row: AnyRow, side: "rood" | "blauw"): string {
+  const klasseUitUitslagen = row?.[`__${side}_uitslagen_klasse`];
+  if (klasseUitUitslagen) return displayTournamentClass(klasseUitUitslagen);
+
+  return (
+    String(
+      row?.[`${side}_nulmeting_klasse`] ??
+        row?.[`${side}_klasse_fp`] ??
+        row?.[`${side}_klasse_mm`] ??
+        row?.[`${side}_klasse`] ??
+        "",
+    ).trim() || "-"
   );
 }
 
@@ -1697,6 +1790,122 @@ function getToernooiFighterKey(
   return `fallback:${naam}__${gym}`;
 }
 
+
+function normalizeVaForToernooi(v: any): string {
+  return String(v ?? "").replace(/[^0-9]/g, "");
+}
+
+function getToernooiSideVa(row: AnyRow, side: "rood" | "blauw"): string {
+  // Toernooi-meldingen kunnen uit controle_resultaten komen met va_nummer,
+  // toernooi_va_nummer of fighter_id. In de context verschilt de veldnaam per bron.
+  // Daarom breder zoeken dan alleen rood_va_mm/blauw_va_mm.
+  return normalizeVaForToernooi(
+    row?.[`${side}_va_mm`] ??
+      row?.[`${side}_va`] ??
+      row?.[`${side}_va_fp`] ??
+      row?.[`${side}_va_nummer`] ??
+      row?.[`${side}_toernooi_va_nummer`] ??
+      row?.[`${side}_fighter_id`] ??
+      row?.[side === "rood" ? "va_rood" : "va_blauw"] ??
+      row?.[side === "rood" ? "rood_fighter_id" : "blauw_fighter_id"],
+  );
+}
+
+function normalizeNameForToernooi(v: any): string {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getToernooiSideName(row: AnyRow, side: "rood" | "blauw"): string {
+  return normalizeNameForToernooi(
+    row?.[`${side}_naam_fp`] ??
+      row?.[`${side}_naam_mm`] ??
+      row?.[`${side}_naam`],
+  );
+}
+
+function toernooiResultMentionsSideName(
+  res: ResRow,
+  row: AnyRow,
+  side: "rood" | "blauw",
+): boolean {
+  const sideName = getToernooiSideName(row, side);
+  if (!sideName) return false;
+
+  const text = normalizeNameForToernooi(
+    `${(res as any)?.boodschap ?? ""} ${(res as any)?.rule ?? ""}`,
+  );
+
+  if (!text) return false;
+  return text.includes(sideName);
+}
+
+function toernooiResultMatchesSide(
+  res: ResRow,
+  row: AnyRow,
+  side: "rood" | "blauw",
+): boolean {
+  const resToernooi = String((res as any)?.toernooi_code ?? "").trim().toUpperCase();
+  const rowToernooi = String(getToernooiKey(row) ?? "").trim().toUpperCase();
+  if (resToernooi && rowToernooi && resToernooi !== rowToernooi) return false;
+
+  const resHoek = String(res?.hoek ?? "").trim().toLowerCase();
+  const resVa = normalizeVaForToernooi(
+    (res as any)?.toernooi_va_nummer ??
+      (res as any)?.va_nummer ??
+      (res as any)?.fighter_id,
+  );
+  const sideVa = getToernooiSideVa(row, side);
+
+  // 1) Deelnemer-VA is leidend: toernooi_code + VA/fighter_id moet exact matchen.
+  // Dit voorkomt dat een licentiemelding van T2 op alle deelnemers of op T1 komt.
+  if (resVa) return !!sideVa && resVa === sideVa;
+
+  // 2) Alleen als controle_resultaten géén VA/fighter_id heeft, mag naam-fallback.
+  // Dit vangt oude toernooi-meldingen op die alleen de naam in de boodschap hebben.
+  if (toernooiResultMentionsSideName(res, row, side)) return true;
+
+  // 3) Een hoek zonder VA is bij toernooien niet betrouwbaar genoeg om een
+  // persoonsbadge te zetten; dezelfde deelnemer wisselt per toernooi-pairing van hoek.
+  if (resHoek) return false;
+
+  // 4) Algemene pair-meldingen zonder VA/hoek/naam mogen bij beide deelnemers,
+  // maar licentie/startverbod nooit algemeen plakken.
+  if (isLicentieRow(res) || isVerbodRow(res)) return false;
+  return true;
+}
+
+function toernooiResultDedupeKey(rr: ResRow): string {
+  return [
+    String((rr as any)?.toernooi_code ?? "").trim().toUpperCase(),
+    String((rr as any)?.fighter_id ?? "").trim(),
+    String((rr as any)?.toernooi_va_nummer ?? "").trim(),
+    String((rr as any)?.va_nummer ?? "").trim(),
+    String(rr.hoek ?? "").trim().toLowerCase(),
+    String(rr.rule_code ?? "").trim().toUpperCase(),
+    String(rr.rule ?? "").trim().toUpperCase(),
+    String(rr.boodschap ?? "").trim().toLowerCase(),
+    String(rr.resultaat ?? "").trim().toLowerCase(),
+  ].join("|");
+}
+
+function toernooiResultMatchesRow(res: ResRow, row: AnyRow): boolean {
+  const resToernooi = String((res as any)?.toernooi_code ?? "").trim().toUpperCase();
+  const rowToernooi = String(getToernooiKey(row) ?? "").trim().toUpperCase();
+  if (!resToernooi || !rowToernooi || resToernooi !== rowToernooi) return false;
+
+  return (
+    toernooiResultMatchesSide(res, row, "rood") ||
+    toernooiResultMatchesSide(res, row, "blauw")
+  );
+}
+
 function mergePartijStatuses(statuses: PartijStatus[]): PartijStatus {
   if (statuses.includes("verbod")) return "verbod";
   if (statuses.includes("afgekeurd")) return "afgekeurd";
@@ -1718,12 +1927,6 @@ function buildToernooiDeelnemers(
 
   for (const row of rows) {
     const partijNr = Number(row?.partij_nr);
-    const partijStatus = Number.isFinite(partijNr)
-      ? (statusByPartij[partijNr] ?? "geen_info")
-      : "geen_info";
-    const partijMeldingen = Number.isFinite(partijNr)
-      ? (countByPartij[partijNr] ?? 0)
-      : 0;
     const partijResultaten = Number.isFinite(partijNr)
       ? (resultatenByPartij[partijNr] ?? [])
       : [];
@@ -1748,32 +1951,32 @@ function buildToernooiDeelnemers(
 
       const va = safeText(
         row?.[`${side}_va_mm`] ??
+          row?.[`${side}_va_nummer`] ??
+          row?.[`${side}_fighter_id`] ??
           (side === "rood" ? row?.va_rood : row?.va_blauw),
         "-",
       );
 
       const leeftijd = ageAtEvent(row, side);
 
-      const sideResultaten = partijResultaten.filter(
-        (res) => !res?.hoek || res.hoek === side,
-      );
+      const sideResultaten = partijResultaten.filter((res) => {
+        const resToernooi = String((res as any)?.toernooi_code ?? "").trim();
+        if (resToernooi) return toernooiResultMatchesSide(res, row, side);
+        return !res?.hoek || res.hoek === side;
+      });
 
       const sideMeldingen = sideResultaten
         .map((res) => toernooiMeldingLabelFromRes(res))
         .filter((x): x is string => !!x);
 
-      const sideHeeftVerbod = sideResultaten.some((res) => isVerbodRow(res));
+      const sideHeeftVerbod =
+        sideResultaten.some((res) => isVerbodRow(res)) ||
+        (Number.isFinite(partijNr) ? !!verbodByPartij[partijNr] : false);
+
       const sideHeeftGeenLicentie =
-        sideResultaten.some((res) => {
-          const code = String(res?.rule_code ?? "").toUpperCase();
-          const rule = String(res?.rule ?? "").toUpperCase();
-          const msg = String(res?.boodschap ?? "").toUpperCase();
-          return (
-            code.includes("LICENT") ||
-            rule.includes("LICENT") ||
-            msg.includes("LICENT")
-          );
-        }) || isMissingLicentie(row, side);
+        sideResultaten.some((res) => isOpenLicentieMeldingRow(res)) ||
+        isMissingLicentie(row, side);
+
       const sideHeeftDispensatie = sideResultaten.some(
         (res) => normResultaatRow(res) === "dispensatie",
       );
@@ -1785,23 +1988,19 @@ function buildToernooiDeelnemers(
         isBelgischeGymInfoRow(res),
       );
 
-      if (fighterClassMismatchInTournament(row, side)) {
-        const toernooiKlasse =
-          String(row?.klasse_mm ?? row?.klasse ?? "").trim() || "-";
-        const fighterKlasse =
-          String(
-            row?.[`${side}_nulmeting_klasse`] ??
-              row?.[`${side}_klasse_fp`] ??
-              row?.[`${side}_klasse_mm`] ??
-              row?.[`${side}_klasse`] ??
-              "",
-          ).trim() || "-";
-        sideMeldingen.push(
-          `Zit niet in toernooi-klasse (${fighterKlasse} in ${toernooiKlasse})`,
-        );
+      if (sideHeeftGeenLicentie && !sideMeldingen.some((m) => m.toLowerCase().includes("licentie"))) {
+        sideMeldingen.push("Geen licentie");
       }
 
       const meldingList = dedupeStrings(sideMeldingen);
+      const sideStatusFromMeldingen = sideResultaten.length
+        ? statusFromResultaten(sideResultaten)
+        : "ok";
+      const sideStatus = mergePartijStatuses([
+        sideStatusFromMeldingen,
+        sideHeeftGeenLicentie ? "afgekeurd" : "ok",
+      ]);
+      const sideMeldingenCount = meldingList.length;
       const existing = map.get(fighterKey);
 
       if (!existing) {
@@ -1811,18 +2010,18 @@ function buildToernooiDeelnemers(
           gym,
           va,
           leeftijd,
-          status: partijStatus,
+          status: sideStatus,
           heeftVerbod: sideHeeftVerbod,
           heeftGeenLicentie: sideHeeftGeenLicentie,
           heeftDispensatie: sideHeeftDispensatie,
           heeftAfkeur: sideHeeftAfkeur,
           heeftBelgieCheck: sideHeeftBelgieCheck,
-          meldingenCount: partijMeldingen,
+          meldingenCount: sideMeldingenCount,
           partijen: Number.isFinite(partijNr) ? [partijNr] : [],
           meldingen: meldingList,
         });
       } else {
-        existing.status = mergePartijStatuses([existing.status, partijStatus]);
+        existing.status = mergePartijStatuses([existing.status, sideStatus]);
         existing.heeftVerbod = existing.heeftVerbod || sideHeeftVerbod;
         existing.heeftGeenLicentie =
           existing.heeftGeenLicentie || sideHeeftGeenLicentie;
@@ -1833,7 +2032,7 @@ function buildToernooiDeelnemers(
           existing.heeftBelgieCheck || sideHeeftBelgieCheck;
         existing.meldingenCount = Math.max(
           existing.meldingenCount,
-          partijMeldingen,
+          sideMeldingenCount,
         );
         existing.meldingen = dedupeStrings([
           ...existing.meldingen,
@@ -1919,6 +2118,71 @@ function buildToernooiGroepen(
       };
     })
     .sort((a, b) => a.toernooiKey.localeCompare(b.toernooiKey, "nl"));
+}
+
+async function enrichRowsWithUitslagenClasses(
+  matchmakingId: string,
+  inputRows: AnyRow[],
+): Promise<AnyRow[]> {
+  const vaSet = new Set<string>();
+
+  for (const row of inputRows ?? []) {
+    for (const side of ["rood", "blauw"] as const) {
+      const va = normalizeVaForToernooi(
+        row?.[`${side}_va_mm`] ??
+          row?.[`${side}_va`] ??
+          row?.[`${side}_va_fp`] ??
+          row?.[`${side}_va_nummer`] ??
+          row?.[`${side}_fighter_id`] ??
+          row?.[side === "rood" ? "va_rood" : "va_blauw"] ??
+          row?.[side === "rood" ? "rood_fighter_id" : "blauw_fighter_id"],
+      );
+      if (va) vaSet.add(va);
+    }
+  }
+
+  const vaList = Array.from(vaSet);
+  if (!vaList.length) return inputRows;
+
+  const { data, error } = await supabase
+    .from("uitslagen_raw")
+    .select("va_nummer, discipline, klasse, uitslag")
+    .eq("matchmaking_id", matchmakingId)
+    .in("va_nummer", vaList);
+
+  if (error) {
+    console.warn("[controle page] uitslagen_raw klasse fetch mislukt:", error);
+    return inputRows;
+  }
+
+  const byVa = new Map<string, UitslagClassRow[]>();
+  for (const row of (data ?? []) as UitslagClassRow[]) {
+    const va = normalizeVaForToernooi(row?.va_nummer);
+    if (!va) continue;
+    const list = byVa.get(va) ?? [];
+    list.push(row);
+    byVa.set(va, list);
+  }
+
+  return inputRows.map((row) => {
+    const next = { ...row };
+
+    for (const side of ["rood", "blauw"] as const) {
+      const va = normalizeVaForToernooi(
+        row?.[`${side}_va_mm`] ??
+          row?.[`${side}_va`] ??
+          row?.[`${side}_va_fp`] ??
+          row?.[`${side}_va_nummer`] ??
+          row?.[`${side}_fighter_id`] ??
+          row?.[side === "rood" ? "va_rood" : "va_blauw"] ??
+          row?.[side === "rood" ? "rood_fighter_id" : "blauw_fighter_id"],
+      );
+      const klasse = va ? highestTournamentClassFromUitslagen(byVa.get(va) ?? []) : "";
+      if (klasse) next[`__${side}_uitslagen_klasse`] = klasse;
+    }
+
+    return next;
+  });
 }
 
 export default function ControleMatchmakingPage() {
@@ -2640,10 +2904,12 @@ export default function ControleMatchmakingPage() {
 
       if (rawErr) throw rawErr;
 
-      const ctxList = mergeRawMaxWeightIntoContextRows(
+      let ctxList = mergeRawMaxWeightIntoContextRows(
         (ctxRows ?? []) as AnyRow[],
         (rawRows ?? []) as AnyRow[],
       );
+
+      ctxList = await enrichRowsWithUitslagenClasses(matchmakingId, ctxList);
       setRows(ctxList);
       syncOrderedRowsFromRows(ctxList);
 
@@ -2672,7 +2938,7 @@ export default function ControleMatchmakingPage() {
       const { data: resRows, error: resErr } = await supabase
         .from("controle_resultaten")
         .select(
-          "partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap, review_status, original_resultaat",
+          "partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap, review_status, original_resultaat, toernooi_code, fighter_id, toernooi_va_nummer, va_nummer",
         )
         .eq("controle_run_id", latestControleRunId);
 
@@ -2698,6 +2964,46 @@ export default function ControleMatchmakingPage() {
         if (!resByPn[pn]) resByPn[pn] = [];
         resByPn[pn].push(rr);
       }
+
+      // Toernooi-meldingen uit controle_resultaten hebben vaak geen partij_nr,
+      // maar wel toernooi_code + fighter_id/toernooi_va_nummer/hoek.
+      // Page 471 filtert rechtstreeks op toernooi_code; page 472 moet ze daarom
+      // terug koppelen aan de T1/T2-rijen zodat elk toernooi zijn eigen open
+      // meldingen toont.
+      const toernooiOnlyRes = activeRes.filter((rr) => {
+        const pn = Number(rr.partij_nr);
+        return (!Number.isFinite(pn) || pn <= 0) && String((rr as any)?.toernooi_code ?? "").trim();
+      });
+
+      if (toernooiOnlyRes.length > 0) {
+        for (const ctxRow of ctxList) {
+          if (!isToernooiRow(ctxRow)) continue;
+          const pn = Number(ctxRow?.partij_nr);
+          if (!Number.isFinite(pn) || pn <= 0) continue;
+
+          const matches = toernooiOnlyRes.filter((rr) => toernooiResultMatchesRow(rr, ctxRow));
+
+          if (!matches.length) continue;
+
+          const ctxForPn = ctxByPn[pn] ?? ctxRow;
+          const filteredMatches = isExactBoksen(ctxForPn)
+            ? matches.filter((rr) => !isBoksenNoVaInfoRow(rr))
+            : matches;
+
+          if (!filteredMatches.length) continue;
+          if (!resByPn[pn]) resByPn[pn] = [];
+
+          const seenKeys = new Set(resByPn[pn].map(toernooiResultDedupeKey));
+
+          for (const rr of filteredMatches) {
+            const key = toernooiResultDedupeKey(rr);
+            if (seenKeys.has(key)) continue;
+            seenKeys.add(key);
+            resByPn[pn].push(rr);
+          }
+        }
+      }
+
       setResultatenByPartij(resByPn);
 
       const dispMap: Record<number, boolean> = {};
@@ -2733,7 +3039,9 @@ export default function ControleMatchmakingPage() {
         if (licentieGoedgekeurd) approvedLicentieMap[pn] = true;
         const mistLicentie =
           !licentieGoedgekeurd &&
-          (isMissingLicentie(ctx, "rood") || isMissingLicentie(ctx, "blauw"));
+          (hasOpenLicentieMelding(rr) ||
+            isMissingLicentie(ctx, "rood") ||
+            isMissingLicentie(ctx, "blauw"));
 
         if (mistLicentie && status !== "verbod") status = "afgekeurd";
 
@@ -2795,12 +3103,17 @@ export default function ControleMatchmakingPage() {
 
       if (approvedLicentieByPartij[pn]) continue;
 
-      if (isMissingLicentie(r, "rood") || isMissingLicentie(r, "blauw")) {
+      const rr = resultatenByPartij[pn] ?? [];
+      if (
+        hasOpenLicentieMelding(rr) ||
+        isMissingLicentie(r, "rood") ||
+        isMissingLicentie(r, "blauw")
+      ) {
         m[pn] = true;
       }
     }
     return m;
-  }, [rows, approvedLicentieByPartij]);
+  }, [rows, approvedLicentieByPartij, resultatenByPartij]);
 
   const hasAfkeurByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
@@ -3984,6 +4297,19 @@ export default function ControleMatchmakingPage() {
                                       <div className="mt-1 text-sm font-bold text-zinc-900">
                                         {deelnemer.va}
                                       </div>
+
+                                      {deelnemer.meldingen.length ? (
+                                        <div className="mt-3 rounded-lg border border-orange-200 bg-orange-50 p-3">
+                                          <div className="text-[11px] font-black uppercase tracking-[0.10em] text-orange-800">
+                                            Open melding(en)
+                                          </div>
+                                          <ul className="mt-2 list-disc pl-5 text-sm font-semibold text-zinc-900">
+                                            {deelnemer.meldingen.map((melding) => (
+                                              <li key={melding}>{melding}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      ) : null}
                                     </div>
                                   ))}
                                 </div>

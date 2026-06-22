@@ -1,8 +1,10 @@
 // lib/matchmaker/rulesSingleFighter.ts
-// Regels voor één losse matchmaker-aanmelding.
-// Deze regels zijn bedoeld om de matchmaker te helpen vóórdat er een partij bestaat.
+// Eén ingang voor single-fighter regels.
+// Belangrijk: gebruik dezelfde volwassen klasse/record-logica als fighterRules.ts.
+// Jeugdpartijen tellen niet mee voor volwassen R/N/C/B/A-promotie.
 
-import { type AnyRow, boolish, s, toNumberOrNull, normalizeKlasse } from "./singleFighterUtils";
+import { type AnyRow } from "./singleFighterUtils";
+import { runMatchmakerFighterRules } from "./fighterRules";
 
 export type SingleFighterRuleHit = {
   matchmaking_id: string;
@@ -11,114 +13,55 @@ export type SingleFighterRuleHit = {
   aanmelding_id?: string | number | null;
   fighter_id?: string | null;
   va_nummer?: string | null;
+  toernooi_code?: string | null;
+  is_toernooi?: boolean | null;
+  partij_nr?: number | null;
+  bout_id?: string | null;
   regel_type: "matchmaker_fighter";
   rule: string;
   rule_code: string;
-  resultaat: "OK" | "LET_OP" | "ACTIE" | "AFKEUR" | "VERBOD";
+  resultaat: "OK" | "LET_OP" | "ACTIE" | "DISPENSATIE" | "AFKEUR" | "VERBOD";
   severity: string;
   boodschap: string;
   bron: "aanmeldingen";
   created_at: string;
 };
 
-function addFactory(context: AnyRow, hits: SingleFighterRuleHit[]) {
-  return (
-    rule_code: string,
-    resultaat: SingleFighterRuleHit["resultaat"],
-    boodschap: string,
-    severity = resultaat
-  ) => {
-    hits.push({
-      matchmaking_id: context.matchmaking_id,
-      controle_run_id: context.controle_run_id,
-      inschrijving_id: context.inschrijving_id ?? context.aanmelding_id ?? null,
-      aanmelding_id: context.aanmelding_id ?? context.inschrijving_id ?? null,
-      fighter_id: s(context.fighter_id ?? context.va_nummer) || null,
-      va_nummer: s(context.va_nummer) || null,
-      regel_type: "matchmaker_fighter",
-      rule: rule_code,
-      rule_code,
-      resultaat,
-      severity,
-      boodschap,
-      bron: "aanmeldingen",
-      created_at: new Date().toISOString(),
-    });
-  };
+function s(v: any): string {
+  return String(v ?? "").trim();
 }
 
+/**
+ * Backwards compatible wrapper voor bestaande imports.
+ *
+ * De oude rulesSingleFighter gebruikte context.klasse_advies uit enrich.
+ * Dat kon fout gaan omdat klasse_advies op totale aantallen leunde.
+ * Deze wrapper draait daarom altijd de centrale runMatchmakerFighterRules,
+ * die per volwassen klasse telt en jeugdpartijen niet laat promoveren.
+ */
 export function rulesSingleFighter(context: AnyRow): SingleFighterRuleHit[] {
-  const hits: SingleFighterRuleHit[] = [];
-  const add = addFactory(context, hits);
+  const hits = runMatchmakerFighterRules(context, { includeOk: false });
 
-  if (!s(context.va_nummer)) {
-    add("MATCHMAKER_GEEN_VA", "ACTIE", "Deze aanmelding heeft geen geldig Fightpaspoortnummer.");
-  }
-
-  if (!s(context.naam_fp ?? context.fp_naam) && s(context.va_nummer)) {
-    add("MATCHMAKER_GEEN_FP_DATA", "ACTIE", "Geen Fightpaspoortgegevens gevonden voor deze vechter.");
-  }
-
-  const licentieBool = boolish(context.licentie_ok ?? context.licentie_status ?? context.licentie);
-  if (licentieBool === false) {
-    add("MATCHMAKER_GEEN_LICENTIE", "AFKEUR", "Deze vechter heeft geen geldige licentie.");
-  }
-
-  const startverbod = boolish(context.heeft_startverbod ?? context.startverbod);
-  if (startverbod === true || s(context.heeft_startverbod ?? context.startverbod).toLowerCase().includes("ja")) {
-    add("MATCHMAKER_STARTVERBOD", "VERBOD", "Deze vechter heeft een startverbod.", "VERBOD");
-  }
-
-  if (context.naam_match === false) {
-    add("MATCHMAKER_NAAM_WIJKT_AF", "LET_OP", "Naam uit aanmelding wijkt af van Fightpaspoort.", "LET_OP");
-  }
-
-  if (context.geboortedatum_match === false) {
-    add("MATCHMAKER_GEBOORTEDATUM_WIJKT_AF", "LET_OP", "Geboortedatum uit aanmelding wijkt af van Fightpaspoort.", "LET_OP");
-  }
-
-  if (context.gym_match === false) {
-    add("MATCHMAKER_SCHOOL_WIJKT_AF", "LET_OP", "Sportschool uit aanmelding wijkt af van Fightpaspoort.", "LET_OP");
-  }
-
-  if (context.keurmerk === false || context.heeft_keurmerk === false) {
-    add(
-      "MATCHMAKER_GEEN_KEURMERK",
-      "LET_OP",
-      context.keurmerk_reden || "Sportschool heeft geen geldig keurmerk op eventdatum.",
-      "LET_OP"
-    );
-  }
-
-  if (s(context.keurmerk_status) === "belgie_check") {
-    add(
-      "MATCHMAKER_BELGIE_CHECK",
-      "LET_OP",
-      context.keurmerk_reden || "Belgische sportschool: controleer BKBMO/boksboekje handmatig.",
-      "LET_OP"
-    );
-  }
-
-  const klasse = normalizeKlasse(context.klasse ?? context.klasse_mm ?? context.nulmeting_klasse);
-  const advies = normalizeKlasse(context.klasse_advies);
-  if (klasse && advies && klasse !== advies) {
-    add(
-      "MATCHMAKER_KLASSE_ADVIES",
-      "LET_OP",
-      context.klasse_advies_reden || `Klasseadvies wijkt af: ${klasse} → ${advies}.`,
-      "LET_OP"
-    );
-  }
-
-  const leeftijd = toNumberOrNull(context.leeftijd_event ?? context.leeftijd);
-  if (leeftijd != null && leeftijd < 18 && klasse && !String(klasse).startsWith("J")) {
-    add(
-      "MATCHMAKER_JEUGD_LET_OP",
-      "LET_OP",
-      "Deze vechter is jeugd op eventdatum. Match alleen met passende jeugdregels/leeftijd/gewicht/ervaring.",
-      "LET_OP"
-    );
-  }
-
-  return hits;
+  return hits.map((hit: any) => ({
+    matchmaking_id: s(hit.matchmaking_id ?? context.matchmaking_id),
+    controle_run_id: s(hit.controle_run_id ?? context.controle_run_id),
+    inschrijving_id: hit.inschrijving_id ?? context.inschrijving_id ?? context.aanmelding_id ?? null,
+    aanmelding_id: hit.aanmelding_id ?? context.aanmelding_id ?? context.inschrijving_id ?? null,
+    fighter_id: hit.fighter_id ?? context.fighter_id ?? null,
+    va_nummer: hit.va_nummer ?? context.va_nummer ?? null,
+    toernooi_code: s(context.toernooi_code) || null,
+    is_toernooi: context.is_toernooi === true || !!s(context.toernooi_code),
+    partij_nr: Number.isFinite(Number(context.partij_nr)) ? Number(context.partij_nr) : null,
+    bout_id: s(context.bout_id) || null,
+    regel_type: "matchmaker_fighter",
+    rule: hit.rule ?? hit.rule_code,
+    rule_code: hit.rule_code,
+    resultaat: hit.resultaat,
+    severity: hit.severity,
+    boodschap: hit.boodschap,
+    bron: "aanmeldingen",
+    created_at: hit.created_at ?? new Date().toISOString(),
+  }));
 }
+
+export default rulesSingleFighter;

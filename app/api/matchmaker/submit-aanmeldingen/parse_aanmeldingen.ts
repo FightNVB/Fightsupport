@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 
 export type ParseAanmeldingenContext = {
   upload_batch_id?: string | null;
+  upload_id?: string | null;
   upload_filename?: string | null;
   storage_path?: string | null;
 };
@@ -22,7 +23,15 @@ export type ParsedFighterRow = {
   gym: string | null;
 
   geboortedatum: string | null;
+
+  // Gewicht blijft numeriek voor sorteren/filteren.
+  // Bij "-95" is dit 95 met gewicht_type="up_to".
+  // Bij "95+" is dit 95 met gewicht_type="open_above".
   gewicht: number | null;
+  gewicht_notatie: string | null;
+  gewicht_type: "exact" | "up_to" | "open_above" | null;
+  min_gewicht: number | null;
+  max_gewicht: number | null;
 
   win: number | null;
   loss: number | null;
@@ -41,6 +50,7 @@ function s(v: unknown): string {
 function norm(s: any): string {
   return String(cellPrimitive(s) ?? "")
     .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
 }
@@ -118,8 +128,119 @@ function parseNumber(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function parsePositiveNumber(v: any): number | null {
+  const n = parseNumber(v);
+  if (n == null) return null;
+  return Math.abs(n);
+}
+
+type ParsedWeightInfo = {
+  gewicht: number | null;
+  gewicht_notatie: string | null;
+  gewicht_type: "exact" | "up_to" | "open_above" | null;
+  min_gewicht: number | null;
+  max_gewicht: number | null;
+};
+
+function parseWeightInfo(v: any): ParsedWeightInfo {
+  const raw = cellPrimitive(v);
+
+  if (raw == null || raw === "") {
+    return {
+      gewicht: null,
+      gewicht_notatie: null,
+      gewicht_type: null,
+      min_gewicht: null,
+      max_gewicht: null,
+    };
+  }
+
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    const n = Math.abs(raw);
+    return {
+      gewicht: n,
+      gewicht_notatie: String(n),
+      gewicht_type: "exact",
+      min_gewicht: null,
+      max_gewicht: n,
+    };
+  }
+
+  const text = String(raw ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/,/g, ".")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!text || text.toLowerCase() === "null" || text === "[object Object]") {
+    return {
+      gewicht: null,
+      gewicht_notatie: null,
+      gewicht_type: null,
+      min_gewicht: null,
+      max_gewicht: null,
+    };
+  }
+
+  const compact = text
+    .toLowerCase()
+    .replace(/kg/g, "")
+    .replace(/kilo/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+
+  const n = parsePositiveNumber(text);
+
+  if (n == null) {
+    return {
+      gewicht: null,
+      gewicht_notatie: text,
+      gewicht_type: null,
+      min_gewicht: null,
+      max_gewicht: null,
+    };
+  }
+
+  // 95+ is de enige open heavyweight klasse: minimaal 95 kg, géén max.
+  // Realistisch kan iemand 120/150 kg zijn; dat mag in dezelfde 95+ klasse.
+  if (/^\+?\d+(?:\.\d+)?\+$/.test(compact) || compact.includes("+")) {
+    return {
+      gewicht: n,
+      gewicht_notatie: `${String(n).replace(".", ",")}+`,
+      gewicht_type: "open_above",
+      min_gewicht: n,
+      max_gewicht: null,
+    };
+  }
+
+  // -95 betekent niet min 95, maar maximaal/tot en met 95 kg.
+  // Ook <=95, ≤95, <95, tot 95, max 95 en t/m 95 worden hetzelfde behandeld.
+  const isUpTo =
+    /^[-–—]\d+(?:\.\d+)?$/.test(compact) ||
+    /^(<=|≤|<)\d+(?:\.\d+)?$/.test(compact) ||
+    /^(tot|tm|t\/m|max|maximum)\d+(?:\.\d+)?$/.test(compact);
+
+  if (isUpTo) {
+    return {
+      gewicht: n,
+      gewicht_notatie: `-${String(n).replace(".", ",")}`,
+      gewicht_type: "up_to",
+      min_gewicht: null,
+      max_gewicht: n,
+    };
+  }
+
+  return {
+    gewicht: n,
+    gewicht_notatie: String(n).replace(".", ","),
+    gewicht_type: "exact",
+    min_gewicht: null,
+    max_gewicht: n,
+  };
+}
+
 function parseWeightKg(v: any): number | null {
-  return parseNumber(v);
+  return parseWeightInfo(v).gewicht;
 }
 
 function pad2(n: number) {
@@ -196,8 +317,14 @@ function findHeaderRow(ws: ExcelJS.Worksheet): number {
     const values = (row.values ?? []) as any[];
     const joined = values.map(norm).join("|");
 
+    const hasAthleteName =
+      joined.includes("naam atleet 1") ||
+      joined.includes("naam atleet") ||
+      joined.includes("volledige naam") ||
+      joined.includes("naam vechter");
+
     const fightSupportTemplate =
-      joined.includes("naam atleet 1") &&
+      hasAthleteName &&
       joined.includes("sportschool") &&
       joined.includes("fightpaspoort");
 
@@ -286,6 +413,7 @@ export async function parseExcelToFighters(
   const colMap = buildColumnMap(headerRow);
   const eventMeta = getEventMeta(ws, headerRowNr);
   const uploadBatchId = s(context.upload_batch_id);
+  const uploadId = s(context.upload_id);
   const uploadFilename = s(context.upload_filename);
   const storagePath = s(context.storage_path);
 
@@ -379,6 +507,13 @@ export async function parseExcelToFighters(
 
     const rowNrFromSheet = getCellNumber(row, cNr);
     const gym = getCellText(row, cGym);
+    const weightInfo = cGew ? parseWeightInfo(row.getCell(cGew).value) : {
+      gewicht: null,
+      gewicht_notatie: null,
+      gewicht_type: null,
+      min_gewicht: null,
+      max_gewicht: null,
+    };
     const erv = parseErvaring(getCellText(row, cErv));
 
     const win = cWin ? getCellNumber(row, cWin) : erv.win;
@@ -402,7 +537,11 @@ export async function parseExcelToFighters(
       gym,
 
       geboortedatum: getCellDate(row, cDob),
-      gewicht: cGew ? parseWeightKg(row.getCell(cGew).value) : null,
+      gewicht: weightInfo.gewicht,
+      gewicht_notatie: weightInfo.gewicht_notatie,
+      gewicht_type: weightInfo.gewicht_type,
+      min_gewicht: weightInfo.min_gewicht,
+      max_gewicht: weightInfo.max_gewicht,
 
       win,
       loss,
@@ -418,7 +557,12 @@ export async function parseExcelToFighters(
         event_meta: eventMeta,
         original_name_cell: fullName,
         parsed_naam: naam,
+        gewicht_notatie: weightInfo.gewicht_notatie,
+        gewicht_type: weightInfo.gewicht_type,
+        min_gewicht: weightInfo.min_gewicht,
+        max_gewicht: weightInfo.max_gewicht,
         ...(uploadBatchId ? { upload_batch_id: uploadBatchId } : {}),
+        ...(uploadId ? { upload_id: uploadId } : {}),
         ...(uploadFilename ? { upload_filename: uploadFilename } : {}),
         ...(storagePath ? { storage_path: storagePath } : {}),
       },

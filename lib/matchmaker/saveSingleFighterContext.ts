@@ -328,18 +328,49 @@ export async function saveSingleFighterRules(params: {
   matchmakingId: string;
   controleRunId: string;
   hits: AnyRow[];
+  // Belangrijk wanneer een hercontrole géén meldingen meer oplevert:
+  // zonder scopeRows zouden oude regels blijven staan, omdat hits leeg is.
+  scopeRows?: AnyRow[];
 }) {
-  const { supabase, matchmakingId, controleRunId, hits } = params;
-
-  if (!hits?.length) return { data: [], error: null };
+  const { supabase, matchmakingId, controleRunId, hits, scopeRows = [] } = params;
 
   const table = "matchmaker_fighter_resultaten";
 
-  await supabase
+  // Deze functie kan meerdere keren binnen dezelfde run worden aangeroepen:
+  // gewone wedstrijden en toernooi-vechters. Verwijder daarom alleen de groep
+  // die nu opnieuw opgeslagen wordt, anders gooit de laatste save de eerdere
+  // wedstrijd- of toernooiresultaten weg.
+  const scopeForDelete = hits?.length ? hits : scopeRows;
+  const groups = (scopeForDelete ?? []).reduce(
+    (acc, row) => {
+      const toernooiCode = toernooiCodeOrNull(
+        pick(row, ["toernooi_code", "toernooicode", "tournament_code"])
+      );
+      if (toernooiCode || isToernooiContext(row)) acc.toernooi += 1;
+      else acc.wedstrijd += 1;
+      return acc;
+    },
+    { wedstrijd: 0, toernooi: 0 }
+  );
+
+  let delQ = supabase
     .from(table)
     .delete()
     .eq("matchmaking_id", matchmakingId)
     .eq("controle_run_id", controleRunId);
+
+  if (groups.toernooi > 0 && groups.wedstrijd === 0) {
+    delQ = delQ.not("toernooi_code", "is", null);
+  } else if (groups.wedstrijd > 0 && groups.toernooi === 0) {
+    delQ = delQ.is("toernooi_code", null);
+  }
+
+  const { error: delErr } = await delQ;
+  if (delErr) return { data: [], error: delErr };
+
+  // Als er nu géén hits zijn, is dat juist het signaal dat de oude meldingen
+  // voor deze scope weg moeten blijven. Dus na de delete klaar.
+  if (!hits?.length) return { data: [], error: null };
 
   const rows = hits.map((hit) => {
   const toernooi_code = toernooiCodeOrNull(

@@ -132,10 +132,35 @@ function isES(v: any) {
   return s === "es" || s === "spanje" || s === "spain" || s === "españa" || s === "espana";
 }
 
-type LandHint = "NL" | "BE" | "DE" | "FR" | "ES";
+function isUK(v: any) {
+  const s = normLand(v);
+  return (
+    s === "uk" ||
+    s === "gb" ||
+    s === "groot brittannie" ||
+    s === "groot-brittannie" ||
+    s === "groot brittannië" ||
+    s === "groot-brittannië" ||
+    s === "verenigd koninkrijk" ||
+    s === "united kingdom" ||
+    s === "engeland" ||
+    s === "england"
+  );
+}
+
+function isTR(v: any) {
+  const s = normLand(v);
+  return s === "tr" || s === "turkije" || s === "turkey" || s === "türkiye" || s === "turkiye";
+}
+
+type LandHint = "NL" | "BE" | "DE" | "FR" | "ES" | "UK" | "TR" | "FOREIGN";
 
 function normalizeCountryCodeOrName(raw: string): LandHint | null {
-  const s = String(raw ?? "").trim().toLowerCase();
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/\s+/g, " ");
   if (!s) return null;
 
   if (["nl", "nederland", "netherlands", "the netherlands"].includes(s)) return "NL";
@@ -143,6 +168,11 @@ function normalizeCountryCodeOrName(raw: string): LandHint | null {
   if (["de", "duitsland", "deutschland", "germany"].includes(s)) return "DE";
   if (["fr", "frankrijk", "france"].includes(s)) return "FR";
   if (["es", "spanje", "spain", "españa", "espana"].includes(s)) return "ES";
+  if (["uk", "gb", "groot brittannie", "groot-brittannie", "groot brittannië", "groot-brittannië", "verenigd koninkrijk", "united kingdom", "engeland", "england"].includes(s)) return "UK";
+  if (["tr", "turkije", "turkey", "türkiye", "turkiye"].includes(s)) return "TR";
+
+  // Landcodes zet je tussen haakjes, bv. (BE). Alles anders dan NL is buitenland.
+  if (/^[a-z]{2}$/.test(s)) return "FOREIGN";
 
   return null;
 }
@@ -151,9 +181,10 @@ function detectLandHintFromGymText(rawGym: string): LandHint | null {
   const raw = String(rawGym ?? "").trim();
   if (!raw) return null;
 
-  const s = raw.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  const s = raw.replace(/ /g, " ").replace(/\s+/g, " ").trim();
   const lower = s.toLowerCase();
 
+  // Hoogste prioriteit: landcode/landnaam tussen haakjes, bv. Sportschool (BE).
   const parenMatches = [...s.matchAll(/\(([^)]+)\)/g)];
   for (const m of parenMatches) {
     const inside = String(m[1] ?? "").trim();
@@ -161,19 +192,14 @@ function detectLandHintFromGymText(rawGym: string): LandHint | null {
     if (hint) return hint;
   }
 
-  const upperTokens = s.match(/\b[A-Z]{2}\b/g) ?? [];
-  for (const tok of upperTokens) {
-    const hint = normalizeCountryCodeOrName(tok);
-    if (hint) return hint;
-  }
-
+  // Fallback: expliciete landnamen achter/in de sportschoolnaam.
   if (lower.includes("belgie") || lower.includes("belgië") || lower.includes("belgium")) return "BE";
   if (lower.includes("duitsland") || lower.includes("deutschland") || lower.includes("germany")) return "DE";
   if (lower.includes("nederland") || lower.includes("the netherlands") || lower.includes("netherlands")) return "NL";
   if (lower.includes("frankrijk") || lower.includes("france")) return "FR";
-  if (lower.includes("spanje") || lower.includes("spain") || lower.includes("españa") || lower.includes("espana")) {
-    return "ES";
-  }
+  if (lower.includes("spanje") || lower.includes("spain") || lower.includes("españa") || lower.includes("espana")) return "ES";
+  if (lower.includes("united kingdom") || lower.includes("verenigd koninkrijk") || lower.includes("engeland") || lower.includes("england")) return "UK";
+  if (lower.includes("turkije") || lower.includes("turkey") || lower.includes("türkiye") || lower.includes("turkiye")) return "TR";
 
   return null;
 }
@@ -184,8 +210,26 @@ function landHintToLabel(hint: LandHint | null): string | null {
   if (hint === "DE") return "Duitsland";
   if (hint === "FR") return "Frankrijk";
   if (hint === "ES") return "Spanje";
+  if (hint === "UK") return "United Kingdom";
+  if (hint === "TR") return "Turkije";
+  if (hint === "FOREIGN") return "Buitenland";
   return null;
 }
+
+function isForeignHint(hint: LandHint | null) {
+  return !!hint && hint !== "NL";
+}
+
+function defaultLandHintForMatching(hint: LandHint | null): LandHint {
+  // Geen landcode/landnaam betekent: eerst behandelen als Nederlandse sportschool.
+  // Alleen expliciete buitenlandse hint (bv. (BE), België, Duitsland) maakt hem buitenland.
+  return hint ?? "NL";
+}
+
+function landLabelForMatch(landDb: any, hint: LandHint | null) {
+  return landDb ?? landHintToLabel(defaultLandHintForMatching(hint));
+}
+
 
 function landMatchesHint(landValue: any, hint: LandHint | null) {
   if (!hint) return false;
@@ -194,7 +238,23 @@ function landMatchesHint(landValue: any, hint: LandHint | null) {
   if (hint === "DE") return isDE(landValue);
   if (hint === "FR") return isFR(landValue);
   if (hint === "ES") return isES(landValue);
+  if (hint === "UK") return isUK(landValue);
+  if (hint === "TR") return isTR(landValue);
+  if (hint === "FOREIGN") return isForeignNonNL(landValue);
   return false;
+}
+
+function buildForeignKeurmerkReason(opts: { gym: string; land: string | null; matchInfo?: string | null }) {
+  const land = opts.land ?? "Buitenland";
+  const basis = opts.matchInfo ?? (opts.gym ? `↳ [MM sportschool:] "${opts.gym}"` : `↳ [MM sportschool:] -`);
+
+  if (land === "België") {
+    return `⚠️ België — geen NVB keurmerk vereist. Controleer sportschool op BKBMO site + boksboekje. Land: ${land}.
+${basis}`;
+  }
+
+  return `ℹ️ Buitenland — geen NVB keurmerk vereist. Controleer boksboekje handmatig. Land: ${land}.
+${basis}`;
 }
 
 function toIsoDateOnly(d: any): string | null {
@@ -338,14 +398,14 @@ function stripCountryHintsFromRaw(raw: string) {
   let s = String(raw ?? "").trim();
   if (!s) return s;
 
-  s = s.replace(/\((NL|BE|DE|FR|ES)\)/gi, " ");
+  s = s.replace(/\(([A-Z]{2})\)/g, " ");
   s = s.replace(
-    /\((Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España)\)/gi,
+    /\((Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\)/gi,
     " "
   );
-  s = s.replace(/\b(NL|BE|DE|FR|ES)\b/g, " ");
+  s = s.replace(/\b(NL|BE|DE|FR|ES|UK|GB|TR)\b/g, " ");
   s = s.replace(
-    /\b(Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España)\b/gi,
+    /\b(Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\b/gi,
     " "
   );
   s = s.replace(/\s+/g, " ").trim();
@@ -516,7 +576,8 @@ function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMap
   if (!gRaw) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
 
   const list = sportscholen ?? [];
-  const landHint = detectLandHintFromGymText(gRaw);
+  const explicitLandHint = detectLandHintFromGymText(gRaw);
+  const landHint = defaultLandHintForMatching(explicitLandHint);
   const knownPlaces = extractKnownPlaces(list);
 
   // 1) ECHTE letterlijke/raw-strict match eerst
@@ -684,6 +745,7 @@ function buildKeurmerkPatchForGym(opts: {
   const patch: any = {};
   const mmLine = (value: string) =>
     value ? `↳ [MM sportschool:] "${value}"` : `↳ [MM sportschool:] -`;
+  const hint = detectLandHintFromGymText(gymValue);
 
   const match = gymValue
     ? findGymMatch(sportscholen, gymValue, aliasMaps)
@@ -691,18 +753,24 @@ function buildKeurmerkPatchForGym(opts: {
   const found = match.row;
 
   if (!found) {
+    if (isForeignHint(hint)) {
+      const land = landHintToLabel(hint);
+      patch[valueKey] = true;
+      patch[reasonKey] = buildForeignKeurmerkReason({ gym: gymValue, land });
+      return patch;
+    }
+
     patch[valueKey] = null;
     patch[reasonKey] = gymValue
       ? `${mmLine(gymValue)}
-Geen match in sportscholen. ${match.reason ?? ""}`.trim()
+Geen landcode/landnaam gevonden, dus behandeld als Nederlandse sportschool. Geen betrouwbare match in sportscholen. ${match.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim()
       : `${mmLine("")}
 Geen sportschool opgegeven.`.trim();
     return patch;
   }
 
-  const hint = detectLandHintFromGymText(gymValue);
   const landDb = found?.land ?? found?.country ?? null;
-  const land = landDb ?? landHintToLabel(hint);
+  const land = landLabelForMatch(landDb, hint);
   const eindeIso = toIsoDateOnly(found?.keurmerk_eind ?? found?.keurmerk_einde ?? found?.einde_keurmerk);
   const matchInfo =
     `${mmLine(gymValue)}
@@ -716,16 +784,13 @@ Geen sportschool opgegeven.`.trim();
 
     if (landDb ? isBE(landDb) : hint === "BE") {
       patch[reasonKey] =
-        `⚠️ België — controleer sportschool op BKBMO site + boksboekje. Land: ${land ?? "België"}.
-${matchInfo}`;
+        buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "België", matchInfo });
     } else if (landDb ? isDE(landDb) : hint === "DE") {
       patch[reasonKey] =
-        `ℹ️ Buitenland (Duitsland) — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.
-${matchInfo}`;
+        buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo });
     } else {
       patch[reasonKey] =
-        `ℹ️ Buitenland — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.
-${matchInfo}`;
+        buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo });
     }
 
     return patch;
@@ -827,82 +892,92 @@ export async function enrichControleBoutContext(
 
     const patch: any = {};
     const mmLine = (gym: string) => (gym ? `↳ [MM sportschool:] "${gym}"` : `↳ [MM sportschool:] -`);
+    const roodHint = detectLandHintFromGymText(roodGym);
+    const blauwHint = detectLandHintFromGymText(blauwGym);
 
     if (!rood) {
-      patch.keurmerk_rood = null;
-      patch.keurmerk_reden_rood = roodGym
-        ? `${mmLine(roodGym)}\nGeen match in sportscholen. ${roodMatch.reason ?? ""}`.trim()
-        : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
+      if (isForeignHint(roodHint)) {
+        patch.keurmerk_rood = true;
+        patch.keurmerk_reden_rood = buildForeignKeurmerkReason({ gym: roodGym, land: landHintToLabel(roodHint) });
+      } else {
+        patch.keurmerk_rood = null;
+        patch.keurmerk_reden_rood = roodGym
+          ? `${mmLine(roodGym)}
+Geen landcode/landnaam gevonden, dus behandeld als Nederlandse sportschool. Geen betrouwbare match in sportscholen. ${roodMatch.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim()
+          : `${mmLine("")}
+Geen sportschool opgegeven.`.trim();
+      }
     } else {
-      const hint = detectLandHintFromGymText(roodGym);
+      const hint = roodHint;
       const landDb = rood?.land ?? rood?.country ?? null;
-      const land = landDb ?? landHintToLabel(hint);
+      const land = landLabelForMatch(landDb, hint);
       const eindeIso = toIsoDateOnly(rood?.keurmerk_eind ?? rood?.keurmerk_einde ?? rood?.einde_keurmerk);
 
       const matchInfo =
-        `${mmLine(roodGym)}\n` +
+        `${mmLine(roodGym)}
+` +
         `↳ gematcht met "${rood.naam}" (${rood.plaats ?? rood.stad ?? "?"}, ${land ?? "?"})`;
 
-      const isForeign = landDb ? isForeignNonNL(landDb) : hint !== null && hint !== "NL";
+      const isForeign = landDb ? isForeignNonNL(landDb) : isForeignHint(hint);
 
       if (isForeign) {
         patch.keurmerk_rood = true;
-
-        if (landDb ? isBE(landDb) : hint === "BE") {
-          patch.keurmerk_reden_rood =
-            `⚠️ België — controleer sportschool op BKBMO site + boksboekje. Land: ${land ?? "België"}.\n${matchInfo}`;
-        } else if (landDb ? isDE(landDb) : hint === "DE") {
-          patch.keurmerk_reden_rood =
-            `ℹ️ Buitenland (Duitsland) — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
-        } else {
-          patch.keurmerk_reden_rood =
-            `ℹ️ Buitenland — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
-        }
+        patch.keurmerk_reden_rood = buildForeignKeurmerkReason({
+          gym: roodGym,
+          land: land ?? (landDb ? "Buitenland" : landHintToLabel(hint)),
+          matchInfo,
+        });
       } else {
         const geldig = !!eindeIso && eindeIso >= String((row as any)?.evenement_datum ?? "");
         patch.keurmerk_rood = geldig;
         patch.keurmerk_reden_rood = geldig
-          ? `${matchInfo}\nKeurmerk geldig t/m ${eindeIso}.`
-          : `${matchInfo}\nGeen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`;
+          ? `${matchInfo}
+Keurmerk geldig t/m ${eindeIso}.`
+          : `${matchInfo}
+Geen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`;
       }
     }
 
     if (!blauw) {
-      patch.keurmerk_blauw = null;
-      patch.keurmerk_reden_blauw = blauwGym
-        ? `${mmLine(blauwGym)}\nGeen match in sportscholen. ${blauwMatch.reason ?? ""}`.trim()
-        : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
+      if (isForeignHint(blauwHint)) {
+        patch.keurmerk_blauw = true;
+        patch.keurmerk_reden_blauw = buildForeignKeurmerkReason({ gym: blauwGym, land: landHintToLabel(blauwHint) });
+      } else {
+        patch.keurmerk_blauw = null;
+        patch.keurmerk_reden_blauw = blauwGym
+          ? `${mmLine(blauwGym)}
+Geen landcode/landnaam gevonden, dus behandeld als Nederlandse sportschool. Geen betrouwbare match in sportscholen. ${blauwMatch.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim()
+          : `${mmLine("")}
+Geen sportschool opgegeven.`.trim();
+      }
     } else {
-      const hint = detectLandHintFromGymText(blauwGym);
+      const hint = blauwHint;
       const landDb = blauw?.land ?? blauw?.country ?? null;
-      const land = landDb ?? landHintToLabel(hint);
+      const land = landLabelForMatch(landDb, hint);
       const eindeIso = toIsoDateOnly(blauw?.keurmerk_eind ?? blauw?.keurmerk_einde ?? blauw?.einde_keurmerk);
 
       const matchInfo =
-        `${mmLine(blauwGym)}\n` +
+        `${mmLine(blauwGym)}
+` +
         `↳ gematcht met "${blauw.naam}" (${blauw.plaats ?? blauw.stad ?? "?"}, ${land ?? "?"})`;
 
-      const isForeign = landDb ? isForeignNonNL(landDb) : hint !== null && hint !== "NL";
+      const isForeign = landDb ? isForeignNonNL(landDb) : isForeignHint(hint);
 
       if (isForeign) {
         patch.keurmerk_blauw = true;
-
-        if (landDb ? isBE(landDb) : hint === "BE") {
-          patch.keurmerk_reden_blauw =
-            `⚠️ België — controleer sportschool op BKBMO site + boksboekje. Land: ${land ?? "België"}.\n${matchInfo}`;
-        } else if (landDb ? isDE(landDb) : hint === "DE") {
-          patch.keurmerk_reden_blauw =
-            `ℹ️ Buitenland (Duitsland) — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
-        } else {
-          patch.keurmerk_reden_blauw =
-            `ℹ️ Buitenland — geen NVB keurmerk vereist. Controleer bond/boekje handmatig.\n${matchInfo}`;
-        }
+        patch.keurmerk_reden_blauw = buildForeignKeurmerkReason({
+          gym: blauwGym,
+          land: land ?? (landDb ? "Buitenland" : landHintToLabel(hint)),
+          matchInfo,
+        });
       } else {
         const geldig = !!eindeIso && eindeIso >= String((row as any)?.evenement_datum ?? "");
         patch.keurmerk_blauw = geldig;
         patch.keurmerk_reden_blauw = geldig
-          ? `${matchInfo}\nKeurmerk geldig t/m ${eindeIso}.`
-          : `${matchInfo}\nGeen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`;
+          ? `${matchInfo}
+Keurmerk geldig t/m ${eindeIso}.`
+          : `${matchInfo}
+Geen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`;
       }
     }
 

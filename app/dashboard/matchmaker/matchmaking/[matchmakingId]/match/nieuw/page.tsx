@@ -742,7 +742,34 @@ function analysisAgeIsMixed(roodAge: number | null, blauwAge: number | null) {
   return (roodAge < 18 && blauwAge >= 18) || (blauwAge < 18 && roodAge >= 18);
 }
 
+function isLicentieOfKeurmerkMelding(row: ResultRow) {
+  const text = lower(
+    [
+      row?.rule_code,
+      row?.rule,
+      row?.boodschap,
+      row?.title,
+      row?.type,
+    ]
+      .map((x) => s(x))
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  return (
+    text.includes("licentie") ||
+    text.includes("license") ||
+    text.includes("keurmerk") ||
+    text.includes("sportschool geen keurmerk") ||
+    text.includes("sportschool zonder keurmerk")
+  );
+}
+
 function resultSeverity(row: ResultRow): Severity {
+  // Licentie en keurmerk zijn duidelijke waarschuwingen voor de matchmaker,
+  // maar mogen op deze matchpagina geen VERBOD veroorzaken.
+  if (isLicentieOfKeurmerkMelding(row)) return "LET OP";
+
   const x = lower(row?.severity ?? row?.resultaat ?? row?.original_resultaat);
 
   if (x.includes("verbod")) return "VERBOD";
@@ -1094,8 +1121,8 @@ export default function NieuweMatchPage() {
       items.push({
         title: "Licentie rood",
         value: roodLic,
-        severity: "VERBOD",
-        detail: "Licentie moet JA zijn. Zonder geldige licentie mag deze vechter niet gematcht worden.",
+        severity: "LET OP",
+        detail: "Deze vechter heeft geen geldige licentie. Controleer dit voordat je de partij doorzet.",
         icon: <ShieldAlert size={16} />,
       });
     }
@@ -1104,8 +1131,8 @@ export default function NieuweMatchPage() {
       items.push({
         title: "Licentie blauw",
         value: blauwLic,
-        severity: "VERBOD",
-        detail: "Licentie moet JA zijn. Zonder geldige licentie mag deze vechter niet gematcht worden.",
+        severity: "LET OP",
+        detail: "Deze vechter heeft geen geldige licentie. Controleer dit voordat je de partij doorzet.",
         icon: <ShieldAlert size={16} />,
       });
     }
@@ -1114,8 +1141,8 @@ export default function NieuweMatchPage() {
       items.push({
         title: "Keurmerk rood",
         value: roodKeur.label,
-        severity: "VERBOD",
-        detail: roodKeur.reason || "Keurmerk moet geldig zijn. Zonder geldig keurmerk mag deze vechter niet gematcht worden.",
+        severity: "LET OP",
+        detail: roodKeur.reason || "De sportschool heeft geen geldig keurmerk. Controleer dit voordat je de partij doorzet.",
         icon: <ShieldAlert size={16} />,
       });
     }
@@ -1124,8 +1151,8 @@ export default function NieuweMatchPage() {
       items.push({
         title: "Keurmerk blauw",
         value: blauwKeur.label,
-        severity: "VERBOD",
-        detail: blauwKeur.reason || "Keurmerk moet geldig zijn. Zonder geldig keurmerk mag deze vechter niet gematcht worden.",
+        severity: "LET OP",
+        detail: blauwKeur.reason || "De sportschool heeft geen geldig keurmerk. Controleer dit voordat je de partij doorzet.",
         icon: <ShieldAlert size={16} />,
       });
     }

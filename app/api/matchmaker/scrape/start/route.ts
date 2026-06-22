@@ -467,6 +467,77 @@ async function readMatchmakerFightersRaw(opts: {
   return [];
 }
 
+async function readMatchmakerUitslagenRaw(opts: {
+  matchmakingId: string;
+  scrapeRunId: string;
+  vaNummers: string[];
+}) {
+  const { matchmakingId, scrapeRunId, vaNummers } = opts;
+
+  if (!vaNummers.length) return [] as any[];
+
+  const attempts = [
+    () =>
+      supabase
+        .from("matchmaker_uitslagen_raw")
+        .select("*")
+        .eq("matchmaking_id", matchmakingId)
+        .in("va_nummer", vaNummers),
+
+    () =>
+      supabase
+        .from("matchmaker_uitslagen_raw")
+        .select("*")
+        .eq("matchmaker_matchmaking_id", matchmakingId)
+        .in("va_nummer", vaNummers),
+
+    () =>
+      supabase
+        .from("matchmaker_uitslagen_raw")
+        .select("*")
+        .eq("scrape_run_id", scrapeRunId)
+        .in("va_nummer", vaNummers),
+
+    () =>
+      supabase
+        .from("matchmaker_uitslagen_raw")
+        .select("*")
+        .eq("controle_run_id", scrapeRunId)
+        .in("va_nummer", vaNummers),
+  ];
+
+  let lastError: any = null;
+
+  for (const attempt of attempts) {
+    const { rows, error } = await readRawByQuery(attempt);
+
+    if (error) {
+      lastError = error;
+      if (missingColumnName(error) || isMissingTableError(error)) continue;
+      continue;
+    }
+
+    if (!rows.length) continue;
+
+    return rows
+      .map((row: any) => ({
+        ...row,
+        fighter_id: normalizeFighterId(row?.fighter_id),
+        va_nummer: toVaStrict(row?.va_nummer) ?? toVaStrict(row?.fighter_id) ?? toVaStrict(row?.va),
+      }))
+      .filter((row: any) => !!row.va_nummer);
+  }
+
+  if (lastError) {
+    console.warn(
+      "[matchmaker/scrape/start] matchmaker_uitslagen_raw lezen waarschuwing:",
+      lastError.message ?? lastError
+    );
+  }
+
+  return [] as any[];
+}
+
 
 async function readMatchmakerFighterContexts(matchmakingId: string) {
   const attempts = [
@@ -941,12 +1012,19 @@ export async function POST(req: Request) {
       va_nummer: toVaStrict(row?.va_nummer) ?? toVaStrict(row?.fighter_id),
     }));
 
+    const uitslagenRows = await readMatchmakerUitslagenRaw({
+      matchmakingId: matchmaking_id,
+      scrapeRunId: scrape_run_id,
+      vaNummers: va_nummers,
+    });
+
     const contextResult = await runSingleFighterContextPipeline({
       supabase,
       matchmakingId: matchmaking_id,
       controleRunId: scrape_run_id,
       aanmeldingen: safeAanmeldingen,
       rawRows: safeRawRows,
+      uitslagenRows,
       eventDate: (mmRow as any)?.datum ?? null,
       writeRules: false,
     });
@@ -1011,6 +1089,7 @@ export async function POST(req: Request) {
       ms: scrapeResult.ms,
       va_count: va_nummers.length,
       matchmaker_fighters_raw_count: rawRows.length,
+      matchmaker_uitslagen_raw_count: uitslagenRows.length,
       context_count: contextResult.count,
       rules_count: fighterRulesResult.rules_count,
       rules_table: fighterRulesResult.table,
@@ -1024,6 +1103,7 @@ export async function POST(req: Request) {
       scrape_run_id,
       va_count: va_nummers.length,
       matchmaker_fighters_raw_count: rawRows.length,
+      matchmaker_uitslagen_raw_count: uitslagenRows.length,
       context_count: contextResult.count,
       rules_count: fighterRulesResult.rules_count,
       rules_table: fighterRulesResult.table,

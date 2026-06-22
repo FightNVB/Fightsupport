@@ -163,22 +163,55 @@ function tabKeyOf(f: Fighter) {
 
   return `${k}/${gender}`;
 }
+function parseWeightClassValue(raw: any): { value: number | null; isMaxClass: boolean; isOpenAbove: boolean } {
+  const txt = s(raw);
+  if (!txt) return { value: null, isMaxClass: false, isOpenAbove: false };
+
+  const normalized = txt
+    .toLowerCase()
+    .replace(/,/g, ".")
+    .replace(/ /g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // -49, - 49, ≤49, <=49, tot 49 en onder 49 betekenen allemaal:
+  // max/tot 49 kg. Dit is dus géén negatief gewicht.
+  const isMaxClass =
+    /^-\s*\d/.test(normalized) ||
+    /^(≤|<=|<)\s*\d/.test(normalized) ||
+    /\b(tot|onder|max|t\/m|tm)\b/.test(normalized);
+
+  // 95+ is de open heavyweight klasse: vanaf 95 kg, zonder max.
+  // Voor sortering hoort hij op 95 te staan, maar in beeld moet de + blijven staan.
+  const isOpenAbove = /\d+(?:\.\d+)?\s*\+/.test(normalized) || /\b(vanaf|minimaal|min)\b/.test(normalized);
+
+  const numberMatch = normalized.match(/\d+(?:\.\d+)?/);
+  if (!numberMatch) return { value: null, isMaxClass, isOpenAbove };
+
+  const value = Number(numberMatch[0]);
+  return { value: Number.isFinite(value) ? value : null, isMaxClass, isOpenAbove };
+}
+
 function gewichtOf(f: Fighter) {
   const raw = pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht, f.gewicht_fp);
   const txt = s(raw);
   if (!txt) return "-";
-  const n = Number(txt.replace(",", ".").replace(/[^\d.-]/g, ""));
-  if (!Number.isFinite(n)) return /kg/i.test(txt) ? txt : `${txt} kg`;
-  return Number.isInteger(n) ? `${n} kg` : `${String(n).replace(".", ",")} kg`;
+
+  const parsed = parseWeightClassValue(raw);
+  if (parsed.value === null) return /kg/i.test(txt) ? txt : `${txt} kg`;
+
+  const formatted = Number.isInteger(parsed.value)
+    ? `${parsed.value}`
+    : `${String(parsed.value).replace(".", ",")}`;
+
+  if (parsed.isOpenAbove) return `${formatted}+ kg`;
+  if (parsed.isMaxClass) return `-${formatted} kg`;
+  return `${formatted} kg`;
 }
 function gewichtSortValue(f: Fighter) {
   const raw = pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht, f.gewicht_fp);
-  const n = Number(
-    s(raw)
-      .replace(",", ".")
-      .replace(/[^\d.-]/g, ""),
-  );
-  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+  const parsed = parseWeightClassValue(raw);
+  return parsed.value !== null ? parsed.value : Number.POSITIVE_INFINITY;
 }
 function parseDateOnly(v: any): Date | null {
   if (!v) return null;
@@ -453,10 +486,15 @@ function totaalPartijenSortValue(f: Fighter) {
   return total > 0 ? total : Number.POSITIVE_INFINITY;
 }
 function sortFightersInTab(a: Fighter, b: Fighter) {
-  const leeftijdDiff = leeftijdSortValue(a) - leeftijdSortValue(b);
-  if (leeftijdDiff !== 0) return leeftijdDiff;
+  // Belangrijkste sortering: gewichtsklasse/gewicht.
+  // -49 wordt als 49 gelezen, 95+ als 95, en onbekend komt onderaan.
   const gewichtDiff = gewichtSortValue(a) - gewichtSortValue(b);
   if (gewichtDiff !== 0) return gewichtDiff;
+
+  // Bij gelijk gewicht sorteren we daarna op leeftijd: jongste bovenaan.
+  const leeftijdDiff = leeftijdSortValue(a) - leeftijdSortValue(b);
+  if (leeftijdDiff !== 0) return leeftijdDiff;
+
   const partijenDiff = totaalPartijenSortValue(a) - totaalPartijenSortValue(b);
   if (partijenDiff !== 0) return partijenDiff;
   return name(a).localeCompare(name(b), "nl");
@@ -1141,7 +1179,7 @@ export default function FightersPage() {
       "Pro/heer",
       "Pro/dame",
     ];
-    return Array.from(map.entries())
+    const classTabs = Array.from(map.entries())
       .sort(([a], [b]) => {
         const ai = orderKlasse.indexOf(a);
         const bi = orderKlasse.indexOf(b);
@@ -1151,6 +1189,14 @@ export default function FightersPage() {
         return a.localeCompare(b, "nl");
       })
       .map(([key, count]) => ({ key, count }));
+
+    return [
+      {
+        key: "Alles",
+        count: fighters.filter((f) => !isBlockedFromMatching(f)).length,
+      },
+      ...classTabs,
+    ];
   }, [fighters]);
 
   useEffect(() => {
@@ -1200,7 +1246,7 @@ export default function FightersPage() {
         if (filter === "afgemeld") return isAfgemeld(f);
 
         if (isBlockedFromMatching(f)) return false;
-        if (activeTab && tabKeyOf(f) !== activeTab) return false;
+        if (activeTab && activeTab !== "Alles" && tabKeyOf(f) !== activeTab) return false;
         if (filter === "no_license" && statusLic(f) !== "bad") return false;
         if (filter === "no_keurmerk" && statusKeur(f) !== "bad") return false;
         return true;

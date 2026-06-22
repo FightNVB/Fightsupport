@@ -147,6 +147,23 @@ export async function saveControleResultaten(opts: {
 
   const hitsIn = Array.isArray(opts?.hits) ? opts.hits : [];
 
+  // Als deze functie zonder bout_id/partij_nr wordt aangeroepen vanuit een deel-save
+  // (bijvoorbeeld eerst gewone partijen en daarna toernooi-vechters), mag de tweede
+  // save niet de eerste groep verwijderen. Daarom bepalen we bij unscoped saves of
+  // de hits alleen toernooi of alleen wedstrijden bevatten.
+  const unscoped = !scopedBoutId && scopedPartijNr == null;
+  const hitGroups = hitsIn.reduce(
+    (acc, hit) => {
+      const hasToernooi = !!normStr((hit as any)?.toernooi_code);
+      if (hasToernooi) acc.toernooi += 1;
+      else acc.wedstrijd += 1;
+      return acc;
+    },
+    { wedstrijd: 0, toernooi: 0 }
+  );
+  const unscopedOnlyToernooi = unscoped && hitGroups.toernooi > 0 && hitGroups.wedstrijd === 0;
+  const unscopedOnlyWedstrijd = unscoped && hitGroups.wedstrijd > 0 && hitGroups.toernooi === 0;
+
   // 0) bestaande reviews ophalen vóór delete
   let exQ = supabaseAdmin
     .from("controle_resultaten")
@@ -160,6 +177,10 @@ export async function saveControleResultaten(opts: {
     exQ = exQ.eq("bout_id", scopedBoutId);
   } else if (scopedPartijNr != null) {
     exQ = exQ.eq("partij_nr", scopedPartijNr);
+  } else if (unscopedOnlyToernooi) {
+    exQ = exQ.not("toernooi_code", "is", null);
+  } else if (unscopedOnlyWedstrijd) {
+    exQ = exQ.is("toernooi_code", null);
   }
 
   const { data: existing, error: exErr } = await exQ;
@@ -191,6 +212,10 @@ export async function saveControleResultaten(opts: {
     delQ = delQ.eq("bout_id", scopedBoutId);
   } else if (scopedPartijNr != null) {
     delQ = delQ.eq("partij_nr", scopedPartijNr);
+  } else if (unscopedOnlyToernooi) {
+    delQ = delQ.not("toernooi_code", "is", null);
+  } else if (unscopedOnlyWedstrijd) {
+    delQ = delQ.is("toernooi_code", null);
   }
 
   const { error: delErr } = await delQ;

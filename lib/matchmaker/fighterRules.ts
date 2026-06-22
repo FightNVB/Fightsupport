@@ -207,22 +207,45 @@ function parseGender(v: unknown): "M" | "V" | null {
   return null;
 }
 
+function normalizeKlasseText(v: unknown): string {
+  return s(v)
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\/_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isJeugdKlasseText(v: unknown): boolean {
+  const x = normalizeKlasseText(v);
+  if (!x) return false;
+  return x === "J" || x === "J+" || x.startsWith("J ") || x.startsWith("J ") || x.includes("JEUGD") || x.includes("YOUTH");
+}
+
 function normalizeKlasse(v: unknown): NormKlasse | null {
-  const x = s(v).toUpperCase();
+  const x = normalizeKlasseText(v);
 
   if (!x) return null;
-
-  if (x.includes("JEUGD") || x.includes("YOUTH") || x === "J" || x === "J+" || x.startsWith("J-")) {
-    return "JEUGD";
-  }
 
   if (x.includes("MMA") && (x.includes("PRO") || x.includes("PROF"))) return "MMA_PRO";
   if (x.includes("MMA") && (x.includes("AMA") || x.includes("AMATEUR"))) return "MMA_AMATEUR";
 
-  if (x.includes("NIEUWELING") || x.includes("NEWCOMER")) return "N";
+  // Zelfde principe als admin-control: samengestelde FP/nulmetingtekst zoals
+  // "Jeugd/Youth • Nieuweling/Newcomer" moet voor een volwassen vechter als N
+  // gelezen kunnen worden. Alleen puur Jeugd/Youth is géén volwassen klasse.
   if (x.includes("VETERAAN") || x.includes("VETERAN")) return "N";
+  if (x.includes("NIEUWELING") || x.includes("NEWCOMER")) return "N";
 
-  const klass = x.match(/\b(R|N|C|B|A)[- ]?(KLASSE|CLASS)?\b/);
+  if (x.includes("R KLASSE") || x.includes("R CLASS")) return "R";
+  if (x.includes("N KLASSE") || x.includes("N CLASS")) return "N";
+  if (x.includes("C KLASSE") || x.includes("C CLASS")) return "C";
+  if (x.includes("B KLASSE") || x.includes("B CLASS")) return "B";
+  if (x.includes("A KLASSE") || x.includes("A CLASS")) return "A";
+
+  if (isJeugdKlasseText(x)) return "JEUGD";
+
+  const klass = x.match(/\b(R|N|C|B|A)\b/);
   if (klass) return klass[1] as Klasse;
 
   return null;
@@ -230,6 +253,19 @@ function normalizeKlasse(v: unknown): NormKlasse | null {
 
 function isAdultKlasse(k: NormKlasse | null): k is Klasse {
   return k === "R" || k === "N" || k === "C" || k === "B" || k === "A";
+}
+
+function normalizeUitslagKlasse(v: unknown): NormKlasse | null {
+  // Voor uitslagen is jeugd altijd jeugd, ook als FightPassport
+  // samengestelde tekst geeft zoals "Jeugd/Youth • Nieuweling/Newcomer".
+  // Die jeugdpartijen tellen later als overige ervaring, maar mogen nooit
+  // het volwassen N/C/B/A-record of automatische promotie sturen.
+  if (isJeugdKlasseText(v)) return "JEUGD";
+  return normalizeKlasse(v);
+}
+
+function isKbMtUitslagRow(row: UitslagRow): boolean {
+  return isKbMtDiscipline(row?.discipline);
 }
 
 function klasseIndex(k: Klasse | null): number {
@@ -339,7 +375,10 @@ function getUitslagen(ctx: AnyRow, uitslagen?: UitslagRow[]): UitslagRow[] {
   if (Array.isArray(uitslagen)) return uitslagen;
   if (Array.isArray(ctx.uitslagen)) return ctx.uitslagen;
   if (Array.isArray(ctx.uitslagen_raw)) return ctx.uitslagen_raw;
+  if (Array.isArray(ctx.raw?.matchmaker_uitslagen_raw)) return ctx.raw.matchmaker_uitslagen_raw;
+  if (Array.isArray(ctx.raw_json?.matchmaker_uitslagen_raw)) return ctx.raw_json.matchmaker_uitslagen_raw;
   if (Array.isArray(ctx.extra?.uitslagen)) return ctx.extra.uitslagen;
+  if (Array.isArray(ctx.extra?.raw?.matchmaker_uitslagen_raw)) return ctx.extra.raw.matchmaker_uitslagen_raw;
   if (Array.isArray(ctx.extra?.raw?.uitslagen)) return ctx.extra.raw.uitslagen;
   return [];
 }
@@ -354,17 +393,13 @@ function buildKlasseProgress(rows: UitslagRow[]): KlasseProgress {
   };
 
   for (const row of rows) {
-    if (!isKbMtDiscipline(row.discipline)) continue;
+    if (!isKbMtUitslagRow(row)) continue;
 
-    const k = normalizeKlasse(row.klasse);
+    const k = normalizeUitslagKlasse(row.klasse);
     const outcome = parseOutcome(row.uitslag);
 
     if (isAdultKlasse(k)) {
       addOutcomeToRecord(progress[k], outcome);
-    } else {
-      // Jeugd, onbekende klasse, demo/no-contest of andere oude data hoort niet in het huidige volwassen record.
-      // Deze wordt later als overige meegenomen bij de actuele klasse.
-      continue;
     }
   }
 
@@ -382,23 +417,32 @@ export function recordStatsFromUitslagen(rows: UitslagRow[] = [], currentClass?:
   let other = 0;
 
   for (const row of rows) {
-    if (!isKbMtDiscipline(row.discipline)) continue;
+    if (!isKbMtUitslagRow(row)) continue;
 
-    const k = normalizeKlasse(row.klasse);
+    const k = normalizeUitslagKlasse(row.klasse);
     const outcome = parseOutcome(row.uitslag);
 
-    if (requested && k === requested) {
+    if (requested) {
+      // Record is altijd alleen de opgegeven/huidige volwassen klasse.
+      // Alles uit jeugd, vorige volwassen klasses, demo en no contest komt tussen haakjes.
+      if (k === requested && outcome !== "OTHER") {
+        if (outcome === "WIN") wins += 1;
+        else if (outcome === "LOSS") losses += 1;
+        else if (outcome === "DRAW") draws += 1;
+      } else {
+        other += 1;
+      }
+      continue;
+    }
+
+    // Zonder opgegeven klasse tonen we alleen volwassen resultaten als W/V/O.
+    // Jeugd/unknown/demo/no contest blijft overige ervaring.
+    if (isAdultKlasse(k) && outcome !== "OTHER") {
       if (outcome === "WIN") wins += 1;
       else if (outcome === "LOSS") losses += 1;
       else if (outcome === "DRAW") draws += 1;
-      else other += 1;
-    } else if (requested) {
-      other += 1;
     } else {
-      if (outcome === "WIN") wins += 1;
-      else if (outcome === "LOSS") losses += 1;
-      else if (outcome === "DRAW") draws += 1;
-      else other += 1;
+      other += 1;
     }
   }
 
@@ -426,7 +470,8 @@ function minimumAfterClass(base: Klasse, rec: RecordStats): Klasse {
   }
 
   if (base === "N") {
-    if (rec.wins >= 3 || rec.total >= 6) return "C";
+    // Admin-control: na 3 gewonnen N-partijen mag C, maar pas na 4 winst of 6 totaal moet C.
+    if (rec.wins >= 4 || rec.total >= 6) return "C";
     return "N";
   }
 
@@ -452,15 +497,18 @@ function getRecordAdvice(rows: UitslagRow[], fpKlasse: NormKlasse | null): Recor
     if (progress[k].total > 0 || progress[k].other > 0) currentClass = k;
   }
 
+  // Heeft iemand alleen jeugdpartijen, dan start die vanaf 18 jaar in N.
+  // Jeugdpartijen worden wel ervaring/overige, maar nooit volwassen promotie.
   if (!currentClass) currentClass = "N";
 
   let minimumClass: Klasse = "N";
 
-  // R is optioneel. Zonder partijen mag R of N, maar advies/minimum blijft R als FP/nulmeting R aangeeft.
+  // R is optioneel voor echte beginners. Met eerdere jeugd- of volwassen ervaring
+  // behandelen we iemand niet als beginner en is N het startpunt.
   if (currentClass === "R") minimumClass = minimumAfterClass("R", progress.R);
   else minimumClass = currentClass;
 
-  // Doorloop verplichte promoties per klasse. Een vechter kan nooit lager dan de klasse die uit zijn actuele klasse/record volgt.
+  // Doorloop verplichte promoties alleen op basis van volwassen klasse-records.
   for (const k of KLASSE_VOLGORDE) {
     if (klasseIndex(k) < klasseIndex(minimumClass)) continue;
     const next = minimumAfterClass(k, progress[k]);
@@ -474,6 +522,12 @@ function getRecordAdvice(rows: UitslagRow[], fpKlasse: NormKlasse | null): Recor
     totalOther += progress[k].other;
   }
 
+  for (const row of rows) {
+    if (!isKbMtUitslagRow(row)) continue;
+    const k = normalizeUitslagKlasse(row.klasse);
+    if (!isAdultKlasse(k)) totalOther += 1;
+  }
+
   return {
     currentClass,
     minimumClass,
@@ -481,6 +535,28 @@ function getRecordAdvice(rows: UitslagRow[], fpKlasse: NormKlasse | null): Recor
     totalOfficial,
     totalOther,
   };
+}
+
+function mayMoveFromNToC(rec: RecordStats): boolean {
+  return rec.wins >= 3 || rec.total >= 6;
+}
+
+function canFightRequestedClass(advice: RecordAdvice, requested: Klasse, progress: KlasseProgress): boolean {
+  if (klasseIndex(requested) <= klasseIndex(advice.minimumClass)) return true;
+
+  // N -> C met precies 3 gewonnen N-partijen is toegestaan, maar niet verplicht.
+  // Daardoor mag single-fighter dit niet als "te hoog" afkeuren/dispensatie maken.
+  if (advice.minimumClass === "N" && requested === "C" && mayMoveFromNToC(progress.N)) return true;
+
+  return false;
+}
+
+function optionalPromotionMessage(advice: RecordAdvice, requested: Klasse, progress: KlasseProgress): string | null {
+  if (advice.minimumClass === "N" && requested === "C" && progress.N.wins >= 3 && progress.N.wins < 4 && progress.N.total < 6) {
+    return `Vechter mag naar C door ${progress.N.wins} gewonnen N-klasse partijen, maar is nog niet verplicht gepromoveerd. Verplicht naar C is vanaf 4 gewonnen of 6 totaal in N.`;
+  }
+
+  return null;
 }
 
 function recordLabelForRequestedClass(rows: UitslagRow[], requested: Klasse): string {
@@ -641,7 +717,7 @@ export function runMatchmakerFighterRules(
       const hasNonRExperience = recordStats.other > 0;
 
       if (hasNonRExperience) {
-        add("MATCHMAKER_R_KLASSE_MET_WEDSTRIJDERVARING", "AFKEUR", `R-klasse is alleen bedoeld als optionele instapklasse zonder eerdere wedstrijdervaring buiten R. Huidig record in R: ${rRec.recordLabel}. Overige partijen: ${recordStats.other}.`, "error", "R-klasse met wedstrijdervaring");
+        add("MATCHMAKER_R_KLASSE_MET_WEDSTRIJDERVARING", "AFKEUR", `R-klasse is alleen bedoeld als optionele instapklasse voor vechters zonder wedstrijdervaring. Deze vechter heeft al ${recordStats.other} partij(en) uit jeugd/vorige klasse/demo/no contest. Start daarom in N.`, "error", "R-klasse met wedstrijdervaring");
       } else if (rRec.wins >= 2 || rRec.total >= 3) {
         add("MATCHMAKER_R_KLASSE_MAX_BEREIKT", "AFKEUR", `R-klasse maximum bereikt. Record in R: ${rRec.recordLabel}. Na 2 winst of 3 totaal moet deze vechter naar N klasse.`, "error", "R-klasse maximum bereikt");
       }
@@ -651,17 +727,24 @@ export function runMatchmakerFighterRules(
       const requestedRecordLabel = recordLabelForRequestedClass(uitslagen, requested);
 
       if (klasseIndex(requested) < klasseIndex(advice.minimumClass)) {
-        add("MATCHMAKER_KLASSE_TE_LAAG", "ACTIE", `Vechter is opgegeven voor klasse ${requested}, maar hoort op basis van Fightpaspoort/uitslagen minimaal in klasse ${advice.minimumClass}. Record in opgegeven klasse: ${requestedRecordLabel}.`, "warning", "Klasse te laag");
+        add("MATCHMAKER_KLASSE_TE_LAAG", "ACTIE", `Vechter is opgegeven voor klasse ${requested}, maar hoort minimaal in klasse ${advice.minimumClass}. Record in deze klasse: ${requestedRecordLabel}. Jeugd/vorige klasse/demo/no contest staan tussen haakjes als overige.`, "warning", "Klasse te laag");
       }
 
-      if (klasseIndex(requested) > klasseIndex(advice.minimumClass)) {
-        // Te hoog indelen kan soms met dispensatie, behalve wanneer iemand zonder historie rechtstreeks hoger dan N wordt gezet.
+      const progress = buildKlasseProgress(uitslagen);
+      const optionalPromotion = optionalPromotionMessage(advice, requested, progress);
+
+      if (optionalPromotion) {
+        add("MATCHMAKER_KLASSE_PROMOTIE_MAG", "LET_OP", optionalPromotion, "info", "Klasse promotie toegestaan");
+      }
+
+      if (klasseIndex(requested) > klasseIndex(advice.minimumClass) && !canFightRequestedClass(advice, requested, progress)) {
+        // Te hoog indelen kan soms met dispensatie, behalve wanneer iemand zonder volwassen uitslagen rechtstreeks hoger dan N wordt gezet.
         const resultaat: MatchmakerFighterResultaat = advice.totalOfficial === 0 && requested !== "N" && requested !== "R" ? "AFKEUR" : "DISPENSATIE";
-        add("MATCHMAKER_KLASSE_TE_HOOG", resultaat, `Vechter is opgegeven voor klasse ${requested}, maar op basis van Fightpaspoort/uitslagen is het advies ${advice.minimumClass}. Record in opgegeven klasse: ${requestedRecordLabel}.`, resultaat === "AFKEUR" ? "error" : "warning", "Klasse te hoog");
+        add("MATCHMAKER_KLASSE_TE_HOOG", resultaat, `Vechter is opgegeven voor klasse ${requested}, maar hoort volgens de telling in klasse ${advice.minimumClass}. Record in deze klasse: ${requestedRecordLabel}. Jeugdpartijen tellen alleen als overige en geven geen promotie naar C/B/A.`, resultaat === "AFKEUR" ? "error" : "warning", "Klasse te hoog");
       }
 
       if (opts?.includeOk) {
-        add("MATCHMAKER_RECORD_BEREKEND", "OK", `Record voor opgegeven klasse ${requested}: ${requestedRecordLabel}.`, "ok", "Record berekend");
+        add("MATCHMAKER_RECORD_BEREKEND", "OK", `Record in klasse ${requested}: ${requestedRecordLabel}. Jeugd/vorige klasse/demo/no contest staan tussen haakjes.`, "ok", "Record berekend");
       }
     }
   }

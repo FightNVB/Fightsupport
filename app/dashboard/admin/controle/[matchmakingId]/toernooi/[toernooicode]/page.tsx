@@ -25,6 +25,7 @@ type Fighter = {
   toernooi_code: string | null;
   discipline?: string | null;
   klasse?: string | null;
+  nulmeting_klasse?: string | null;
   record?: string | null;
   gewicht_match?: string | number | null;
 };
@@ -35,6 +36,7 @@ type Melding = {
   toernooi_code: string | null;
   discipline?: string | null;
   klasse?: string | null;
+  nulmeting_klasse?: string | null;
   record?: string | null;
   gewicht_match?: string | number | null;
   toernooi_va_nummer?: string | null;
@@ -154,6 +156,18 @@ function meldingCategorie(m: Melding): MeldingCategorie {
   return "vechter";
 }
 
+function isLicentieMelding(m: Melding) {
+  return meldingCategorie(m) === "licentie";
+}
+
+function isStartverbodMelding(m: Melding) {
+  return meldingCategorie(m) === "startverbod";
+}
+
+function isKeurmerkMelding(m: Melding) {
+  return meldingCategorie(m) === "keurmerk";
+}
+
 function isOpenMelding(m: Melding) {
   const review = norm(m.review_status);
   const resultaat = normResultaat(m.resultaat);
@@ -195,6 +209,7 @@ function toFighter(row: any): Fighter {
     toernooi_code: row?.toernooi_code ?? null,
     discipline: row?.discipline ?? null,
     klasse: row?.klasse_mm ?? row?.klasse ?? null,
+    nulmeting_klasse: row?.nulmeting_klasse ?? null,
   };
 }
 
@@ -307,6 +322,113 @@ function buildRecord(uitslagen: any[]) {
 }
 
 
+function tournamentClassToken(v: unknown) {
+  const x = String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  if (!x) return "";
+  if (x.includes("j+") || x.includes("talent")) return "J+";
+  if (x.includes("jeugd") || x.includes("youth") || x === "j" || x.startsWith("j ")) return "J";
+  if (x.includes("recreant") || x === "r" || x.includes("r klasse") || x.includes("r class")) return "R";
+  if (x.includes("nieuweling") || x.includes("newcomer") || x.includes("novice") || x === "n" || x.includes("n klasse") || x.includes("n class")) return "N";
+  if (x === "c" || x.includes("c klasse") || x.includes("c class")) return "C";
+  if (x === "b" || x.includes("b klasse") || x.includes("b class")) return "B";
+  if (x === "a" || x.includes("a klasse") || x.includes("a class") || x.includes("elite")) return "A";
+  return x.toUpperCase();
+}
+
+
+function isRelevantKickboxingDiscipline(v: unknown) {
+  const s = String(v ?? "").trim().toLowerCase();
+  return s.includes("kick") || s.includes("muay") || s.includes("thai") || s.includes("k1");
+}
+
+function isJeugdKlasseForHistory(v: unknown) {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return s === "j" || s.includes("jeugd") || s.includes("youth");
+}
+
+function effectiveClassFromUitslagenOrNulmeting(fighter: Fighter, uitslagenRows: any[]) {
+  const va = normalizeVa(fighter.va_nummer ?? fighter.fighter_id);
+  let best = "";
+  let bestRank = 0;
+
+  for (const row of uitslagenRows ?? []) {
+    if (normalizeVa(row?.va_nummer) !== va) continue;
+    if (!isRelevantKickboxingDiscipline(row?.discipline)) continue;
+    if (isJeugdKlasseForHistory(row?.klasse)) continue;
+
+    const token = tournamentClassToken(row?.klasse);
+    const rankMap: Record<string, number> = { R: 1, N: 2, C: 3, B: 4, A: 5 };
+    const rank = rankMap[token] ?? 0;
+
+    if (rank > bestRank) {
+      best = token;
+      bestRank = rank;
+    }
+  }
+
+  return best || tournamentClassToken((fighter as any)?.nulmeting_klasse);
+}
+
+function hasClassMismatchMelding(meldingen: Melding[], fighter: Fighter) {
+  const va = normalizeVa(fighter.va_nummer ?? fighter.fighter_id);
+  return meldingen.some((m) => {
+    if (!sameFighter(m, fighter)) return false;
+    const text = `${m.rule_code ?? ""} ${m.rule ?? ""} ${m.boodschap ?? ""}`.toLowerCase();
+    return text.includes("toernooi-klasse") || text.includes("toernooiklasse") || text.includes("klasse");
+  });
+}
+
+function buildClassMismatchMeldingen(fighters: Fighter[], existingMeldingen: Melding[], uitslagenRows: any[]): Melding[] {
+  const out: Melding[] = [];
+
+  for (const fighter of fighters) {
+    const toernooiKlasseRaw = fighter.klasse;
+    const toernooiKlasse = tournamentClassToken(toernooiKlasseRaw);
+    const fighterKlasse = effectiveClassFromUitslagenOrNulmeting(fighter, uitslagenRows);
+    const va = normalizeVa(fighter.va_nummer ?? fighter.fighter_id);
+    const hasRelevantUitslagen = (uitslagenRows ?? []).some((row: any) =>
+      normalizeVa(row?.va_nummer) === va &&
+      isRelevantKickboxingDiscipline(row?.discipline) &&
+      !isJeugdKlasseForHistory(row?.klasse) &&
+      !!tournamentClassToken(row?.klasse)
+    );
+    const fighterKlasseRaw = hasRelevantUitslagen ? fighterKlasse : (fighter as any).nulmeting_klasse;
+
+    if (!toernooiKlasse || !fighterKlasse || toernooiKlasse === fighterKlasse) continue;
+    if (hasClassMismatchMelding(existingMeldingen, fighter)) continue;
+
+    out.push({
+      id: `synthetic-class-${fighter.toernooi_code ?? "T"}-${va || fighter.id || fighter.naam}`,
+      fighter_id: va || fighter.fighter_id,
+      toernooi_va_nummer: va || fighter.va_nummer || fighter.fighter_id,
+      toernooi_code: fighter.toernooi_code,
+      resultaat: "actie",
+      severity: "warning",
+      rule: "Toernooi klasse",
+      rule_code: "TOERNOOI_KLASSE_MISMATCH",
+      boodschap: `Zit niet in toernooi-klasse (${safe(fighterKlasseRaw, fighterKlasse)} in ${safe(toernooiKlasseRaw, toernooiKlasse)})`,
+      review_status: null,
+      actie_status: null,
+      aantekeningen: null,
+      created_at: null,
+    });
+  }
+
+  return out;
+}
+
+
 export default function ToernooiDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -361,11 +483,15 @@ export default function ToernooiDetailPage() {
         .map((f) => normalizeVa(f.va_nummer ?? f.fighter_id))
         .filter(Boolean);
 
+      let uitslagenRows: any[] = [];
+
       if (vas.length > 0) {
-        const { data: uitslagenRows } = await supabase
+        const { data: fetchedUitslagenRows } = await supabase
           .from("controle_uitslagen")
           .select("va_nummer,uitslag,klasse,discipline")
           .in("va_nummer", vas);
+
+        uitslagenRows = (fetchedUitslagenRows ?? []) as any[];
 
         const recMap: Record<string,string> = {};
 
@@ -403,7 +529,10 @@ export default function ToernooiDetailPage() {
       }
 
 
-      setMeldingen((resultRows ?? []).map(toMelding));
+      const dbMeldingen = (resultRows ?? []).map(toMelding);
+      // Klassemeldingen komen uit controle_resultaten/rulesEngine.
+      // Niet meer frontend-only synthetisch toevoegen, anders wijken overzicht/detail/toernooi van elkaar af.
+      setMeldingen(dedupeMeldingen(dbMeldingen));
     } catch (e: any) {
       setError(e?.message ?? String(e));
       setFighters([]);
@@ -528,11 +657,12 @@ export default function ToernooiDetailPage() {
                 {fighters.map((f) => {
                   const va = fighterVa(f);
                   const fM = fighterMeldingen.get(va) ?? [];
-                  const highest = [...fM].sort((a, b) => resultRank(b.resultaat) - resultRank(a.resultaat))[0];
+                  const openFM = fM.filter(isOpenMelding);
+                  const highest = [...openFM].sort((a, b) => resultRank(b.resultaat) - resultRank(a.resultaat))[0];
                   const st = highest ? resultStyle(highest.resultaat) : resultStyle("ok");
-                  const startverbod = isTruthyValue(f.heeft_startverbod);
-                  const geenLicentie = isFalsyValue(f.licentie);
-                  const geenKeurmerk = isFalsyValue(f.heeft_keurmerk ?? f.keurmerk);
+                  const startverbod = isTruthyValue(f.heeft_startverbod) || openFM.some(isStartverbodMelding);
+                  const geenLicentie = isFalsyValue(f.licentie) || openFM.some(isLicentieMelding);
+                  const geenKeurmerk = isFalsyValue(f.heeft_keurmerk ?? f.keurmerk) || openFM.some(isKeurmerkMelding);
 
                   return (
                     <Link

@@ -212,6 +212,13 @@ function vaOf(f: Row) {
   );
 }
 
+function vaExcelValue(v: unknown) {
+  const va = onlyDigits(v);
+  if (!va) return "";
+  const n = Number(va);
+  return Number.isFinite(n) ? n : va;
+}
+
 function inschrijvingIdOf(f: Row) {
   return s(pickFirst(f.inschrijving_id, f.aanmelding_id, f.id));
 }
@@ -298,21 +305,28 @@ function klasseOf(f: Row) {
 }
 
 function geslachtOf(f: Row) {
-  const g = lower(
-    pickFirst(
-      f.geslacht,
-      f.gender,
-      f.sexe,
-      getPath(f, "extra.raw.aanmelding.geslacht"),
-    ),
+  // FightPassport scrape/context is leidend voor geslacht.
+  // Bij aanmeldingen is geslacht vaak leeg, terwijl matchmaker_fighters_raw
+  // of matchmaker_fighter_context.fp_geslacht wel "man"/"vrouw" bevat.
+  const raw = pickFirst(
+    f.fp_geslacht,
+    f.geslacht,
+    f.gender,
+    f.sexe,
+    getPath(f, "extra.raw.fighters_raw.geslacht"),
+    getPath(f, "extra.raw.fighters_raw.fp_geslacht"),
+    getPath(f, "raw.fighters_raw.geslacht"),
+    getPath(f, "raw.geslacht"),
+    getPath(f, "extra.raw.aanmelding.geslacht"),
   );
+  const g = lower(raw);
   if (["m", "man", "male", "heer", "heren", "jongen", "jongens"].includes(g))
     return "Man";
   if (
     ["v", "vrouw", "female", "dame", "dames", "meisje", "meisjes"].includes(g)
   )
     return "Vrouw";
-  return s(pickFirst(f.geslacht, f.gender, f.sexe)) || "Onbekend";
+  return s(raw) || "Onbekend";
 }
 
 function parseDateOnly(v: any): Date | null {
@@ -899,14 +913,40 @@ function mergeByAanmelding(base: Row[], scraped: Row[]) {
   return Array.from(byKey.values());
 }
 
+function isJeugdFighter(f: Row) {
+  return normalizeClassToken(klasseOf(f)) === "j";
+}
+
 function sortFighters(a: Row, b: Row, matchmaking: Row | null) {
-  const ageA = leeftijdNumberOf(a, matchmaking) ?? Number.POSITIVE_INFINITY;
-  const ageB = leeftijdNumberOf(b, matchmaking) ?? Number.POSITIVE_INFINITY;
-  if (ageA !== ageB) return ageA - ageB;
   const weightA = gewichtNumberOf(a) ?? Number.POSITIVE_INFINITY;
   const weightB = gewichtNumberOf(b) ?? Number.POSITIVE_INFINITY;
+
+  if (isJeugdFighter(a) || isJeugdFighter(b)) {
+    const ageA = leeftijdNumberOf(a, matchmaking) ?? Number.POSITIVE_INFINITY;
+    const ageB = leeftijdNumberOf(b, matchmaking) ?? Number.POSITIVE_INFINITY;
+    if (ageA !== ageB) return ageA - ageB;
+    if (weightA !== weightB) return weightA - weightB;
+    return nameOf(a).localeCompare(nameOf(b), "nl");
+  }
+
+  // Volwassenen: alleen op gewicht sorteren, daarna naam als vaste fallback.
   if (weightA !== weightB) return weightA - weightB;
   return nameOf(a).localeCompare(nameOf(b), "nl");
+}
+
+function hasContactDetails(fighters: Row[]) {
+  return fighters.some((f) => trainerOf(f) || emailOf(f) || phoneOf(f));
+}
+
+function excelColName(col: number) {
+  let name = "";
+  let n = col;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    name = String.fromCharCode(65 + rem) + name;
+    n = Math.floor((n - 1) / 26);
+  }
+  return name;
 }
 
 function setHeaderStyle(row: ExcelJS.Row) {
@@ -943,65 +983,172 @@ function addLogo(workbook: ExcelJS.Workbook, ws: ExcelJS.Worksheet) {
   });
 }
 
+
+function isOpenReview(row: Row) {
+  const review = lower(row.review_status);
+  return ![
+    "goedgekeurd",
+    "approved",
+    "akkoord",
+    "afgehandeld",
+    "closed",
+    "gesloten",
+  ].includes(review);
+}
+
+function isKlasseMelding(row: Row) {
+  const haystack = lower(
+    [
+      row.rule_code,
+      row.rule,
+      row.resultaat,
+      row.severity,
+      row.boodschap,
+      row.message,
+      row.opmerking,
+      row.notitie,
+    ]
+      .map(s)
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  return (
+    haystack.includes("klasse") ||
+    haystack.includes("te hoog") ||
+    haystack.includes("te laag") ||
+    haystack.includes("promotie") ||
+    haystack.includes("degradatie")
+  );
+}
+
+function klasseMeldingForFighter(f: Row, resultRows: Row[]) {
+  return resultRows.find(
+    (r) => isOpenReview(r) && isKlasseMelding(r) && rowMatchesFighter(r, f),
+  );
+}
+
+function kleurKlasseCell(cell: ExcelJS.Cell, melding: Row | undefined) {
+  if (!melding) return;
+
+  const resultaat = lower(
+    pickFirst(
+      melding.resultaat,
+      melding.severity,
+      melding.status,
+      melding.rule_resultaat,
+      melding.rule_status,
+    ),
+  );
+  const tekst = lower(
+    [
+      melding.rule_code,
+      melding.rule,
+      melding.boodschap,
+      melding.message,
+      melding.opmerking,
+      melding.notitie,
+    ]
+      .map(s)
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  if (resultaat.includes("verbod") || tekst.includes("verbod")) {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFB00020" },
+    };
+    cell.font = { bold: true, color: { argb: WHITE } };
+    return;
+  }
+
+  if (
+    resultaat.includes("afkeur") ||
+    tekst.includes("afkeur") ||
+    tekst.includes("verkeerde klasse")
+  ) {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: ORANGE },
+    };
+    cell.font = { bold: true, color: { argb: WHITE } };
+    return;
+  }
+
+  cell.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFFFE08A" },
+  };
+  cell.font = { bold: true, color: { argb: BLACK } };
+}
+
 function fillSheet(
   workbook: ExcelJS.Workbook,
   sheetName: string,
   fighters: Row[],
   uitslagenRows: Row[],
+  resultRows: Row[],
   matchmaking: Row | null,
 ) {
   const ws = workbook.addWorksheet(sheetName);
+  const includeContact = hasContactDetails(fighters);
+  const baseHeader = [
+    "Geslacht",
+    "Discipline",
+    "Klasse",
+    "Naam",
+    "Startverbod",
+    "Sportschool",
+    "Keurmerk",
+    "VA",
+    "Licentie",
+    "Geboortedatum",
+    "Leeftijd",
+    "Record",
+    "Gewicht",
+  ];
+  const contactHeader = ["Trainer/contact", "E-mail", "Telefoon"];
+  const header = includeContact ? [...baseHeader, ...contactHeader] : baseHeader;
+
   addLogo(workbook, ws);
-  ws.mergeCells("A1:Q3");
+  ws.mergeCells(`A1:${excelColName(header.length)}3`);
   ws.getCell("A1").value = `Gecontroleerde aanmeldingen - ${sheetName}`;
   ws.getCell("A1").font = { bold: true, size: 18, color: { argb: ORANGE } };
   ws.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
 
   ws.addRow([]);
-  const header = [
-    "Status",
-    "VA",
-    "Naam",
-    "Geslacht",
-    "Leeftijd",
-    "Geboortedatum",
-    "Gewicht",
-    "Klasse",
-    "Discipline",
-    "Record",
-    "Sportschool",
-    "Trainer/contact",
-    "E-mail",
-    "Telefoon",
-    "Licentie",
-    "Keurmerk",
-    "Startverbod",
-  ];
   ws.addRow(header);
   const headerRow = ws.lastRow!;
   setHeaderStyle(headerRow);
 
   for (const f of fighters) {
     const age = leeftijdNumberOf(f, matchmaking);
-    const row = ws.addRow([
-      displayStatusOf(f),
-      vaOf(f),
-      nameOf(f),
+    const values = [
       geslachtOf(f),
-      age ?? "",
-      fmtDate(dobOf(f)),
-      gewichtOf(f),
-      klasseOf(f),
       disciplineOf(f),
-      recordOf(f, uitslagenRows),
-      gymOf(f),
-      trainerOf(f),
-      emailOf(f),
-      phoneOf(f),
-      licentieOf(f),
-      keurmerkOf(f, matchmaking),
+      klasseOf(f),
+      nameOf(f),
       startverbodOf(f),
-    ]);
+      gymOf(f),
+      keurmerkOf(f, matchmaking),
+      vaExcelValue(vaOf(f)),
+      licentieOf(f),
+      fmtDate(dobOf(f)),
+      age ?? "",
+      recordOf(f, uitslagenRows),
+      gewichtOf(f),
+    ];
+
+    if (includeContact) {
+      values.push(trainerOf(f), emailOf(f), phoneOf(f));
+    }
+
+    const row = ws.addRow(values);
+    row.getCell(8).numFmt = "0";
 
     const rowNo = row.number;
     row.eachCell((cell) => {
@@ -1019,32 +1166,28 @@ function fillSheet(
           fgColor: { argb: "FFF7F7F7" },
         };
     });
-    row.getCell(3).font = { bold: true, color: { argb: ORANGE } };
+    row.getCell(4).font = { bold: true, color: { argb: ORANGE } };
+    kleurKlasseCell(row.getCell(3), klasseMeldingForFighter(f, resultRows));
   }
 
   ws.views = [{ state: "frozen", ySplit: 5 }];
-  ws.autoFilter = {
-    from: { row: 5, column: 1 },
-    to: { row: 5, column: header.length },
-  };
   ws.columns = [
-    { width: 18 },
-    { width: 10 },
-    { width: 28 },
-    { width: 12 },
-    { width: 10 },
-    { width: 14 },
-    { width: 12 },
-    { width: 14 },
-    { width: 16 },
-    { width: 14 },
-    { width: 28 },
-    { width: 24 },
-    { width: 30 },
-    { width: 16 },
-    { width: 12 },
-    { width: 12 },
-    { width: 14 },
+    { width: 12 }, // Geslacht
+    { width: 16 }, // Discipline
+    { width: 14 }, // Klasse
+    { width: 28 }, // Naam
+    { width: 14 }, // Startverbod
+    { width: 28 }, // Sportschool
+    { width: 12 }, // Keurmerk
+    { width: 10 }, // VA
+    { width: 12 }, // Licentie
+    { width: 16 }, // Geboortedatum
+    { width: 10 }, // Leeftijd
+    { width: 14 }, // Record
+    { width: 12 }, // Gewicht
+    ...(includeContact
+      ? [{ width: 24 }, { width: 30 }, { width: 16 }]
+      : []),
   ];
 }
 
@@ -1133,7 +1276,7 @@ function fillMeldingenSheet(
     const f = findFighterForRule(r, maps) || r;
     const row = ws.addRow([
       nameOf(f),
-      onlyDigits(pickFirst(r.va_nummer, vaOf(f))),
+      vaExcelValue(pickFirst(r.va_nummer, vaOf(f))),
       gymOf(f),
       ruleNameOf(r),
       resultTextOf(r),
@@ -1141,6 +1284,7 @@ function fillMeldingenSheet(
       s(r.review_status),
       s(r.controle_run_id),
     ]);
+    row.getCell(2).numFmt = "0";
     row.eachCell((cell) => {
       cell.alignment = { vertical: "top", wrapText: true };
       cell.border = {
@@ -1153,7 +1297,6 @@ function fillMeldingenSheet(
     row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
   }
   ws.views = [{ state: "frozen", ySplit: 5 }];
-  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: 8 } };
   ws.columns = [
     { width: 28 },
     { width: 10 },
@@ -1212,10 +1355,11 @@ function fillKeurmerkenSheet(
       end ? fmtDate(end) : "Geen datum",
       keurmerkOf(f, matchmaking),
       nameOf(f),
-      vaOf(f),
+      vaExcelValue(vaOf(f)),
       fmtDate(eventDateOf(f, matchmaking)),
       reason,
     ]);
+    row.getCell(6).numFmt = "0";
     row.eachCell((cell) => {
       cell.alignment = { vertical: "top", wrapText: true };
       cell.border = {
@@ -1228,7 +1372,6 @@ function fillKeurmerkenSheet(
     row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
   }
   ws.views = [{ state: "frozen", ySplit: 5 }];
-  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: 8 } };
   ws.columns = [
     { width: 32 },
     { width: 32 },
@@ -1272,10 +1415,11 @@ function fillOpmerkingenSheet(workbook: ExcelJS.Workbook, fighters: Row[]) {
     const row = ws.addRow([
       nameOf(f),
       opmerkingOf(f),
-      vaOf(f),
+      vaExcelValue(vaOf(f)),
       gymOf(f),
       tabKeyOf(f),
     ]);
+    row.getCell(3).numFmt = "0";
     row.eachCell((cell) => {
       cell.alignment = { vertical: "top", wrapText: true };
       cell.border = {
@@ -1288,7 +1432,6 @@ function fillOpmerkingenSheet(workbook: ExcelJS.Workbook, fighters: Row[]) {
     row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
   }
   ws.views = [{ state: "frozen", ySplit: 5 }];
-  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: 5 } };
   ws.columns = [
     { width: 30 },
     { width: 78 },
@@ -1385,6 +1528,7 @@ export async function GET(req: Request) {
         "Geen gecontroleerde aanmeldingen",
         [],
         uitslagenRows,
+        resultRows,
         matchmaking ?? null,
       );
     } else {
@@ -1395,6 +1539,7 @@ export async function GET(req: Request) {
           sheetName,
           rows,
           uitslagenRows,
+          resultRows,
           matchmaking ?? null,
         );
       }

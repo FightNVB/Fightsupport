@@ -623,14 +623,13 @@ function fallbackAdultKbMtKlasseFromNulmeting(ctx: any, hoek: "rood" | "blauw"):
 }
 
 function getAdultKbMtBaseKlasse(ctx: any, hoek: "rood" | "blauw", rows: UitslagRow[]): Klasse {
+  // Uitslagen zijn leidend. Nulmeting is alleen fallback als er geen
+  // bruikbare volwassen KICKBOKSEN/MUAY THAI uitslagen zijn.
   const historyKlasse = hoogsteKlasseUitUitslagen(rows);
+  if (historyKlasse) return historyKlasse;
+
   const nulmetingKlasse = fallbackAdultKbMtKlasseFromNulmeting(ctx, hoek);
-
-  if (historyKlasse && nulmetingKlasse) {
-    return maxKlasse(historyKlasse, nulmetingKlasse) ?? historyKlasse;
-  }
-
-  return historyKlasse ?? nulmetingKlasse ?? "N";
+  return nulmetingKlasse ?? "N";
 }
 
 async function fetchUitslagenByVa(opts: {
@@ -651,7 +650,6 @@ async function fetchUitslagenByVa(opts: {
       .from("uitslagen_raw")
       .select("va_nummer, discipline, klasse, uitslag")
       .eq("matchmaking_id", matchmaking_id)
-      .eq("controle_run_id", controle_run_id)
       .in("va_nummer", chunk);
 
     if (error) throw error;
@@ -728,13 +726,13 @@ function buildMandatoryPromotionHit(opts: {
     partij_nr,
     bout_id,
     hoek,
-    rule: "Klasse promotie verplicht",
+    rule: "Verplicht naar hogere klasse",
     rule_code: "VOLWASSEN_KLASSE_PROMOTIE_VERPLICHT",
     resultaat: teLaag ? "AFKEUR" : "INFO",
     severity: teLaag ? "error" : "info",
     boodschap: teLaag
-      ? `${naam} heeft ${promotion.reason} en moet verplicht van ${promotion.from} naar ${promotion.to}. Matchmaking klasse${plek}: ${boutK}.`
-      : `${naam} heeft ${promotion.reason} en hoort vanaf nu in klasse ${promotion.to}${plek}.`,
+      ? `${naam} heeft te veel ervaring voor klasse ${promotion.from} en moet naar klasse ${promotion.to}. Deze partij staat nu in klasse ${boutK}.`
+      : `${naam} heeft genoeg ervaring voor klasse ${promotion.to}.`,
   };
 }
 
@@ -1971,11 +1969,11 @@ async function runTournamentRules(opts: {
             matchmaking_id,
             bout_id,
             partij_nr: null,
-            rule: "Niet juiste klasse",
+            rule: "Dispensatie nodig voor klasse",
             rule_code: "TOERNOOI_VOLWASSEN_VERKEERDE_KLASSE",
-            resultaat: "AFKEUR",
-            severity: "error",
-            boodschap: `${naamR} hoort niet in klasse ${boutK} van ${toernooiCode}. Fighter klasse op basis van uitslagen/nulmeting/promotie: ${roodK}.`,
+            resultaat: "DISPENSATIE",
+            severity: "warning",
+            boodschap: `${naamR} staat in klasse ${boutK}, maar hoort volgens de controle in klasse ${roodK}. Vraag dispensatie aan of pas de klasse aan.`,
           });
         }
 
@@ -1984,11 +1982,11 @@ async function runTournamentRules(opts: {
             matchmaking_id,
             bout_id,
             partij_nr: null,
-            rule: "Niet juiste klasse",
+            rule: "Dispensatie nodig voor klasse",
             rule_code: "TOERNOOI_VOLWASSEN_VERKEERDE_KLASSE",
-            resultaat: "AFKEUR",
-            severity: "error",
-            boodschap: `${naamB} hoort niet in klasse ${boutK} van ${toernooiCode}. Fighter klasse op basis van uitslagen/nulmeting/promotie: ${blauwK}.`,
+            resultaat: "DISPENSATIE",
+            severity: "warning",
+            boodschap: `${naamB} staat in klasse ${boutK}, maar hoort volgens de controle in klasse ${blauwK}. Vraag dispensatie aan of pas de klasse aan.`,
           });
         }
       }
@@ -1996,6 +1994,46 @@ async function runTournamentRules(opts: {
   }
 
   return hits;
+}
+
+
+function makeRuleHitUserFriendly(hit: RuleHit): RuleHit {
+  const clean = (v: any) => String(v ?? "")
+    .replace(/\bMM\b/g, "matchmaking")
+    .replace(/FightPassport\/nulmeting\/promotie/gi, "de controle")
+    .replace(/FightPassport\/nulmeting/gi, "de controle")
+    .replace(/FightPassport/gi, "FightPassport")
+    .replace(/scrape-info/gi, "gegevens")
+    .replace(/scrape/gi, "controle")
+    .replace(/\bctx\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const code = String(hit.rule_code ?? "").toUpperCase();
+  let rule = clean(hit.rule);
+  let boodschap = clean(hit.boodschap);
+
+  if (code.includes("LICENT")) rule = "Licentie controleren";
+  else if (code.includes("KEURMERK") || code.includes("SPORTSCHOOL")) rule = "Sportschool controleren";
+  else if (code.includes("STARTVERBOD")) rule = "Startverbod";
+  else if (code.includes("GEWICHT")) rule = hit.resultaat === "DISPENSATIE" ? "Dispensatie nodig voor gewicht" : "Gewicht controleren";
+  else if (code.includes("LEEFTIJD")) rule = hit.resultaat === "VERBOD" ? "Leeftijdsverschil te groot" : "Leeftijd controleren";
+  else if (code.includes("KLASSE_GEEN_BASIS") || code.includes("VERKEERDE_KLASSE")) rule = hit.resultaat === "DISPENSATIE" ? "Dispensatie nodig voor klasse" : "Verkeerde klasse";
+  else if (code.includes("PROMOTIE")) rule = "Verplicht naar hogere klasse";
+  else if (code.includes("GEEN_FIGHTPASSPORT_INFO")) rule = "Vechtergegevens controleren";
+  else if (code.includes("VA_NUMMER") || code.includes("FIGHTPASPOORT")) rule = "FightPassport-nummer controleren";
+  else if (code.includes("NAAM")) rule = "Naam controleren";
+  else if (code.includes("R_KLASSE")) rule = "R-klasse controleren";
+
+  if (!boodschap) {
+    if (hit.resultaat === "DISPENSATIE") boodschap = "Voor deze partij is dispensatie nodig.";
+    else if (hit.resultaat === "AFKEUR") boodschap = "Deze partij voldoet niet aan de regels. Pas de gegevens aan of keur de partij af.";
+    else if (hit.resultaat === "VERBOD") boodschap = "Deze partij mag niet doorgaan volgens de regels.";
+    else if (hit.resultaat === "ACTIE") boodschap = "Controleer deze partij handmatig.";
+    else boodschap = "Geen bijzonderheden.";
+  }
+
+  return { ...hit, rule, boodschap };
 }
 
 export async function rulesEngine(opts: {
@@ -2027,14 +2065,16 @@ export async function rulesEngine(opts: {
   const legacyTournamentRows = rows.filter((ctx) => isToernooiCtx(ctx));
   const normalRows = rows.filter((ctx) => !isToernooiCtx(ctx));
 
+  // Toernooi moet op de actuele/verrijkte controle_toernooi_context draaien.
+  // controle_bout_context kan nog oude MM/raw sportschooltekst bevatten (bv. "Team Elite"),
+  // terwijl controle_toernooi_context na correctie al "Team Elite rijen" bevat.
+  // Daarom gebruiken we legacy toernooi-rows uit controle_bout_context alleen als fallback.
   const toernooiContextRows = scopedBoutId || scopedPartijNr != null
     ? []
     : await fetchToernooiContextRows({ controle_run_id, matchmaking_id });
 
-  const tournamentRows = [
-    ...legacyTournamentRows,
-    ...buildTournamentPairRowsFromParticipants(toernooiContextRows),
-  ];
+  const toernooiPairRows = buildTournamentPairRowsFromParticipants(toernooiContextRows);
+  const tournamentRows = toernooiPairRows.length > 0 ? toernooiPairRows : legacyTournamentRows;
 
   const tournamentHits = tournamentRows.length
     ? await runTournamentRules({
@@ -3059,16 +3099,16 @@ export async function rulesEngine(opts: {
             bout_id,
             hoek: "rood",
             rule: hasJeugdErvaring
-              ? "Volwassen: jeugd-ervaring beoordelen"
-              : "Volwassen: onvoldoende basis voor opgegeven klasse",
+              ? "Klasse handmatig controleren"
+              : "Dispensatie nodig voor klasse",
             rule_code: hasJeugdErvaring
               ? "VOLWASSEN_JEUGD_ERVARING_CONTROLE"
               : "VOLWASSEN_KLASSE_GEEN_BASIS",
-            resultaat: hasJeugdErvaring ? "ACTIE" : "AFKEUR",
-            severity: hasJeugdErvaring ? "warning" : "error",
+            resultaat: hasJeugdErvaring ? "ACTIE" : "DISPENSATIE",
+            severity: "warning",
             boodschap: hasJeugdErvaring
-              ? `${naamRood} is 18+ en staat volgens volwassen regels op startpunt N. Matchmaker zet ${boutK}. Er is jeugd-ervaring gevonden (${jeugdR.total} partij(en)); keur goed als deze jeugd-ervaring voldoende is voor ${boutK}.`
-              : `${naamRood} is 18+ en hoort volgens uitslagen/nulmeting/startpunt in N. Matchmaker zet ${boutK}, maar er is geen volwassen basis gevonden voor ${boutK}.`,
+              ? `${naamRood} is volwassen en staat nu in klasse ${boutK}. Er zijn ${jeugdR.total} jeugdpartij(en) gevonden. Controleer of dat genoeg is voor deze klasse.`
+              : `${naamRood} staat in klasse ${boutK}, maar hoort volgens de controle in klasse N. Vraag dispensatie aan of pas de klasse aan.`,
           },
           ctx
         );
@@ -3085,16 +3125,16 @@ export async function rulesEngine(opts: {
             bout_id,
             hoek: "blauw",
             rule: hasJeugdErvaring
-              ? "Volwassen: jeugd-ervaring beoordelen"
-              : "Volwassen: onvoldoende basis voor opgegeven klasse",
+              ? "Klasse handmatig controleren"
+              : "Dispensatie nodig voor klasse",
             rule_code: hasJeugdErvaring
               ? "VOLWASSEN_JEUGD_ERVARING_CONTROLE"
               : "VOLWASSEN_KLASSE_GEEN_BASIS",
-            resultaat: hasJeugdErvaring ? "ACTIE" : "AFKEUR",
-            severity: hasJeugdErvaring ? "warning" : "error",
+            resultaat: hasJeugdErvaring ? "ACTIE" : "DISPENSATIE",
+            severity: "warning",
             boodschap: hasJeugdErvaring
-              ? `${naamBlauw} is 18+ en staat volgens volwassen regels op startpunt N. Matchmaker zet ${boutK}. Er is jeugd-ervaring gevonden (${jeugdB.total} partij(en)); keur goed als deze jeugd-ervaring voldoende is voor ${boutK}.`
-              : `${naamBlauw} is 18+ en hoort volgens uitslagen/nulmeting/startpunt in N. Matchmaker zet ${boutK}, maar er is geen volwassen basis gevonden voor ${boutK}.`,
+              ? `${naamBlauw} is volwassen en staat nu in klasse ${boutK}. Er zijn ${jeugdB.total} jeugdpartij(en) gevonden. Controleer of dat genoeg is voor deze klasse.`
+              : `${naamBlauw} staat in klasse ${boutK}, maar hoort volgens de controle in klasse N. Vraag dispensatie aan of pas de klasse aan.`,
           },
           ctx
         );
@@ -3102,34 +3142,51 @@ export async function rulesEngine(opts: {
 
       if (boutK && (!roodOk || !blauwOk)) {
         const klasseDetails: string[] = [];
+        const klasseActieDetails: string[] = [];
+
+        const roodGeenBasisVoorHoger = requestedHigherThanN && roodHeeftFightPassportInfo && !roodOk && roodK === "N";
+        const blauwGeenBasisVoorHoger = requestedHigherThanN && blauwHeeftFightPassportInfo && !blauwOk && blauwK === "N";
 
         if (!roodOk) {
           klasseDetails.push(`rood hoort in ${roodK}`);
+          if (roodGeenBasisVoorHoger) {
+            klasseActieDetails.push(`rood heeft geen volwassen basis voor ${boutK}`);
+          }
         } else if (roodK === "R" && boutK === "N") {
           klasseDetails.push("rood akkoord: N is startklasse");
         }
 
         if (!blauwOk) {
           klasseDetails.push(`blauw hoort in ${blauwK}`);
+          if (blauwGeenBasisVoorHoger) {
+            klasseActieDetails.push(`blauw heeft geen volwassen basis voor ${boutK}`);
+          }
         } else if (blauwK === "R" && boutK === "N") {
           klasseDetails.push("blauw akkoord: N is startklasse");
         }
 
-        pushHit({
-          matchmaking_id,
-          partij_nr,
-          bout_id,
-          rule: "Volwassen: verkeerde klasse",
-          rule_code: "VOLWASSEN_VERKEERDE_KLASSE",
-          resultaat: "AFKEUR",
-          severity: "error",
-          boodschap: `Boutklasse klopt niet: Klasse op MM ${boutK}. ${klasseDetails.join(" • ")}.`,
-        });
+        const alleenGeenBasisVoorHoger =
+          (!roodOk || !blauwOk) &&
+          (!roodOk ? roodGeenBasisVoorHoger : true) &&
+          (!blauwOk ? blauwGeenBasisVoorHoger : true);
+
+        if (!alleenGeenBasisVoorHoger) {
+          pushHit({
+            matchmaking_id,
+            partij_nr,
+            bout_id,
+            rule: "Verkeerde klasse",
+            rule_code: "VOLWASSEN_VERKEERDE_KLASSE",
+            resultaat: "AFKEUR",
+            severity: "error",
+            boodschap: `Deze partij staat in klasse ${boutK}, maar dat klopt niet. ${klasseDetails.join(" • ")}. Pas de klasse aan.`,
+          });
+        }
       }
     }
   }
 
-  const allHits = [...tournamentHits, ...hits];
+  const allHits = [...tournamentHits, ...hits].map(makeRuleHitUserFriendly);
 
   await saveControleResultaten({
     controle_run_id,

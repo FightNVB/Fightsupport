@@ -51,9 +51,6 @@ type PartijStatus =
   | "geen_info";
 
 type ResRow = {
-  id?: string | null;
-  source_table?: string | null;
-  source_id?: string | null;
   partij_nr: number | null;
   hoek?: "rood" | "blauw" | null;
   resultaat: "ok" | "actie" | "dispensatie" | "afgekeurd" | "verbod" | string;
@@ -62,16 +59,17 @@ type ResRow = {
   boodschap: string | null;
   review_status?: string | null;
   original_resultaat?: string | null;
-  // Velden uit weigh_in_bouts, zodat het overzicht niet hoeft te gokken
-  // op basis van alleen de tekst in controle_resultaten.
-  dispensatie_nodig?: boolean | string | null;
-  dispensatie_verleend?: boolean | string | null;
-  dispensatie_reason?: string | null;
-  reglement_status?: string | null;
-  praktijk_status?: string | null;
-  eindstatus?: string | null;
-  gewicht_strafpunt_rood?: number | string | null;
-  gewicht_strafpunt_blauw?: number | string | null;
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  toernooi_va_nummer?: string | null;
+  va_nummer?: string | null;
+};
+
+type UitslagClassRow = {
+  va_nummer?: string | number | null;
+  discipline?: string | null;
+  klasse?: string | null;
+  uitslag?: string | null;
 };
 
 type FilterKey =
@@ -82,8 +80,7 @@ type FilterKey =
   | "actie"
   | "ok"
   | "geen_info"
-  | "geen_licentie"
-  | "weegstation";
+  | "geen_licentie";
 
 type ToernooiDeelnemer = {
   key: string;
@@ -325,13 +322,15 @@ function normalizeDisciplineForRule(v: any): string {
 
 function isExactBoksen(ctx: AnyRow | null | undefined): boolean {
   if (!ctx) return false;
-  return normalizeDisciplineForRule(
-    ctx?.discipline ??
-      ctx?.discipline_mm ??
-      ctx?.discipline_fp ??
-      ctx?.wedstrijd_discipline ??
-      ctx?.bout_discipline,
-  ) === "boksen";
+  return (
+    normalizeDisciplineForRule(
+      ctx?.discipline ??
+        ctx?.discipline_mm ??
+        ctx?.discipline_fp ??
+        ctx?.wedstrijd_discipline ??
+        ctx?.bout_discipline,
+    ) === "boksen"
+  );
 }
 
 function isBoksenNoVaInfoRow(r: Partial<ResRow> | null | undefined): boolean {
@@ -498,6 +497,14 @@ function isLicentieRow(r: Partial<ResRow> | null | undefined): boolean {
   );
 }
 
+function isOpenLicentieMeldingRow(r: ResRow): boolean {
+  return isLicentieRow(r) && isActiveMeldingRow(r);
+}
+
+function hasOpenLicentieMelding(rows: ResRow[] | undefined): boolean {
+  return (rows ?? []).some(isOpenLicentieMeldingRow);
+}
+
 function isActiveMeldingRow(r: ResRow): boolean {
   if (isApprovedReviewStatus(r.review_status)) return false;
   const res = normResultaatRow(r);
@@ -617,317 +624,6 @@ function StatusBadge({ status }: { status: PartijStatus }) {
   return <Chip label="GEEN INFO" tone="white" />;
 }
 
-type WeegstationBadgeInfo = {
-  key: string;
-  label: string;
-  detail?: string;
-  tone: "minpunt" | "disp_ok" | "disp_bad" | "afkeur" | "goedkeur" | "info";
-};
-
-function boolLike(v: any): boolean | null {
-  if (v == null) return null;
-  if (typeof v === "boolean") return v;
-  if (typeof v === "number") return v !== 0;
-  const s = String(v).trim().toLowerCase();
-  if (!s) return null;
-  if (
-    ["true", "1", "ja", "yes", "y", "verleend", "goedgekeurd", "ok"].includes(s)
-  )
-    return true;
-  if (
-    [
-      "false",
-      "0",
-      "nee",
-      "no",
-      "n",
-      "afgewezen",
-      "afgekeurd",
-      "geweigerd",
-    ].includes(s)
-  )
-    return false;
-  return null;
-}
-
-function hasDeniedWeegDispensatie(rows: ResRow[] | undefined): boolean {
-  return (rows ?? []).some((r) => {
-    if (!isWeegstationRow(r)) return false;
-    const nodig = boolLike((r as any).dispensatie_nodig);
-    const verleend = boolLike((r as any).dispensatie_verleend);
-    const reason = String((r as any).dispensatie_reason ?? "")
-      .trim()
-      .toLowerCase();
-    const code = String((r as any).rule_code ?? "")
-      .trim()
-      .toUpperCase();
-    const msg = String((r as any).boodschap ?? "")
-      .trim()
-      .toLowerCase();
-    const res = normResultaat((r as any).resultaat);
-
-    if (nodig === true && verleend === false) return true;
-    if (
-      reason.includes("afgewezen") ||
-      reason.includes("afgekeurd") ||
-      reason.includes("geweigerd")
-    )
-      return true;
-    if (
-      (code.includes("DISP") || msg.includes("dispensatie")) &&
-      (res === "afgekeurd" ||
-        code.includes("AFGEKEURD") ||
-        code.includes("AFGEWEZEN") ||
-        msg.includes("afgewezen") ||
-        msg.includes("afgekeurd") ||
-        msg.includes("niet verleend") ||
-        msg.includes("geweigerd"))
-    )
-      return true;
-    return false;
-  });
-}
-
-function isWeegstationRow(r: Partial<ResRow> | null | undefined): boolean {
-  const rule = String((r as any)?.rule ?? "")
-    .trim()
-    .toLowerCase();
-  const source = String((r as any)?.source_table ?? "")
-    .trim()
-    .toLowerCase();
-  const code = String((r as any)?.rule_code ?? "")
-    .trim()
-    .toUpperCase();
-  const msg = String((r as any)?.boodschap ?? "")
-    .trim()
-    .toLowerCase();
-
-  return (
-    rule.startsWith("weegstation") ||
-    source === "weigh_in_bouts" ||
-    code.startsWith("WEEGSTATION") ||
-    code.startsWith("MINPUNT") ||
-    (code.includes("DISP") &&
-      (source === "weigh_in_bouts" ||
-        rule.includes("weeg") ||
-        msg.includes("weeg"))) ||
-    msg.includes("weegstation") ||
-    msg.includes("weegdispensatie")
-  );
-}
-
-function weegstationBadgesFromRows(
-  rows: ResRow[] | undefined,
-): WeegstationBadgeInfo[] {
-  const out: WeegstationBadgeInfo[] = [];
-
-  for (const r of rows ?? []) {
-    if (!isWeegstationRow(r)) continue;
-
-    const rule = String(r.rule ?? "")
-      .trim()
-      .toLowerCase();
-    const code = String(r.rule_code ?? "")
-      .trim()
-      .toUpperCase();
-    const msg = String(r.boodschap ?? "").trim();
-    const msgLower = msg.toLowerCase();
-    const res = normResultaat(r.resultaat);
-    const hoek = String(r.hoek ?? "")
-      .trim()
-      .toLowerCase();
-    const hoekLabel =
-      hoek === "rood" ? "ROOD" : hoek === "blauw" ? "BLAUW" : "";
-
-    if (
-      rule.includes("minpunt") ||
-      code.includes("MINPUNT") ||
-      msgLower.includes("minpunt")
-    ) {
-      out.push({
-        key: `${r.id ?? code ?? msg}-minpunt`,
-        label: hoekLabel ? `MINPUNT ${hoekLabel}` : "MINPUNT TOEGEKEND",
-        detail: msg || undefined,
-        tone: "minpunt",
-      });
-      continue;
-    }
-
-    const isWeegDispensatie =
-      rule.includes("weegdispensatie") ||
-      rule.includes("weeg dispensatie") ||
-      code.includes("WEEGDISP") ||
-      code.includes("WEEG_DISP") ||
-      code.includes("WEGING_DISP") ||
-      msgLower.includes("weegdispensatie") ||
-      msgLower.includes("weeg dispensatie");
-
-    const directDispensatieNodig = boolLike((r as any).dispensatie_nodig);
-    const directDispensatieVerleend = boolLike((r as any).dispensatie_verleend);
-    const directDispensatieReason = String((r as any).dispensatie_reason ?? "")
-      .trim()
-      .toLowerCase();
-
-    if (isWeegDispensatie || directDispensatieNodig === true) {
-      const afgekeurd =
-        directDispensatieVerleend === false ||
-        directDispensatieReason.includes("afgewezen") ||
-        directDispensatieReason.includes("afgekeurd") ||
-        directDispensatieReason.includes("geweigerd") ||
-        res === "afgekeurd" ||
-        code.includes("AFKEUR") ||
-        code.includes("AFGEKEURD") ||
-        code.includes("AFGEWEZEN") ||
-        code.includes("GEWEIGERD") ||
-        msgLower.includes("afgekeurd") ||
-        msgLower.includes("afgewezen") ||
-        msgLower.includes("afkeur") ||
-        msgLower.includes("niet verleend") ||
-        msgLower.includes("geweigerd");
-
-      out.push({
-        key: `${r.id ?? code ?? msg}-disp`,
-        label: afgekeurd ? "WEEGDISP. AFGEKEURD" : "WEEGDISP. VERLEEND",
-        detail: msg || undefined,
-        tone: afgekeurd ? "disp_bad" : "disp_ok",
-      });
-      continue;
-    }
-
-    if (
-      rule.includes("status") ||
-      msgLower.includes("weegstation afgesloten")
-    ) {
-      const afgekeurd =
-        res === "afgekeurd" ||
-        code.includes("AFKEUR") ||
-        msgLower.includes("afkeur");
-      const goedgekeurd =
-        res === "ok" || code === "OK" || msgLower.includes("status ok");
-
-      if (afgekeurd) {
-        out.push({
-          key: `${r.id ?? code ?? msg}-afkeur`,
-          label: "AFKEUR OP GEWICHT",
-          detail: msg || undefined,
-          tone: "afkeur",
-        });
-        continue;
-      }
-
-      if (goedgekeurd) {
-        out.push({
-          key: `${r.id ?? code ?? msg}-goedkeur`,
-          label: "GOEDKEUR NA WEGING",
-          detail: msg || undefined,
-          tone: "goedkeur",
-        });
-        continue;
-      }
-    }
-
-    out.push({
-      key: `${r.id ?? code ?? msg}-weegstation`,
-      label: "WEEGSTATION",
-      detail: msg || undefined,
-      tone: "info",
-    });
-  }
-
-  const seen = new Set<string>();
-  return out.filter((b) => {
-    const k = `${b.label}__${b.detail ?? ""}`.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-}
-
-function hasWeegstationMelding(rows: ResRow[] | undefined): boolean {
-  return weegstationBadgesFromRows(rows).length > 0;
-}
-
-function isWeegstationAandachtBadge(badge: WeegstationBadgeInfo): boolean {
-  // Goedkeur na weging mag wel zichtbaar zijn als badge,
-  // maar hoort niet in het filter met weegstation-aandachtspunten.
-  return ["minpunt", "disp_ok", "disp_bad", "afkeur"].includes(badge.tone);
-}
-
-function hasWeegstationAandachtspunt(rows: ResRow[] | undefined): boolean {
-  return weegstationBadgesFromRows(rows).some(isWeegstationAandachtBadge);
-}
-
-function statusFromWeegstationRows(
-  rows: ResRow[] | undefined,
-): PartijStatus | null {
-  const badges = weegstationBadgesFromRows(rows);
-
-  // Een afgekeurde weegdispensatie of afkeur op gewicht moet in het
-  // overzicht zwaarder wegen dan een algemene "status ok" melding.
-  if (badges.some((b) => b.tone === "disp_bad" || b.tone === "afkeur")) {
-    return "afgekeurd";
-  }
-
-  // Verleende weegdispensatie en minpunt blijven als aandachtspunt zichtbaar,
-  // maar zijn geen harde afkeur.
-  if (badges.some((b) => b.tone === "disp_ok")) return "dispensatie";
-  if (badges.some((b) => b.tone === "minpunt")) return "actie";
-
-  return null;
-}
-
-function WeegstationBadge({ badge }: { badge: WeegstationBadgeInfo }) {
-  const palette =
-    badge.tone === "afkeur" || badge.tone === "disp_bad"
-      ? {
-          bg: "linear-gradient(180deg, #2a0f12 0%, #120608 100%)",
-          border: "rgba(248,113,113,0.85)",
-          color: "#fecaca",
-          tag: "#ef4444",
-        }
-      : badge.tone === "goedkeur" || badge.tone === "disp_ok"
-        ? {
-            bg: "linear-gradient(180deg, #0f2418 0%, #07120c 100%)",
-            border: "rgba(74,222,128,0.80)",
-            color: "#bbf7d0",
-            tag: "#22c55e",
-          }
-        : badge.tone === "minpunt"
-          ? {
-              bg: "linear-gradient(180deg, #2c1f0a 0%, #130d04 100%)",
-              border: "rgba(251,191,36,0.88)",
-              color: "#fde68a",
-              tag: "#f59e0b",
-            }
-          : {
-              bg: "linear-gradient(180deg, #162033 0%, #080d16 100%)",
-              border: "rgba(147,197,253,0.75)",
-              color: "#dbeafe",
-              tag: "#3b82f6",
-            };
-
-  return (
-    <span
-      title={badge.detail}
-      className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em]"
-      style={{
-        background: palette.bg,
-        border: `1px solid ${palette.border}`,
-        color: palette.color,
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.14), 0 2px 8px rgba(0,0,0,0.25)",
-      }}
-    >
-      <span
-        className="h-2 w-2 rounded-full"
-        style={{ background: palette.tag, boxShadow: `0 0 8px ${palette.tag}` }}
-      />
-      <span className="opacity-70">WEEG</span>
-      <span>{badge.label}</span>
-    </span>
-  );
-}
-
 function FilterButton({
   label,
   active,
@@ -1040,12 +736,14 @@ function isGeenTegenstander(ctx: AnyRow): boolean {
 }
 
 function formatDurationExact(mins: number): string {
-  const rounded = Math.round(mins);
-  const h = Math.floor(rounded / 60);
-  const m = rounded % 60;
-  if (h <= 0) return `${m} min`;
+  const roundedOne = Math.round(mins * 10) / 10;
+  const h = Math.floor(roundedOne / 60);
+  const m = Math.round((roundedOne - h * 60) * 10) / 10;
+  const fmt = (n: number) =>
+    Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
+  if (h <= 0) return `${fmt(m)} min`;
   if (m === 0) return `${h} uur`;
-  return `${h} uur ${m} min`;
+  return `${h} uur ${fmt(m)} min`;
 }
 
 function isGalaDuurRow(r: ResRow) {
@@ -1355,9 +1053,9 @@ function buildGalaDuurFromMins(totalMins: number) {
     mins: totalMins,
     needsApproval,
     overMax,
-    text: `Geschatte gala-duur: ${formatDurationExact(totalMins)} (${Math.round(
-      totalMins,
-    )} min). ${extra}`,
+    text: `Geschatte gala-duur: ${formatDurationExact(totalMins)} (${String(
+      Math.round(totalMins * 10) / 10,
+    ).replace(".", ",")} min). ${extra}`,
   };
 }
 
@@ -1385,7 +1083,9 @@ function buildCompactRunMeldingen(
 
   const compactMsg =
     mins != null
-      ? `Geschatte gala-duur: ${formatDurationExact(mins)} (${Math.round(mins)} min). ${
+      ? `Geschatte gala-duur: ${formatDurationExact(mins)} (${String(
+          Math.round(mins * 10) / 10,
+        ).replace(".", ",")} min). ${
           overMax
             ? "Overschrijdt max 8.5 uur — AFKEUR."
             : needsApproval
@@ -1540,13 +1240,6 @@ function getBoutIdForReorder(r: AnyRow): string | null {
   return null;
 }
 
-function getRealPartijNr(r: AnyRow): number | null {
-  const raw = r?.partij_nr;
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) return Number(raw.trim());
-  return null;
-}
-
 function arrayMove<T>(list: T[], from: number, to: number): T[] {
   const copy = [...list];
   const [item] = copy.splice(from, 1);
@@ -1564,8 +1257,106 @@ function toNumberLoose(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+
+function firstFilled(...vals: any[]) {
+  for (const v of vals) {
+    if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  }
+  return null;
+}
+
+function parseJsonObjectLoose(v: any): any {
+  if (!v) return {};
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return {};
+  }
+}
+
+function getResolvedMaxWeightRaw(row: AnyRow): any {
+  const extra = parseJsonObjectLoose(row?.extra);
+  const raw = parseJsonObjectLoose(row?.raw_json);
+  return firstFilled(
+    row?.max_gewicht,
+    row?.max_gewicht_mm,
+    row?.gewicht_max_mm,
+    row?.matchmaking_bouts_raw_max_gewicht,
+    row?.gewicht_max,
+    row?.max_kg,
+    row?.maximum_gewicht,
+    row?.gewichtslimiet,
+    extra?.max_gewicht,
+    extra?.max_kg,
+    extra?.gewicht_max,
+    extra?.maximum_gewicht,
+    extra?.gewichtslimiet,
+    raw?.max_gewicht,
+    raw?.max_kg,
+    raw?.gewicht_max,
+    raw?.maximum_gewicht,
+    raw?.gewichtslimiet,
+  );
+}
+
+function getResolvedMaxWeightNumber(row: AnyRow): number | null {
+  const raw = getResolvedMaxWeightRaw(row);
+  const n = toNumberLoose(raw);
+  return n == null ? null : Math.abs(n);
+}
+
+function mergeRawMaxWeightIntoContextRows(ctxRows: AnyRow[], rawRows: AnyRow[]): AnyRow[] {
+  if (!ctxRows.length || !rawRows.length) return ctxRows;
+
+  const rawByPartij = new Map<number, AnyRow>();
+  const rawById = new Map<string, AnyRow>();
+
+  for (const raw of rawRows) {
+    const pn = Number(raw?.partij_nr);
+    if (Number.isFinite(pn)) rawByPartij.set(pn, raw);
+
+    for (const key of [raw?.id, raw?.bout_uid, raw?.source_matchmaker_bout_id]) {
+      const id = String(key ?? "").trim();
+      if (id) rawById.set(id, raw);
+    }
+  }
+
+  return ctxRows.map((ctx) => {
+    const ids = [ctx?.bout_id, ctx?.bout_uid, ctx?.raw_bout_id, ctx?.matchmaker_bout_id, ctx?.source_matchmaker_bout_id]
+      .map((v) => String(v ?? "").trim())
+      .filter(Boolean);
+
+    let raw: AnyRow | undefined;
+    for (const id of ids) {
+      raw = rawById.get(id);
+      if (raw) break;
+    }
+
+    const pn = Number(ctx?.partij_nr);
+    if (!raw && Number.isFinite(pn)) raw = rawByPartij.get(pn);
+    if (!raw) return ctx;
+
+    const next = { ...ctx };
+
+    const maxWeight = getResolvedMaxWeightRaw(raw);
+    if (firstFilled(next.max_gewicht, next.max_gewicht_mm, next.matchmaking_bouts_raw_max_gewicht) == null && maxWeight != null) {
+      next.max_gewicht = maxWeight;
+      next.matchmaking_bouts_raw_max_gewicht = maxWeight;
+    }
+
+    for (const key of ["max_gewicht_notatie", "max_gewicht_type"]) {
+      if (firstFilled(next[key]) == null && firstFilled(raw?.[key]) != null) {
+        next[key] = raw[key];
+      }
+    }
+
+    return next;
+  });
+}
+
 function getBoutWeightForSort(r: AnyRow): number {
-  const maxKg = toNumberLoose(r?.max_gewicht);
+  const maxKg = getResolvedMaxWeightNumber(r);
   if (maxKg != null) return maxKg;
 
   const rood = toNumberLoose(r?.rood_gewicht);
@@ -1726,13 +1517,87 @@ function getTournamentClassFromRow(row: AnyRow): string {
   return normalizeTournamentClass(row?.klasse_mm ?? row?.klasse ?? "");
 }
 
+function adultTournamentClassRank(v: string): number {
+  const s = normalizeTournamentClass(v);
+  if (s === "r") return 1;
+  if (s === "n") return 2;
+  if (s === "c") return 3;
+  if (s === "b") return 4;
+  if (s === "a") return 5;
+  return 0;
+}
+
+function isRelevantTournamentUitslagDiscipline(v: any): boolean {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  if (!s) return false;
+  return s.includes("kick") || s.includes("k1") || s.includes("muay") || s.includes("thai");
+}
+
+function isJeugdTournamentClassText(v: any): boolean {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  return s === "j" || s.includes("j+") || s.includes("jeugd") || s.includes("youth");
+}
+
+function highestTournamentClassFromUitslagen(rows: UitslagClassRow[]): string {
+  let best = "";
+  let bestRank = 0;
+
+  for (const row of rows ?? []) {
+    if (!isRelevantTournamentUitslagDiscipline(row?.discipline)) continue;
+    if (isJeugdTournamentClassText(row?.klasse)) continue;
+
+    const k = normalizeTournamentClass(row?.klasse);
+    const rank = adultTournamentClassRank(k);
+    if (rank > bestRank) {
+      best = k;
+      bestRank = rank;
+    }
+  }
+
+  return best;
+}
+
+function displayTournamentClass(v: any): string {
+  const s = normalizeTournamentClass(v);
+  if (s === "r") return "R";
+  if (s === "n") return "N";
+  if (s === "c") return "C";
+  if (s === "b") return "B";
+  if (s === "a") return "A";
+  if (s === "jeugd") return "Jeugd/Youth";
+  return String(v ?? "").trim() || "-";
+}
+
 function getFighterClassFromRow(row: AnyRow, side: "rood" | "blauw"): string {
+  // Eerst uitslagen gebruiken. Nulmeting is alleen fallback als er geen bruikbare uitslagen zijn.
+  const klasseUitUitslagen = row?.[`__${side}_uitslagen_klasse`];
+  if (klasseUitUitslagen) return normalizeTournamentClass(klasseUitUitslagen);
+
   return normalizeTournamentClass(
     row?.[`${side}_nulmeting_klasse`] ??
       row?.[`${side}_klasse_fp`] ??
       row?.[`${side}_klasse_mm`] ??
       row?.[`${side}_klasse`] ??
       "",
+  );
+}
+
+function getFighterClassLabelFromRow(row: AnyRow, side: "rood" | "blauw"): string {
+  const klasseUitUitslagen = row?.[`__${side}_uitslagen_klasse`];
+  if (klasseUitUitslagen) return displayTournamentClass(klasseUitUitslagen);
+
+  return (
+    String(
+      row?.[`${side}_nulmeting_klasse`] ??
+        row?.[`${side}_klasse_fp`] ??
+        row?.[`${side}_klasse_mm`] ??
+        row?.[`${side}_klasse`] ??
+        "",
+    ).trim() || "-"
   );
 }
 
@@ -1925,6 +1790,122 @@ function getToernooiFighterKey(
   return `fallback:${naam}__${gym}`;
 }
 
+
+function normalizeVaForToernooi(v: any): string {
+  return String(v ?? "").replace(/[^0-9]/g, "");
+}
+
+function getToernooiSideVa(row: AnyRow, side: "rood" | "blauw"): string {
+  // Toernooi-meldingen kunnen uit controle_resultaten komen met va_nummer,
+  // toernooi_va_nummer of fighter_id. In de context verschilt de veldnaam per bron.
+  // Daarom breder zoeken dan alleen rood_va_mm/blauw_va_mm.
+  return normalizeVaForToernooi(
+    row?.[`${side}_va_mm`] ??
+      row?.[`${side}_va`] ??
+      row?.[`${side}_va_fp`] ??
+      row?.[`${side}_va_nummer`] ??
+      row?.[`${side}_toernooi_va_nummer`] ??
+      row?.[`${side}_fighter_id`] ??
+      row?.[side === "rood" ? "va_rood" : "va_blauw"] ??
+      row?.[side === "rood" ? "rood_fighter_id" : "blauw_fighter_id"],
+  );
+}
+
+function normalizeNameForToernooi(v: any): string {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getToernooiSideName(row: AnyRow, side: "rood" | "blauw"): string {
+  return normalizeNameForToernooi(
+    row?.[`${side}_naam_fp`] ??
+      row?.[`${side}_naam_mm`] ??
+      row?.[`${side}_naam`],
+  );
+}
+
+function toernooiResultMentionsSideName(
+  res: ResRow,
+  row: AnyRow,
+  side: "rood" | "blauw",
+): boolean {
+  const sideName = getToernooiSideName(row, side);
+  if (!sideName) return false;
+
+  const text = normalizeNameForToernooi(
+    `${(res as any)?.boodschap ?? ""} ${(res as any)?.rule ?? ""}`,
+  );
+
+  if (!text) return false;
+  return text.includes(sideName);
+}
+
+function toernooiResultMatchesSide(
+  res: ResRow,
+  row: AnyRow,
+  side: "rood" | "blauw",
+): boolean {
+  const resToernooi = String((res as any)?.toernooi_code ?? "").trim().toUpperCase();
+  const rowToernooi = String(getToernooiKey(row) ?? "").trim().toUpperCase();
+  if (resToernooi && rowToernooi && resToernooi !== rowToernooi) return false;
+
+  const resHoek = String(res?.hoek ?? "").trim().toLowerCase();
+  const resVa = normalizeVaForToernooi(
+    (res as any)?.toernooi_va_nummer ??
+      (res as any)?.va_nummer ??
+      (res as any)?.fighter_id,
+  );
+  const sideVa = getToernooiSideVa(row, side);
+
+  // 1) Deelnemer-VA is leidend: toernooi_code + VA/fighter_id moet exact matchen.
+  // Dit voorkomt dat een licentiemelding van T2 op alle deelnemers of op T1 komt.
+  if (resVa) return !!sideVa && resVa === sideVa;
+
+  // 2) Alleen als controle_resultaten géén VA/fighter_id heeft, mag naam-fallback.
+  // Dit vangt oude toernooi-meldingen op die alleen de naam in de boodschap hebben.
+  if (toernooiResultMentionsSideName(res, row, side)) return true;
+
+  // 3) Een hoek zonder VA is bij toernooien niet betrouwbaar genoeg om een
+  // persoonsbadge te zetten; dezelfde deelnemer wisselt per toernooi-pairing van hoek.
+  if (resHoek) return false;
+
+  // 4) Algemene pair-meldingen zonder VA/hoek/naam mogen bij beide deelnemers,
+  // maar licentie/startverbod nooit algemeen plakken.
+  if (isLicentieRow(res) || isVerbodRow(res)) return false;
+  return true;
+}
+
+function toernooiResultDedupeKey(rr: ResRow): string {
+  return [
+    String((rr as any)?.toernooi_code ?? "").trim().toUpperCase(),
+    String((rr as any)?.fighter_id ?? "").trim(),
+    String((rr as any)?.toernooi_va_nummer ?? "").trim(),
+    String((rr as any)?.va_nummer ?? "").trim(),
+    String(rr.hoek ?? "").trim().toLowerCase(),
+    String(rr.rule_code ?? "").trim().toUpperCase(),
+    String(rr.rule ?? "").trim().toUpperCase(),
+    String(rr.boodschap ?? "").trim().toLowerCase(),
+    String(rr.resultaat ?? "").trim().toLowerCase(),
+  ].join("|");
+}
+
+function toernooiResultMatchesRow(res: ResRow, row: AnyRow): boolean {
+  const resToernooi = String((res as any)?.toernooi_code ?? "").trim().toUpperCase();
+  const rowToernooi = String(getToernooiKey(row) ?? "").trim().toUpperCase();
+  if (!resToernooi || !rowToernooi || resToernooi !== rowToernooi) return false;
+
+  return (
+    toernooiResultMatchesSide(res, row, "rood") ||
+    toernooiResultMatchesSide(res, row, "blauw")
+  );
+}
+
 function mergePartijStatuses(statuses: PartijStatus[]): PartijStatus {
   if (statuses.includes("verbod")) return "verbod";
   if (statuses.includes("afgekeurd")) return "afgekeurd";
@@ -1946,12 +1927,6 @@ function buildToernooiDeelnemers(
 
   for (const row of rows) {
     const partijNr = Number(row?.partij_nr);
-    const partijStatus = Number.isFinite(partijNr)
-      ? (statusByPartij[partijNr] ?? "geen_info")
-      : "geen_info";
-    const partijMeldingen = Number.isFinite(partijNr)
-      ? (countByPartij[partijNr] ?? 0)
-      : 0;
     const partijResultaten = Number.isFinite(partijNr)
       ? (resultatenByPartij[partijNr] ?? [])
       : [];
@@ -1976,32 +1951,32 @@ function buildToernooiDeelnemers(
 
       const va = safeText(
         row?.[`${side}_va_mm`] ??
+          row?.[`${side}_va_nummer`] ??
+          row?.[`${side}_fighter_id`] ??
           (side === "rood" ? row?.va_rood : row?.va_blauw),
         "-",
       );
 
       const leeftijd = ageAtEvent(row, side);
 
-      const sideResultaten = partijResultaten.filter(
-        (res) => !res?.hoek || res.hoek === side,
-      );
+      const sideResultaten = partijResultaten.filter((res) => {
+        const resToernooi = String((res as any)?.toernooi_code ?? "").trim();
+        if (resToernooi) return toernooiResultMatchesSide(res, row, side);
+        return !res?.hoek || res.hoek === side;
+      });
 
       const sideMeldingen = sideResultaten
         .map((res) => toernooiMeldingLabelFromRes(res))
         .filter((x): x is string => !!x);
 
-      const sideHeeftVerbod = sideResultaten.some((res) => isVerbodRow(res));
+      const sideHeeftVerbod =
+        sideResultaten.some((res) => isVerbodRow(res)) ||
+        (Number.isFinite(partijNr) ? !!verbodByPartij[partijNr] : false);
+
       const sideHeeftGeenLicentie =
-        sideResultaten.some((res) => {
-          const code = String(res?.rule_code ?? "").toUpperCase();
-          const rule = String(res?.rule ?? "").toUpperCase();
-          const msg = String(res?.boodschap ?? "").toUpperCase();
-          return (
-            code.includes("LICENT") ||
-            rule.includes("LICENT") ||
-            msg.includes("LICENT")
-          );
-        }) || isMissingLicentie(row, side);
+        sideResultaten.some((res) => isOpenLicentieMeldingRow(res)) ||
+        isMissingLicentie(row, side);
+
       const sideHeeftDispensatie = sideResultaten.some(
         (res) => normResultaatRow(res) === "dispensatie",
       );
@@ -2013,23 +1988,19 @@ function buildToernooiDeelnemers(
         isBelgischeGymInfoRow(res),
       );
 
-      if (fighterClassMismatchInTournament(row, side)) {
-        const toernooiKlasse =
-          String(row?.klasse_mm ?? row?.klasse ?? "").trim() || "-";
-        const fighterKlasse =
-          String(
-            row?.[`${side}_nulmeting_klasse`] ??
-              row?.[`${side}_klasse_fp`] ??
-              row?.[`${side}_klasse_mm`] ??
-              row?.[`${side}_klasse`] ??
-              "",
-          ).trim() || "-";
-        sideMeldingen.push(
-          `Zit niet in toernooi-klasse (${fighterKlasse} in ${toernooiKlasse})`,
-        );
+      if (sideHeeftGeenLicentie && !sideMeldingen.some((m) => m.toLowerCase().includes("licentie"))) {
+        sideMeldingen.push("Geen licentie");
       }
 
       const meldingList = dedupeStrings(sideMeldingen);
+      const sideStatusFromMeldingen = sideResultaten.length
+        ? statusFromResultaten(sideResultaten)
+        : "ok";
+      const sideStatus = mergePartijStatuses([
+        sideStatusFromMeldingen,
+        sideHeeftGeenLicentie ? "afgekeurd" : "ok",
+      ]);
+      const sideMeldingenCount = meldingList.length;
       const existing = map.get(fighterKey);
 
       if (!existing) {
@@ -2039,18 +2010,18 @@ function buildToernooiDeelnemers(
           gym,
           va,
           leeftijd,
-          status: partijStatus,
+          status: sideStatus,
           heeftVerbod: sideHeeftVerbod,
           heeftGeenLicentie: sideHeeftGeenLicentie,
           heeftDispensatie: sideHeeftDispensatie,
           heeftAfkeur: sideHeeftAfkeur,
           heeftBelgieCheck: sideHeeftBelgieCheck,
-          meldingenCount: partijMeldingen,
+          meldingenCount: sideMeldingenCount,
           partijen: Number.isFinite(partijNr) ? [partijNr] : [],
           meldingen: meldingList,
         });
       } else {
-        existing.status = mergePartijStatuses([existing.status, partijStatus]);
+        existing.status = mergePartijStatuses([existing.status, sideStatus]);
         existing.heeftVerbod = existing.heeftVerbod || sideHeeftVerbod;
         existing.heeftGeenLicentie =
           existing.heeftGeenLicentie || sideHeeftGeenLicentie;
@@ -2061,7 +2032,7 @@ function buildToernooiDeelnemers(
           existing.heeftBelgieCheck || sideHeeftBelgieCheck;
         existing.meldingenCount = Math.max(
           existing.meldingenCount,
-          partijMeldingen,
+          sideMeldingenCount,
         );
         existing.meldingen = dedupeStrings([
           ...existing.meldingen,
@@ -2149,6 +2120,71 @@ function buildToernooiGroepen(
     .sort((a, b) => a.toernooiKey.localeCompare(b.toernooiKey, "nl"));
 }
 
+async function enrichRowsWithUitslagenClasses(
+  matchmakingId: string,
+  inputRows: AnyRow[],
+): Promise<AnyRow[]> {
+  const vaSet = new Set<string>();
+
+  for (const row of inputRows ?? []) {
+    for (const side of ["rood", "blauw"] as const) {
+      const va = normalizeVaForToernooi(
+        row?.[`${side}_va_mm`] ??
+          row?.[`${side}_va`] ??
+          row?.[`${side}_va_fp`] ??
+          row?.[`${side}_va_nummer`] ??
+          row?.[`${side}_fighter_id`] ??
+          row?.[side === "rood" ? "va_rood" : "va_blauw"] ??
+          row?.[side === "rood" ? "rood_fighter_id" : "blauw_fighter_id"],
+      );
+      if (va) vaSet.add(va);
+    }
+  }
+
+  const vaList = Array.from(vaSet);
+  if (!vaList.length) return inputRows;
+
+  const { data, error } = await supabase
+    .from("uitslagen_raw")
+    .select("va_nummer, discipline, klasse, uitslag")
+    .eq("matchmaking_id", matchmakingId)
+    .in("va_nummer", vaList);
+
+  if (error) {
+    console.warn("[controle page] uitslagen_raw klasse fetch mislukt:", error);
+    return inputRows;
+  }
+
+  const byVa = new Map<string, UitslagClassRow[]>();
+  for (const row of (data ?? []) as UitslagClassRow[]) {
+    const va = normalizeVaForToernooi(row?.va_nummer);
+    if (!va) continue;
+    const list = byVa.get(va) ?? [];
+    list.push(row);
+    byVa.set(va, list);
+  }
+
+  return inputRows.map((row) => {
+    const next = { ...row };
+
+    for (const side of ["rood", "blauw"] as const) {
+      const va = normalizeVaForToernooi(
+        row?.[`${side}_va_mm`] ??
+          row?.[`${side}_va`] ??
+          row?.[`${side}_va_fp`] ??
+          row?.[`${side}_va_nummer`] ??
+          row?.[`${side}_fighter_id`] ??
+          row?.[side === "rood" ? "va_rood" : "va_blauw"] ??
+          row?.[side === "rood" ? "rood_fighter_id" : "blauw_fighter_id"],
+      );
+      const klasse = va ? highestTournamentClassFromUitslagen(byVa.get(va) ?? []) : "";
+      if (klasse) next[`__${side}_uitslagen_klasse`] = klasse;
+    }
+
+    return next;
+  });
+}
+
 export default function ControleMatchmakingPage() {
   const params = useParams();
   const router = useRouter();
@@ -2219,6 +2255,7 @@ export default function ControleMatchmakingPage() {
     return data.session?.access_token ?? null;
   }
 
+
   async function refreshPresence() {
     if (!matchmakingId) return;
 
@@ -2227,7 +2264,7 @@ export default function ControleMatchmakingPage() {
       if (!token) return;
 
       const resp = await authedFetch(
-        `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}&page=officials_controle`,
+        `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}&page=admin_controle`,
         {
           method: "POST",
           headers: {
@@ -2236,7 +2273,7 @@ export default function ControleMatchmakingPage() {
           },
           body: JSON.stringify({
             matchmakingId,
-            page: "officials_controle",
+            page: "admin_controle",
           }),
         },
       );
@@ -2265,7 +2302,7 @@ export default function ControleMatchmakingPage() {
         height: "1px",
         background:
           "linear-gradient(to right, transparent, rgba(220,220,220,0.22), transparent)",
-      }) as React.CSSProperties,
+      }) as CSSProperties,
     [],
   );
 
@@ -2353,19 +2390,17 @@ export default function ControleMatchmakingPage() {
   }
 
   function getVisualPartijNr(row: AnyRow, indexInView: number) {
-    // Partijnummers zijn historische sleutels voor controle_resultaten.
-    // Na verwijderen mag een gat blijven bestaan: nummer 5 moet verdwijnen,
-    // niet visueel of bij opslaan opnieuw aan partij 6 gekoppeld worden.
-    return getRealPartijNr(row) ?? indexInView + 1;
+    if (!lineupMode) return Number(row?.partij_nr ?? indexInView + 1);
+    return indexInView + 1;
   }
 
   function hasOrderChanges() {
     if (orderedRows.length !== rows.length) return false;
 
     for (let i = 0; i < orderedRows.length; i += 1) {
-      const originalKey = getStableRowKey(rows[i] ?? {});
-      const currentKey = getStableRowKey(orderedRows[i] ?? {});
-      if (originalKey !== currentKey) return true;
+      const visualNr = i + 1;
+      const currentNr = Number(orderedRows[i]?.partij_nr ?? 0);
+      if (currentNr !== visualNr) return true;
       if (orderedRows[i]?.__swapped_corners) return true;
     }
 
@@ -2427,32 +2462,14 @@ export default function ControleMatchmakingPage() {
     const items = orderedRows.map((r, index) => ({
       ctx_row_id: getControleContextId(r),
       bout_id: getBoutIdForReorder(r),
-      old_partij_nr: getRealPartijNr(r),
-      // Niet dichtnummeren na verwijderen. partij_nr blijft dezelfde sleutel,
-      // anders kunnen oude controle_resultaten aan een andere partij gaan hangen.
-      partij_nr: getRealPartijNr(r),
-      lineup_position: index + 1,
-      sort_order: index + 1,
-
-      // Hoekwissel moet naar de API mee, anders wordt rood/blauw alleen lokaal
-      // in React gewisseld en na opslaan/reload weer teruggezet.
+      old_partij_nr:
+        typeof r?.partij_nr === "number"
+          ? r.partij_nr
+          : typeof r?.partij_nr === "string" && /^\d+$/.test(r.partij_nr.trim())
+            ? Number(r.partij_nr.trim())
+            : null,
+      partij_nr: index + 1,
       swap_corners: !!r?.__swapped_corners,
-      swapped_corners: !!r?.__swapped_corners,
-
-      // Stuur de actuele hoekwaarden mee zoals ze nu in de lineup staan.
-      // De reorder-route kan hiermee controle_bout_context en raw syncen.
-      rood_naam_mm: r?.rood_naam_mm ?? r?.rood_naam ?? null,
-      blauw_naam_mm: r?.blauw_naam_mm ?? r?.blauw_naam ?? null,
-      rood_gym_mm: r?.rood_gym_mm ?? r?.rood_gym ?? null,
-      blauw_gym_mm: r?.blauw_gym_mm ?? r?.blauw_gym ?? null,
-      rood_va_mm: r?.rood_va_mm ?? r?.va_rood ?? null,
-      blauw_va_mm: r?.blauw_va_mm ?? r?.va_blauw ?? null,
-      va_rood: r?.va_rood ?? r?.rood_va_mm ?? null,
-      va_blauw: r?.va_blauw ?? r?.blauw_va_mm ?? null,
-      rood_gewicht: r?.rood_gewicht ?? null,
-      blauw_gewicht: r?.blauw_gewicht ?? null,
-      rood_geboortedatum_mm: r?.rood_geboortedatum_mm ?? null,
-      blauw_geboortedatum_mm: r?.blauw_geboortedatum_mm ?? null,
     }));
 
     const invalid = items.find(
@@ -2545,7 +2562,10 @@ export default function ControleMatchmakingPage() {
       blauw_gym: fBlauwGym.trim(),
       va_blauw: fBlauwVa.trim(),
       blauw_gewicht: toNum(fBlauwKg),
-      max_gewicht: toNum(fMaxKg),
+      max_gewicht: (() => {
+        const n = toNum(fMaxKg);
+        return n == null ? null : Math.abs(n);
+      })(),
     };
 
     if (
@@ -2634,6 +2654,55 @@ export default function ControleMatchmakingPage() {
     }
   }
 
+  async function handleSendToBond() {
+    await withHeaderBusy("bond", async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaker/send-to-bond", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(json?.error ?? "Sturen naar bond mislukt.");
+      }
+
+      setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar bond.");
+      router.replace("/dashboard/officials/controle");
+    });
+  }
+
+  async function stuurNaarControle() {
+    await withHeaderBusy("controle", async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaker/submit-to-control", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ matchmaking_id: matchmakingId }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok)
+        throw new Error(json?.error ?? "Sturen naar controle mislukt.");
+
+      setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar controle.");
+      setReloadTick((x) => x + 1);
+    });
+  }
+
   async function handleSendToAdmin() {
     await withHeaderBusy("admin", async () => {
       const token = await getAccessToken();
@@ -2656,7 +2725,7 @@ export default function ControleMatchmakingPage() {
       }
 
       setMsg(json?.message ?? "✅ Matchmaking is doorgestuurd naar admin.");
-      router.replace("/dashboard/controle");
+      router.replace("/dashboard/officials/controle");
     });
   }
 
@@ -2685,6 +2754,33 @@ export default function ControleMatchmakingPage() {
         throw new Error(json?.error ?? "Retour naar matchmaker mislukt.");
 
       setMsg(json?.message ?? "✅ Matchmaking is teruggezet naar matchmaker.");
+      setReloadTick((x) => x + 1);
+    });
+  }
+
+  async function stuurUploadNaarAdmin() {
+    await withHeaderBusy("admin", async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaker/send-to-admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok)
+        throw new Error(json?.error ?? "Sturen naar admin mislukt.");
+
+      setMsg(
+        json?.message ?? "✅ Upload-matchmaking is doorgestuurd naar admin.",
+      );
       setReloadTick((x) => x + 1);
     });
   }
@@ -2721,29 +2817,7 @@ export default function ControleMatchmakingPage() {
 
   async function stuurNaarUitslagen() {
     await withHeaderBusy("uitslagen", async () => {
-      const token = await getAccessToken();
-      if (!token) throw new Error("Niet ingelogd.");
-
-      const resp = await authedFetch("/api/matchmaking/naar-uitslagen", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          matchmakingId,
-          matchmaking_id: matchmakingId,
-        }),
-      });
-
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        throw new Error(json?.error ?? "Omzetten naar uitslagen mislukt.");
-      }
-
-      setMsg(json?.message ?? "✅ Lineup is omgezet naar uitslagen.");
-      router.replace("/dashboard/officials");
-      return;
+      setMsg("ℹ️ Naar uitslagen is nog niet gekoppeld in deze pagina.");
     });
   }
 
@@ -2886,7 +2960,19 @@ export default function ControleMatchmakingPage() {
         ctxRows = fallbackCtx.data ?? [];
       }
 
-      const ctxList = (ctxRows ?? []) as AnyRow[];
+      const { data: rawRows, error: rawErr } = await supabase
+        .from("matchmaking_bouts_raw")
+        .select("id, bout_uid, source_matchmaker_bout_id, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
+        .eq("matchmaking_id", matchmakingId);
+
+      if (rawErr) throw rawErr;
+
+      let ctxList = mergeRawMaxWeightIntoContextRows(
+        (ctxRows ?? []) as AnyRow[],
+        (rawRows ?? []) as AnyRow[],
+      );
+
+      ctxList = await enrichRowsWithUitslagenClasses(matchmakingId, ctxList);
       setRows(ctxList);
       syncOrderedRowsFromRows(ctxList);
 
@@ -2912,198 +2998,17 @@ export default function ControleMatchmakingPage() {
         return;
       }
 
-      const selectControleResultaten =
-        "id, partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap, review_status, original_resultaat, source_table, source_id";
-
       const { data: resRows, error: resErr } = await supabase
         .from("controle_resultaten")
-        .select(selectControleResultaten)
+        .select(
+          "partij_nr, bout_id, hoek, resultaat, rule, rule_code, boodschap, review_status, original_resultaat, toernooi_code, fighter_id, toernooi_va_nummer, va_nummer",
+        )
         .eq("controle_run_id", latestControleRunId);
 
       if (resErr) throw resErr;
 
-      const { data: weegRows, error: weegErr } = await supabase
-        .from("controle_resultaten")
-        .select(selectControleResultaten)
-        .eq("matchmaking_id", matchmakingId)
-        .ilike("rule", "weegstation%");
-
-      if (weegErr) throw weegErr;
-
-      // Extra bron: weigh_in_bouts bevat de waarheid over weegdispensatie.
-      // controle_resultaten kan nog een algemene "goedkeur na weging" hebben,
-      // maar als weigh_in_bouts.dispensatie_verleend=false is, moet overzicht AFKEUR tonen.
-      const { data: directWeegRows, error: directWeegErr } = await supabase
-        .from("weigh_in_bouts")
-        .select(
-          "id, partij_nr, controle_run_id, matchmaking_id, reglement_status, praktijk_status, eindstatus, dispensatie_nodig, dispensatie_verleend, dispensatie_reason, gewicht_strafpunt_rood, gewicht_strafpunt_blauw, rood_gewogen_gewicht, blauw_gewogen_gewicht, gewicht_verschil",
-        )
-        .eq("matchmaking_id", matchmakingId);
-
-      if (directWeegErr) throw directWeegErr;
-
-      const directWeegResultaten: ResRow[] = (
-        (directWeegRows ?? []) as AnyRow[]
-      )
-        .map((w) => {
-          const pn = Number(w.partij_nr);
-          const dispNodig = boolLike(w.dispensatie_nodig);
-          const dispVerleend = boolLike(w.dispensatie_verleend);
-          const eind = String(
-            w.eindstatus ?? w.praktijk_status ?? w.reglement_status ?? "",
-          ).toUpperCase();
-          const strafRood = Number(w.gewicht_strafpunt_rood ?? 0) || 0;
-          const strafBlauw = Number(w.gewicht_strafpunt_blauw ?? 0) || 0;
-          const hasMinpunt = strafRood > 0 || strafBlauw > 0;
-          const minpuntHoek =
-            strafRood > 0 ? "rood" : strafBlauw > 0 ? "blauw" : null;
-          const reason = String(w.dispensatie_reason ?? "").trim();
-
-          let resultaat: ResRow["resultaat"] = "ok";
-          let rule = "weegstation_status";
-          let ruleCode =
-            eind === "AFKEUR" ? "WEEGSTATION_AFKEUR" : "WEEGSTATION_OK";
-          let boodschap =
-            eind === "AFKEUR" ? "Afkeur op gewicht" : "Goedkeur na weging";
-          let hoek: "rood" | "blauw" | null = null;
-
-          if (dispNodig === true) {
-            rule = "weegstation_dispensatie";
-            if (dispVerleend === false) {
-              resultaat = "afgekeurd";
-              ruleCode = "WEEGSTATION_DISPENSATIE_AFGEWEZEN";
-              boodschap = reason
-                ? `Weegdispensatie afgekeurd: ${reason}`
-                : "Weegdispensatie afgekeurd";
-            } else if (dispVerleend === true) {
-              resultaat = "dispensatie";
-              ruleCode = "WEEGSTATION_DISPENSATIE_VERLEEND";
-              boodschap = reason
-                ? `Weegdispensatie verleend: ${reason}`
-                : "Weegdispensatie verleend";
-            } else if (eind === "AFKEUR") {
-              resultaat = "afgekeurd";
-              ruleCode = "WEEGSTATION_DISPENSATIE_AFGEWEZEN";
-              boodschap = reason
-                ? `Weegdispensatie afgekeurd: ${reason}`
-                : "Weegdispensatie afgekeurd";
-            } else {
-              resultaat = "dispensatie";
-              ruleCode = "WEEGSTATION_DISPENSATIE_NODIG";
-              boodschap = reason
-                ? `Weegdispensatie nodig: ${reason}`
-                : "Weegdispensatie nodig";
-            }
-          } else if (hasMinpunt) {
-            resultaat = "actie";
-            rule = "weegstation_minpunt";
-            ruleCode = "MINPUNT";
-            boodschap =
-              minpuntHoek === "rood"
-                ? "Minpunt rood"
-                : minpuntHoek === "blauw"
-                  ? "Minpunt blauw"
-                  : "Minpunt toegekend";
-            hoek = minpuntHoek;
-          } else if (eind === "AFKEUR") {
-            resultaat = "afgekeurd";
-          }
-
-          return {
-            id: `weigh_in_bouts:${w.id}`,
-            source_table: "weigh_in_bouts",
-            source_id: String(w.id ?? ""),
-            partij_nr: Number.isFinite(pn) ? pn : null,
-            hoek,
-            resultaat,
-            rule,
-            rule_code: ruleCode,
-            boodschap,
-            dispensatie_nodig: w.dispensatie_nodig,
-            dispensatie_verleend: w.dispensatie_verleend,
-            dispensatie_reason: w.dispensatie_reason,
-            reglement_status: w.reglement_status,
-            praktijk_status: w.praktijk_status,
-            eindstatus: w.eindstatus,
-            gewicht_strafpunt_rood: w.gewicht_strafpunt_rood,
-            gewicht_strafpunt_blauw: w.gewicht_strafpunt_blauw,
-          };
-        })
-        .filter((w) => Number.isFinite(Number(w.partij_nr)));
-
-      const controleResultatenRows = [
-        ...((resRows ?? []) as ResRow[]),
-        ...((weegRows ?? []) as ResRow[]),
-      ];
-
-      const weegDedupeKey = (item: ResRow) => {
-        if (!isWeegstationRow(item)) return "";
-
-        const pn = Number(item.partij_nr);
-        if (!Number.isFinite(pn) || pn <= 0) return "";
-
-        const code = String(item.rule_code ?? "").trim().toUpperCase();
-        const rule = String(item.rule ?? "").trim().toLowerCase();
-        const msg = String(item.boodschap ?? "").trim().toLowerCase();
-        const hoek = String(item.hoek ?? "").trim().toLowerCase();
-        const res = normResultaat((item as any).resultaat);
-
-        let soort = "status";
-        if (rule.includes("minpunt") || code.includes("MINPUNT") || msg.includes("minpunt")) {
-          soort = `minpunt:${hoek || "algemeen"}`;
-        } else if (
-          rule.includes("dispensatie") ||
-          code.includes("DISP") ||
-          msg.includes("dispensatie") ||
-          res === "dispensatie"
-        ) {
-          soort = "dispensatie";
-        } else if (
-          code.includes("AFKEUR") ||
-          res === "afgekeurd" ||
-          msg.includes("afkeur") ||
-          msg.includes("afgekeurd")
-        ) {
-          soort = "afkeur";
-        } else if (code === "OK" || res === "ok" || msg.includes("status ok")) {
-          soort = "ok";
-        }
-
-        return `${pn}:${soort}`;
-      };
-
-      // controle_resultaten is leidend. directWeegResultaten uit weigh_in_bouts is alleen fallback
-      // voor oude data zonder controle_resultaten-weegregel. Anders krijg je dubbele badges/minpunten.
-      const controleWeegKeys = new Set(
-        controleResultatenRows
-          .filter(isWeegstationRow)
-          .map(weegDedupeKey)
-          .filter(Boolean),
-      );
-
-      const directWeegFallbackRows = directWeegResultaten.filter((item) => {
-        const key = weegDedupeKey(item);
-        return !key || !controleWeegKeys.has(key);
-      });
-
-      const mergedResMap = new Map<string, ResRow>();
-      for (const item of [
-        ...controleResultatenRows,
-        ...directWeegFallbackRows,
-      ]) {
-        const key =
-          (isWeegstationRow(item) && weegDedupeKey(item)) ||
-          String(
-            item.id ??
-              `${item.partij_nr ?? ""}-${item.rule ?? ""}-${item.rule_code ?? ""}-${item.hoek ?? ""}-${item.boodschap ?? ""}`,
-          );
-        if (!mergedResMap.has(key)) mergedResMap.set(key, item);
-      }
-
-      const allRes = Array.from(mergedResMap.values());
-      const activeRes = allRes.filter(
-        (r) => isActiveMeldingRow(r) || isWeegstationRow(r),
-      );
+      const allRes = (resRows ?? []) as ResRow[];
+      const activeRes = allRes.filter(isActiveMeldingRow);
 
       const runRows = activeRes.filter((r) => {
         const pn = (r as any)?.partij_nr;
@@ -3122,21 +3027,53 @@ export default function ControleMatchmakingPage() {
         if (!resByPn[pn]) resByPn[pn] = [];
         resByPn[pn].push(rr);
       }
+
+      // Toernooi-meldingen uit controle_resultaten hebben vaak geen partij_nr,
+      // maar wel toernooi_code + fighter_id/toernooi_va_nummer/hoek.
+      // Page 471 filtert rechtstreeks op toernooi_code; page 472 moet ze daarom
+      // terug koppelen aan de T1/T2-rijen zodat elk toernooi zijn eigen open
+      // meldingen toont.
+      const toernooiOnlyRes = activeRes.filter((rr) => {
+        const pn = Number(rr.partij_nr);
+        return (!Number.isFinite(pn) || pn <= 0) && String((rr as any)?.toernooi_code ?? "").trim();
+      });
+
+      if (toernooiOnlyRes.length > 0) {
+        for (const ctxRow of ctxList) {
+          if (!isToernooiRow(ctxRow)) continue;
+          const pn = Number(ctxRow?.partij_nr);
+          if (!Number.isFinite(pn) || pn <= 0) continue;
+
+          const matches = toernooiOnlyRes.filter((rr) => toernooiResultMatchesRow(rr, ctxRow));
+
+          if (!matches.length) continue;
+
+          const ctxForPn = ctxByPn[pn] ?? ctxRow;
+          const filteredMatches = isExactBoksen(ctxForPn)
+            ? matches.filter((rr) => !isBoksenNoVaInfoRow(rr))
+            : matches;
+
+          if (!filteredMatches.length) continue;
+          if (!resByPn[pn]) resByPn[pn] = [];
+
+          const seenKeys = new Set(resByPn[pn].map(toernooiResultDedupeKey));
+
+          for (const rr of filteredMatches) {
+            const key = toernooiResultDedupeKey(rr);
+            if (seenKeys.has(key)) continue;
+            seenKeys.add(key);
+            resByPn[pn].push(rr);
+          }
+        }
+      }
+
       setResultatenByPartij(resByPn);
 
       const dispMap: Record<number, boolean> = {};
       for (const pn of Object.keys(resByPn)) {
         const pnNum = Number(pn);
-        const allRowsForPartij = resByPn[pnNum] ?? [];
-        const rr = allRowsForPartij.filter((r) => !isWeegstationRow(r));
-        const weegRowsForPartij = allRowsForPartij.filter(isWeegstationRow);
-        const weegDispAfgekeurd = hasDeniedWeegDispensatie(weegRowsForPartij);
-        const hasDisp =
-          !weegDispAfgekeurd &&
-          (rr.some((r) => normResultaatRow(r) === "dispensatie") ||
-            weegstationBadgesFromRows(weegRowsForPartij).some(
-              (b) => b.tone === "disp_ok",
-            ));
+        const rr = resByPn[pnNum];
+        const hasDisp = rr.some((r) => normResultaatRow(r) === "dispensatie");
         if (hasDisp) dispMap[pnNum] = true;
       }
 
@@ -3149,20 +3086,8 @@ export default function ControleMatchmakingPage() {
         const pn = Number(pnStr);
         const ctx = ctxByPn[pn];
         const rr = resByPn[pn] ?? [];
-        const rrForRulesEngine = rr.filter((res) => !isWeegstationRow(res));
 
-        let status = statusFromResultatenOrOk(rrForRulesEngine, ctx);
-
-        const weegStatus = statusFromWeegstationRows(
-          rr.filter(isWeegstationRow),
-        );
-        if (weegStatus === "afgekeurd") {
-          status = "afgekeurd";
-        } else if (weegStatus === "dispensatie" && status === "ok") {
-          status = "dispensatie";
-        } else if (weegStatus === "actie" && status === "ok") {
-          status = "actie";
-        }
+        let status = statusFromResultatenOrOk(rr, ctx);
 
         const allForPn = allRes.filter((res) => Number(res.partij_nr) === pn);
         const relevantForPn = isExactBoksen(ctx)
@@ -3177,7 +3102,9 @@ export default function ControleMatchmakingPage() {
         if (licentieGoedgekeurd) approvedLicentieMap[pn] = true;
         const mistLicentie =
           !licentieGoedgekeurd &&
-          (isMissingLicentie(ctx, "rood") || isMissingLicentie(ctx, "blauw"));
+          (hasOpenLicentieMelding(rr) ||
+            isMissingLicentie(ctx, "rood") ||
+            isMissingLicentie(ctx, "blauw"));
 
         if (mistLicentie && status !== "verbod") status = "afgekeurd";
 
@@ -3203,6 +3130,7 @@ export default function ControleMatchmakingPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchmakingId, reloadTick]);
+
 
   useEffect(() => {
     refreshPresence();
@@ -3238,31 +3166,29 @@ export default function ControleMatchmakingPage() {
 
       if (approvedLicentieByPartij[pn]) continue;
 
-      if (isMissingLicentie(r, "rood") || isMissingLicentie(r, "blauw")) {
+      const rr = resultatenByPartij[pn] ?? [];
+      if (
+        hasOpenLicentieMelding(rr) ||
+        isMissingLicentie(r, "rood") ||
+        isMissingLicentie(r, "blauw")
+      ) {
         m[pn] = true;
       }
     }
     return m;
-  }, [rows, approvedLicentieByPartij]);
+  }, [rows, approvedLicentieByPartij, resultatenByPartij]);
 
   const hasAfkeurByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
-    for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
+    for (const [pnStr, rr] of Object.entries(resultatenByPartij) as [string, ResRow[]][]) {
       const pn = Number(pnStr);
       if (!Number.isFinite(pn)) continue;
-
-      const heeftRulesEngineAfkeur = rr.some(
-        (r) =>
-          !isWeegstationRow(r) &&
-          !isBelgischeGymInfoRow(r) &&
-          normResultaatRow(r) === "afgekeurd",
-      );
-
-      const heeftWeegstationAfkeur = weegstationBadgesFromRows(
-        rr.filter(isWeegstationRow),
-      ).some((b) => b.tone === "disp_bad" || b.tone === "afkeur");
-
-      if (heeftRulesEngineAfkeur || heeftWeegstationAfkeur) {
+      if (
+        rr.some(
+          (r) =>
+            !isBelgischeGymInfoRow(r) && normResultaatRow(r) === "afgekeurd",
+        )
+      ) {
         m[pn] = true;
       }
     }
@@ -3275,41 +3201,13 @@ export default function ControleMatchmakingPage() {
 
   const hasActieByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
-    for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
+    for (const [pnStr, rr] of Object.entries(resultatenByPartij) as [string, ResRow[]][]) {
       const pn = Number(pnStr);
       if (!Number.isFinite(pn)) continue;
-
-      const heeftRulesEngineActie = rr.some(
-        (r) => !isWeegstationRow(r) && normResultaatRow(r) === "actie",
-      );
-      const heeftWeegstationMinpunt = weegstationBadgesFromRows(
-        rr.filter(isWeegstationRow),
-      ).some((b) => b.tone === "minpunt");
-
-      if (heeftRulesEngineActie || heeftWeegstationMinpunt) m[pn] = true;
+      if (rr.some((r) => normResultaatRow(r) === "actie")) m[pn] = true;
     }
     return m;
   }, [resultatenByPartij]);
-
-  const weegstationByPartij = useMemo(() => {
-    const m: Record<number, ResRow[]> = {};
-    for (const [pnStr, rr] of Object.entries(resultatenByPartij)) {
-      const pn = Number(pnStr);
-      if (!Number.isFinite(pn)) continue;
-      const rows = rr.filter((r) => isWeegstationRow(r));
-      if (rows.length > 0) m[pn] = rows;
-    }
-    return m;
-  }, [resultatenByPartij]);
-
-  const hasWeegstationByPartij = useMemo(() => {
-    const m: Record<number, boolean> = {};
-    for (const [pnStr, rr] of Object.entries(weegstationByPartij)) {
-      const pn = Number(pnStr);
-      if (Number.isFinite(pn) && hasWeegstationAandachtspunt(rr)) m[pn] = true;
-    }
-    return m;
-  }, [weegstationByPartij]);
 
   const toernooiGroepen = useMemo(() => {
     return buildToernooiGroepen(
@@ -3362,8 +3260,7 @@ export default function ControleMatchmakingPage() {
       disp = 0,
       geen = 0,
       verbod = 0,
-      geen_licentie = 0,
-      weegstation = 0;
+      geen_licentie = 0;
 
     for (const r of gewoneRows) {
       const pn = Number(r.partij_nr);
@@ -3379,7 +3276,6 @@ export default function ControleMatchmakingPage() {
       if (hasActieByPartij[pn]) actie++;
       if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
-      if (hasWeegstationByPartij[pn]) weegstation++;
 
       const cnt = countByPartij[pn] ?? 0;
       meldingen_totaal += cnt;
@@ -3397,7 +3293,6 @@ export default function ControleMatchmakingPage() {
       ok,
       geen,
       geen_licentie: geen_licentie + toernooiGeenLicentieTotaal,
-      weegstation,
     };
   }, [
     gewoneRows,
@@ -3410,7 +3305,6 @@ export default function ControleMatchmakingPage() {
     hasDispByPartij,
     dispRequestByPartij,
     toernooiGeenLicentieTotaal,
-    hasWeegstationByPartij,
   ]);
 
   const filterCounts = useMemo(() => {
@@ -3420,8 +3314,7 @@ export default function ControleMatchmakingPage() {
       disp = 0,
       geen = 0,
       verbod = 0,
-      geen_licentie = 0,
-      weegstation = 0;
+      geen_licentie = 0;
 
     for (const r of gewoneRows) {
       const pn = Number(r.partij_nr);
@@ -3437,7 +3330,6 @@ export default function ControleMatchmakingPage() {
       if (hasActieByPartij[pn]) actie++;
       if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
-      if (hasWeegstationByPartij[pn]) weegstation++;
     }
 
     return {
@@ -3449,7 +3341,6 @@ export default function ControleMatchmakingPage() {
       ok,
       geen_info: geen,
       geen_licentie,
-      weegstation,
     };
   }, [
     gewoneRows,
@@ -3460,7 +3351,6 @@ export default function ControleMatchmakingPage() {
     hasActieByPartij,
     hasDispByPartij,
     dispRequestByPartij,
-    hasWeegstationByPartij,
   ]);
 
   const filteredRows = useMemo(() => {
@@ -3479,7 +3369,6 @@ export default function ControleMatchmakingPage() {
       if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
       if (filter === "afgekeurd") return !!hasAfkeurByPartij[pn];
       if (filter === "actie") return !!hasActieByPartij[pn];
-      if (filter === "weegstation") return !!hasWeegstationByPartij[pn];
       if (filter !== "all") {
         const s = statusByPartij[pn] ?? "geen_info";
         if (s !== filter) return false;
@@ -3523,7 +3412,6 @@ export default function ControleMatchmakingPage() {
     dispRequestByPartij,
     verbodByPartij,
     missingLicentieByPartij,
-    hasWeegstationByPartij,
     search,
     lineupMode,
   ]);
@@ -4189,7 +4077,28 @@ export default function ControleMatchmakingPage() {
                               </thead>
                               <tbody>
                                 {Object.entries(galaDuurCalc.countsByKlasse)
-                                  .sort((a, b) => a[0].localeCompare(b[0]))
+                                  .sort((a, b) => {
+                                    const order = [
+                                      "Jeugd < 16 jaar",
+                                      "Jeugd 16+ jaar (beide 16+)",
+                                      "Talentstatus / J+",
+                                      "R / Recreant",
+                                      "N / Nieuweling",
+                                      "C",
+                                      "B",
+                                      "A / A K1",
+                                      "A titel",
+                                      "Demo",
+                                      "Boksen",
+                                      "MMA jeugd",
+                                      "MMA amateur",
+                                      "MMA Pro",
+                                    ];
+                                    const ai = order.findIndex((x) => a[0].includes(x));
+                                    const bi = order.findIndex((x) => b[0].includes(x));
+                                    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+                                    return a[0].localeCompare(b[0], "nl");
+                                  })
                                   .map(([klasse, count], idx) => {
                                     const mins =
                                       galaDuurCalc.minsByKlasse[klasse] ?? 0;
@@ -4253,7 +4162,7 @@ export default function ControleMatchmakingPage() {
                         "-",
                       );
                       const maxGewichten = groep.rows
-                        .map((r) => toNumberLoose(r?.max_gewicht))
+                        .map((r) => getResolvedMaxWeightNumber(r))
                         .filter(
                           (v): v is number => v != null && Number.isFinite(v),
                         );
@@ -4494,6 +4403,19 @@ export default function ControleMatchmakingPage() {
                                       <div className="mt-1 text-sm font-bold text-zinc-900">
                                         {deelnemer.va}
                                       </div>
+
+                                      {deelnemer.meldingen.length ? (
+                                        <div className="mt-3 rounded-lg border border-orange-200 bg-orange-50 p-3">
+                                          <div className="text-[11px] font-black uppercase tracking-[0.10em] text-orange-800">
+                                            Open melding(en)
+                                          </div>
+                                          <ul className="mt-2 list-disc pl-5 text-sm font-semibold text-zinc-900">
+                                            {deelnemer.meldingen.map((melding) => (
+                                              <li key={melding}>{melding}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      ) : null}
                                     </div>
                                   ))}
                                 </div>
@@ -4550,19 +4472,11 @@ export default function ControleMatchmakingPage() {
                     disabled={lineupMode}
                   />
                   <FilterButton
-                    label="Licentie"
+                    label="Geen licentie"
                     count={filterCounts.geen_licentie}
                     tone="blue"
                     active={filter === "geen_licentie"}
                     onClick={() => setFilter("geen_licentie")}
-                    disabled={lineupMode}
-                  />
-                  <FilterButton
-                    label="Weegstation"
-                    count={filterCounts.weegstation}
-                    tone="gray"
-                    active={filter === "weegstation"}
-                    onClick={() => setFilter("weegstation")}
                     disabled={lineupMode}
                   />
                   <FilterButton
@@ -4689,7 +4603,7 @@ export default function ControleMatchmakingPage() {
 
                         const discipline = safeText(r.discipline, "-");
                         const klasse = safeText(r.klasse_mm ?? r.klasse, "-");
-                        const maxGewicht = toNumberLoose(r.max_gewicht);
+                        const maxGewicht = getResolvedMaxWeightNumber(r);
                         const isToernooi = isToernooiRow(r);
                         const dividerClass = zebraWhite
                           ? "border-t border-gray-400/70"
@@ -4700,18 +4614,9 @@ export default function ControleMatchmakingPage() {
                         const heeftAfkeur = Number.isFinite(originalPn)
                           ? !!hasAfkeurByPartij[originalPn]
                           : false;
-                        const weegstationBadges = Number.isFinite(originalPn)
-                          ? weegstationBadgesFromRows(
-                              weegstationByPartij[originalPn],
-                            )
-                          : [];
-                        const weegDispAfgekeurd = weegstationBadges.some(
-                          (b) => b.tone === "disp_bad",
-                        );
                         const heeftDispensatie = Number.isFinite(originalPn)
-                          ? !weegDispAfgekeurd &&
-                            (!!hasDispByPartij[originalPn] ||
-                              !!dispRequestByPartij[originalPn])
+                          ? !!hasDispByPartij[originalPn] ||
+                            !!dispRequestByPartij[originalPn]
                           : false;
                         const heeftActie = Number.isFinite(originalPn)
                           ? !!hasActieByPartij[originalPn]
@@ -4790,12 +4695,6 @@ export default function ControleMatchmakingPage() {
                                   {heeftActie && status !== "actie" ? (
                                     <Chip label="ACTIE" tone="yellow" />
                                   ) : null}
-                                  {weegstationBadges.map((badge) => (
-                                    <WeegstationBadge
-                                      key={badge.key}
-                                      badge={badge}
-                                    />
-                                  ))}
                                 </div>
 
                                 {lineupMode ? (

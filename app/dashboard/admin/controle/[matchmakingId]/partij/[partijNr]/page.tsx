@@ -1532,17 +1532,102 @@ export default function PartijDetailPage() {
     }
   }
 
+  function dedupeControleResultatenRows(rows: ControleResultaatRow[]) {
+    const map = new Map<string, ControleResultaatRow>();
+
+    for (const row of rows ?? []) {
+      const id = String(row?.id ?? "").trim();
+      const fallback = [
+        row?.controle_run_id,
+        row?.run_id,
+        row?.matchmaking_id,
+        row?.bout_id,
+        row?.partij_nr,
+        row?.hoek,
+        row?.rule_code,
+        row?.rule,
+        row?.boodschap,
+        row?.created_at,
+      ]
+        .map((v) => String(v ?? "").trim().toLowerCase())
+        .join("|");
+
+      const key = id || fallback;
+      if (!key || map.has(key)) continue;
+      map.set(key, row);
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const ta = new Date(String(a?.created_at ?? "")).getTime();
+      const tb = new Date(String(b?.created_at ?? "")).getTime();
+      if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+      return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+    });
+  }
+
+  async function fetchRegelsVoorPartij(opts: {
+    runId: string;
+    partijNr: number;
+    ctxRow?: AnyRow | null;
+  }): Promise<ControleResultaatRow[]> {
+    const { runId, partijNr, ctxRow } = opts;
+    const boutId = asUuid(ctxRow?.bout_id);
+    const mmId = String(matchmakingId ?? "").trim();
+
+    const queries = [
+      supabase
+        .from("controle_resultaten")
+        .select("*")
+        .eq("controle_run_id", runId)
+        .eq("partij_nr", partijNr),
+      supabase
+        .from("controle_resultaten")
+        .select("*")
+        .eq("run_id", runId)
+        .eq("partij_nr", partijNr),
+    ];
+
+    // Weegstation-meldingen staan ook in controle_resultaten, maar kunnen
+    // vanuit een andere flow met alleen matchmaking_id/partij_nr of bout_id zijn opgeslagen.
+    // Daarom halen we die bewust mee, zonder de rest van deze goed werkende pagina te veranderen.
+    if (mmId) {
+      queries.push(
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("matchmaking_id", mmId)
+          .eq("partij_nr", partijNr)
+      );
+    }
+
+    if (mmId && boutId) {
+      queries.push(
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("matchmaking_id", mmId)
+          .eq("bout_id", boutId)
+      );
+    }
+
+    const results = await Promise.all(queries);
+    const allRows: ControleResultaatRow[] = [];
+
+    for (const res of results) {
+      if (res.error) throw res.error;
+      allRows.push(...(((res.data ?? []) as unknown) as ControleResultaatRow[]));
+    }
+
+    return dedupeControleResultatenRows(allRows);
+  }
+
   async function reloadRegels() {
     if (!run?.id || !partijNr) return;
-    const { data: resRows, error: resErr } = await supabase
-      .from("controle_resultaten")
-      .select("*")
-      .eq("controle_run_id", run.id)
-      .eq("partij_nr", partijNr)
-      .order("created_at", { ascending: true });
-
-    if (resErr) throw resErr;
-    const rows = (resRows ?? []) as ControleResultaatRow[];
+    const rows = await fetchRegelsVoorPartij({
+      runId: run.id,
+      partijNr,
+      ctxRow: ctx,
+    });
     setRegels(rows);
     primeNoteDrafts(rows);
   }
@@ -1792,17 +1877,12 @@ export default function PartijDetailPage() {
         const row = (ctxRows?.[0] ?? null) as AnyRow | null;
         setCtx(row);
 
-        const { data: resRows, error: resErr } = await supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("controle_run_id", latestRun.id)
-          .eq("partij_nr", partijNr)
-          .order("created_at", { ascending: true });
-
-        if (resErr) throw resErr;
-
         {
-          const rows = (resRows ?? []) as ControleResultaatRow[];
+          const rows = await fetchRegelsVoorPartij({
+            runId: latestRun.id,
+            partijNr,
+            ctxRow: row,
+          });
           setRegels(rows);
           primeNoteDrafts(rows);
         }

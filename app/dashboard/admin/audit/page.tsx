@@ -62,6 +62,99 @@ type EventMap = Record<
   }
 >;
 
+
+type ControleResultaatRow = {
+  id?: string | null;
+  matchmaking_id?: string | null;
+  controle_run_id?: string | null;
+  bout_id?: string | null;
+  partij_nr?: number | null;
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  va_nummer?: string | null;
+  rule?: string | null;
+  rule_code?: string | null;
+  resultaat?: string | null;
+  original_resultaat?: string | null;
+  severity?: string | null;
+  boodschap?: string | null;
+  hoek?: string | null;
+  review_status?: string | null;
+  review_note?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  aantekeningen?: string | null;
+};
+
+type BoutContextRow = {
+  matchmaking_id?: string | null;
+  bout_id?: string | null;
+  partij_nr?: number | null;
+  rood_naam_mm?: string | null;
+  blauw_naam_mm?: string | null;
+  rood_gym_mm?: string | null;
+  blauw_gym_mm?: string | null;
+  rood_va_mm?: string | null;
+  blauw_va_mm?: string | null;
+  klasse_mm?: string | null;
+  discipline?: string | null;
+  evenement_naam?: string | null;
+  evenement_datum?: string | null;
+};
+
+type ToernooiContextRow = {
+  matchmaking_id?: string | null;
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  va_nummer?: string | null;
+  naam?: string | null;
+  naam_mm?: string | null;
+  naam_fp?: string | null;
+  sportschool?: string | null;
+  sportschool_mm?: string | null;
+  klasse?: string | null;
+  klasse_mm?: string | null;
+  discipline?: string | null;
+  evenement_naam?: string | null;
+  evenement_datum?: string | null;
+};
+
+type WeighInBoutRow = {
+  id?: string | null;
+  matchmaking_id?: string | null;
+  bout_context_id?: string | null;
+  controle_run_id?: string | null;
+  partij_nr?: number | null;
+  original_partij_nr?: number | null;
+  rood_naam?: string | null;
+  blauw_naam?: string | null;
+  rood_gym?: string | null;
+  blauw_gym?: string | null;
+  rood_va?: string | null;
+  blauw_va?: string | null;
+  rood_gewogen_gewicht?: string | number | null;
+  blauw_gewogen_gewicht?: string | number | null;
+  gewicht_strafpunt_rood?: string | number | null;
+  gewicht_strafpunt_blauw?: string | number | null;
+  klasse_mm?: string | null;
+  discipline?: string | null;
+  max_gewicht_notatie?: string | null;
+  reglement_status?: string | null;
+  praktijk_status?: string | null;
+  eindstatus?: string | null;
+  evenement_naam?: string | null;
+  evenement_datum?: string | null;
+};
+
+type ApprovalInfo = {
+  controle?: ControleResultaatRow | null;
+  bout?: BoutContextRow | null;
+  toernooi?: ToernooiContextRow | null;
+  weighIn?: WeighInBoutRow | null;
+};
+
+type ApprovalMap = Record<string, ApprovalInfo>;
+
 const ACTION_OPTIONS = [
   { value: "", label: "Alle acties" },
   { value: "update", label: "Update" },
@@ -195,6 +288,166 @@ function getSnapshotData(row: AuditRow) {
   );
 }
 
+
+function isGoedgekeurdValue(v: unknown) {
+  return normalizeKey(v) === "goedgekeurd";
+}
+
+function getAuditValue(row: AuditRow, key: string) {
+  return row.new_value?.[key] ?? row.meta?.[key] ?? row.old_value?.[key] ?? null;
+}
+
+function toNullableNumber(v: unknown) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getControleResultaatId(row: AuditRow) {
+  const candidates = [
+    row.entity_type === "controle_resultaten" ? row.entity_id : null,
+    getAuditValue(row, "controle_resultaat_id"),
+    getAuditValue(row, "resultaat_id"),
+    getAuditValue(row, "id"),
+  ];
+
+  return safeText(candidates.find((v) => safeText(v)) || "");
+}
+
+function getWeighInBoutId(row: AuditRow) {
+  const candidates = [
+    row.entity_type === "weigh_in_bouts" ? row.entity_id : null,
+    getAuditValue(row, "weigh_in_bout_id"),
+    getAuditValue(row, "weighInBoutId"),
+    getAuditValue(row, "id"),
+  ];
+
+  return safeText(candidates.find((v) => safeText(v)) || "");
+}
+
+function getApprovalKey(row: AuditRow) {
+  return row.id;
+}
+
+function getApprovalSearchText(info?: ApprovalInfo | null) {
+  if (!info) return "";
+  const c = info.controle;
+  const b = info.bout;
+  const t = info.toernooi;
+  const w = info.weighIn;
+  return normalizeKey([
+    c?.rule,
+    c?.rule_code,
+    c?.boodschap,
+    c?.review_status,
+    c?.original_resultaat,
+    b?.rood_naam_mm,
+    b?.blauw_naam_mm,
+    b?.rood_gym_mm,
+    b?.blauw_gym_mm,
+    b?.rood_va_mm,
+    b?.blauw_va_mm,
+    t?.naam,
+    t?.naam_mm,
+    t?.naam_fp,
+    t?.sportschool,
+    t?.sportschool_mm,
+    t?.va_nummer,
+    w?.rood_naam,
+    w?.blauw_naam,
+    w?.rood_gym,
+    w?.blauw_gym,
+    w?.rood_va,
+    w?.blauw_va,
+    w?.reglement_status,
+    w?.praktijk_status,
+    w?.eindstatus,
+  ].filter(Boolean).join(" "));
+}
+
+function hasApprovalChange(row: AuditRow) {
+  return (
+    isGoedgekeurdValue(row.new_value?.review_status) ||
+    isGoedgekeurdValue(row.meta?.review_status) ||
+    isGoedgekeurdValue(row.old_value?.review_status) ||
+    isGoedgekeurdValue(row.new_value?.actie_status) ||
+    isGoedgekeurdValue(row.meta?.actie_status)
+  );
+}
+
+const APPROVAL_TECH_FIELDS = new Set([
+  "review_status",
+  "reviewed_by",
+  "reviewed_at",
+  "review_note",
+  "actie_status",
+  "actie",
+  "aantekeningen",
+  "resultaat",
+]);
+
+function getDisplayChangedFields(row: AuditRow) {
+  const fields = getChangedFields(row);
+
+  if (!hasApprovalChange(row)) return fields;
+
+  const technicalApprovalFields = fields.filter((change) => APPROVAL_TECH_FIELDS.has(change.key));
+  const otherFields = fields.filter((change) => !APPROVAL_TECH_FIELDS.has(change.key));
+
+  if (!technicalApprovalFields.length) return fields;
+
+  const oldStatus =
+    row.old_value?.review_status ??
+    row.old_value?.actie_status ??
+    row.old_value?.resultaat ??
+    row.old_value?.original_resultaat ??
+    row.meta?.original_resultaat ??
+    "Open";
+
+  const newStatus =
+    row.new_value?.review_status ??
+    row.meta?.review_status ??
+    row.new_value?.actie_status ??
+    "goedgekeurd";
+
+  return [
+    {
+      key: "Goedkeuring",
+      oldValue: oldStatus,
+      newValue: newStatus,
+    },
+    ...otherFields,
+  ];
+}
+
+function getAuditDedupeKey(row: AuditRow) {
+  const controleId = getControleResultaatId(row);
+  if ((hasApprovalChange(row) || row.entity_type === "controle_resultaten") && controleId) {
+    return `controle_resultaten:${controleId}`;
+  }
+
+  const weighInId = getWeighInBoutId(row);
+  if ((hasApprovalChange(row) || row.entity_type === "weigh_in_bouts") && weighInId) {
+    return `weigh_in_bouts:${weighInId}`;
+  }
+
+  return `audit:${row.id}`;
+}
+
+function dedupeAuditRows(rows: AuditRow[]) {
+  const seen = new Set<string>();
+  const result: AuditRow[] = [];
+
+  for (const row of rows) {
+    const key = getAuditDedupeKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(row);
+  }
+
+  return result;
+}
+
 const pageBackground: CSSProperties = {
   minHeight: "100vh",
   color: "#fff",
@@ -239,6 +492,7 @@ export default function AdminAuditPage() {
 
   const [nameMap, setNameMap] = useState<UserNameMap>({});
   const [eventMap, setEventMap] = useState<EventMap>({});
+  const [approvalMap, setApprovalMap] = useState<ApprovalMap>({});
 
   const [searchText, setSearchText] = useState("");
   const [actionFilter, setActionFilter] = useState("");
@@ -265,15 +519,244 @@ export default function AdminAuditPage() {
       const nextItems = Array.isArray(json?.items) ? json.items : [];
       setItems(nextItems);
 
-      await Promise.all([loadUserNames(nextItems), loadEventNames(nextItems)]);
+      await Promise.all([loadUserNames(nextItems), loadEventNames(nextItems), loadApprovalInfo(nextItems)]);
     } catch (err: any) {
       setError(err?.message || "Onbekende fout.");
       setItems([]);
       setNameMap({});
       setEventMap({});
+      setApprovalMap({});
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadApprovalInfo(rows: AuditRow[]) {
+    if (!rows.length) {
+      setApprovalMap({});
+      return;
+    }
+
+    const resultMap: ApprovalMap = {};
+    const controleIds = Array.from(
+      new Set(rows.map((row) => getControleResultaatId(row)).filter(Boolean))
+    );
+    const weighInIds = Array.from(
+      new Set(rows.map((row) => getWeighInBoutId(row)).filter(Boolean))
+    );
+
+    const rowMatcher = (row: AuditRow, c?: ControleResultaatRow | null) => {
+      if (!c) return false;
+      const id = safeText(c.id);
+      if (id && getControleResultaatId(row) === id) return true;
+      const mm = safeText(c.matchmaking_id);
+      const partij = c.partij_nr ?? null;
+      const rowMm = safeText(row.matchmaking_id || getAuditValue(row, "matchmaking_id"));
+      const rowPartij = toNullableNumber(row.partij_nr ?? getAuditValue(row, "partij_nr"));
+      return !!mm && !!rowMm && mm === rowMm && partij !== null && rowPartij !== null && rowPartij === partij;
+    };
+
+    const weighRowMatcher = (row: AuditRow, w?: WeighInBoutRow | null) => {
+      if (!w) return false;
+      const id = safeText(w.id);
+      if (id && getWeighInBoutId(row) === id) return true;
+      const mm = safeText(w.matchmaking_id);
+      const partij = w.partij_nr ?? w.original_partij_nr ?? null;
+      const rowMm = safeText(row.matchmaking_id || getAuditValue(row, "matchmaking_id"));
+      const rowPartij = toNullableNumber(row.partij_nr ?? getAuditValue(row, "partij_nr"));
+      return !!mm && !!rowMm && mm === rowMm && partij !== null && rowPartij !== null && rowPartij === partij;
+    };
+
+    let controleRows: ControleResultaatRow[] = [];
+    let weighRows: WeighInBoutRow[] = [];
+
+    try {
+      if (controleIds.length) {
+        const res = await supabase
+          .from("controle_resultaten")
+          .select("id,matchmaking_id,controle_run_id,bout_id,partij_nr,toernooi_code,fighter_id,va_nummer,rule,rule_code,resultaat,original_resultaat,severity,boodschap,hoek,review_status,review_note,reviewed_by,reviewed_at,aantekeningen")
+          .in("id", controleIds);
+
+        if (res.error) console.warn("[audit] controle_resultaten by id error:", res.error);
+        if (Array.isArray(res.data)) controleRows = res.data as ControleResultaatRow[];
+      }
+    } catch (err) {
+      console.warn("[audit] controle_resultaten fetch failed:", err);
+    }
+
+    try {
+      const directRows: ControleResultaatRow[] = rows
+        .filter((row) => hasApprovalChange(row) || row.entity_type === "controle_resultaten")
+        .map((row) => ({
+          id: safeText(getControleResultaatId(row)) || null,
+          matchmaking_id: safeText(row.matchmaking_id || getAuditValue(row, "matchmaking_id")) || null,
+          controle_run_id: safeText(getAuditValue(row, "controle_run_id")) || null,
+          bout_id: safeText(getAuditValue(row, "bout_id")) || null,
+          partij_nr: toNullableNumber(row.partij_nr ?? getAuditValue(row, "partij_nr")),
+          toernooi_code: safeText(getAuditValue(row, "toernooi_code")) || null,
+          fighter_id: safeText(getAuditValue(row, "fighter_id")) || null,
+          va_nummer: safeText(getAuditValue(row, "va_nummer")) || null,
+          rule: safeText(getAuditValue(row, "rule")) || null,
+          rule_code: safeText(getAuditValue(row, "rule_code")) || null,
+          resultaat: safeText(getAuditValue(row, "resultaat")) || null,
+          original_resultaat: safeText(getAuditValue(row, "original_resultaat")) || null,
+          severity: safeText(getAuditValue(row, "severity")) || null,
+          boodschap: safeText(getAuditValue(row, "boodschap")) || null,
+          hoek: safeText(getAuditValue(row, "hoek")) || null,
+          review_status: safeText(getAuditValue(row, "review_status")) || null,
+          review_note: safeText(getAuditValue(row, "review_note")) || null,
+          reviewed_by: safeText(getAuditValue(row, "reviewed_by")) || null,
+          reviewed_at: safeText(getAuditValue(row, "reviewed_at")) || null,
+          aantekeningen: safeText(getAuditValue(row, "aantekeningen")) || null,
+        }))
+        .filter((x) => x.matchmaking_id || x.id || x.bout_id);
+
+      for (const direct of directRows) {
+        const already = controleRows.some((x) => safeText(x.id) && safeText(x.id) === safeText(direct.id));
+        if (!already) controleRows.push(direct);
+      }
+    } catch (err) {
+      console.warn("[audit] controle_resultaten direct parse failed:", err);
+    }
+
+    const boutIds = Array.from(new Set(controleRows.map((x) => safeText(x.bout_id)).filter(Boolean)));
+    const mmIds = Array.from(
+      new Set(
+        [
+          ...controleRows.map((x) => safeText(x.matchmaking_id)),
+          ...rows.map((row) => safeText(row.matchmaking_id || getAuditValue(row, "matchmaking_id"))),
+        ].filter(Boolean)
+      )
+    );
+
+    let boutRows: BoutContextRow[] = [];
+    let toernooiRows: ToernooiContextRow[] = [];
+
+    try {
+      if (boutIds.length) {
+        const res = await supabase
+          .from("controle_bout_context")
+          .select("matchmaking_id,bout_id,partij_nr,rood_naam_mm,blauw_naam_mm,rood_gym_mm,blauw_gym_mm,rood_va_mm,blauw_va_mm,klasse_mm,discipline,evenement_naam,evenement_datum")
+          .in("bout_id", boutIds);
+
+        if (res.error) console.warn("[audit] controle_bout_context by bout error:", res.error);
+        if (Array.isArray(res.data)) boutRows = res.data as BoutContextRow[];
+      }
+    } catch (err) {
+      console.warn("[audit] controle_bout_context by bout fetch failed:", err);
+    }
+
+    try {
+      if (mmIds.length) {
+        const res = await supabase
+          .from("controle_bout_context")
+          .select("matchmaking_id,bout_id,partij_nr,rood_naam_mm,blauw_naam_mm,rood_gym_mm,blauw_gym_mm,rood_va_mm,blauw_va_mm,klasse_mm,discipline,evenement_naam,evenement_datum")
+          .in("matchmaking_id", mmIds);
+
+        if (res.error) console.warn("[audit] controle_bout_context by mm error:", res.error);
+        if (Array.isArray(res.data)) {
+          for (const item of res.data as BoutContextRow[]) {
+            const exists = boutRows.some(
+              (x) => safeText(x.bout_id) && safeText(x.bout_id) === safeText(item.bout_id)
+            );
+            if (!exists) boutRows.push(item);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[audit] controle_bout_context by mm fetch failed:", err);
+    }
+
+    try {
+      if (mmIds.length) {
+        const res = await supabase
+          .from("controle_toernooi_context")
+          .select("matchmaking_id,toernooi_code,fighter_id,va_nummer,naam,naam_mm,naam_fp,sportschool,sportschool_mm,klasse,klasse_mm,discipline,evenement_naam,evenement_datum")
+          .in("matchmaking_id", mmIds);
+
+        if (res.error) console.warn("[audit] controle_toernooi_context error:", res.error);
+        if (Array.isArray(res.data)) toernooiRows = res.data as ToernooiContextRow[];
+      }
+    } catch (err) {
+      console.warn("[audit] controle_toernooi_context fetch failed:", err);
+    }
+
+    try {
+      if (weighInIds.length) {
+        const res = await supabase
+          .from("weigh_in_bouts")
+          .select("id,matchmaking_id,bout_context_id,controle_run_id,partij_nr,original_partij_nr,rood_naam,blauw_naam,rood_gym,blauw_gym,rood_va,blauw_va,rood_gewogen_gewicht,blauw_gewogen_gewicht,gewicht_strafpunt_rood,gewicht_strafpunt_blauw,klasse_mm,discipline,max_gewicht_notatie,reglement_status,praktijk_status,eindstatus,evenement_naam,evenement_datum")
+          .in("id", weighInIds);
+
+        if (res.error) console.warn("[audit] weigh_in_bouts by id error:", res.error);
+        if (Array.isArray(res.data)) weighRows = res.data as WeighInBoutRow[];
+      }
+    } catch (err) {
+      console.warn("[audit] weigh_in_bouts by id fetch failed:", err);
+    }
+
+    try {
+      if (mmIds.length) {
+        const res = await supabase
+          .from("weigh_in_bouts")
+          .select("id,matchmaking_id,bout_context_id,controle_run_id,partij_nr,original_partij_nr,rood_naam,blauw_naam,rood_gym,blauw_gym,rood_va,blauw_va,rood_gewogen_gewicht,blauw_gewogen_gewicht,gewicht_strafpunt_rood,gewicht_strafpunt_blauw,klasse_mm,discipline,max_gewicht_notatie,reglement_status,praktijk_status,eindstatus,evenement_naam,evenement_datum")
+          .in("matchmaking_id", mmIds);
+
+        if (res.error) console.warn("[audit] weigh_in_bouts by mm error:", res.error);
+        if (Array.isArray(res.data)) {
+          for (const item of res.data as WeighInBoutRow[]) {
+            const exists = weighRows.some((x) => safeText(x.id) && safeText(x.id) === safeText(item.id));
+            if (!exists) weighRows.push(item);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[audit] weigh_in_bouts by mm fetch failed:", err);
+    }
+
+    for (const row of rows) {
+      const key = getApprovalKey(row);
+      const controle = controleRows.find((c) => rowMatcher(row, c)) || null;
+      const rowMm = safeText(row.matchmaking_id || getAuditValue(row, "matchmaking_id"));
+      const rowPartij = toNullableNumber(row.partij_nr ?? getAuditValue(row, "partij_nr"));
+      const bout =
+        boutRows.find((b) => controle?.bout_id && safeText(b.bout_id) === safeText(controle.bout_id)) ||
+        boutRows.find(
+          (b) =>
+            rowMm &&
+            safeText(b.matchmaking_id) === rowMm &&
+            b.partij_nr !== null &&
+            b.partij_nr !== undefined &&
+            rowPartij !== null && Number(b.partij_nr) === rowPartij
+        ) ||
+        null;
+
+      const toernooi =
+        toernooiRows.find(
+          (t) =>
+            rowMm &&
+            safeText(t.matchmaking_id) === rowMm &&
+            ((controle?.toernooi_code && safeText(t.toernooi_code) === safeText(controle.toernooi_code)) ||
+              (controle?.fighter_id && safeText(t.fighter_id) === safeText(controle.fighter_id)) ||
+              (controle?.va_nummer && safeText(t.va_nummer) === safeText(controle.va_nummer)))
+        ) || null;
+
+      const weighIn =
+        weighRows.find((w) => weighRowMatcher(row, w)) ||
+        weighRows.find(
+          (w) =>
+            rowMm &&
+            safeText(w.matchmaking_id) === rowMm &&
+            (rowPartij !== null && (Number(w.partij_nr) === rowPartij || Number(w.original_partij_nr) === rowPartij))
+        ) ||
+        null;
+
+      if (controle || bout || toernooi || weighIn) {
+        resultMap[key] = { controle, bout, toernooi, weighIn };
+      }
+    }
+
+    setApprovalMap(resultMap);
   }
 
   async function loadUserNames(rows: AuditRow[]) {
@@ -437,6 +920,7 @@ export default function AdminAuditPage() {
       const entityId = normalizeKey(row.entity_id);
       const matchmakingId = normalizeKey(row.matchmaking_id);
       const partijNr = normalizeKey(row.partij_nr);
+      const approvalText = getApprovalSearchText(approvalMap[getApprovalKey(row)]);
 
       const matchesAction = !actionFilter || actionText === normalizeKey(actionFilter);
 
@@ -456,20 +940,23 @@ export default function AdminAuditPage() {
         entityType.includes(q) ||
         entityId.includes(q) ||
         matchmakingId.includes(q) ||
-        partijNr.includes(q);
+        partijNr.includes(q) ||
+        approvalText.includes(q);
 
       return matchesAction && matchesActor && matchesSearch;
     });
-  }, [items, searchText, actorFilter, actionFilter, eventMap, nameMap]);
+  }, [items, searchText, actorFilter, actionFilter, eventMap, nameMap, approvalMap]);
+
+  const visibleItems = useMemo(() => dedupeAuditRows(filteredItems), [filteredItems]);
 
   const stats = useMemo(() => {
     return {
-      totaal: filteredItems.length,
-      updates: filteredItems.filter((x) => x.action === "update").length,
-      snapshots: filteredItems.filter((x) => x.action === "snapshot_created").length,
-      types: new Set(filteredItems.map((x) => x.entity_type || "").filter(Boolean)).size,
+      totaal: visibleItems.length,
+      updates: visibleItems.filter((x) => x.action === "update").length,
+      snapshots: visibleItems.filter((x) => x.action === "snapshot_created").length,
+      types: new Set(visibleItems.map((x) => x.entity_type || "").filter(Boolean)).size,
     };
-  }, [filteredItems]);
+  }, [visibleItems]);
 
   function toggleChanges(id: string) {
     setOpenChanges((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -636,16 +1123,17 @@ export default function AdminAuditPage() {
             <MessagePanel text="Laden..." />
           ) : error ? (
             <MessagePanel text={error} error />
-          ) : filteredItems.length === 0 ? (
+          ) : visibleItems.length === 0 ? (
             <MessagePanel text="Geen audit records gevonden." />
           ) : (
-            filteredItems.map((row) => {
+            visibleItems.map((row) => {
               const actorName = getActorName(row);
-              const changedFields = getChangedFields(row);
+              const changedFields = getDisplayChangedFields(row);
               const hasSnapshot = rowHasSnapshot(row);
               const snapshotData = getSnapshotData(row);
               const isChangesOpen = !!openChanges[row.id];
               const isJsonOpen = !!openJson[row.id];
+              const approvalInfo = approvalMap[getApprovalKey(row)] || null;
 
               return (
                 <SteelFrame key={row.id}>
@@ -748,6 +1236,8 @@ export default function AdminAuditPage() {
                         />
                       </div>
                     </div>
+
+                    {approvalInfo ? <ApprovalInfoPanel info={approvalInfo} actorName={actorName} /> : null}
 
                     {(isChangesOpen || isJsonOpen) && (
                       <div
@@ -1436,6 +1926,256 @@ function ChangeHead({
       }}
     >
       {children}
+    </div>
+  );
+}
+
+function formatWeight(v: unknown) {
+  const s = safeText(v);
+  if (!s) return "—";
+  return `${s} kg`;
+}
+
+function formatPenalty(v: unknown) {
+  const s = safeText(v);
+  if (!s) return "0";
+  return s;
+}
+
+function ApprovalInfoPanel({
+  info,
+  actorName,
+}: {
+  info: ApprovalInfo;
+  actorName: string;
+}) {
+  const c = info.controle;
+  const b = info.bout;
+  const t = info.toernooi;
+  const w = info.weighIn;
+
+  const isToernooi = !!t || !!c?.toernooi_code || c?.partij_nr === 0;
+  const partijLabel = isToernooi
+    ? `Toernooi ${safeText(c?.toernooi_code || t?.toernooi_code) || "—"}`
+    : `Partij ${c?.partij_nr ?? b?.partij_nr ?? w?.partij_nr ?? "—"}`;
+
+  const roodNaam = safeText(b?.rood_naam_mm) || safeText(w?.rood_naam);
+  const blauwNaam = safeText(b?.blauw_naam_mm) || safeText(w?.blauw_naam);
+  const roodGym = safeText(b?.rood_gym_mm) || safeText(w?.rood_gym);
+  const blauwGym = safeText(b?.blauw_gym_mm) || safeText(w?.blauw_gym);
+  const roodVa = safeText(b?.rood_va_mm) || safeText(w?.rood_va);
+  const blauwVa = safeText(b?.blauw_va_mm) || safeText(w?.blauw_va);
+
+  const eventName =
+    safeText(b?.evenement_naam) || safeText(w?.evenement_naam) || safeText(t?.evenement_naam);
+  const eventDate = b?.evenement_datum || w?.evenement_datum || t?.evenement_datum || null;
+  const klasse = safeText(b?.klasse_mm) || safeText(w?.klasse_mm) || safeText(t?.klasse_mm) || safeText(t?.klasse);
+  const discipline = safeText(b?.discipline) || safeText(w?.discipline) || safeText(t?.discipline);
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: 10,
+        border: "1px solid rgba(255,77,0,0.42)",
+        background:
+          "linear-gradient(180deg, rgba(255,77,0,0.13), rgba(0,0,0,0.18))",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 9,
+        }}
+      >
+        <TagPill strong>{safeText(c?.review_status) || "goedgekeurd"}</TagPill>
+        <TagPill>{partijLabel}</TagPill>
+        {klasse ? <TagPill>{klasse}</TagPill> : null}
+        {discipline ? <TagPill>{discipline}</TagPill> : null}
+        {w ? <TagPill>Weegstation</TagPill> : null}
+      </div>
+
+      {eventName ? (
+        <div
+          style={{
+            marginBottom: 8,
+            fontSize: 12,
+            fontWeight: 900,
+            color: "#f1f1f1",
+          }}
+        >
+          {eventName} {fmtEventDate(eventDate)}
+        </div>
+      ) : null}
+
+      {isToernooi ? (
+        <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+          <FighterLine corner="TOERNOOI" name={safeText(t?.naam_mm) || safeText(t?.naam) || safeText(t?.naam_fp) || "Onbekende vechter"} gym={safeText(t?.sportschool_mm) || safeText(t?.sportschool)} va={safeText(t?.va_nummer)} />
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)",
+            gap: 10,
+            alignItems: "center",
+            marginBottom: 10,
+          }}
+        >
+          <FighterLine corner="ROOD" name={roodNaam || "Rood onbekend"} gym={roodGym} va={roodVa} />
+          <div style={{ fontSize: 10, fontWeight: 1000, color: ORANGE }}>VS</div>
+          <FighterLine corner="BLAUW" name={blauwNaam || "Blauw onbekend"} gym={blauwGym} va={blauwVa} />
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: 8,
+        }}
+      >
+        <ApprovalMini label="Rule" value={safeText(c?.rule) || safeText(c?.rule_code) || "—"} />
+        <ApprovalMini label="Oorspronkelijk" value={safeText(c?.original_resultaat) || safeText(c?.resultaat) || "—"} />
+        <ApprovalMini label="Door" value={actorName || "—"} />
+        <ApprovalMini label="Goedgekeurd op" value={fmtDate(c?.reviewed_at)} />
+      </div>
+
+      {safeText(c?.boodschap) ? (
+        <div style={{ marginTop: 8 }}>
+          <ApprovalMini label="Melding" value={safeText(c?.boodschap)} wide />
+        </div>
+      ) : null}
+
+      {w ? (
+        <div
+          style={{
+            marginTop: 8,
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gap: 8,
+          }}
+        >
+          <ApprovalMini label="Rood gewicht" value={formatWeight(w.rood_gewogen_gewicht)} />
+          <ApprovalMini label="Blauw gewicht" value={formatWeight(w.blauw_gewogen_gewicht)} />
+          <ApprovalMini label="Minpunten rood" value={formatPenalty(w.gewicht_strafpunt_rood)} />
+          <ApprovalMini label="Minpunten blauw" value={formatPenalty(w.gewicht_strafpunt_blauw)} />
+          <ApprovalMini label="Max gewicht" value={safeText(w.max_gewicht_notatie) || "—"} />
+          <ApprovalMini label="Reglement" value={safeText(w.reglement_status) || "—"} />
+          <ApprovalMini label="Praktijk" value={safeText(w.praktijk_status) || "—"} />
+          <ApprovalMini label="Eindstatus" value={safeText(w.eindstatus) || "—"} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FighterLine({
+  corner,
+  name,
+  gym,
+  va,
+}: {
+  corner: string;
+  name: string;
+  gym?: string;
+  va?: string;
+}) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(0,0,0,0.18)",
+        padding: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          fontWeight: 1000,
+          letterSpacing: 1.2,
+          color: ORANGE,
+        }}
+      >
+        {corner}
+      </div>
+      <div
+        style={{
+          marginTop: 2,
+          fontSize: 13,
+          fontWeight: 1000,
+          color: "#fff",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+        title={name}
+      >
+        {name}
+      </div>
+      <div
+        style={{
+          marginTop: 2,
+          fontSize: 11,
+          color: "rgba(255,255,255,0.66)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+        title={gym || ""}
+      >
+        {gym || "—"}{va ? ` · VA ${va}` : ""}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalMini({
+  label,
+  value,
+  wide = false,
+}: {
+  label: string;
+  value: string;
+  wide?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        gridColumn: wide ? "1 / -1" : undefined,
+        border: "1px solid rgba(255,255,255,0.09)",
+        background: "rgba(0,0,0,0.16)",
+        padding: 8,
+      }}
+    >
+      <div
+        style={{
+          marginBottom: 4,
+          fontSize: 9,
+          fontWeight: 900,
+          letterSpacing: 1,
+          textTransform: "uppercase",
+          color: "rgba(255,255,255,0.48)",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          lineHeight: 1.35,
+          color: "#f1f1f1",
+          wordBreak: "break-word",
+        }}
+      >
+        {value || "—"}
+      </div>
     </div>
   );
 }

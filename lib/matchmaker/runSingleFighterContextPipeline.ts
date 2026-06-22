@@ -13,6 +13,7 @@ export async function runSingleFighterContextPipeline(params: {
   controleRunId: string;
   aanmeldingen: AnyRow[];
   rawRows: AnyRow[];
+  uitslagenRows?: AnyRow[];
   eventDate?: string | null;
   writeRules?: boolean;
 }) {
@@ -22,6 +23,7 @@ export async function runSingleFighterContextPipeline(params: {
     controleRunId,
     aanmeldingen,
     rawRows,
+    uitslagenRows = [],
     eventDate = null,
     writeRules = true,
   } = params;
@@ -32,6 +34,15 @@ export async function runSingleFighterContextPipeline(params: {
     if (va && !rawByVa.has(va)) rawByVa.set(va, raw);
   }
 
+  const uitslagenByVa = new Map<string, AnyRow[]>();
+  for (const row of uitslagenRows ?? []) {
+    const va = normalizeVa(row?.va_nummer ?? row?.fighter_id ?? row?.va);
+    if (!va) continue;
+    const list = uitslagenByVa.get(va) ?? [];
+    list.push(row);
+    uitslagenByVa.set(va, list);
+  }
+
   const built = (aanmeldingen ?? []).map((aanmelding) => {
     const va = normalizeVa(aanmelding?.va_nummer ?? aanmelding?.va ?? aanmelding?.va_nr ?? aanmelding?.vanummer);
     return buildSingleFighterContext({
@@ -39,6 +50,7 @@ export async function runSingleFighterContextPipeline(params: {
       controleRunId,
       aanmelding,
       fightersRaw: va ? rawByVa.get(va) ?? null : null,
+      uitslagen: va ? uitslagenByVa.get(va) ?? [] : [],
       eventDate,
     });
   });
@@ -64,6 +76,7 @@ export async function runSingleFighterContextPipeline(params: {
       matchmakingId,
       controleRunId,
       hits,
+      scopeRows: enriched,
     });
 
     rulesCount = rulesSave.data?.length ?? hits.length;

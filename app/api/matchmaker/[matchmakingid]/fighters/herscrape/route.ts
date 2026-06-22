@@ -88,6 +88,156 @@ async function updateAanmeldingenStatusBySelection(args: {
   }
 }
 
+
+async function resolveAanmeldingIdsFromVa(args: {
+  matchmakingId: string;
+  vaNummers: string[];
+}) {
+  const { matchmakingId, vaNummers } = args;
+  if (!vaNummers.length) return [] as string[];
+
+  const found = new Set<string>();
+  const possibleVaColumns = ["va_nummer", "va", "va_nr", "vanummer", "fighter_id"];
+
+  for (const col of possibleVaColumns) {
+    const { data, error } = await supabaseAdmin
+      .from("aanmeldingen")
+      .select("id")
+      .eq("matchmaking_id", matchmakingId)
+      .in(col, vaNummers);
+
+    if (!error) {
+      for (const row of data ?? []) {
+        const id = String((row as any)?.id ?? "").trim();
+        if (id) found.add(id);
+      }
+      continue;
+    }
+
+    if (isMissingColumnError(error)) continue;
+    throw error;
+  }
+
+  return [...found];
+}
+
+async function resolveVaFromAanmeldingIds(args: {
+  matchmakingId: string;
+  aanmeldingIds: string[];
+}) {
+  const { matchmakingId, aanmeldingIds } = args;
+  if (!aanmeldingIds.length) return [] as string[];
+
+  const found = new Set<string>();
+  const possibleVaColumns = ["va_nummer", "va", "va_nr", "vanummer", "fighter_id"];
+
+  for (const col of possibleVaColumns) {
+    const { data, error } = await supabaseAdmin
+      .from("aanmeldingen")
+      .select(`id,${col}`)
+      .eq("matchmaking_id", matchmakingId)
+      .in("id", aanmeldingIds);
+
+    if (!error) {
+      for (const row of data ?? []) {
+        const va = onlyDigits((row as any)?.[col]);
+        if (va) found.add(va);
+      }
+      continue;
+    }
+
+    if (isMissingColumnError(error)) continue;
+    throw error;
+  }
+
+  return [...found];
+}
+
+
+async function resolveSelectionFromMatchmakerTables(args: {
+  matchmakingId: string;
+  vaNummers: string[];
+  aanmeldingIds: string[];
+}) {
+  const { matchmakingId } = args;
+  const vaSet = new Set(args.vaNummers.map(onlyDigits).filter(Boolean));
+  const idSet = new Set(args.aanmeldingIds.map((v) => String(v ?? "").trim()).filter(Boolean));
+
+  async function collectByVa(table: string) {
+    const vaColumns = ["va_nummer", "va", "fighter_id"];
+    const idColumns = ["aanmelding_id", "inschrijving_id", "id"];
+
+    for (const vaCol of vaColumns) {
+      if (!vaSet.size) break;
+
+      const selectCols = Array.from(new Set([vaCol, ...idColumns])).join(",");
+      const { data, error } = await supabaseAdmin
+        .from(table)
+        .select(selectCols)
+        .eq("matchmaking_id", matchmakingId)
+        .in(vaCol, [...vaSet]);
+
+      if (error) {
+        if (isMissingColumnError(error)) continue;
+        throw error;
+      }
+
+      for (const row of data ?? []) {
+        for (const idCol of idColumns) {
+          const id = String((row as any)?.[idCol] ?? "").trim();
+          if (id) idSet.add(id);
+        }
+      }
+    }
+  }
+
+  async function collectVaById(table: string) {
+    const idColumns = ["aanmelding_id", "inschrijving_id", "id"];
+    const vaColumns = ["va_nummer", "va", "fighter_id"];
+
+    for (const idCol of idColumns) {
+      if (!idSet.size) break;
+
+      const selectCols = Array.from(new Set([idCol, ...vaColumns])).join(",");
+      const { data, error } = await supabaseAdmin
+        .from(table)
+        .select(selectCols)
+        .eq("matchmaking_id", matchmakingId)
+        .in(idCol, [...idSet]);
+
+      if (error) {
+        if (isMissingColumnError(error)) continue;
+        throw error;
+      }
+
+      for (const row of data ?? []) {
+        for (const vaCol of vaColumns) {
+          const va = onlyDigits((row as any)?.[vaCol]);
+          if (va) vaSet.add(va);
+        }
+      }
+    }
+  }
+
+  for (const table of ["aanmeldingen", "matchmaker_fighter_context", "matchmaker_fighters_raw"]) {
+    await collectByVa(table).catch((err) => {
+      if (!isMissingColumnError(err)) throw err;
+    });
+  }
+
+  for (const table of ["aanmeldingen", "matchmaker_fighter_context", "matchmaker_fighters_raw"]) {
+    await collectVaById(table).catch((err) => {
+      if (!isMissingColumnError(err)) throw err;
+    });
+  }
+
+  return {
+    vaNummers: [...vaSet],
+    aanmeldingIds: [...idSet],
+  };
+}
+
+
 async function deleteWhereVa(
   table: string,
   matchmakingId: string,
@@ -121,7 +271,9 @@ async function deleteOldSelectedData(
   vaNummers: string[],
 ) {
   await deleteWhereVa("matchmaker_fighter_resultaten", matchmakingId, vaNummers).catch(() => undefined);
+  await deleteWhereVa("matchmaker_fighter_rules", matchmakingId, vaNummers).catch(() => undefined);
   await deleteWhereVa("matchmaker_fighter_context", matchmakingId, vaNummers).catch(() => undefined);
+  await deleteWhereVa("matchmaker_uitslagen_raw", matchmakingId, vaNummers).catch(() => undefined);
   await deleteWhereVa("matchmaker_fighters_raw", matchmakingId, vaNummers).catch(() => undefined);
 }
 
@@ -200,8 +352,14 @@ export async function POST(
 
   try {
     const resolvedParams = await params;
+    const body = await req.json().catch(() => ({}));
+
     cleanMatchmakingId = String(
-      resolvedParams?.matchmakingId || resolvedParams?.matchmakingid || "",
+      resolvedParams?.matchmakingId ||
+        resolvedParams?.matchmakingid ||
+        body?.matchmaking_id ||
+        body?.matchmakingId ||
+        "",
     ).trim();
 
     if (!cleanMatchmakingId) {
@@ -212,21 +370,80 @@ export async function POST(
     }
 
     const { user, token } = await getUser(req);
-    const body = await req.json().catch(() => ({}));
 
-    vaNummers = uniq(body?.va_nummers || body?.vaNummers || []);
-    aanmeldingIds = uniqText(
-      body?.aanmelding_ids ||
-        body?.aanmeldingIds ||
-        body?.inschrijving_ids ||
-        body?.inschrijvingIds ||
-        [],
-    );
+    vaNummers = uniq([
+      ...(Array.isArray(body?.va_nummers) ? body.va_nummers : []),
+      ...(Array.isArray(body?.vaNummers) ? body.vaNummers : []),
+      ...(Array.isArray(body?.fighter_ids) ? body.fighter_ids : []),
+      ...(Array.isArray(body?.fighterIds) ? body.fighterIds : []),
+      body?.va_nummer,
+      body?.vaNummer,
+      body?.fighter_id,
+      body?.fighterId,
+      body?.va,
+    ]);
+
+    aanmeldingIds = uniqText([
+      ...(Array.isArray(body?.aanmelding_ids) ? body.aanmelding_ids : []),
+      ...(Array.isArray(body?.aanmeldingIds) ? body.aanmeldingIds : []),
+      ...(Array.isArray(body?.inschrijving_ids) ? body.inschrijving_ids : []),
+      ...(Array.isArray(body?.inschrijvingIds) ? body.inschrijvingIds : []),
+      ...(Array.isArray(body?.selected_ids) ? body.selected_ids : []),
+      ...(Array.isArray(body?.selectedIds) ? body.selectedIds : []),
+      body?.aanmelding_id,
+      body?.aanmeldingId,
+      body?.inschrijving_id,
+      body?.inschrijvingId,
+      body?.selected_id,
+      body?.selectedId,
+    ]);
 
     if (!vaNummers.length && !aanmeldingIds.length) {
       return NextResponse.json(
         { error: "Geen geselecteerde vechters ontvangen." },
         { status: 400 },
+      );
+    }
+
+    // De frontend stuurt niet altijd dezelfde selectievelden.
+    // Vul daarom VA's en aanmelding/inschrijving IDs aan vanuit zowel aanmeldingen
+    // als de matchmaker-tabellen. Zo werkt herscrape ook als alleen een VA of
+    // alleen een matchmaker-context ID wordt meegegeven.
+    if (vaNummers.length) {
+      const idsFromVa = await resolveAanmeldingIdsFromVa({
+        matchmakingId: cleanMatchmakingId,
+        vaNummers,
+      });
+
+      aanmeldingIds = Array.from(new Set([...aanmeldingIds, ...idsFromVa]));
+    }
+
+    if (aanmeldingIds.length) {
+      const vaFromIds = await resolveVaFromAanmeldingIds({
+        matchmakingId: cleanMatchmakingId,
+        aanmeldingIds,
+      }).catch(() => [] as string[]);
+
+      vaNummers = Array.from(new Set([...vaNummers, ...vaFromIds]));
+    }
+
+    const resolvedSelection = await resolveSelectionFromMatchmakerTables({
+      matchmakingId: cleanMatchmakingId,
+      vaNummers,
+      aanmeldingIds,
+    });
+
+    vaNummers = resolvedSelection.vaNummers;
+    aanmeldingIds = resolvedSelection.aanmeldingIds;
+
+    if (!vaNummers.length && !aanmeldingIds.length) {
+      return NextResponse.json(
+        {
+          error:
+            "Geen matchmaker-vechter gevonden voor de selectie. Stuur een VA-nummer, fighter_id of aanmelding_id mee.",
+          matchmaking_id: cleanMatchmakingId,
+        },
+        { status: 404 },
       );
     }
 

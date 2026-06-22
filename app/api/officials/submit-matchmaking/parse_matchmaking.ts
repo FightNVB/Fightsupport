@@ -1,5 +1,5 @@
 // ---------------------------------------------------------
-// FIGHTSUPPORT PARSER – VERSIE 13.0 –
+// FIGHTSUPPORT PARSER – VERSIE 13.2 –
 // ---------------------------------------------------------
 //
 // ✅ .xlsx via ExcelJS (styles + waarden)
@@ -13,11 +13,14 @@
 // - afgesproken gewicht is partijniveau, net als discipline/klasse
 // - max/min gewicht mag NOOIT als rood_gewicht of blauw_gewicht worden gelezen
 //
-// ✅ NIEUW in 13.0:
+// ✅ NIEUW in 13.2:
 // - toernooi via partij_nr = T1 / T2 / T3 ...
 // - gegenereerde toernooi-bouts krijgen GEEN nep partij_nr
 // - toernooi_code staat zowel op rootniveau als in extra
 // - template parser groepeert deelnemers op partij_nr=T*
+// - scant meerdere werkbladen en kiest het beste matchmaking-blad
+// - herkent afgesproken gewicht dat per ongeluk in KG (1)/(2) staat als Max KG leeg is
+// - extra VA-header fallback voor layouts met Rode hoek / Blauwe hoek en VA nr. rood/blauw
 //
 
 import ExcelJS from "exceljs";
@@ -670,11 +673,61 @@ function detectTemplateCols(headerRow: any[]): TemplateCols | null {
   };
 }
 
+
+function scoreTemplateWorksheet(ws: ExcelJS.Worksheet): number {
+  let best = 0;
+
+  for (let r = 1; r <= Math.min(25, ws.rowCount); r++) {
+    const row = ws.getRow(r);
+    const header: any[] = [];
+
+    for (let c = 1; c <= Math.min(17, ws.columnCount); c++) {
+      header.push(row.getCell(c).value);
+    }
+
+    const detected = detectTemplateCols(header);
+    if (!detected) continue;
+
+    let dataRows = 0;
+    for (let rr = r + 1; rr <= Math.min(ws.rowCount, r + 80); rr++) {
+      const dataRow = ws.getRow(rr);
+      const a = normCell(dataRow.getCell(detected.partijNr).value);
+      const d = normCell(dataRow.getCell(detected.discipline).value);
+      const n1 = normCell(dataRow.getCell(detected.naam1).value);
+      const n2 = normCell(dataRow.getCell(detected.naam2).value);
+      const va1 = extractVA(dataRow.getCell(detected.va1).value);
+      const va2 = extractVA(dataRow.getCell(detected.va2).value);
+      const h = normCell(dataRow.getCell(detected.vs).value);
+
+      if (a || d || n1 || n2 || va1 || va2 || isVsMarker(h) || parseTCode(h)) dataRows++;
+    }
+
+    best = Math.max(best, 100 + dataRows);
+  }
+
+  return best;
+}
+
+function pickBestTemplateWorksheet(wb: ExcelJS.Workbook): ExcelJS.Worksheet | null {
+  let bestWs: ExcelJS.Worksheet | null = null;
+  let bestScore = -1;
+
+  for (const ws of wb.worksheets ?? []) {
+    const score = scoreTemplateWorksheet(ws);
+    if (score > bestScore) {
+      bestScore = score;
+      bestWs = ws;
+    }
+  }
+
+  return bestScore > 0 ? bestWs : wb.worksheets?.[0] ?? null;
+}
+
 async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileBuffer as any);
 
-  const ws = wb.worksheets?.[0];
+  const ws = pickBestTemplateWorksheet(wb);
   if (!ws) return null;
 
   let headerRowIndex = -1;
@@ -761,6 +814,27 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
     const maxKgMeta = parseAgreedWeightMeta(maxKgVal);
     const minKgMeta = parseAgreedWeightMeta(minKgVal);
 
+    // Sommige promotors vullen het afgesproken gewicht per ongeluk in KG (1) of KG (2)
+    // en laten Max KG leeg. Als maar één van beide KG-kolommen gevuld is, behandelen we
+    // die waarde als partijniveau-gewicht en NIET als rood/blauw vechtergewicht.
+    const kg1AsAgreedMeta =
+      !maxKgMeta &&
+      !minKgMeta &&
+      kg1Meta &&
+      !kg2Meta
+        ? parseAgreedWeightMeta(row.getCell(cols.kg1).value)
+        : null;
+
+    const kg2AsAgreedMeta =
+      !maxKgMeta &&
+      !minKgMeta &&
+      kg2Meta &&
+      !kg1Meta
+        ? parseAgreedWeightMeta(row.getCell(cols.kg2).value)
+        : null;
+
+    const effectiveMaxKgMeta = maxKgMeta ?? kg1AsAgreedMeta ?? kg2AsAgreedMeta;
+
     const isEmptyLine =
       !naam1 &&
       !gym1 &&
@@ -789,7 +863,7 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
       bout.va_rood = va1;
       bout.rood_geboortedatum = null;
 
-      if (kg1Meta) {
+      if (kg1Meta && !kg1AsAgreedMeta) {
         applySmartWeightFromCornerCell(bout, "rood", kg1Meta, "template_kg1");
       }
 
@@ -798,14 +872,14 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
       bout.va_blauw = va2;
       bout.blauw_geboortedatum = null;
 
-      if (kg2Meta) {
+      if (kg2Meta && !kg2AsAgreedMeta) {
         applySmartWeightFromCornerCell(bout, "blauw", kg2Meta, "template_kg2");
       }
 
       bout.discipline = discipline;
       bout.klasse = klasse;
 
-      if (maxKgMeta) applyAgreedWeightMeta(bout, "max", maxKgMeta);
+      if (effectiveMaxKgMeta) applyAgreedWeightMeta(bout, "max", effectiveMaxKgMeta);
       if (minKgMeta) applyAgreedWeightMeta(bout, "min", minKgMeta);
 
       bout.record_rood_w = 0;
@@ -824,7 +898,8 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         h_marker: normCell(vsVal) || null,
         rood_gewicht_type: kg1Meta?.type ?? null,
         blauw_gewicht_type: kg2Meta?.type ?? null,
-        max_gewicht_type: bout.extra.max_gewicht_type ?? maxKgMeta?.type ?? null,
+        max_gewicht_type: bout.extra.max_gewicht_type ?? effectiveMaxKgMeta?.type ?? null,
+        agreed_weight_from_corner_kg: kg1AsAgreedMeta ? "kg1" : kg2AsAgreedMeta ? "kg2" : null,
         min_gewicht_type: bout.extra.min_gewicht_type ?? minKgMeta?.type ?? null,
       };
 
@@ -840,7 +915,7 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         kg_meta: kg1Meta,
         discipline,
         klasse,
-        max_gewicht_meta: maxKgMeta,
+        max_gewicht_meta: effectiveMaxKgMeta,
         min_gewicht_meta: minKgMeta,
       });
 
@@ -853,7 +928,7 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         kg_meta: kg2Meta,
         discipline,
         klasse,
-        max_gewicht_meta: maxKgMeta,
+        max_gewicht_meta: effectiveMaxKgMeta,
         min_gewicht_meta: minKgMeta,
       });
     }
@@ -1032,8 +1107,8 @@ function exceljsToSheetLike(ws: ExcelJS.Worksheet): SheetLike {
   };
 }
 
-function sheetjsToSheetLike(workbook: XLSX.WorkBook): SheetLike {
-  const name = workbook.SheetNames[0];
+function sheetjsToSheetLike(workbook: XLSX.WorkBook, sheetName?: string): SheetLike {
+  const name = sheetName || workbook.SheetNames[0];
   const sheet = workbook.Sheets[name];
 
   if (!sheet) {
@@ -1780,6 +1855,139 @@ function extractWeightMetaFromCornerRange(row: RowLike, map: ColMap, skipCols: n
   return null;
 }
 
+
+function findVaColumnsFromHeaders(opts: {
+  sheet: SheetLike;
+  headerRowIndex: number;
+  maxCol: number;
+  red: ColMap;
+  blue: ColMap;
+}): { redVaCol: number | null; blueVaCol: number | null; vaCols: number[] } {
+  const { sheet, headerRowIndex, maxCol, red, blue } = opts;
+  const headerRow = sheet.getRow(headerRowIndex);
+
+  const vaCols: number[] = [];
+  for (let c = 1; c <= maxCol; c++) {
+    const h = norm(cellTextLike(headerRow.getCell(c)));
+    if (!h) continue;
+
+    const isVaHeader =
+      h === "va" ||
+      h === "va nr" ||
+      h === "va nr." ||
+      h.includes("va nr") ||
+      h.includes("fightpaspoort") ||
+      h.includes("paspoort") ||
+      h === "nva";
+
+    if (isVaHeader) vaCols.push(c);
+  }
+
+  let redVaCol: number | null = null;
+  let blueVaCol: number | null = null;
+
+  for (const c of vaCols) {
+    const h = norm(cellTextLike(headerRow.getCell(c)));
+
+    if (!redVaCol && (h.includes("rood") || h.includes("red"))) {
+      redVaCol = c;
+      continue;
+    }
+
+    if (!blueVaCol && (h.includes("blauw") || h.includes("blue"))) {
+      blueVaCol = c;
+      continue;
+    }
+  }
+
+  const redStart = red.start ?? 1;
+  const redEnd = red.end ?? Math.max(redStart, (blue.start ?? maxCol) - 1);
+  const blueStart = blue.start ?? redEnd + 1;
+  const blueEnd = blue.end ?? maxCol;
+
+  if (!redVaCol) {
+    redVaCol = vaCols.find((c) => c >= redStart && c <= redEnd) ?? null;
+  }
+
+  if (!blueVaCol) {
+    blueVaCol = vaCols.find((c) => c >= blueStart && c <= blueEnd) ?? null;
+  }
+
+  // Layouts zoals: rood VA in I, blauw VA in R zonder expliciete kleur in header.
+  // Dan zijn de eerste twee VA-kolommen gewoon rood/blauw.
+  if (!redVaCol && vaCols.length >= 1) redVaCol = vaCols[0] ?? null;
+  if (!blueVaCol && vaCols.length >= 2) blueVaCol = vaCols[1] ?? null;
+
+  return { redVaCol, blueVaCol, vaCols };
+}
+
+function readVaFromColumn(row: RowLike, col: number | null): string | null {
+  if (!col) return null;
+  const cell = row.getCell(col);
+  return extractVA(cellTextLike(cell)) || extractVA(cell.value);
+}
+
+
+function scoreSheetLikeForMatchmaking(sheet: SheetLike): number {
+  if (!sheet || sheet.rowCount === 0) return -1;
+
+  const maxCol = Math.min(sheet.columnCount || 80, 120);
+  const scanRows = Math.min(sheet.rowCount || 200, 120);
+  let score = 0;
+
+  const headerRowIndex = detectHeaderRow(sheet, 50, Math.min(80, maxCol));
+  const header = rowToStringsLike(sheet.getRow(headerRowIndex), Math.min(80, maxCol));
+  const joinedHeader = header.join(" | ");
+
+  if (joinedHeader.includes("voornaam")) score += 15;
+  if (joinedHeader.includes("achternaam")) score += 15;
+  if (joinedHeader.includes("va") || joinedHeader.includes("paspoort")) score += 15;
+  if (joinedHeader.includes("gym") || joinedHeader.includes("sportschool")) score += 10;
+  if (joinedHeader.includes("rood") || joinedHeader.includes("red")) score += 10;
+  if (joinedHeader.includes("blauw") || joinedHeader.includes("blue")) score += 10;
+  if (joinedHeader.includes("vs") || joinedHeader.includes("v.s")) score += 5;
+
+  for (let r = Math.max(1, headerRowIndex + 1); r <= scanRows; r++) {
+    const row = sheet.getRow(r);
+    let rowHasVa = false;
+    let rowHasName = false;
+    let rowHasWeight = false;
+    let rowHasRecord = false;
+
+    for (let c = 1; c <= Math.min(maxCol, 40); c++) {
+      const txt = cellTextLike(row.getCell(c));
+      if (!txt) continue;
+
+      if (extractVA(txt)) rowHasVa = true;
+      if (looksLikeName(txt)) rowHasName = true;
+      if (extractWeightMeta(txt, { allowClassNotation: true })) rowHasWeight = true;
+      if (looksLikeRecord(txt)) rowHasRecord = true;
+    }
+
+    if (rowHasVa) score += 3;
+    if (rowHasName) score += 1;
+    if (rowHasWeight) score += 1;
+    if (rowHasRecord) score += 1;
+  }
+
+  return score;
+}
+
+function pickBestSheetLike(sheets: Array<{ sheet: SheetLike; name: string }>): { sheet: SheetLike; name: string } | null {
+  let best: { sheet: SheetLike; name: string } | null = null;
+  let bestScore = -1;
+
+  for (const item of sheets) {
+    const score = scoreSheetLikeForMatchmaking(item.sheet);
+    if (score > bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  }
+
+  return best;
+}
+
 /* =========================================================
    9. MAIN – BUFFER → BOUTS (.xlsx / .xls)
 ========================================================= */
@@ -1810,6 +2018,7 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
   }
 
   let sheet: SheetLike | null = null;
+  let selectedSheetName: string | null = null;
   let mode: "exceljs_xlsx" | "sheetjs_xls" | "sheetjs_xlsx" = "exceljs_xlsx";
 
   if (isOleXls(fileBuffer)) {
@@ -1819,15 +2028,19 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
       cellStyles: true,
       raw: false,
     });
-    sheet = sheetjsToSheetLike(wb);
+    const candidates = wb.SheetNames.map((name) => ({ sheet: sheetjsToSheetLike(wb, name), name }));
+    const picked = pickBestSheetLike(candidates);
+    sheet = picked?.sheet ?? null;
+    selectedSheetName = picked?.name ?? null;
     mode = "sheetjs_xls";
   } else {
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(fileBuffer as any);
-      const ws = workbook.worksheets[0];
-      if (!ws) return [];
-      sheet = exceljsToSheetLike(ws);
+      const candidates = (workbook.worksheets ?? []).map((ws) => ({ sheet: exceljsToSheetLike(ws), name: ws.name }));
+      const picked = pickBestSheetLike(candidates);
+      sheet = picked?.sheet ?? null;
+      selectedSheetName = picked?.name ?? null;
       mode = "exceljs_xlsx";
     } catch {
       const wb = XLSX.read(fileBuffer, {
@@ -1836,7 +2049,10 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
         cellStyles: true,
         raw: false,
       });
-      sheet = sheetjsToSheetLike(wb);
+      const candidates = wb.SheetNames.map((name) => ({ sheet: sheetjsToSheetLike(wb, name), name }));
+      const picked = pickBestSheetLike(candidates);
+      sheet = picked?.sheet ?? null;
+      selectedSheetName = picked?.name ?? null;
       mode = "sheetjs_xlsx";
     }
   }
@@ -1845,7 +2061,8 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
 
   const vaOnly = tryParseVaOnlyPairs(sheet);
   if (vaOnly) {
-    console.log("📘 Parsed bouts (VA-only mode):", vaOnly.length, "mode:", mode);
+    for (const b of vaOnly) b.extra.sheet_name = selectedSheetName;
+    console.log("📘 Parsed bouts (VA-only mode):", vaOnly.length, "mode:", mode, "sheet:", selectedSheetName);
     console.log("VA rood:", vaOnly.filter((b) => b.va_rood).length);
     console.log("VA blauw:", vaOnly.filter((b) => b.va_blauw).length);
     return vaOnly;
@@ -1857,6 +2074,14 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
     sheet,
     headerRowIndex,
     maxCol,
+  });
+
+  const vaHeaderFallback = findVaColumnsFromHeaders({
+    sheet,
+    headerRowIndex,
+    maxCol,
+    red,
+    blue,
   });
 
   const skipWeightCols = [maxGewCol, minGewCol].filter((x): x is number => typeof x === "number");
@@ -1880,6 +2105,7 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
 
     const bout = makeEmptyBout();
     bout.extra.parse_mode = mode;
+    bout.extra.sheet_name = selectedSheetName;
 
     let isToernooi = false;
     let toernooiCode: string | null = null;
@@ -1970,6 +2196,9 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
 
     const roodVaRaw = red.va ? cellTextLike(row.getCell(red.va)) : "";
     bout.va_rood = extractVA(roodVaRaw);
+    if (!bout.va_rood) {
+      bout.va_rood = readVaFromColumn(row, vaHeaderFallback.redVaCol);
+    }
 
     const roodRecRaw = red.rec ? cellTextLike(row.getCell(red.rec)) : "";
     const recR = extractRecord(roodRecRaw);
@@ -2001,6 +2230,9 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
 
     const blauwVaRaw = blue.va ? cellTextLike(row.getCell(blue.va)) : "";
     bout.va_blauw = extractVA(blauwVaRaw);
+    if (!bout.va_blauw) {
+      bout.va_blauw = readVaFromColumn(row, vaHeaderFallback.blueVaCol);
+    }
 
     const blauwRecRaw = blue.rec ? cellTextLike(row.getCell(blue.rec)) : "";
     const recB = extractRecord(blauwRecRaw);
@@ -2056,7 +2288,7 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
     bouts.push(bout);
   }
 
-  console.log("📘 Parsed bouts:", bouts.length, "mode:", mode);
+  console.log("📘 Parsed bouts:", bouts.length, "mode:", mode, "sheet:", selectedSheetName);
   console.log("VA rood:", bouts.filter((b) => b.va_rood).length);
   console.log("VA blauw:", bouts.filter((b) => b.va_blauw).length);
   console.log("Toernooi bouts:", bouts.filter((b) => b.is_toernooi).length);

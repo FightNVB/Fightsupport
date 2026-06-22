@@ -74,6 +74,17 @@ function runNodeScript(scriptPath: string, args: string[], cwd?: string): Promis
         // Hiermee voorkom je dat een globale FP_MATCHMAKER_ID de admin/master scraper naar een matchmaker-profiel stuurt.
         FP_MATCHMAKER_ID: "",
         FP_SESSION_MODE: "master",
+
+        // Licentie/keurmerk zijn kritieke checks: geef FightPassport/DETAILS extra tijd.
+        WORKERS: process.env.WORKERS ?? "8",
+        STAGGER_MS: process.env.STAGGER_MS ?? "250",
+        TAB_ATTEMPTS: process.env.TAB_ATTEMPTS ?? "8",
+        SOFT_WAIT_MS: process.env.SOFT_WAIT_MS ?? "1500",
+        BETWEEN_ATTEMPTS_MS: process.env.BETWEEN_ATTEMPTS_MS ?? "450",
+        FULLFIGHTER_TIMEOUT_MS: process.env.FULLFIGHTER_TIMEOUT_MS ?? "45000",
+        UITSLAGEN_TIMEOUT_MS: process.env.UITSLAGEN_TIMEOUT_MS ?? "90000",
+        UITSLAGEN_TRIES: process.env.UITSLAGEN_TRIES ?? "1",
+
         SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
         ComSpec: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
       },
@@ -266,7 +277,12 @@ export async function POST(req: Request) {
     const toernooi_code = String(body?.toernooi_code ?? body?.toernooiCode ?? "").trim().toUpperCase();
     const fighter_id_in = toVaStrict(body?.fighter_id ?? body?.va_nummer ?? body?.va ?? body?.fighterId);
 
-    if (partij_nr == null && (!toernooi_code || !fighter_id_in)) {
+    // Toernooi-deelnemers hebben in controle_resultaten vaak partij_nr = 0.
+    // De oude route ging alleen de toernooi-rescrape in als partij_nr echt null was.
+    // Daardoor deed een rescrape met { partij_nr: 0, toernooi_code, fighter_id } niets/ging naar de gewone partij-flow.
+    const isToernooiRequest = !!toernooi_code && !!fighter_id_in && (partij_nr == null || partij_nr <= 0);
+
+    if (partij_nr == null && !isToernooiRequest) {
       return NextResponse.json(
         { error: "partij_nr is verplicht voor een partij, of toernooi_code + fighter_id voor een toernooi-vechter" },
         { status: 400 }
@@ -286,7 +302,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (partij_nr == null && toernooi_code && fighter_id_in) {
+    if (isToernooiRequest) {
       const bundlePath = resolveScriptPath("scrapers", "fp_bundle", "scraper_fp_bundle.js");
       await runNodeScript(bundlePath, [matchmaking_id, controle_run_id, fighter_id_in], path.dirname(bundlePath));
 
@@ -295,22 +311,37 @@ export async function POST(req: Request) {
         fighter_id: fighter_id_in,
       });
 
-      await enrichControleBoutContext(matchmaking_id, controle_run_id);
+      // Alleen deze toernooi-vechter opnieuw verrijken.
+      // Belangrijk: de rulesEngine moet daarna draaien op de actuele
+      // controle_toernooi_context en niet op oude/raw toernooi-data.
+      await enrichControleBoutContext(matchmaking_id, controle_run_id, {
+        toernooi_code,
+        fighter_id: fighter_id_in,
+      } as any);
 
-      const { data: allCtxRows, error: ctxErr } = await supabase
-        .from("controle_bout_context")
+      const { data: toernooiCtxRows, error: toernooiCtxErr } = await supabase
+        .from("controle_toernooi_context")
         .select("*")
         .eq("matchmaking_id", matchmaking_id)
         .eq("controle_run_id", controle_run_id)
-        .order("partij_nr", { ascending: true });
+        .eq("toernooi_code", toernooi_code)
+        .or(`fighter_id.eq.${fighter_id_in},va_nummer.eq.${fighter_id_in}`)
+        .order("naam", { ascending: true });
 
-      if (ctxErr) throw ctxErr;
+      if (toernooiCtxErr) throw toernooiCtxErr;
 
+      // Voor toernooi geven we expres geen controle_bout_context mee.
+      // rulesEngine haalt/maakt de toernooi-pair rows op basis van
+      // controle_toernooi_context. Zo worden stale meldingen met oude
+      // matchmaking_bouts_raw sportschool/klasse niet opnieuw gebruikt.
       await rulesEngine({
         matchmaking_id,
         controle_run_id,
-        ctxRows: allCtxRows ?? [],
-      });
+        ctxRows: [],
+        scoped_toernooi_code: toernooi_code,
+        scoped_fighter_id: fighter_id_in,
+        scoped_toernooi_rows: toernooiCtxRows ?? [],
+      } as any);
 
       return NextResponse.json({
         ok: true,
