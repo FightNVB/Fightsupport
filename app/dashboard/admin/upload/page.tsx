@@ -34,7 +34,7 @@ function isEmpty(v: unknown) {
   return norm(v).length === 0;
 }
 
-const BONDTEAMS = ["IRO", "NKF", "WPKL", "WMTA", "VON", "UMC", "MMAAN", "MON"];
+const BONDTEAMS = ["IRO", "NKF", "WPKL", "WMTA", "VON", "FOG", "MMAAN", "MON"];
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
 

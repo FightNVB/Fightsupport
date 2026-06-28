@@ -1487,35 +1487,29 @@ export default function RapportPage() {
     const verlopen = new Set<string>();
     const datumOntbreekt = new Set<string>();
 
-    for (const r of resultaten ?? []) {
-      const pn = Number(r.partij_nr);
-      if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) continue;
+    const codeFromAny = (row: any) =>
+      String(row?.toernooi_code ?? row?.toernooiCode ?? "").trim().toUpperCase();
 
-      const isRelevant =
-        isBelgischeManualCheckRow(r) ||
-        isKeurmerkOpenIssue(r) ||
-        (isSportschoolMatchRow(r) && !isApprovedOrClosed(r.review_status));
+    const fighterIdFromAny = (row: any) =>
+      normalizeVa(row?.fighter_id ?? row?.toernooi_va_nummer ?? row?.va_nummer ?? row?.fighterId);
 
-      if (!isRelevant) continue;
+    const ctxByToernooiFighter = new Map<string, any>();
+    for (const row of toernooiRows ?? []) {
+      const code = codeFromAny(row) || getToernooiCodeSafe(row);
+      const fighterId = fighterIdFromAny(row);
+      if (!code || !fighterId) continue;
+      ctxByToernooiFighter.set(`${code}__${fighterId}`, row);
+    }
+
+    const addGymToBucket = (r: ResultRow, gym: string) => {
+      const cleanGym = safeRaw(gym);
+      if (!cleanGym || cleanGym === "-") return;
 
       const tekst = `${r.rule_code ?? ""} ${r.rule ?? ""} ${r.boodschap ?? ""} ${r.aantekeningen ?? ""}`.toLowerCase();
-      const quoted = String(r.boodschap ?? "").match(/"([^"]+)"/);
-      const hoek = inferHoek(r);
-      const ctx = ctxByPartij.get(pn);
-
-      const gymFromCtx =
-        hoek === "rood"
-          ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "")
-          : hoek === "blauw"
-          ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "")
-          : "";
-
-      const gym = quoted?.[1]?.trim() || gymFromCtx || "-";
-      if (!gym) continue;
 
       if (isBelgischeManualCheckRow(r)) {
-        belgischeCheck.add(gym);
-        continue;
+        belgischeCheck.add(cleanGym);
+        return;
       }
 
       const isNietGevonden =
@@ -1554,24 +1548,64 @@ export default function RapportPage() {
         tekst.includes("niet geldig keurmerk");
 
       if (isNietGevonden) {
-        nietGevonden.add(gym);
-        continue;
+        nietGevonden.add(cleanGym);
+        return;
       }
       if (isGeenData) {
-        geenData.add(gym);
-        continue;
+        geenData.add(cleanGym);
+        return;
       }
       if (isDatumOntbreekt) {
-        datumOntbreekt.add(gym);
-        continue;
+        datumOntbreekt.add(cleanGym);
+        return;
       }
       if (isVerlopen) {
-        verlopen.add(gym);
-        continue;
+        verlopen.add(cleanGym);
+        return;
       }
       if (isGeenKeurmerk || !isApprovedOrClosed(r.review_status) || normResultaatLower(r.resultaat) !== "ok") {
-        geenKeurmerk.add(gym);
+        geenKeurmerk.add(cleanGym);
       }
+    };
+
+    for (const r of resultaten ?? []) {
+      const pn = Number(r.partij_nr);
+      const toernooiCode = codeFromAny(r);
+      const isToernooiResultaat = (Number.isFinite(pn) && pn === 0) || !!toernooiCode;
+      const isGewonePartij = Number.isFinite(pn) && gewonePartijNrs.has(pn);
+
+      // Voor dit blok tellen gewone partijen én toernooi-deelnemers mee.
+      // Oude code stopte hier bij !gewonePartijNrs.has(pn), waardoor toernooi-keurmerken ontbraken.
+      if (!isGewonePartij && !isToernooiResultaat) continue;
+
+      const isRelevant =
+        isBelgischeManualCheckRow(r) ||
+        isKeurmerkOpenIssue(r) ||
+        (isSportschoolMatchRow(r) && !isApprovedOrClosed(r.review_status));
+
+      if (!isRelevant) continue;
+
+      const quoted = String(r.boodschap ?? "").match(/"([^"]+)"/);
+      const hoek = inferHoek(r);
+      let gymFromCtx = "";
+
+      if (isToernooiResultaat) {
+        const code = toernooiCode || "TOERNOOI";
+        const fighterId = fighterIdFromAny(r);
+        const ctx = fighterId ? ctxByToernooiFighter.get(`${code}__${fighterId}`) : null;
+        gymFromCtx = safeRaw(ctx?.sportschool ?? ctx?.sportschool_mm ?? r.sportschool);
+      } else {
+        const ctx = ctxByPartij.get(pn);
+        gymFromCtx =
+          hoek === "rood"
+            ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym, "")
+            : hoek === "blauw"
+            ? safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym, "")
+            : "";
+      }
+
+      const gym = quoted?.[1]?.trim() || gymFromCtx || safeRaw(r.sportschool) || "-";
+      addGymToBucket(r, gym);
     }
 
     for (const gym of belgischeCheck) {
@@ -1622,7 +1656,7 @@ export default function RapportPage() {
       verlopen: uniqueGyms(verlopen),
       datumOntbreekt: uniqueGyms(datumOntbreekt),
     };
-  }, [resultaten, ctxByPartij, gewonePartijNrs]);
+  }, [resultaten, ctxByPartij, gewonePartijNrs, toernooiRows]);
 
   const sportschoolIssueCount = useMemo(() => {
     return (

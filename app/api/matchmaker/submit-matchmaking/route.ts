@@ -219,7 +219,7 @@ const ALLOWED_BONDTEAMS = new Set([
   "WPKL",
   "WMTA",
   "VON",
-  "UMC",
+  "FOG",
   "MMAAN",
   "MON",
 ]);
@@ -230,6 +230,37 @@ function normalizeBondteamValue(v: unknown): string {
 
 function bad(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
+}
+
+function findDuplicatePartijNrs(bouts: any[]): number[] {
+  const seen = new Set<number>();
+  const duplicates = new Set<number>();
+
+  for (const b of bouts ?? []) {
+    if ((b as any)?.is_toernooi === true) continue;
+
+    const raw = (b as any)?.partij_nr;
+    if (raw == null || raw === "") continue;
+
+    const nr = Number(raw);
+    if (!Number.isInteger(nr) || nr <= 0) continue;
+
+    if (seen.has(nr)) duplicates.add(nr);
+    seen.add(nr);
+  }
+
+  return Array.from(duplicates).sort((a, b) => a - b);
+}
+
+function duplicatePartijNrsResponse(duplicates: number[]) {
+  return NextResponse.json(
+    {
+      error: "Dubbele partijnummers gevonden",
+      duplicate_partij_nrs: duplicates,
+      message: `Partijnummer(s) ${duplicates.join(", ")} komen dubbel voor in de matchmaking-upload. Pas de Excel aan en upload opnieuw.`,
+    },
+    { status: 400 }
+  );
 }
 
 function roleLower(r: any): RoleName {
@@ -476,6 +507,12 @@ export async function POST(req: Request) {
         },
         { status: 415 }
       );
+    }
+
+
+    const duplicatePartijNrs = findDuplicatePartijNrs(bouts);
+    if (duplicatePartijNrs.length > 0) {
+      return duplicatePartijNrsResponse(duplicatePartijNrs);
     }
 
     profileForUpload = await findUserProfileForUpload(auth);
