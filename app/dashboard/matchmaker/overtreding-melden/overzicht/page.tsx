@@ -6,7 +6,15 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
 import Image from "next/image";
-import { ArrowLeft, AlertTriangle, RefreshCw, ShieldAlert, Search, Plus, FileText } from "lucide-react";
+import {
+  ArrowLeft,
+  AlertTriangle,
+  RefreshCw,
+  ShieldAlert,
+  Search,
+  Plus,
+  FileText,
+} from "lucide-react";
 
 const LOGO = "/branding/fightsupport/fightsupport1.png";
 
@@ -37,6 +45,17 @@ type Melding = {
   aangemaakt_door_bondteam?: string | null;
   melder_naam?: string | null;
   melder_email?: string | null;
+  melder_id?: string | null;
+  melder_user_id?: string | null;
+  aangemaakt_door?: string | null;
+  aangemaakt_door_id?: string | null;
+  aangemaakt_door_user_id?: string | null;
+  gemeld_door?: string | null;
+  gemeld_door_id?: string | null;
+  gemeld_door_user_id?: string | null;
+  user_id?: string | null;
+  created_by?: string | null;
+  created_by_user_id?: string | null;
   melder_bondteam?: string | null;
   gemeld_door_naam?: string | null;
   gemeld_door_email?: string | null;
@@ -79,7 +98,14 @@ function typeVan(m: Melding) {
 }
 
 function datumOvertredingVan(m: Melding) {
-  return m.datum_overtreding || m.datum || m.aangemaakt_op || m.gemeld_op || m.created_at || null;
+  return (
+    m.datum_overtreding ||
+    m.datum ||
+    m.aangemaakt_op ||
+    m.gemeld_op ||
+    m.created_at ||
+    null
+  );
 }
 
 function tekstVan(m: Melding) {
@@ -88,8 +114,10 @@ function tekstVan(m: Melding) {
 
 function statusClass(status?: string | null) {
   const s = (status || "open").toLowerCase();
-  if (s.includes("afgerond") || s.includes("gesloten")) return "border-emerald-400/50 bg-emerald-950/30 text-emerald-100";
-  if (s.includes("vervallen")) return "border-zinc-500 bg-zinc-900/60 text-zinc-300";
+  if (s.includes("afgerond") || s.includes("gesloten"))
+    return "border-emerald-400/50 bg-emerald-950/30 text-emerald-100";
+  if (s.includes("vervallen"))
+    return "border-zinc-500 bg-zinc-900/60 text-zinc-300";
   return "border-orange-400/50 bg-orange-950/30 text-orange-100";
 }
 
@@ -148,15 +176,62 @@ function isMatchmakerMelding(m: Melding) {
 }
 
 function melderNaamVan(m: Melding) {
-  return m.gemeld_door_naam || m.melder_naam || m.aangemaakt_door_naam || "Matchmaker";
+  return (
+    m.gemeld_door_naam ||
+    m.melder_naam ||
+    m.aangemaakt_door_naam ||
+    "Matchmaker"
+  );
 }
 
 function melderEmailVan(m: Melding) {
   return m.gemeld_door_email || m.melder_email || m.aangemaakt_door_email || "";
 }
 
+function melderIdsVan(m: Melding) {
+  return [
+    m.melder_id,
+    m.melder_user_id,
+    m.aangemaakt_door,
+    m.aangemaakt_door_id,
+    m.aangemaakt_door_user_id,
+    m.gemeld_door,
+    m.gemeld_door_id,
+    m.gemeld_door_user_id,
+    m.user_id,
+    m.created_by,
+    m.created_by_user_id,
+  ]
+    .map(clean)
+    .filter(Boolean);
+}
+
+function isEigenMelding(m: Melding, userId: string, email?: string | null) {
+  const myId = clean(userId);
+  const myEmail = lower(email);
+  const ids = melderIdsVan(m);
+
+  if (myId && ids.some((id) => id === myId)) return true;
+
+  if (myEmail) {
+    const mails = [m.gemeld_door_email, m.melder_email, m.aangemaakt_door_email]
+      .map(lower)
+      .filter(Boolean);
+    if (mails.some((mail) => mail === myEmail)) return true;
+  }
+
+  return false;
+}
+
 function arraysFromApi(json: any): Melding[] {
-  const candidates = [json?.items, json?.data, json?.meldingen, json?.cases, json?.rows, json?.dossiers];
+  const candidates = [
+    json?.items,
+    json?.data,
+    json?.meldingen,
+    json?.cases,
+    json?.rows,
+    json?.dossiers,
+  ];
   const found = candidates.find(Array.isArray);
   return Array.isArray(found) ? found : [];
 }
@@ -191,13 +266,18 @@ export default function MatchmakersOvertredingenOverzichtPage() {
   const [myRole, setMyRole] = useState("");
 
   const allowed = useMemo(
-    () => roles?.some((r) => ["matchmaker", "hoofdmatchmaker", "admin", "superadmin"].includes(String(r).toLowerCase())) ?? false,
-    [roles]
+    () =>
+      roles?.some((r) =>
+        ["matchmaker", "admin", "superadmin"].includes(
+          String(r).toLowerCase(),
+        ),
+      ) ?? false,
+    [roles],
   );
 
   const authIsSuperadmin = useMemo(
     () => roles?.some((r) => String(r).toLowerCase() === "superadmin") ?? false,
-    [roles]
+    [roles],
   );
 
   const isSuperadmin = authIsSuperadmin || lower(myRole) === "superadmin";
@@ -210,7 +290,10 @@ export default function MatchmakersOvertredingenOverzichtPage() {
       .eq("id", userId)
       .maybeSingle<UserProfile>();
 
-    if (byId.error) throw new Error(`Profiel ophalen uit user_profiles mislukt: ${byId.error.message}`);
+    if (byId.error)
+      throw new Error(
+        `Profiel ophalen uit user_profiles mislukt: ${byId.error.message}`,
+      );
     if (byId.data?.bondteam || byId.data?.role) return byId.data;
 
     if (email) {
@@ -220,7 +303,10 @@ export default function MatchmakersOvertredingenOverzichtPage() {
         .eq("email", email)
         .maybeSingle<UserProfile>();
 
-      if (byEmail.error) throw new Error(`Profiel ophalen op e-mail mislukt: ${byEmail.error.message}`);
+      if (byEmail.error)
+        throw new Error(
+          `Profiel ophalen op e-mail mislukt: ${byEmail.error.message}`,
+        );
       if (byEmail.data) return byEmail.data;
     }
 
@@ -246,17 +332,13 @@ export default function MatchmakersOvertredingenOverzichtPage() {
       setMyBondteam(profileBondteam);
       setMyRole(profileRole);
 
-      if (!profileBondteam) {
-        setItems([]);
-        setError("Geen bondteam gevonden in user_profiles. Controleer of dit account in user_profiles een bondteam heeft.");
-        setLoading(false);
-        return;
-      }
-
       const token = await getSessionToken();
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-      const profileIsSuperadmin = lower(profileRole) === "superadmin" || roles?.some((r) => lower(r) === "superadmin");
-      const profileCanSeeAllBonds = profileIsSuperadmin && profileBondteam === "NVB";
+      const profileIsSuperadmin =
+        lower(profileRole) === "superadmin" ||
+        roles?.some((r) => lower(r) === "superadmin");
+      const profileCanSeeAllBonds =
+        profileIsSuperadmin && profileBondteam === "NVB";
 
       const adminEndpoints = [
         "/api/admin/algemeen/overtredingen?bron=matchmaker",
@@ -266,9 +348,11 @@ export default function MatchmakersOvertredingenOverzichtPage() {
         "/api/matchmaker/overtredingen?naar_admin=1&include_admin=1",
         "/api/matchmaker/overtredingen",
       ];
-      const endpoints = profileIsSuperadmin || roles?.some((r) => ["admin", "superadmin"].includes(lower(r)))
-        ? [...adminEndpoints, ...matchmakerEndpoints]
-        : [...matchmakerEndpoints, ...adminEndpoints];
+      const endpoints =
+        profileIsSuperadmin ||
+        roles?.some((r) => ["admin", "superadmin"].includes(lower(r)))
+          ? [...adminEndpoints, ...matchmakerEndpoints]
+          : [...matchmakerEndpoints, ...adminEndpoints];
 
       let loaded: Melding[] = [];
       let warning = "";
@@ -281,7 +365,8 @@ export default function MatchmakersOvertredingenOverzichtPage() {
           const json = await res.json().catch(() => null);
 
           if (!res.ok || json?.ok === false) {
-            lastError = json?.error || `Meldingen laden mislukt via ${endpoint}`;
+            lastError =
+              json?.error || `Meldingen laden mislukt via ${endpoint}`;
             continue;
           }
 
@@ -294,17 +379,14 @@ export default function MatchmakersOvertredingenOverzichtPage() {
         }
       }
 
-      const scoped = profileCanSeeAllBonds
+      const roleList = roles ?? [];
+      const isAdminLike =
+        profileIsSuperadmin ||
+        roleList.some((r) => ["admin", "superadmin"].includes(lower(r)));
+
+      const scoped = isAdminLike
         ? loaded
-        : loaded.filter((m) => {
-            const itemBondteam = norm(bondteamVan(m));
-
-            // Oude/matchmaker meldingen hebben soms nog geen bondteam-kolom gevuld.
-            // Die mogen niet verdwijnen uit het matchmakers-overzicht als BRON/MELDER_ROL matchmaker is.
-            if (!itemBondteam && isMatchmakerMelding(m)) return true;
-
-            return itemBondteam === profileBondteam;
-          });
+        : loaded.filter((m) => isEigenMelding(m, user.id, user.email));
 
       setItems(scoped);
 
@@ -352,32 +434,106 @@ export default function MatchmakersOvertredingenOverzichtPage() {
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
-        .includes(needle)
+        .includes(needle),
     );
   }, [items, q]);
 
-  const openCount = filtered.filter((m) => !(m.status || "open").toLowerCase().match(/afgerond|gesloten|vervallen/)).length;
-  const ernstigCount = filtered.filter((m) => ["hoog", "ernstig"].includes((m.ernst || "").toLowerCase())).length;
+  const openCount = filtered.filter(
+    (m) =>
+      !(m.status || "open").toLowerCase().match(/afgerond|gesloten|vervallen/),
+  ).length;
+  const ernstigCount = filtered.filter((m) =>
+    ["hoog", "ernstig"].includes((m.ernst || "").toLowerCase()),
+  ).length;
 
   return (
-    <main className="min-h-screen px-4 py-6 print:bg-white print:px-0 print:py-0" style={{ background: "#eef0f3" }}>
+    <main
+      className="min-h-screen px-4 py-6 print:bg-white print:px-0 print:py-0"
+      style={{ background: "#eef0f3" }}
+    >
       <div className="mx-auto w-full max-w-[1650px] print:max-w-none">
-        <div className="no-print rounded-[32px] p-[6px]" style={{ background: "linear-gradient(180deg, #f8f8f8 0%, #d8d8d8 22%, #8f8f8f 55%, #f0f0f0 100%)", boxShadow: "0 0 0 1px rgba(255,255,255,0.7), 0 22px 70px rgba(0,0,0,0.9)" }}>
-          <div className="relative overflow-hidden rounded-[28px]" style={{ background: "linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)", border: "3px solid rgba(63,63,70,0.35)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)" }}>
-            <header className="px-6 py-5" style={{ background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)", borderBottom: "3px solid rgba(255,77,0,0.55)" }}>
+        <div
+          className="no-print rounded-[32px] p-[6px]"
+          style={{
+            background:
+              "linear-gradient(180deg, #f8f8f8 0%, #d8d8d8 22%, #8f8f8f 55%, #f0f0f0 100%)",
+            boxShadow:
+              "0 0 0 1px rgba(255,255,255,0.7), 0 22px 70px rgba(0,0,0,0.9)",
+          }}
+        >
+          <div
+            className="relative overflow-hidden rounded-[28px]"
+            style={{
+              background: "linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)",
+              border: "3px solid rgba(63,63,70,0.35)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
+            }}
+          >
+            <header
+              className="px-6 py-5"
+              style={{
+                background: "linear-gradient(180deg, #3a3a3f 0%, #2a2a2e 100%)",
+                borderBottom: "3px solid rgba(255,77,0,0.55)",
+              }}
+            >
               <div className="grid grid-cols-1 items-center gap-4 xl:grid-cols-[1fr_auto_1fr]">
                 <div className="justify-self-start">
-                  <div className="font-extrabold uppercase" style={{ fontSize: 28, letterSpacing: "0.04em", color: "#ff4d00" }}>Matchmaker · Overzicht meldingen</div>
-                  <div className="mt-1 max-w-2xl text-sm text-white/85">{canSeeAllBonds ? "NVB superadmin: alle bondteams zichtbaar." : `Matchmaker-meldingen die naar admin zijn gestuurd. Alleen meldingen van bondteam ${myBondteam || "-"}.`}</div>
+                  <div
+                    className="font-extrabold uppercase"
+                    style={{
+                      fontSize: 28,
+                      letterSpacing: "0.04em",
+                      color: "#ff4d00",
+                    }}
+                  >
+                    Matchmaker · Overzicht meldingen
+                  </div>
+                  <div className="mt-1 max-w-2xl text-sm text-white/85">
+                    {isSuperadmin
+                      ? "Superadmin: alle meldingen zichtbaar."
+                      : "Matchmaker-meldingen die naar admin zijn gestuurd. Je ziet alleen je eigen meldingen."}
+                  </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Link href="/dashboard/matchmaker" className={silverButton()}><ArrowLeft size={14} /> Terug naar matchmaker</Link>
-                    <Link href="/dashboard/matchmaker/overtreding-melden" className={darkButton()}><Plus size={14} /> Nieuwe melding</Link>
+                    <Link
+                      href="/dashboard/matchmaker"
+                      className={silverButton()}
+                    >
+                      <ArrowLeft size={14} /> Terug naar matchmaker
+                    </Link>
+                    <Link
+                      href="/dashboard/matchmaker/overtreding-melden"
+                      className={darkButton()}
+                    >
+                      <Plus size={14} /> Nieuwe melding
+                    </Link>
                   </div>
                 </div>
-                <div className="justify-self-center"><div className="relative h-[90px] w-[260px]"><Image src={LOGO} alt="FightSupport" fill priority className="object-contain" sizes="260px" /></div></div>
+                <div className="justify-self-center">
+                  <div className="relative h-[90px] w-[260px]">
+                    <Image
+                      src={LOGO}
+                      alt="FightSupport"
+                      fill
+                      priority
+                      className="object-contain"
+                      sizes="260px"
+                    />
+                  </div>
+                </div>
                 <div className="flex flex-wrap justify-end gap-2">
-                  <Link href="/dashboard/matchmaker/overtreding-melden/rapport" className={silverButton()}><FileText size={14} /> Rapport</Link>
-                  <button onClick={load} disabled={loading} className={darkButton()}><RefreshCw size={14} /> Ververs</button>
+                  <Link
+                    href="/dashboard/matchmaker/overtreding-melden/rapport"
+                    className={silverButton()}
+                  >
+                    <FileText size={14} /> Rapport
+                  </Link>
+                  <button
+                    onClick={load}
+                    disabled={loading}
+                    className={darkButton()}
+                  >
+                    <RefreshCw size={14} /> Ververs
+                  </button>
                 </div>
               </div>
             </header>
@@ -385,34 +541,77 @@ export default function MatchmakersOvertredingenOverzichtPage() {
             <div className="px-4 py-6 md:px-6">
               <div className="grid gap-3 md:grid-cols-6">
                 {[
-                  ["Bondteam", myBondteam || "-"],
+                  ["Account", user?.email || myBondteam || "-"],
                   ["Rol", myRole || roles?.join(", ") || "-"],
                   ["Totaal", items.length],
                   ["Gefilterd", filtered.length],
                   ["Open/actief", openCount],
                   ["Hoog/ernstig", ernstigCount],
                 ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-2xl border border-zinc-700/30 bg-[#242428] p-3 text-white shadow-inner">
-                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-white/60">{label}</div>
-                    <div className="mt-1 text-2xl font-black text-[#ff4d00]">{value}</div>
+                  <div
+                    key={String(label)}
+                    className="rounded-2xl border border-zinc-700/30 bg-[#242428] p-3 text-white shadow-inner"
+                  >
+                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-white/60">
+                      {label}
+                    </div>
+                    <div className="mt-1 text-2xl font-black text-[#ff4d00]">
+                      {value}
+                    </div>
                   </div>
                 ))}
               </div>
 
-              {error ? <div className="mt-4 flex items-center gap-2 rounded-2xl border border-red-400/50 bg-red-950/90 p-4 text-sm font-bold text-red-100"><AlertTriangle size={16} /> {error}</div> : null}
+              {error ? (
+                <div className="mt-4 flex items-center gap-2 rounded-2xl border border-red-400/50 bg-red-950/90 p-4 text-sm font-bold text-red-100">
+                  <AlertTriangle size={16} /> {error}
+                </div>
+              ) : null}
 
-              <div className="mt-4 rounded-2xl border p-3" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(239,242,246,0.98) 100%)", borderColor: "rgba(90,90,95,0.22)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 24px rgba(0,0,0,0.08)" }}>
+              <div
+                className="mt-4 rounded-2xl border p-3"
+                style={{
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(239,242,246,0.98) 100%)",
+                  borderColor: "rgba(90,90,95,0.22)",
+                  boxShadow:
+                    "inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 24px rgba(0,0,0,0.08)",
+                }}
+              >
                 <div className="flex items-center gap-2">
                   <Search size={17} className="text-[#ff4d00]" />
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Zoeken op naam, VA, categorie, status, melder..." className="h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-950 outline-none focus:border-[#ff4d00]" />
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Zoeken op naam, VA, categorie, status, melder..."
+                    className="h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-950 outline-none focus:border-[#ff4d00]"
+                  />
                 </div>
               </div>
 
-              <div className="mt-5 overflow-hidden rounded-2xl" style={{ border: "2px solid rgba(230,230,230,0.55)", background: "linear-gradient(180deg, rgba(18,18,18,0.18) 0%, rgba(10,10,10,0.22) 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)" }}>
-                <div className="h-[3px]" style={{ background: "rgba(255,77,0,0.75)" }} />
+              <div
+                className="mt-5 overflow-hidden rounded-2xl"
+                style={{
+                  border: "2px solid rgba(230,230,230,0.55)",
+                  background:
+                    "linear-gradient(180deg, rgba(18,18,18,0.18) 0%, rgba(10,10,10,0.22) 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
+                }}
+              >
+                <div
+                  className="h-[3px]"
+                  style={{ background: "rgba(255,77,0,0.75)" }}
+                />
                 <div className="overflow-x-auto">
                   <table className="min-w-full border-collapse text-sm">
-                    <thead style={{ background: "linear-gradient(180deg, #ff6a00 0%, #ff5400 100%)", color: "#fff", borderBottom: "2px solid rgba(255,255,255,0.35)" }}>
+                    <thead
+                      style={{
+                        background:
+                          "linear-gradient(180deg, #ff6a00 0%, #ff5400 100%)",
+                        color: "#fff",
+                        borderBottom: "2px solid rgba(255,255,255,0.35)",
+                      }}
+                    >
                       <tr>
                         <th className="px-3 py-2 text-left">Datum</th>
                         <th className="px-3 py-2 text-left">Ingediend</th>
@@ -427,25 +626,97 @@ export default function MatchmakersOvertredingenOverzichtPage() {
                     </thead>
                     <tbody>
                       {loading ? (
-                        <tr><td colSpan={9} className="bg-white p-8 text-center font-bold text-zinc-500">Meldingen laden...</td></tr>
+                        <tr>
+                          <td
+                            colSpan={9}
+                            className="bg-white p-8 text-center font-bold text-zinc-500"
+                          >
+                            Meldingen laden...
+                          </td>
+                        </tr>
                       ) : filtered.length === 0 ? (
-                        <tr><td colSpan={9} className="bg-white p-8 text-center font-bold text-zinc-500">Geen meldingen gevonden.</td></tr>
-                      ) : filtered.map((m, i) => {
-                        const zebra = i % 2 === 0;
-                        return (
-                          <tr key={m.id} style={{ backgroundColor: zebra ? "#ffffff" : "#0d0d0d", color: zebra ? "#000" : "#fff" }}>
-                            <td className="px-3 py-2 font-black">{fmtDate(datumOvertredingVan(m))}</td>
-                            <td className="px-3 py-2">{fmtDate(m.aangemaakt_op || m.gemeld_op || m.created_at)}</td>
-                            <td className="px-3 py-2"><div className="font-black" style={{ color: "#ff4d00" }}>{naamVan(m)}</div><div className="text-[11px] uppercase opacity-70">{typeVan(m)}{m.va_nummer ? ` · VA ${m.va_nummer}` : ""}</div></td>
-                            <td className="px-3 py-2">{m.categorie || "-"}</td>
-                            <td className="px-3 py-2"><span className="border border-orange-500/40 bg-orange-950/30 px-2 py-1 text-[10px] font-black uppercase text-orange-200">{m.ernst || "-"}</span></td>
-                            <td className="px-3 py-2"><span className={`border px-2 py-1 text-[10px] font-black uppercase ${statusClass(m.status)}`}>{m.status || "open"}</span></td>
-                            <td className="px-3 py-2"><div className="font-bold">{melderNaamVan(m)}</div><div className="text-[11px] opacity-70">{melderEmailVan(m) || melderRolVan(m) || "-"}</div></td>
-                            <td className="px-3 py-2"><div className="font-black" style={{ color: "#ff4d00" }}>{bondteamVan(m) || "Geen bondteam"}</div><div className="text-[11px] uppercase opacity-70">{bronVan(m) || "-"}</div></td>
-                            <td className="max-w-xl px-3 py-2">{tekstVan(m)}</td>
-                          </tr>
-                        );
-                      })}
+                        <tr>
+                          <td
+                            colSpan={9}
+                            className="bg-white p-8 text-center font-bold text-zinc-500"
+                          >
+                            Geen meldingen gevonden.
+                          </td>
+                        </tr>
+                      ) : (
+                        filtered.map((m, i) => {
+                          const zebra = i % 2 === 0;
+                          return (
+                            <tr
+                              key={m.id}
+                              style={{
+                                backgroundColor: zebra ? "#ffffff" : "#0d0d0d",
+                                color: zebra ? "#000" : "#fff",
+                              }}
+                            >
+                              <td className="px-3 py-2 font-black">
+                                {fmtDate(datumOvertredingVan(m))}
+                              </td>
+                              <td className="px-3 py-2">
+                                {fmtDate(
+                                  m.aangemaakt_op ||
+                                    m.gemeld_op ||
+                                    m.created_at,
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                <div
+                                  className="font-black"
+                                  style={{ color: "#ff4d00" }}
+                                >
+                                  {naamVan(m)}
+                                </div>
+                                <div className="text-[11px] uppercase opacity-70">
+                                  {typeVan(m)}
+                                  {m.va_nummer ? ` · VA ${m.va_nummer}` : ""}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                {m.categorie || "-"}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className="border border-orange-500/40 bg-orange-950/30 px-2 py-1 text-[10px] font-black uppercase text-orange-200">
+                                  {m.ernst || "-"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={`border px-2 py-1 text-[10px] font-black uppercase ${statusClass(m.status)}`}
+                                >
+                                  {m.status || "open"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="font-bold">
+                                  {melderNaamVan(m)}
+                                </div>
+                                <div className="text-[11px] opacity-70">
+                                  {melderEmailVan(m) || melderRolVan(m) || "-"}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <div
+                                  className="font-black"
+                                  style={{ color: "#ff4d00" }}
+                                >
+                                  {bondteamVan(m) || "Geen bondteam"}
+                                </div>
+                                <div className="text-[11px] uppercase opacity-70">
+                                  {bronVan(m) || "-"}
+                                </div>
+                              </td>
+                              <td className="max-w-xl px-3 py-2">
+                                {tekstVan(m)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
