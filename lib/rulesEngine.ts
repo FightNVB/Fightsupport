@@ -3084,57 +3084,45 @@ export async function rulesEngine(opts: {
       // maar moet nooit stilletjes C/B/A akkoord maken.
       const naamRood = getFighterDisplayName(ctx, "rood");
       const naamBlauw = getFighterDisplayName(ctx, "blauw");
-      const jeugdR = getJeugdExperienceStats(rowsR);
-      const jeugdB = getJeugdExperienceStats(rowsB);
       const requestedHigherThanN = !!boutK && idxKlasse(boutK) > idxKlasse("N");
 
       if (requestedHigherThanN && roodHeeftFightPassportInfo && !roodOk && roodK === "N") {
-        // Alleen echte jeugd-uitslagen tellen hier als jeugd-ervaring.
-        // Scraped totaal_wedstrijden mag hier NIET gebruikt worden, want dat bevat ook volwassen N/C/B/A partijen.
-        const hasJeugdErvaring = jeugdR.total > 0;
+        // Volwassen uitslagen zijn leidend.
+        // Jeugduitslagen mogen hier geen aparte meldingstekst meer veroorzaken:
+        // als iemand hoger dan N staat zonder voldoende volwassen N/C/B/A-basis,
+        // is dit gewoon een dispensatie voor klasse.
         pushHitTournamentAware(
           {
             matchmaking_id,
             partij_nr,
             bout_id,
             hoek: "rood",
-            rule: hasJeugdErvaring
-              ? "Klasse handmatig controleren"
-              : "Dispensatie nodig voor klasse",
-            rule_code: hasJeugdErvaring
-              ? "VOLWASSEN_JEUGD_ERVARING_CONTROLE"
-              : "VOLWASSEN_KLASSE_GEEN_BASIS",
-            resultaat: hasJeugdErvaring ? "ACTIE" : "DISPENSATIE",
+            rule: "Dispensatie nodig voor klasse",
+            rule_code: "VOLWASSEN_KLASSE_GEEN_BASIS",
+            resultaat: "DISPENSATIE",
             severity: "warning",
-            boodschap: hasJeugdErvaring
-              ? `${naamRood} is volwassen en staat nu in klasse ${boutK}. Er zijn ${jeugdR.total} jeugdpartij(en) gevonden. Controleer of dat genoeg is voor deze klasse.`
-              : `${naamRood} staat in klasse ${boutK}, maar hoort volgens de controle in klasse N. Vraag dispensatie aan of pas de klasse aan.`,
+            boodschap: `${naamRood} staat in klasse ${boutK}, maar heeft volgens de controle onvoldoende volwassen basis voor deze klasse. Vraag dispensatie aan of pas de klasse aan.`,
           },
           ctx
         );
       }
 
       if (requestedHigherThanN && blauwHeeftFightPassportInfo && !blauwOk && blauwK === "N") {
-        // Alleen echte jeugd-uitslagen tellen hier als jeugd-ervaring.
-        // Scraped totaal_wedstrijden mag hier NIET gebruikt worden, want dat bevat ook volwassen N/C/B/A partijen.
-        const hasJeugdErvaring = jeugdB.total > 0;
+        // Volwassen uitslagen zijn leidend.
+        // Jeugduitslagen mogen hier geen aparte meldingstekst meer veroorzaken:
+        // als iemand hoger dan N staat zonder voldoende volwassen N/C/B/A-basis,
+        // is dit gewoon een dispensatie voor klasse.
         pushHitTournamentAware(
           {
             matchmaking_id,
             partij_nr,
             bout_id,
             hoek: "blauw",
-            rule: hasJeugdErvaring
-              ? "Klasse handmatig controleren"
-              : "Dispensatie nodig voor klasse",
-            rule_code: hasJeugdErvaring
-              ? "VOLWASSEN_JEUGD_ERVARING_CONTROLE"
-              : "VOLWASSEN_KLASSE_GEEN_BASIS",
-            resultaat: hasJeugdErvaring ? "ACTIE" : "DISPENSATIE",
+            rule: "Dispensatie nodig voor klasse",
+            rule_code: "VOLWASSEN_KLASSE_GEEN_BASIS",
+            resultaat: "DISPENSATIE",
             severity: "warning",
-            boodschap: hasJeugdErvaring
-              ? `${naamBlauw} is volwassen en staat nu in klasse ${boutK}. Er zijn ${jeugdB.total} jeugdpartij(en) gevonden. Controleer of dat genoeg is voor deze klasse.`
-              : `${naamBlauw} staat in klasse ${boutK}, maar hoort volgens de controle in klasse N. Vraag dispensatie aan of pas de klasse aan.`,
+            boodschap: `${naamBlauw} staat in klasse ${boutK}, maar heeft volgens de controle onvoldoende volwassen basis voor deze klasse. Vraag dispensatie aan of pas de klasse aan.`,
           },
           ctx
         );

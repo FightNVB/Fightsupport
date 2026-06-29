@@ -589,8 +589,8 @@ function Badge({ status }: { status: PartijStatus }) {
   const base = "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide";
   if (status === "VERBOD") return <span className={`${base} bg-purple-700 text-white`}>VERBOD</span>;
   if (status === "AFKEUR") return <span className={`${base} bg-red-600 text-white`}>AFKEUR</span>;
-  if (status === "DISPENSATIE") return <span className={`${base} bg-yellow-400 text-black`}>DISPENSATIE</span>;
-  if (status === "ACTIE") return <span className={`${base} bg-orange-500 text-black`}>ACTIE</span>;
+  if (status === "DISPENSATIE") return <span className={`${base} bg-orange-500 text-black`}>DISPENSATIE</span>;
+  if (status === "ACTIE") return <span className={`${base} bg-yellow-400 text-black`}>ACTIE</span>;
   return <span className={`${base} bg-green-600 text-white`}>OK</span>;
 }
 
@@ -1258,20 +1258,78 @@ export default function RapportPage() {
     const items: IssueSummaryItem[] = [];
     const seen = new Set<string>();
 
+    const codeFromAny = (row: any) =>
+      String(row?.toernooi_code ?? row?.toernooiCode ?? "").trim().toUpperCase();
+
+    const fighterIdFromAny = (row: any) =>
+      normalizeVa(row?.fighter_id ?? row?.toernooi_va_nummer ?? row?.va_nummer ?? row?.fighterId);
+
+    const ctxByToernooiFighter = new Map<string, any>();
+    for (const row of toernooiRows ?? []) {
+      const code = codeFromAny(row) || getToernooiCodeSafe(row);
+      const fighterId = fighterIdFromAny(row);
+      if (!code || !fighterId) continue;
+      ctxByToernooiFighter.set(`${code}__${fighterId}`, row);
+    }
+
     const missingRows = dedupeRows(
       (resultaten ?? []).filter((r) => {
-        const pn = Number(r.partij_nr);
-        if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) return false;
         if (!isMissingVARow(r)) return false;
         if (isApprovedOrClosed(r.review_status)) return false;
-        return true;
+        const res = normResultaatLower(r.resultaat);
+        if (res === "" || res === "ok") return false;
+
+        const pn = Number(r.partij_nr);
+        const code = codeFromAny(r);
+        const isToernooiResultaat = (Number.isFinite(pn) && pn === 0) || !!code;
+        const isGewonePartij = Number.isFinite(pn) && gewonePartijNrs.has(pn);
+
+        // Geen VA moet uit alle open controle_resultaten komen:
+        // gewone partijen én toernooi-deelnemers.
+        return isGewonePartij || isToernooiResultaat;
       })
     );
 
     for (const r of missingRows) {
       const pn = Number(r.partij_nr);
+      const code = codeFromAny(r);
+      const fighterId = fighterIdFromAny(r);
+      const isToernooiResultaat = (Number.isFinite(pn) && pn === 0) || !!code;
+
+      if (isToernooiResultaat) {
+        const toernooiCode = code || "TOERNOOI";
+        const ctx = fighterId ? ctxByToernooiFighter.get(`${toernooiCode}__${fighterId}`) : null;
+
+        const naam =
+          safeRaw(ctx?.naam ?? ctx?.naam_fp ?? ctx?.naam_mm ?? r.naam) ||
+          (fighterId ? `VA ${fighterId}` : "Toernooi deelnemer");
+
+        const gym = safeRaw(ctx?.sportschool ?? ctx?.sportschool_mm ?? r.sportschool);
+        const naamKey = normDedupeText(naam);
+        const gymKey = normGymKey(gym);
+        const key = `${toernooiCode}__${fighterId || `${naamKey}__${gymKey}`}__va-ontbreekt`;
+
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        items.push({
+          partij_nr: Number.isFinite(pn) ? pn : 0,
+          partij: toernooiCode,
+          hoek: inferHoek(r) ?? "rood",
+          naam: safe(naam, "Toernooi deelnemer"),
+          gym: safe(gym),
+          label: "VA ontbreekt",
+          detail: safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer ontbreekt"),
+          sortNaam: naamKey,
+        });
+
+        continue;
+      }
+
+      if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) continue;
+
       const hoek = inferHoek(r);
-      if (!Number.isFinite(pn) || !hoek) continue;
+      if (!hoek) continue;
 
       const ctx = ctxByPartij.get(pn);
       if (!ctx) continue;
@@ -1282,7 +1340,7 @@ export default function RapportPage() {
           ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? ctx?.rood_naam)
           : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? ctx?.blauw_naam);
 
-      const key = `${naam.toLowerCase()}__va-ontbreekt`;
+      const key = `${pn}__${hoek}__va-ontbreekt`;
       if (seen.has(key)) continue;
       seen.add(key);
 
@@ -1304,7 +1362,7 @@ export default function RapportPage() {
     return items.sort((a, b) =>
       (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl")
     );
-  }, [resultaten, ctxByPartij, gewonePartijNrs]);
+  }, [resultaten, ctxByPartij, gewonePartijNrs, toernooiRows]);
 
   const openKeurmerkRows = useMemo(() => {
     return (resultaten ?? []).filter((r) => {
@@ -1969,7 +2027,16 @@ export default function RapportPage() {
     const seen = new Set<string>();
 
     for (const item of toernooiMeldingen) {
-      if (!item.labels.some((x) => x.toLowerCase().includes("geen va"))) continue;
+      if (
+        !item.labels.some((x) => {
+          const lx = x.toLowerCase();
+          return lx.includes("geen va") || lx.includes("va ontbreekt") || lx.includes("fightpaspoort");
+        }) &&
+        !item.details.some((x) => {
+          const dx = x.toLowerCase();
+          return dx.includes("geen va") || dx.includes("va ontbreekt") || dx.includes("fightpaspoort");
+        })
+      ) continue;
       const key = `${item.toernooiCode}-${item.fighterKey}-va`.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1989,7 +2056,25 @@ export default function RapportPage() {
   }, [toernooiMeldingen]);
 
   const allMissingVaIssues = useMemo(() => {
-    return [...missingVaIssues, ...toernooiMissingVaIssues];
+    const map = new Map<string, IssueSummaryItem>();
+
+    for (const item of [...missingVaIssues, ...toernooiMissingVaIssues]) {
+      const key = `${normDedupeText(item.partij)}__${normDedupeText(item.naam)}__${normGymKey(item.gym)}__va-ontbreekt`;
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, item);
+        continue;
+      }
+
+      map.set(key, {
+        ...prev,
+        detail: prev.detail.length >= item.detail.length ? prev.detail : item.detail,
+      });
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl")
+    );
   }, [missingVaIssues, toernooiMissingVaIssues]);
 
   const toernooiKeurmerkIssues = useMemo(() => {
