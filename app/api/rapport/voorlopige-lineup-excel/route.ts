@@ -864,7 +864,6 @@ export async function GET(req: Request) {
 
   const seenToernooiFighters = new Set<string>();
   const shownWarningTexts = new Set<string>();
-  let exportPartijNr = 1;
   let targetRowNumber = 2;
 
   const gewonePartijen = bouts.filter((b: any) => !isToernooiBout(b));
@@ -885,7 +884,7 @@ export async function GET(req: Request) {
       ws,
       targetRowNumber++,
       {
-        partijNr: exportPartijNr++,
+        partijNr: b.partij_nr ?? "",
         discipline: b.discipline,
         klasse: b.klasse,
         roodNaam: b.rood_naam,

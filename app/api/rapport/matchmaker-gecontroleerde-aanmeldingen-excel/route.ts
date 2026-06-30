@@ -1460,7 +1460,8 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const matchmakingId = s(
-      url.searchParams.get("matchmakingId") ??
+      url.searchParams.get("matchmaking_id") ??
+        url.searchParams.get("matchmakingId") ??
         url.searchParams.get("matchmakingid") ??
         url.searchParams.get("id"),
     );

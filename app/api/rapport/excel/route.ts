@@ -388,7 +388,7 @@ function getComputedRondetijden(ctx: any, eventDate: any) {
   if (klasse.startsWith("B")) return "3 x 3 min";
   if (klasse.startsWith("C")) return "3 x 2 min";
   if (klasse.startsWith("N")) return "3 x 1,5 min";
-  if (klasse.startsWith("R") || klasse.includes("RECREANT")) return "3 x 1,5 min";
+  if (klasse.startsWith("R") || klasse.includes("RECREANT")) return "3 x 1 min";
 
   if (klasse.startsWith("J")) {
     const leeftijdRood = getLeeftijdOpEvenementNumber(ctx, "rood", eventDate);
@@ -1575,6 +1575,7 @@ export async function GET(req: Request) {
     }
 
     const ctxList = (ctxRows ?? []) as any[];
+    const gewoneCtxList = ctxList.filter((p) => !isToernooiContext(p));
 
     const allVaNumbers = Array.from(
       new Set(
@@ -1620,7 +1621,7 @@ export async function GET(req: Request) {
       const START_ROW = 7;
       let outRowNr = START_ROW;
 
-      for (const p of ctxList) {
+      for (const p of gewoneCtxList) {
         const pn = Number(p.partij_nr);
         const meldingen = Number.isFinite(pn) ? meldByPartij.get(pn) ?? [] : [];
         const _status = partyStatusVoorMeldingen(meldingen);

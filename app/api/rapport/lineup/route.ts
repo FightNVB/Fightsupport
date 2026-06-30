@@ -912,7 +912,6 @@ export async function GET(req: Request) {
   clearTemplateData(ws, 2);
 
   const seenToernooiFighters = new Set<string>();
-  let exportPartijNr = 1;
   let rowNumber = 2;
 
   const gewonePartijen = bouts.filter((b: any) => !isToernooiBout(b));
@@ -930,7 +929,7 @@ export async function GET(req: Request) {
     });
 
     setLineupCellValues(ws, rowNumber++, {
-      partij_nr: exportPartijNr++,
+      partij_nr: b.partij_nr ?? "",
       discipline: b.discipline,
       klasse: b.klasse,
       rood_naam: b.rood_naam,

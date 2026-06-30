@@ -33,7 +33,7 @@ import {
 const ORANGE = "#ff4d00";
 const LOGO_SRC = "/branding/fightsupport/excel-logo.png";
 const EXCEL_TEMPLATE_URL =
-  "/public/templates/fightsupport-aanmeldingen-upload.xlsx";
+  "/templates/fightsupport-aanmeldingen-upload.xlsx";
 
 type Aanmelding = Record<string, any>;
 type BusyMode =
@@ -1186,7 +1186,7 @@ export default function AanmeldingenPage() {
               <a
                 className="fs-silver-btn compact-action"
                 href={EXCEL_TEMPLATE_URL}
-                download="fightsupport-upload.xlsx"
+                download="fightsupport-aanmeldingen-upload.xlsx"
               >
                 <Download size={16} />
                 Download template

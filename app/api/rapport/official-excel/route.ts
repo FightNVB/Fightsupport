@@ -642,7 +642,7 @@ function getRondeTijden(ctx: any, eventDate: any) {
     return "3x1 min";
   }
 
-  if (includesClass(klasse, "R")) return "3x1,5 min";
+  if (includesClass(klasse, "R")) return "3x1 min";
   if (includesClass(klasse, "N")) return "3x1,5 min";
   if (includesClass(klasse, "C")) return "3x2 min";
   if (includesClass(klasse, "B")) return "3x3 min";
@@ -1829,6 +1829,7 @@ export async function GET(req: Request) {
 
     const rawMaps = await getMatchmakingRawMap(matchmaking_id);
     const ctxList = mergeRawMaxWeightIntoContextRows((ctxRows ?? []) as any[], rawMaps);
+    const gewoneCtxList = ctxList.filter((p) => !isToernooiContext(p));
     if (!ctxList.length) {
       return NextResponse.json(
         {
@@ -1840,7 +1841,7 @@ export async function GET(req: Request) {
 
     const allVaNumbers = Array.from(
       new Set(
-        ctxList
+        gewoneCtxList
           .flatMap((p) => [getVa(p, "rood"), getVa(p, "blauw")])
           .filter(Boolean),
       ),
@@ -1894,7 +1895,7 @@ export async function GET(req: Request) {
 
     let outRowNr = 2;
 
-    for (const p of ctxList) {
+    for (const p of gewoneCtxList) {
       const row = ws.getRow(outRowNr++);
 
       row.getCell(1).value = p.partij_nr ?? outRowNr - 2;

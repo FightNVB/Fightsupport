@@ -4615,9 +4615,11 @@ export default function ControleMatchmakingPage() {
                         const heeftAfkeur = Number.isFinite(originalPn)
                           ? !!hasAfkeurByPartij[originalPn]
                           : false;
+                        const heeftDispRequest = Number.isFinite(originalPn)
+                          ? !!dispRequestByPartij[originalPn]
+                          : false;
                         const heeftDispensatie = Number.isFinite(originalPn)
-                          ? !!hasDispByPartij[originalPn] ||
-                            !!dispRequestByPartij[originalPn]
+                          ? !!hasDispByPartij[originalPn] || heeftDispRequest
                           : false;
                         const heeftActie = Number.isFinite(originalPn)
                           ? !!hasActieByPartij[originalPn]
@@ -4679,7 +4681,11 @@ export default function ControleMatchmakingPage() {
                                     />
                                   ) : null}
 
-                                  <StatusBadge status={status} />
+                                  {heeftDispRequest ? (
+                                    <Chip label="NAAR DISPENSATIE" tone="purple" />
+                                  ) : (
+                                    <StatusBadge status={status} />
+                                  )}
                                   {heeftVerbod ? (
                                     <Chip label="VERBOD" tone="purple" />
                                   ) : null}
@@ -4690,16 +4696,10 @@ export default function ControleMatchmakingPage() {
                                   {heeftAfkeur && status !== "afgekeurd" ? (
                                     <Chip label="AFKEUR" tone="red" />
                                   ) : null}
-                                  {heeftDispensatie ? (
-                                    <Chip
-                                      label={
-                                        Number.isFinite(originalPn) &&
-                                        dispRequestByPartij[originalPn]
-                                          ? "NAAR DISPENSATIE"
-                                          : "DISPENSATIE"
-                                      }
-                                      tone="orange"
-                                    />
+                                  {heeftDispensatie &&
+                                  !heeftDispRequest &&
+                                  status !== "dispensatie" ? (
+                                    <Chip label="DISPENSATIE" tone="orange" />
                                   ) : null}
                                   {heeftActie && status !== "actie" ? (
                                     <Chip label="ACTIE" tone="yellow" />
