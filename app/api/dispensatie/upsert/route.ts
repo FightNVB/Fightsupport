@@ -37,7 +37,12 @@ function asUuidStrict(v: unknown): string | null {
 }
 
 function asInt(v: unknown): number | null {
-  const n = Number(v);
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s || s.toLowerCase() === "null" || s.toLowerCase() === "undefined") {
+    return null;
+  }
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -51,6 +56,34 @@ function normUpper(v: unknown): string {
   return String(v ?? "").trim().toUpperCase();
 }
 
+async function findBoutVaNumbers(params: {
+  matchmaking_id: string;
+  partij_nr: number | null;
+}) {
+  const { matchmaking_id, partij_nr } = params;
+
+  // matchmaking_bouts_raw heeft geen bout_id-kolom.
+  // Daarom halen we de VA-nummers op via matchmaking_id + partij_nr.
+  if (partij_nr == null) {
+    return { va_rood: null, va_blauw: null };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("matchmaking_bouts_raw")
+    .select("va_rood, va_blauw")
+    .eq("matchmaking_id", matchmaking_id)
+    .eq("partij_nr", partij_nr)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return {
+    va_rood: asInt((data as any)?.va_rood),
+    va_blauw: asInt((data as any)?.va_blauw),
+  };
+}
+
 async function findLatestDispensatieResult(params: {
   bout_id: string;
   controle_run_id: string | null;
@@ -59,6 +92,7 @@ async function findLatestDispensatieResult(params: {
 
   let result: {
     id: string | null;
+    rule: string | null;
     rule_code: string | null;
     boodschap: string | null;
     resultaat: string | null;
@@ -68,7 +102,7 @@ async function findLatestDispensatieResult(params: {
   {
     let q = supabaseAdmin
       .from("controle_resultaten")
-      .select("id, rule_code, boodschap, resultaat, created_at, controle_run_id")
+      .select("id, rule, rule_code, boodschap, resultaat, created_at, controle_run_id")
       .eq("bout_id", bout_id)
       .order("created_at", { ascending: false });
 
@@ -86,6 +120,7 @@ async function findLatestDispensatieResult(params: {
     if (match) {
       result = {
         id: asText(match.id),
+        rule: asText(match.rule),
         rule_code: asText(match.rule_code),
         boodschap: asText(match.boodschap),
         resultaat: asText(match.resultaat),
@@ -97,7 +132,7 @@ async function findLatestDispensatieResult(params: {
   if (!result) {
     const { data, error } = await supabaseAdmin
       .from("controle_resultaten")
-      .select("id, rule_code, boodschap, resultaat, created_at, controle_run_id")
+      .select("id, rule, rule_code, boodschap, resultaat, created_at, controle_run_id")
       .eq("bout_id", bout_id)
       .order("created_at", { ascending: false });
 
@@ -110,6 +145,7 @@ async function findLatestDispensatieResult(params: {
     if (match) {
       result = {
         id: asText(match.id),
+        rule: asText(match.rule),
         rule_code: asText(match.rule_code),
         boodschap: asText(match.boodschap),
         resultaat: asText(match.resultaat),
@@ -218,6 +254,11 @@ export async function POST(req: Request) {
 
     const dispensatie_melding = dispensatieResult.boodschap ?? null;
 
+    const { va_rood, va_blauw } = await findBoutVaNumbers({
+      matchmaking_id,
+      partij_nr,
+    });
+
     const { data: existing, error: exErr } = await supabaseAdmin
       .from("dispensatie_requests")
       .select("id")
@@ -232,7 +273,11 @@ export async function POST(req: Request) {
 
       const patch: any = {
         partij_nr,
+        va_rood,
+        va_blauw,
+        rule: dispensatieResult.rule ?? null,
         rule_code: resolved_rule_code,
+        reason: dispensatie_melding,
         updated_at: new Date().toISOString(),
       };
 
@@ -262,7 +307,9 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         id,
+        rule: dispensatieResult.rule ?? null,
         rule_code: resolved_rule_code,
+        reason: dispensatie_melding,
         melding: dispensatie_melding,
         resultaat: "DISPENSATIE",
         source_resultaat_id: dispensatieResult.id ?? null,
@@ -274,7 +321,11 @@ export async function POST(req: Request) {
       matchmaking_id,
       bout_id,
       partij_nr,
+      va_rood,
+      va_blauw,
+      rule: dispensatieResult.rule ?? null,
       rule_code: resolved_rule_code,
+      reason: dispensatie_melding,
       controle_run_id: controle_run_id ?? null,
       created_by: created_by ?? null,
     };
@@ -304,7 +355,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       id: ins.id,
+      rule: dispensatieResult.rule ?? null,
       rule_code: resolved_rule_code,
+      reason: dispensatie_melding,
       melding: dispensatie_melding,
       resultaat: "DISPENSATIE",
       source_resultaat_id: dispensatieResult.id ?? null,

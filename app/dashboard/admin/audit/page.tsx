@@ -1237,7 +1237,7 @@ export default function AdminAuditPage() {
                       </div>
                     </div>
 
-                    {approvalInfo ? <ApprovalInfoPanel info={approvalInfo} actorName={actorName} /> : null}
+                    {approvalInfo ? <ApprovalInfoPanel info={approvalInfo} actorName={actorName} auditRow={row} /> : null}
 
                     {(isChangesOpen || isJsonOpen) && (
                       <div
@@ -1945,9 +1945,11 @@ function formatPenalty(v: unknown) {
 function ApprovalInfoPanel({
   info,
   actorName,
+  auditRow,
 }: {
   info: ApprovalInfo;
   actorName: string;
+  auditRow: AuditRow;
 }) {
   const c = info.controle;
   const b = info.bout;
@@ -1971,6 +1973,50 @@ function ApprovalInfoPanel({
   const eventDate = b?.evenement_datum || w?.evenement_datum || t?.evenement_datum || null;
   const klasse = safeText(b?.klasse_mm) || safeText(w?.klasse_mm) || safeText(t?.klasse_mm) || safeText(t?.klasse);
   const discipline = safeText(b?.discipline) || safeText(w?.discipline) || safeText(t?.discipline);
+
+  const loggedRuleCode =
+    safeText(c?.rule_code) ||
+    safeText(getAuditValue(auditRow, "rule_code")) ||
+    safeText(c?.rule) ||
+    safeText(getAuditValue(auditRow, "rule")) ||
+    "—";
+
+  const loggedRule =
+    safeText(c?.rule) ||
+    safeText(getAuditValue(auditRow, "rule")) ||
+    safeText(c?.rule_code) ||
+    safeText(getAuditValue(auditRow, "rule_code")) ||
+    "—";
+
+  const loggedOriginal =
+    safeText(c?.original_resultaat) ||
+    safeText(getAuditValue(auditRow, "original_resultaat")) ||
+    safeText(c?.resultaat) ||
+    safeText(getAuditValue(auditRow, "resultaat")) ||
+    "—";
+
+  const loggedDecision =
+    safeText(c?.review_status) ||
+    safeText(getAuditValue(auditRow, "review_status")) ||
+    safeText(getAuditValue(auditRow, "actie_status")) ||
+    "goedgekeurd";
+
+  const loggedMessage =
+    safeText(c?.boodschap) ||
+    safeText(getAuditValue(auditRow, "boodschap")) ||
+    "—";
+
+  const loggedNote =
+    safeText(c?.review_note) ||
+    safeText(getAuditValue(auditRow, "review_note")) ||
+    safeText(c?.aantekeningen) ||
+    safeText(getAuditValue(auditRow, "aantekeningen")) ||
+    "—";
+
+  const loggedAt =
+    c?.reviewed_at ||
+    safeText(getAuditValue(auditRow, "reviewed_at")) ||
+    auditRow.created_at;
 
   return (
     <div
@@ -2038,17 +2084,20 @@ function ApprovalInfoPanel({
           gap: 8,
         }}
       >
-        <ApprovalMini label="Rule" value={safeText(c?.rule) || safeText(c?.rule_code) || "—"} />
-        <ApprovalMini label="Oorspronkelijk" value={safeText(c?.original_resultaat) || safeText(c?.resultaat) || "—"} />
+        <ApprovalMini label="Regelcode" value={loggedRuleCode} />
+        <ApprovalMini label="Regel" value={loggedRule} />
+        <ApprovalMini label="Oorspronkelijk" value={loggedOriginal} />
+        <ApprovalMini label="Beslissing" value={loggedDecision} />
         <ApprovalMini label="Door" value={actorName || "—"} />
-        <ApprovalMini label="Goedgekeurd op" value={fmtDate(c?.reviewed_at)} />
+        <ApprovalMini label="Goedgekeurd op" value={fmtDate(loggedAt)} />
+        <ApprovalMini label="Audit actie" value={safeText(auditRow.action) || "—"} />
+        <ApprovalMini label="Audit tabel" value={safeText(auditRow.entity_type) || "—"} />
       </div>
 
-      {safeText(c?.boodschap) ? (
-        <div style={{ marginTop: 8 }}>
-          <ApprovalMini label="Melding" value={safeText(c?.boodschap)} wide />
-        </div>
-      ) : null}
+      <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+        <ApprovalMini label="Melding / waarom regel afging" value={loggedMessage} wide />
+        <ApprovalMini label="Review opmerking / reden goedkeuring" value={loggedNote} wide />
+      </div>
 
       {w ? (
         <div

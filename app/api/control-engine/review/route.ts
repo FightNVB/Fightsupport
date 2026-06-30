@@ -50,6 +50,24 @@ function cleanText(v: any): string | null {
   return s || null;
 }
 
+function buildReviewNote(row: any, note: string | null): string | null {
+  // Belangrijk voor audit: bij goedkeuren zonder losse notitie willen we
+  // alsnog de oorspronkelijke melding/reden kunnen terugzien.
+  return (
+    cleanText(note) ??
+    cleanText(row?.review_note) ??
+    cleanText(row?.aantekeningen) ??
+    cleanText(row?.boodschap) ??
+    cleanText(row?.rule) ??
+    cleanText(row?.rule_code) ??
+    null
+  );
+}
+
+function buildOriginalResultaat(row: any): string | null {
+  return cleanText(row?.original_resultaat) ?? cleanText(row?.resultaat);
+}
+
 async function resolveControleResultaatRow(body: any) {
   const controle_resultaat_id = cleanText(body?.controle_resultaat_id ?? body?.id);
 
@@ -220,14 +238,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Geen rechten voor review." }, { status: 403 });
     }
 
+    const reviewNote = buildReviewNote(row, note);
+    const originalResultaat = buildOriginalResultaat(row);
+
     if (decision === "approve") {
       const update = {
         resultaat: "ok",
         review_status: "goedgekeurd",
         reviewed_by: userId,
         reviewed_at,
-        original_resultaat: row.original_resultaat ?? row.resultaat,
-        aantekeningen: note ?? row.aantekeningen,
+        original_resultaat: originalResultaat,
+        // review_note + aantekeningen bewaren de reden in de audit-trigger,
+        // ook als resultaat daarna naar OK gaat.
+        review_note: reviewNote,
+        aantekeningen: reviewNote,
       };
 
       const { error: updErr } = await supabase
@@ -245,8 +269,10 @@ export async function POST(req: Request) {
       review_status: "afgekeurd",
       reviewed_by: userId,
       reviewed_at,
-      original_resultaat: row.original_resultaat ?? row.resultaat,
-      aantekeningen: note,
+      original_resultaat: originalResultaat,
+      // Bij afkeuren is note verplicht, maar fallback voorkomt lege auditregels.
+      review_note: reviewNote,
+      aantekeningen: reviewNote,
     };
 
     const { error: updErr } = await supabase

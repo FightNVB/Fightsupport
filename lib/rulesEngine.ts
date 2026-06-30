@@ -3163,11 +3163,11 @@ export async function rulesEngine(opts: {
             matchmaking_id,
             partij_nr,
             bout_id,
-            rule: "Verkeerde klasse",
+            rule: "Dispensatie nodig voor klasse",
             rule_code: "VOLWASSEN_VERKEERDE_KLASSE",
-            resultaat: "AFKEUR",
-            severity: "error",
-            boodschap: `Deze partij staat in klasse ${boutK}, maar dat klopt niet. ${klasseDetails.join(" • ")}. Pas de klasse aan.`,
+            resultaat: "DISPENSATIE",
+            severity: "warning",
+            boodschap: `Deze partij staat in klasse ${boutK}, maar dat klopt niet. ${klasseDetails.join(" • ")}. Vraag dispensatie aan of pas de klasse aan.`,
           });
         }
       }

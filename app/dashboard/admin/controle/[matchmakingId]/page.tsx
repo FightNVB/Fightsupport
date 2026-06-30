@@ -43,12 +43,7 @@ type ControleRun = {
 };
 
 type PartijStatus =
-  | "verbod"
-  | "afgekeurd"
-  | "dispensatie"
-  | "actie"
-  | "ok"
-  | "geen_info";
+  "verbod" | "afgekeurd" | "dispensatie" | "actie" | "ok" | "geen_info";
 
 type ResRow = {
   partij_nr: number | null;
@@ -822,14 +817,20 @@ function hasKlasseToken(
   return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i").test(text);
 }
 
-function bothFightersAtLeastAge(row: AnyRow | null | undefined, minAge: number) {
+function bothFightersAtLeastAge(
+  row: AnyRow | null | undefined,
+  minAge: number,
+) {
   if (!row) return false;
   const rood = ageAtEventNumber(row, "rood");
   const blauw = ageAtEventNumber(row, "blauw");
   return rood != null && blauw != null && rood >= minAge && blauw >= minAge;
 }
 
-function hasTalentStatusKlasse(rawKlasse: string, normalizedKlasse: string): boolean {
+function hasTalentStatusKlasse(
+  rawKlasse: string,
+  normalizedKlasse: string,
+): boolean {
   const raw = String(rawKlasse ?? "").toLowerCase();
   return (
     raw.includes("j+") ||
@@ -907,7 +908,10 @@ function matchKlasseDuur(
 
   if (isJeugdKlasse(rawKlasse, k)) {
     if (bothFightersAtLeastAge(row, 16)) {
-      return { mins: KLASSE_MINUTEN["jeugd 16+"], label: "Jeugd 16+ jaar (beide 16+)" };
+      return {
+        mins: KLASSE_MINUTEN["jeugd 16+"],
+        label: "Jeugd 16+ jaar (beide 16+)",
+      };
     }
     return { mins: KLASSE_MINUTEN.jeugd, label: "Jeugd < 16 jaar" };
   }
@@ -1018,7 +1022,11 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
     const discipline = String(
       eersteMetKlasse?.discipline ?? groupRows[0]?.discipline ?? "",
     ).trim();
-    const match = matchKlasseDuur(klasse, discipline, eersteMetKlasse ?? groupRows[0]);
+    const match = matchKlasseDuur(
+      klasse,
+      discipline,
+      eersteMetKlasse ?? groupRows[0],
+    );
     const label = match
       ? `Toernooi ${toernooiKey} - ${match.label}`
       : klasse
@@ -1257,7 +1265,6 @@ function toNumberLoose(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-
 function firstFilled(...vals: any[]) {
   for (const v of vals) {
     if (v !== null && v !== undefined && String(v).trim() !== "") return v;
@@ -1306,7 +1313,10 @@ function getResolvedMaxWeightNumber(row: AnyRow): number | null {
   return n == null ? null : Math.abs(n);
 }
 
-function mergeRawMaxWeightIntoContextRows(ctxRows: AnyRow[], rawRows: AnyRow[]): AnyRow[] {
+function mergeRawMaxWeightIntoContextRows(
+  ctxRows: AnyRow[],
+  rawRows: AnyRow[],
+): AnyRow[] {
   if (!ctxRows.length || !rawRows.length) return ctxRows;
 
   const rawByPartij = new Map<number, AnyRow>();
@@ -1316,14 +1326,24 @@ function mergeRawMaxWeightIntoContextRows(ctxRows: AnyRow[], rawRows: AnyRow[]):
     const pn = Number(raw?.partij_nr);
     if (Number.isFinite(pn)) rawByPartij.set(pn, raw);
 
-    for (const key of [raw?.id, raw?.bout_uid, raw?.source_matchmaker_bout_id]) {
+    for (const key of [
+      raw?.id,
+      raw?.bout_uid,
+      raw?.source_matchmaker_bout_id,
+    ]) {
       const id = String(key ?? "").trim();
       if (id) rawById.set(id, raw);
     }
   }
 
   return ctxRows.map((ctx) => {
-    const ids = [ctx?.bout_id, ctx?.bout_uid, ctx?.raw_bout_id, ctx?.matchmaker_bout_id, ctx?.source_matchmaker_bout_id]
+    const ids = [
+      ctx?.bout_id,
+      ctx?.bout_uid,
+      ctx?.raw_bout_id,
+      ctx?.matchmaker_bout_id,
+      ctx?.source_matchmaker_bout_id,
+    ]
       .map((v) => String(v ?? "").trim())
       .filter(Boolean);
 
@@ -1340,7 +1360,14 @@ function mergeRawMaxWeightIntoContextRows(ctxRows: AnyRow[], rawRows: AnyRow[]):
     const next = { ...ctx };
 
     const maxWeight = getResolvedMaxWeightRaw(raw);
-    if (firstFilled(next.max_gewicht, next.max_gewicht_mm, next.matchmaking_bouts_raw_max_gewicht) == null && maxWeight != null) {
+    if (
+      firstFilled(
+        next.max_gewicht,
+        next.max_gewicht_mm,
+        next.matchmaking_bouts_raw_max_gewicht,
+      ) == null &&
+      maxWeight != null
+    ) {
       next.max_gewicht = maxWeight;
       next.matchmaking_bouts_raw_max_gewicht = maxWeight;
     }
@@ -1532,14 +1559,21 @@ function isRelevantTournamentUitslagDiscipline(v: any): boolean {
     .trim()
     .toLowerCase();
   if (!s) return false;
-  return s.includes("kick") || s.includes("k1") || s.includes("muay") || s.includes("thai");
+  return (
+    s.includes("kick") ||
+    s.includes("k1") ||
+    s.includes("muay") ||
+    s.includes("thai")
+  );
 }
 
 function isJeugdTournamentClassText(v: any): boolean {
   const s = String(v ?? "")
     .trim()
     .toLowerCase();
-  return s === "j" || s.includes("j+") || s.includes("jeugd") || s.includes("youth");
+  return (
+    s === "j" || s.includes("j+") || s.includes("jeugd") || s.includes("youth")
+  );
 }
 
 function highestTournamentClassFromUitslagen(rows: UitslagClassRow[]): string {
@@ -1586,7 +1620,10 @@ function getFighterClassFromRow(row: AnyRow, side: "rood" | "blauw"): string {
   );
 }
 
-function getFighterClassLabelFromRow(row: AnyRow, side: "rood" | "blauw"): string {
+function getFighterClassLabelFromRow(
+  row: AnyRow,
+  side: "rood" | "blauw",
+): string {
   const klasseUitUitslagen = row?.[`__${side}_uitslagen_klasse`];
   if (klasseUitUitslagen) return displayTournamentClass(klasseUitUitslagen);
 
@@ -1790,7 +1827,6 @@ function getToernooiFighterKey(
   return `fallback:${naam}__${gym}`;
 }
 
-
 function normalizeVaForToernooi(v: any): string {
   return String(v ?? "").replace(/[^0-9]/g, "");
 }
@@ -1851,11 +1887,17 @@ function toernooiResultMatchesSide(
   row: AnyRow,
   side: "rood" | "blauw",
 ): boolean {
-  const resToernooi = String((res as any)?.toernooi_code ?? "").trim().toUpperCase();
-  const rowToernooi = String(getToernooiKey(row) ?? "").trim().toUpperCase();
+  const resToernooi = String((res as any)?.toernooi_code ?? "")
+    .trim()
+    .toUpperCase();
+  const rowToernooi = String(getToernooiKey(row) ?? "")
+    .trim()
+    .toUpperCase();
   if (resToernooi && rowToernooi && resToernooi !== rowToernooi) return false;
 
-  const resHoek = String(res?.hoek ?? "").trim().toLowerCase();
+  const resHoek = String(res?.hoek ?? "")
+    .trim()
+    .toLowerCase();
   const resVa = normalizeVaForToernooi(
     (res as any)?.toernooi_va_nummer ??
       (res as any)?.va_nummer ??
@@ -1883,21 +1925,37 @@ function toernooiResultMatchesSide(
 
 function toernooiResultDedupeKey(rr: ResRow): string {
   return [
-    String((rr as any)?.toernooi_code ?? "").trim().toUpperCase(),
+    String((rr as any)?.toernooi_code ?? "")
+      .trim()
+      .toUpperCase(),
     String((rr as any)?.fighter_id ?? "").trim(),
     String((rr as any)?.toernooi_va_nummer ?? "").trim(),
     String((rr as any)?.va_nummer ?? "").trim(),
-    String(rr.hoek ?? "").trim().toLowerCase(),
-    String(rr.rule_code ?? "").trim().toUpperCase(),
-    String(rr.rule ?? "").trim().toUpperCase(),
-    String(rr.boodschap ?? "").trim().toLowerCase(),
-    String(rr.resultaat ?? "").trim().toLowerCase(),
+    String(rr.hoek ?? "")
+      .trim()
+      .toLowerCase(),
+    String(rr.rule_code ?? "")
+      .trim()
+      .toUpperCase(),
+    String(rr.rule ?? "")
+      .trim()
+      .toUpperCase(),
+    String(rr.boodschap ?? "")
+      .trim()
+      .toLowerCase(),
+    String(rr.resultaat ?? "")
+      .trim()
+      .toLowerCase(),
   ].join("|");
 }
 
 function toernooiResultMatchesRow(res: ResRow, row: AnyRow): boolean {
-  const resToernooi = String((res as any)?.toernooi_code ?? "").trim().toUpperCase();
-  const rowToernooi = String(getToernooiKey(row) ?? "").trim().toUpperCase();
+  const resToernooi = String((res as any)?.toernooi_code ?? "")
+    .trim()
+    .toUpperCase();
+  const rowToernooi = String(getToernooiKey(row) ?? "")
+    .trim()
+    .toUpperCase();
   if (!resToernooi || !rowToernooi || resToernooi !== rowToernooi) return false;
 
   return (
@@ -1988,7 +2046,10 @@ function buildToernooiDeelnemers(
         isBelgischeGymInfoRow(res),
       );
 
-      if (sideHeeftGeenLicentie && !sideMeldingen.some((m) => m.toLowerCase().includes("licentie"))) {
+      if (
+        sideHeeftGeenLicentie &&
+        !sideMeldingen.some((m) => m.toLowerCase().includes("licentie"))
+      ) {
         sideMeldingen.push("Geen licentie");
       }
 
@@ -2177,7 +2238,9 @@ async function enrichRowsWithUitslagenClasses(
           row?.[side === "rood" ? "va_rood" : "va_blauw"] ??
           row?.[side === "rood" ? "rood_fighter_id" : "blauw_fighter_id"],
       );
-      const klasse = va ? highestTournamentClassFromUitslagen(byVa.get(va) ?? []) : "";
+      const klasse = va
+        ? highestTournamentClassFromUitslagen(byVa.get(va) ?? [])
+        : "";
       if (klasse) next[`__${side}_uitslagen_klasse`] = klasse;
     }
 
@@ -2248,13 +2311,14 @@ export default function ControleMatchmakingPage() {
   const [fBlauwKg, setFBlauwKg] = useState("");
   const [fMaxKg, setFMaxKg] = useState("");
 
-  const [presenceUsers, setPresenceUsers] = useState<MatchmakingPresenceUser[]>([]);
+  const [presenceUsers, setPresenceUsers] = useState<MatchmakingPresenceUser[]>(
+    [],
+  );
 
   async function getAccessToken(): Promise<string | null> {
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
   }
-
 
   async function refreshPresence() {
     if (!matchmakingId) return;
@@ -2899,7 +2963,9 @@ export default function ControleMatchmakingPage() {
 
       const { data: rawRows, error: rawErr } = await supabase
         .from("matchmaking_bouts_raw")
-        .select("id, bout_uid, source_matchmaker_bout_id, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
+        .select(
+          "id, bout_uid, source_matchmaker_bout_id, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json",
+        )
         .eq("matchmaking_id", matchmakingId);
 
       if (rawErr) throw rawErr;
@@ -2924,10 +2990,23 @@ export default function ControleMatchmakingPage() {
       }
 
       if (!latestControleRunId) {
+        const { data: dispReqRows, error: dispReqErr } = await supabase
+          .from("dispensatie_requests")
+          .select("partij_nr")
+          .eq("matchmaking_id", matchmakingId);
+
+        if (dispReqErr) throw dispReqErr;
+
+        const dispReqMap: Record<number, boolean> = {};
+        for (const dr of dispReqRows ?? []) {
+          const pn = Number((dr as any)?.partij_nr);
+          if (Number.isFinite(pn) && pn > 0) dispReqMap[pn] = true;
+        }
+
         setStatusByPartij(map);
         setRunMeldingen([]);
         setHasDispByPartij({});
-        setDispRequestByPartij({});
+        setDispRequestByPartij(dispReqMap);
         setCountByPartij({});
         setVerbodByPartij({});
         setResultatenByPartij({});
@@ -2972,7 +3051,10 @@ export default function ControleMatchmakingPage() {
       // meldingen toont.
       const toernooiOnlyRes = activeRes.filter((rr) => {
         const pn = Number(rr.partij_nr);
-        return (!Number.isFinite(pn) || pn <= 0) && String((rr as any)?.toernooi_code ?? "").trim();
+        return (
+          (!Number.isFinite(pn) || pn <= 0) &&
+          String((rr as any)?.toernooi_code ?? "").trim()
+        );
       });
 
       if (toernooiOnlyRes.length > 0) {
@@ -2981,7 +3063,9 @@ export default function ControleMatchmakingPage() {
           const pn = Number(ctxRow?.partij_nr);
           if (!Number.isFinite(pn) || pn <= 0) continue;
 
-          const matches = toernooiOnlyRes.filter((rr) => toernooiResultMatchesRow(rr, ctxRow));
+          const matches = toernooiOnlyRes.filter((rr) =>
+            toernooiResultMatchesRow(rr, ctxRow),
+          );
 
           if (!matches.length) continue;
 
@@ -3050,12 +3134,25 @@ export default function ControleMatchmakingPage() {
         countMap[pn] = rr.length + (mistLicentie && rr.length === 0 ? 1 : 0);
       }
 
+      const { data: dispReqRows, error: dispReqErr } = await supabase
+        .from("dispensatie_requests")
+        .select("partij_nr")
+        .eq("matchmaking_id", matchmakingId);
+
+      if (dispReqErr) throw dispReqErr;
+
+      const dispReqMap: Record<number, boolean> = {};
+      for (const dr of dispReqRows ?? []) {
+        const pn = Number((dr as any)?.partij_nr);
+        if (Number.isFinite(pn) && pn > 0) dispReqMap[pn] = true;
+      }
+
       setStatusByPartij(statusMap);
       setVerbodByPartij(verbodMap);
       setCountByPartij(countMap);
       setApprovedLicentieByPartij(approvedLicentieMap);
       setHasDispByPartij(dispMap);
-      setDispRequestByPartij({});
+      setDispRequestByPartij(dispReqMap);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -3067,7 +3164,6 @@ export default function ControleMatchmakingPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchmakingId, reloadTick]);
-
 
   useEffect(() => {
     refreshPresence();
@@ -3694,7 +3790,8 @@ export default function ControleMatchmakingPage() {
                       className="rounded-full bg-white/70 px-3 py-1"
                     >
                       {safeText(u.user_name, "Onbekende gebruiker")}
-                      {u.user_role ? ` · ${u.user_role}` : ""} · {formatPresenceAge(u.last_seen)}
+                      {u.user_role ? ` · ${u.user_role}` : ""} ·{" "}
+                      {formatPresenceAge(u.last_seen)}
                     </span>
                   ))}
                 </div>
@@ -3988,9 +4085,17 @@ export default function ControleMatchmakingPage() {
                                       "MMA amateur",
                                       "MMA Pro",
                                     ];
-                                    const ai = order.findIndex((x) => a[0].includes(x));
-                                    const bi = order.findIndex((x) => b[0].includes(x));
-                                    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+                                    const ai = order.findIndex((x) =>
+                                      a[0].includes(x),
+                                    );
+                                    const bi = order.findIndex((x) =>
+                                      b[0].includes(x),
+                                    );
+                                    if (ai !== -1 || bi !== -1)
+                                      return (
+                                        (ai === -1 ? 999 : ai) -
+                                        (bi === -1 ? 999 : bi)
+                                      );
                                     return a[0].localeCompare(b[0], "nl");
                                   })
                                   .map(([klasse, count], idx) => {
@@ -4304,9 +4409,11 @@ export default function ControleMatchmakingPage() {
                                             Open melding(en)
                                           </div>
                                           <ul className="mt-2 list-disc pl-5 text-sm font-semibold text-zinc-900">
-                                            {deelnemer.meldingen.map((melding) => (
-                                              <li key={melding}>{melding}</li>
-                                            ))}
+                                            {deelnemer.meldingen.map(
+                                              (melding) => (
+                                                <li key={melding}>{melding}</li>
+                                              ),
+                                            )}
                                           </ul>
                                         </div>
                                       ) : null}
@@ -4584,7 +4691,15 @@ export default function ControleMatchmakingPage() {
                                     <Chip label="AFKEUR" tone="red" />
                                   ) : null}
                                   {heeftDispensatie ? (
-                                    <Chip label="DISPENSATIE" tone="orange" />
+                                    <Chip
+                                      label={
+                                        Number.isFinite(originalPn) &&
+                                        dispRequestByPartij[originalPn]
+                                          ? "NAAR DISPENSATIE"
+                                          : "DISPENSATIE"
+                                      }
+                                      tone="orange"
+                                    />
                                   ) : null}
                                   {heeftActie && status !== "actie" ? (
                                     <Chip label="ACTIE" tone="yellow" />
