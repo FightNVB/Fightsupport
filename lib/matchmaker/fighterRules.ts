@@ -785,6 +785,21 @@ export function runMatchmakerFighterRules(
       }
 
       const progress = buildKlasseProgress(uitslagen);
+      const highestAdultClass = highestAdultClassFromProgress(progress);
+
+      if (
+        highestAdultClass &&
+        klasseIndex(requested) < klasseIndex(highestAdultClass)
+      ) {
+        add(
+          "MATCHMAKER_KLASSE_TE_LAAG",
+          "ACTIE",
+          `Vechter is opgegeven voor klasse ${requested}, maar heeft al officiële uitslagen in klasse ${highestAdultClass}. Record in klasse ${highestAdultClass}: ${recordLabelForRequestedClass(uitslagen, highestAdultClass)}. Jeugd/vorige klasse/demo/no contest staan tussen haakjes als overige.`,
+          "warning",
+          "Klasse te laag",
+        );
+      }
+
       const optionalPromotion = optionalPromotionMessage(advice, requested, progress);
 
       if (optionalPromotion) {
