@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from "react";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { supabase } from "@/lib/supabaseClient";
 import {
   ArrowLeft,
   BarChart3,
@@ -26,6 +25,7 @@ const ORANGE = "#ff4d00";
 
 type Fighter = Record<string, any>;
 type ResultRow = Record<string, any>;
+type EngineHit = Record<string, any>;
 type Severity = "OK" | "LET OP" | "DISPENSATIE" | "AFKEUR" | "VERBOD";
 
 function s(v: unknown) {
@@ -780,6 +780,54 @@ function resultSeverity(row: ResultRow): Severity {
   return "OK";
 }
 
+
+function engineSeverity(hit: EngineHit): Severity {
+  const x = lower(
+    hit?.resultaat ??
+      hit?.severity ??
+      hit?.original_resultaat ??
+      hit?.status ??
+      hit?.type,
+  );
+
+  if (x.includes("verbod")) return "VERBOD";
+  if (x.includes("dispensatie")) return "DISPENSATIE";
+  if (x.includes("afkeur") || x.includes("afgekeurd") || x.includes("error")) return "AFKEUR";
+  if (x.includes("actie") || x.includes("warning") || x.includes("warn") || x.includes("let")) return "LET OP";
+  return "OK";
+}
+
+function hitTitle(hit: EngineHit) {
+  return s(hit?.rule ?? hit?.title ?? hit?.rule_code ?? "Melding") || "Melding";
+}
+
+function hitDetail(hit: EngineHit) {
+  return s(hit?.boodschap ?? hit?.detail ?? hit?.message ?? hit?.omschrijving) || "Controle melding.";
+}
+
+function hitValue(hit: EngineHit) {
+  return s(hit?.resultaat ?? hit?.severity ?? hit?.status) || engineSeverity(hit);
+}
+
+function extractEngineHits(json: any): EngineHit[] {
+  const candidates = [
+    json?.hits,
+    json?.ruleHits,
+    json?.rule_hits,
+    json?.meldingen,
+    json?.resultaten,
+    json?.results,
+    json?.data,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate as EngineHit[];
+  }
+
+  if (Array.isArray(json)) return json as EngineHit[];
+  return [];
+}
+
 function severityRank(x: Severity) {
   return { OK: 0, "LET OP": 1, DISPENSATIE: 2, AFKEUR: 3, VERBOD: 4 }[x];
 }
@@ -819,17 +867,20 @@ const page: CSSProperties = {
 };
 
 export default function NieuweMatchPage() {
-  const params = useParams<{ matchmakingId: string }>();
+  const params = useParams<{ matchmakingId?: string; matchmakingid?: string }>();
   const search = useSearchParams();
   const router = useRouter();
 
-  const matchmakingId = String(params?.matchmakingId ?? "");
+  // Sommige routes gebruiken [matchmakingId], andere oude routes [matchmakingid].
+  // Pak beide, anders wordt de API aangeroepen met een lege id.
+  const matchmakingId = String(params?.matchmakingId ?? params?.matchmakingid ?? "");
   const roodId = search.get("rood") || "";
   const blauwId = search.get("blauw") || "";
 
   const [fighters, setFighters] = useState<Fighter[]>([]);
-  const [results, setResults] = useState<ResultRow[]>([]);
-  const [uitslagenRows, setUitslagenRows] = useState<ResultRow[]>([]);
+  const [engineHits, setEngineHits] = useState<EngineHit[]>([]);
+  const [engineLoading, setEngineLoading] = useState(false);
+  const [engineError, setEngineError] = useState("");
   const [mm, setMm] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -847,83 +898,9 @@ export default function NieuweMatchPage() {
       setFighters(json?.fighters ?? json?.gecontroleerde_fighters ?? []);
       setMm(json?.matchmaking ?? null);
 
-      const inlineUitslagen =
-        json?.uitslagen ??
-        json?.matchmaker_uitslagen_raw ??
-        json?.uitslagen_raw ??
-        json?.fighter_uitslagen ??
-        [];
+      // Regels/meldingen komen niet meer uit lokale page-logica.
+      // De pagina laadt alleen vechters en laat MatchEngine de controle doen.
 
-      // Zelfde bron als de correcte detailpagina: matchmaker_uitslagen_raw.
-      // De API kan leeg/ouder zijn; daarom halen we de ruwe uitslagen hier direct op.
-      try {
-        const { data, error } = await supabase
-          .from("matchmaker_uitslagen_raw")
-          .select("id,matchmaking_id,controle_run_id,fighter_id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,partij_nr,scraped_at,created_at,updated_at")
-          .eq("matchmaking_id", matchmakingId)
-          .order("datum", { ascending: false });
-
-        if (!error && Array.isArray(data) && data.length) {
-          setUitslagenRows(data as ResultRow[]);
-        } else if (Array.isArray(inlineUitslagen) && inlineUitslagen.length) {
-          setUitslagenRows(inlineUitslagen);
-        } else {
-          const ur = await authedFetch(`/api/matchmaker/${matchmakingId}/uitslagen`);
-          const uj = await ur.json().catch(() => ({}));
-          setUitslagenRows(
-            ur.ok
-              ? uj?.uitslagen ??
-                  uj?.matchmaker_uitslagen_raw ??
-                  uj?.uitslagen_raw ??
-                  uj?.results ??
-                  []
-              : [],
-          );
-        }
-      } catch {
-        if (Array.isArray(inlineUitslagen) && inlineUitslagen.length) {
-          setUitslagenRows(inlineUitslagen);
-        } else {
-          try {
-            const ur = await authedFetch(`/api/matchmaker/${matchmakingId}/uitslagen`);
-            const uj = await ur.json().catch(() => ({}));
-            setUitslagenRows(
-              ur.ok
-                ? uj?.uitslagen ??
-                    uj?.matchmaker_uitslagen_raw ??
-                    uj?.uitslagen_raw ??
-                    uj?.results ??
-                    []
-                : [],
-            );
-          } catch {
-            setUitslagenRows([]);
-          }
-        }
-      }
-
-      const inlineResults =
-        json?.resultaten ??
-        json?.results ??
-        json?.matchmaker_fighter_resultaten ??
-        json?.fighter_resultaten ??
-        [];
-
-      if (Array.isArray(inlineResults) && inlineResults.length) {
-        setResults(inlineResults);
-      } else {
-        try {
-          const rr = await authedFetch(
-            `/api/matchmaker/${matchmakingId}/resultaten`,
-          );
-          const rj = await rr.json().catch(() => ({}));
-          if (rr.ok) {
-            setResults(rj?.resultaten ?? rj?.results ?? []);
-          }
-        } catch {
-          setResults([]);
-        }
-      }
     } catch (e: any) {
       setMsg(e?.message || "Laden mislukt");
     }
@@ -957,23 +934,6 @@ export default function NieuweMatchPage() {
     [fighters, blauwId],
   );
 
-  const roodResults = useMemo(
-    () => results.filter((r) => rowMatchesFighter(r, rood)),
-    [results, rood],
-  );
-  const blauwResults = useMemo(
-    () => results.filter((r) => rowMatchesFighter(r, blauw)),
-    [results, blauw],
-  );
-
-  const roodUitslagen = useMemo(
-    () => getUitslagenRows(rood, uitslagenRows),
-    [rood, uitslagenRows],
-  );
-  const blauwUitslagen = useMemo(
-    () => getUitslagenRows(blauw, uitslagenRows),
-    [blauw, uitslagenRows],
-  );
 
   const eventDate = s(
     mm?.datum ??
@@ -985,226 +945,100 @@ export default function NieuweMatchPage() {
       mm?.created_at,
   );
 
-  const analysis = useMemo(() => {
-    const rw = weight(rood);
-    const bw = weight(blauw);
-    const weightDiff = rw != null && bw != null ? Math.abs(rw - bw) : null;
-    const enteredMaxWeight = n(maxWeightInput);
-
-    const roodAge = ageOnDate(birthDate(rood), eventDate);
-    const blauwAge = ageOnDate(birthDate(blauw), eventDate);
-    const ageDiff = diffYMD(birthDate(rood), birthDate(blauw));
-    const youth = isYouthMatch(rood, blauw, eventDate);
-    const maxWeightSuggestion = suggestedMaxWeight(rood, blauw, youth);
-    const allowedWeightDiff = youth ? 2 : null;
-    const partyDiff = partyDifferenceInfo(rood, blauw, youth, roodUitslagen, blauwUitslagen);
-
-    const roodLic = licenseStatus(rood);
-    const blauwLic = licenseStatus(blauw);
-    const roodStart = startverbodStatus(rood);
-    const blauwStart = startverbodStatus(blauw);
-    const roodKeur = keurmerkInfo(rood);
-    const blauwKeur = keurmerkInfo(blauw);
-    const sameGym = sameGymInfo(rood, blauw);
-
-    const items: {
-      title: string;
-      value: string;
-      severity: Severity;
-      detail: string;
-      icon: ReactNode;
-    }[] = [
-      {
-        title: "Partijverschil",
-        value: `${partyDiff.diff} partijen`,
-        severity: partyDiff.severity,
-        detail: partyDiff.detail,
-        icon: <BarChart3 size={16} />,
-      },
-    ];
-
-    if (sameGym.same) {
-      items.push({
-        title: "Zelfde sportschool",
-        value: "LET OP",
-        severity: "LET OP",
-        detail: `Beide vechters komen uit ${sameGym.roodGym}. Controleer bewust of deze partij zo gematcht mag worden.`,
-        icon: <ShieldAlert size={16} />,
-      });
+  useEffect(() => {
+    if (!matchmakingId || !rood || !blauw) {
+      setEngineHits([]);
+      setEngineError("");
+      setEngineLoading(false);
+      return;
     }
 
-    if (
-      youth &&
-      rw != null &&
-      bw != null &&
-      weightDiff != null &&
-      weightDiff > 2
-    ) {
-      items.push({
-        title: "Gewichtsverschil jeugd",
-        value: "DISPENSATIE",
-        severity: "DISPENSATIE",
-        detail: `Jeugdpartij met meer dan 2 kg verschil. Rood ${fmtKg(rw)} kg, blauw ${fmtKg(bw)} kg: verschil ${fmtKg(weightDiff)} kg. DISPENSATIE nodig.`,
-        icon: <ShieldAlert size={16} />,
-      });
-    }
+    let alive = true;
 
-    if (enteredMaxWeight != null && rw != null && bw != null) {
-      const heavier = Math.max(rw, bw);
-      if (enteredMaxWeight < heavier) {
-        items.push({
-          title: "Max gewicht",
-          value: "VERBOD",
-          severity: "VERBOD",
-          detail: `Max gewicht -${fmtKg(enteredMaxWeight)} kg ligt onder het opgegeven gewicht van een vechter (${fmtKg(heavier)} kg).`,
-          icon: <ShieldAlert size={16} />,
+    async function checkMatchWithEngine() {
+      setEngineLoading(true);
+      setEngineError("");
+
+      try {
+        const res = await authedFetch(`/api/matchmaker/${matchmakingId}/match-check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            matchmaking_id: matchmakingId,
+            event_date: eventDate || null,
+            rood_inschrijving_id: rood?.inschrijving_id ?? rood?.id ?? null,
+            blauw_inschrijving_id: blauw?.inschrijving_id ?? blauw?.id ?? null,
+            rood_fighter_id: rood?.fighter_id || rood?.va_nummer || null,
+            blauw_fighter_id: blauw?.fighter_id || blauw?.va_nummer || null,
+            rood,
+            blauw,
+            max_gewicht: n(maxWeightInput),
+            afgesproken_max_gewicht: n(maxWeightInput),
+          }),
         });
-      } else if (enteredMaxWeight <= heavier + 0.05) {
-        items.push({
-          title: "Max gewicht",
-          value: "LET OP",
-          severity: "LET OP",
-          detail: `Max gewicht -${fmtKg(enteredMaxWeight)} kg is heel krap, omdat een vechter met ${fmtKg(heavier)} kg is opgegeven. Die vechter moet eigenlijk iets onder ${fmtKg(enteredMaxWeight)} kg wegen.`,
-          icon: <ShieldAlert size={16} />,
-        });
+
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || json?.message || "MatchEngine controle mislukt");
+
+        if (alive) setEngineHits(extractEngineHits(json));
+      } catch (e: any) {
+        if (alive) {
+          setEngineHits([]);
+          setEngineError(e?.message || "MatchEngine controle mislukt");
+        }
+      } finally {
+        if (alive) setEngineLoading(false);
       }
     }
 
-    const roodGender = lower(gender(rood));
-    const blauwGender = lower(gender(blauw));
+    checkMatchWithEngine();
 
-    if (
-      rood &&
-      blauw &&
-      roodGender &&
-      blauwGender &&
-      roodGender !== blauwGender
-    ) {
-      items.push({
-        title: "Geslacht",
-        value: "VERBOD",
-        severity: "VERBOD",
-        detail: `Geslacht komt niet overeen: rood ${val(gender(rood))}, blauw ${val(gender(blauw))}. Deze match mag niet worden opgeslagen.`,
-        icon: <ShieldAlert size={16} />,
-      });
-    }
+    return () => {
+      alive = false;
+    };
+  }, [matchmakingId, rood, blauw, eventDate, maxWeightInput]);
 
-    if (rood && blauw && analysisAgeIsMixed(roodAge, blauwAge)) {
-      items.push({
-        title: "Leeftijd",
-        value: "VERBOD",
-        severity: "VERBOD",
-        detail: "Jeugd en volwassenen mogen niet tegen elkaar gematcht worden.",
-        icon: <ShieldAlert size={16} />,
-      });
-    }
+  const analysis = useMemo(() => {
+    const roodAge = ageOnDate(birthDate(rood), eventDate);
+    const blauwAge = ageOnDate(birthDate(blauw), eventDate);
+    const youth = isYouthMatch(rood, blauw, eventDate);
+    const maxWeightSuggestion = suggestedMaxWeight(rood, blauw, youth);
+    const enteredMaxWeight = n(maxWeightInput);
 
-    if (youth && ageDiff && ageDiff.totalMonths > 24) {
-      items.push({
-        title: "Leeftijdsverschil jeugd",
-        value: "VERBOD",
-        severity: "VERBOD",
-        detail: `Jeugdpartij met ${ageDiff.totalMonths} maanden en ${ageDiff.days} dagen verschil. Boven 24 maanden is VERBOD.`,
-        icon: <ShieldAlert size={16} />,
-      });
-    } else if (youth && ageDiff && ageDiff.totalMonths > 18) {
-      items.push({
-        title: "Leeftijdsverschil jeugd",
-        value: "DISPENSATIE",
-        severity: "DISPENSATIE",
-        detail: `Jeugdpartij met ${ageDiff.totalMonths} maanden en ${ageDiff.days} dagen verschil. Boven 18 maanden vereist DISPENSATIE.`,
-        icon: <ShieldAlert size={16} />,
-      });
-    }
+    const engineItems = engineHits.map((hit, idx) => ({
+      title: hitTitle(hit),
+      value: hitValue(hit),
+      severity: engineSeverity(hit),
+      detail: hitDetail(hit),
+      icon: <ShieldAlert size={16} />,
+      code: s(hit?.rule_code ?? hit?.code ?? idx),
+    }));
 
-    if (roodLic !== "JA") {
-      items.push({
-        title: "Licentie rood",
-        value: roodLic,
-        severity: "LET OP",
-        detail: "Deze vechter heeft geen geldige licentie. Controleer dit voordat je de partij doorzet.",
-        icon: <ShieldAlert size={16} />,
-      });
-    }
+    const errorItems = engineError
+      ? [
+          {
+            title: "MatchEngine",
+            value: "LET OP",
+            severity: "LET OP" as Severity,
+            detail: engineError,
+            icon: <ShieldAlert size={16} />,
+            code: "MATCH_ENGINE_ERROR",
+          },
+        ]
+      : [];
 
-    if (blauwLic !== "JA") {
-      items.push({
-        title: "Licentie blauw",
-        value: blauwLic,
-        severity: "LET OP",
-        detail: "Deze vechter heeft geen geldige licentie. Controleer dit voordat je de partij doorzet.",
-        icon: <ShieldAlert size={16} />,
-      });
-    }
-
-    if (roodKeur.ok !== true) {
-      items.push({
-        title: "Keurmerk rood",
-        value: roodKeur.label,
-        severity: "LET OP",
-        detail: roodKeur.reason || "De sportschool heeft geen geldig keurmerk. Controleer dit voordat je de partij doorzet.",
-        icon: <ShieldAlert size={16} />,
-      });
-    }
-
-    if (blauwKeur.ok !== true) {
-      items.push({
-        title: "Keurmerk blauw",
-        value: blauwKeur.label,
-        severity: "LET OP",
-        detail: blauwKeur.reason || "De sportschool heeft geen geldig keurmerk. Controleer dit voordat je de partij doorzet.",
-        icon: <ShieldAlert size={16} />,
-      });
-    }
-
-    if (roodStart === "JA") {
-      items.push({
-        title: "Startverbod rood",
-        value: "JA",
-        severity: "VERBOD",
-        detail: "Startverbod JA betekent dat deze vechter niet mag starten.",
-        icon: <ShieldAlert size={16} />,
-      });
-    }
-
-    if (blauwStart === "JA") {
-      items.push({
-        title: "Startverbod blauw",
-        value: "JA",
-        severity: "VERBOD",
-        detail: "Startverbod JA betekent dat deze vechter niet mag starten.",
-        icon: <ShieldAlert size={16} />,
-      });
-    }
-
-    const resultItems = [...roodResults, ...blauwResults]
-      .filter((r) => resultSeverity(r) !== "OK")
-      .map((r) => ({
-        title: s(r.rule_code ?? r.rule) || "Melding",
-        value: resultSeverity(r),
-        severity: resultSeverity(r),
-        detail: s(r.boodschap) || "Controle melding.",
-        icon: <ShieldAlert size={16} />,
-      }));
-
-    const allItems = [...items, ...resultItems];
+    const allItems = [...engineItems, ...errorItems];
 
     return {
       youth,
       roodAge,
       blauwAge,
-      ageDiff,
-      weightDiff,
-      allowedWeightDiff,
       maxWeightSuggestion,
       enteredMaxWeight,
-      partyDiff,
-      roodKeur,
-      blauwKeur,
       items: allItems,
-      worst: worst(allItems),
+      worst: engineLoading ? ("LET OP" as Severity) : worst(allItems),
     };
-  }, [rood, blauw, eventDate, roodResults, blauwResults, roodUitslagen, blauwUitslagen, maxWeightInput]);
+  }, [rood, blauw, eventDate, maxWeightInput, engineHits, engineError, engineLoading]);
 
   useEffect(() => {
     if (!rood || !blauw || maxWeightInput) return;
@@ -1246,6 +1080,17 @@ export default function NieuweMatchPage() {
   async function save(forceDispensatie = false) {
     if (!rood || !blauw) {
       setMsg("Kies eerst rood en blauw.");
+      return;
+    }
+
+    if (engineLoading) {
+      setMsg("Wacht tot de MatchEngine controle klaar is.");
+      return;
+    }
+
+    if (engineError) {
+      setMsg(`MatchEngine controle is niet gelukt:
+${engineError}`);
       return;
     }
 
@@ -1322,6 +1167,7 @@ export default function NieuweMatchPage() {
           </div>
 
           <StatusPill severity={analysis.worst} />
+          {engineLoading && <span className="fs-engine-loading">MatchEngine controle...</span>}
         </header>
 
         {msg && <div className="fs-message">{msg}</div>}
@@ -1333,15 +1179,13 @@ export default function NieuweMatchPage() {
             matchmakingId={matchmakingId}
             f={rood}
             age={analysis.roodAge}
-            keur={analysis.roodKeur}
-            uitslagenRows={roodUitslagen}
           />
 
           <div className="fs-center">
             <div className="fs-details">
               <div className="fs-details-head">
                 <Swords size={15} />
-                WEDSTRIJDDETAILS
+                MATCHENGINE CONTROLE
               </div>
               <InfoLine
                 label="Discipline"
@@ -1354,62 +1198,54 @@ export default function NieuweMatchPage() {
                 dark
               />
               <InfoLine
-                label="Leeftijdsverschil"
+                label="Max gewicht"
                 value={
-                  analysis.ageDiff
-                    ? analysis.youth
-                      ? `${analysis.ageDiff.totalMonths} mnd ${analysis.ageDiff.days} dgn`
-                      : `${analysis.ageDiff.years} jaar`
-                    : "-"
+                  maxWeightInput
+                    ? `-${maxWeightInput} kg`
+                    : analysis.maxWeightSuggestion == null
+                      ? "Nog niet ingevuld"
+                      : `Voorstel -${fmtKg(analysis.maxWeightSuggestion)} kg`
                 }
                 dark
               />
               <InfoLine
-                label="Gewichtsverschil"
-                value={
-                  analysis.weightDiff == null
-                    ? "-"
-                    : `${fmtKg(analysis.weightDiff)} kg`
-                }
-                dark
-              />
-              <InfoLine
-                label="Voorstel max gewicht"
-                value={
-                  analysis.maxWeightSuggestion == null
-                    ? "-"
-                    : `-${fmtKg(analysis.maxWeightSuggestion)} kg`
-                }
-                dark
-              />
-              <InfoLine
-                label="Recordverschil"
-                value={`${analysis.partyDiff.diff} partijen`}
+                label="Meldingen"
+                value={engineLoading ? "Controleren..." : `${analysis.items.filter((item) => item.severity !== "OK").length}`}
                 dark
               />
             </div>
 
-            {analysis.items.filter((item) => item.severity !== "OK").length > 0 && (
-              <div className="fs-center-alerts">
-                {analysis.items
+            <div className="fs-center-alerts">
+              {analysis.items.filter((item) => item.severity !== "OK").length > 0 ? (
+                analysis.items
                   .filter((item) => item.severity !== "OK")
-                  .slice(0, 3)
+                  .slice(0, 4)
                   .map((item, idx) => (
                     <div
                       className={`fs-center-alert ${severityRank(item.severity) >= 3 ? "danger" : "warning"}`}
-                      key={`${item.title}-${idx}`}
+                      key={`${item.code}-${idx}`}
                     >
                       <div className="fs-alert-icon">!</div>
                       <div className="fs-alert-text">
                         <div className="fs-alert-title">
-                          {item.severity === "LET OP" ? "LET OP" : item.severity}: {item.title}
+                          {item.severity === "LET OP" ? "ACTIE" : item.severity}: {item.title}
                         </div>
                         <div className="fs-alert-detail">{item.detail}</div>
                       </div>
                     </div>
-                  ))}
-              </div>
-            )}
+                  ))
+              ) : (
+                <div className="fs-center-alert ok">
+                  <div className="fs-alert-icon">✓</div>
+                  <div className="fs-alert-text">
+                    <div className="fs-alert-title">OK: MatchEngine</div>
+                    <div className="fs-alert-detail">
+                      {engineLoading ? "Controle wordt uitgevoerd..." : "Geen open MatchEngine-meldingen voor deze combinatie."}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <button
               className="fs-save"
@@ -1427,8 +1263,6 @@ export default function NieuweMatchPage() {
             matchmakingId={matchmakingId}
             f={blauw}
             age={analysis.blauwAge}
-            keur={analysis.blauwKeur}
-            uitslagenRows={blauwUitslagen}
           />
         </section>
       </div>
@@ -1679,6 +1513,21 @@ export default function NieuweMatchPage() {
           border: 1px solid rgba(255, 77, 0, 0.5);
           background: rgba(255, 77, 0, 0.11);
           font-weight: 850;
+        }
+
+        .fs-engine-loading {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          padding: 7px 10px;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: #111214;
+          background: rgba(255, 255, 255, 0.82);
+          border: 1px solid rgba(255, 255, 255, 0.42);
         }
 
         .fs-matchplate {
@@ -2573,6 +2422,12 @@ export default function NieuweMatchPage() {
           font-weight: 800;
         }
 
+        .fs-muted-small {
+          color: rgba(0, 0, 0, 0.68);
+          font-size: 12px;
+          font-weight: 800;
+        }
+
         @keyframes fsPulse {
           from {
             transform: scale(0.96);
@@ -2590,7 +2445,22 @@ export default function NieuweMatchPage() {
             text-align: center;
           }
 
-          .fs-matchplate {
+          .fs-engine-loading {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          padding: 7px 10px;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: #111214;
+          background: rgba(255, 255, 255, 0.82);
+          border: 1px solid rgba(255, 255, 255, 0.42);
+        }
+
+        .fs-matchplate {
             grid-template-columns: 1fr;
           }
 
@@ -2633,22 +2503,14 @@ function FighterPanel({
   matchmakingId,
   f,
   age,
-  keur,
-  uitslagenRows = [],
 }: {
   corner: "red" | "blue";
   title: string;
   matchmakingId: string;
   f?: Fighter | null;
   age: number | null;
-  keur: {
-    ok: boolean | null;
-    label: string;
-    tone: "ok" | "bad" | "warn";
-    reason: string;
-  };
-  uitslagenRows?: ResultRow[];
 }) {
+  const keur = keurmerkInfo(f);
   const licentie = licenseStatus(f);
   const startverbod = startverbodStatus(f);
 
@@ -2673,7 +2535,7 @@ function FighterPanel({
         <div className="fs-badges">
           <MiniBadge
             label={`Licentie: ${licentie}`}
-            state={licentie === "JA" ? "ok" : "bad"}
+            state={licentie === "JA" ? "ok" : licentie === "NEE" ? "bad" : "warn"}
           />
           <MiniBadge
             label={`Startverbod: ${startverbod}`}
@@ -2704,15 +2566,20 @@ function FighterPanel({
             label="Gewicht"
             value={weight(f) == null ? "-" : `${weight(f)?.toFixed(1)} kg`}
           />
-          <InfoLine label="Record" value={recordLabel(f, getUitslagenRows(f, uitslagenRows))} />
         </div>
 
         <div className="fs-keur">
           <div className="fs-subhead">
-            <span>KEURMERK</span>
-            <MiniBadge label={keur.label} state={keur.tone} />
+            <span>MELDINGEN</span>
+            <MiniBadge label={`Keurmerk: ${keur.label}`} state={keur.tone} />
           </div>
-          <div className="fs-whitebox">{keur.reason}</div>
+          <div className="fs-whitebox">
+            <b>Keurmerkcontrole</b><br />{keur.reason}
+            <br />
+            <span className="fs-muted-small">
+          
+            </span>
+          </div>
         </div>
       </div>
     </article>

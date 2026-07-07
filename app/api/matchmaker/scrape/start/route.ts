@@ -539,27 +539,69 @@ async function readMatchmakerUitslagenRaw(opts: {
 }
 
 
-async function readMatchmakerFighterContexts(matchmakingId: string) {
-  const attempts = [
-    () =>
-      supabase
-        .from("matchmaker_fighter_context")
-        .select("*")
-        .eq("matchmaking_id", matchmakingId),
+async function readMatchmakerFighterContexts(opts: {
+  matchmakingId: string;
+  controleRunId?: string;
+  vaNummers?: string[];
+}) {
+  const { matchmakingId, controleRunId } = opts;
+  const vaNummers = Array.from(new Set((opts.vaNummers ?? []).map(toVaStrict).filter(Boolean) as string[]));
 
+  function applyVaFilter(q: any) {
+    return vaNummers.length ? q.in("va_nummer", vaNummers) : q;
+  }
+
+  const attempts: Array<() => any> = [];
+
+  // Eerst exact de nieuwe run lezen. Daarmee voorkom je dat oude contexten/resultaten
+  // opnieuw door fighterRules gaan na een herscrape.
+  if (controleRunId) {
+    attempts.push(
+      () =>
+        applyVaFilter(
+          supabase
+            .from("matchmaker_fighter_context")
+            .select("*")
+            .eq("matchmaking_id", matchmakingId)
+            .eq("controle_run_id", controleRunId),
+        ),
+      () =>
+        applyVaFilter(
+          supabase
+            .from("matchmaker_fighter_context")
+            .select("*")
+            .eq("matchmaker_matchmaking_id", matchmakingId)
+            .eq("controle_run_id", controleRunId),
+        ),
+    );
+  }
+
+  // Fallback voor oudere contexten zonder controle_run_id.
+  attempts.push(
     () =>
-      supabase
-        .from("matchmaker_fighter_context")
-        .select("*")
-        .eq("matchmaker_matchmaking_id", matchmakingId),
-  ];
+      applyVaFilter(
+        supabase
+          .from("matchmaker_fighter_context")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId),
+      ),
+    () =>
+      applyVaFilter(
+        supabase
+          .from("matchmaker_fighter_context")
+          .select("*")
+          .eq("matchmaker_matchmaking_id", matchmakingId),
+      ),
+  );
 
   let lastError: any = null;
 
   for (const attempt of attempts) {
     const { data, error } = await attempt();
 
-    if (!error) return data ?? [];
+    if (!error && (data ?? []).length) return data ?? [];
+
+    if (!error) continue;
 
     lastError = error;
 
@@ -682,21 +724,47 @@ async function saveMatchmakerFighterRuleRows(rows: any[]) {
 async function runAndSaveMatchmakerFighterRules(opts: {
   matchmakingId: string;
   controleRunId: string;
+  vaNummers?: string[];
+  uitslagenRows?: any[];
 }) {
-  const contexts = await readMatchmakerFighterContexts(opts.matchmakingId);
+  const contexts = await readMatchmakerFighterContexts({
+    matchmakingId: opts.matchmakingId,
+    controleRunId: opts.controleRunId,
+    vaNummers: opts.vaNummers,
+  });
 
   dlog("[matchmaker/scrape/start] fighterRules contexts", contexts.length);
+
+  const uitslagenByVa = new Map<string, any[]>();
+  for (const row of opts.uitslagenRows ?? []) {
+    const va = toVaStrict(row?.va_nummer) ?? toVaStrict(row?.fighter_id) ?? toVaStrict(row?.va);
+    if (!va) continue;
+    if (!uitslagenByVa.has(va)) uitslagenByVa.set(va, []);
+    uitslagenByVa.get(va)!.push(row);
+  }
 
   const rows: any[] = [];
 
   for (const ctx of contexts) {
+    const ctxVa = toVaStrict(ctx?.va_nummer) ?? toVaStrict(ctx?.va) ?? toVaStrict(ctx?.fighter_id);
+    const freshUitslagen = ctxVa ? uitslagenByVa.get(ctxVa) ?? [] : [];
+
     const hits = runMatchmakerFighterRules(
       {
         ...ctx,
         matchmaking_id: ctx.matchmaking_id ?? opts.matchmakingId,
         controle_run_id: ctx.controle_run_id ?? opts.controleRunId,
+        uitslagen: freshUitslagen,
+        raw: {
+          ...(ctx?.raw ?? {}),
+          matchmaker_uitslagen_raw: freshUitslagen,
+        },
+        raw_json: {
+          ...(ctx?.raw_json ?? {}),
+          matchmaker_uitslagen_raw: freshUitslagen,
+        },
       },
-      { includeOk: true }
+      { uitslagen: freshUitslagen, includeOk: true }
     );
 
     for (const hit of hits) {
@@ -1032,6 +1100,8 @@ export async function POST(req: Request) {
     const fighterRulesResult = await runAndSaveMatchmakerFighterRules({
       matchmakingId: matchmaking_id,
       controleRunId: scrape_run_id,
+      vaNummers: va_nummers,
+      uitslagenRows,
     });
 
     const foundVas = new Set(

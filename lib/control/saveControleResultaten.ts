@@ -85,6 +85,34 @@ function reviewKey(row: {
   return `${partij}|${bout}|${code}|${hoek}|${toernooi}|${fighter}|${toernooiVa}`;
 }
 
+
+function duplicateRowKey(row: {
+  partij_nr: any;
+  bout_id: any;
+  rule_code: any;
+  hoek: any;
+  toernooi_code?: any;
+  fighter_id?: any;
+  toernooi_va_nummer?: any;
+  boodschap?: any;
+}) {
+  const scope = reviewKey({
+    partij_nr: row.partij_nr,
+    bout_id: row.bout_id,
+    rule_code: row.rule_code,
+    hoek: row.hoek,
+    toernooi_code: row.toernooi_code,
+    fighter_id: row.fighter_id,
+    toernooi_va_nummer: row.toernooi_va_nummer,
+  });
+  const boodschap = String(row.boodschap ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  return `${scope}|${boodschap}`;
+}
+
 function normalizeReviewStatus(v: any): "approved" | "rejected" | null {
   const s = String(v ?? "").trim().toLowerCase();
   if (!s) return null;
@@ -222,7 +250,11 @@ export async function saveControleResultaten(opts: {
   if (delErr) throw delErr;
 
   // 2) rows bouwen + reviews terugzetten
+  // Safety-net: rulesEngine kan dezelfde melding via meerdere routes aanleveren
+  // (bijv. gewone save + toernooi/deel-save). Sla exact dezelfde zichtbare melding
+  // binnen dezelfde scope maar één keer op.
   const rowsToInsert: any[] = [];
+  const insertedKeys = new Set<string>();
 
   for (const hit of hitsIn) {
     const hitToernooiCode = normStr(hit?.toernooi_code)?.toUpperCase() ?? null;
@@ -311,6 +343,10 @@ export async function saveControleResultaten(opts: {
         baseRow.actie_status = "afgekeurd";
       }
     }
+
+    const dupeKey = duplicateRowKey(baseRow);
+    if (insertedKeys.has(dupeKey)) continue;
+    insertedKeys.add(dupeKey);
 
     rowsToInsert.push(baseRow);
   }

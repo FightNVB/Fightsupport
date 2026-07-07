@@ -57,12 +57,15 @@ type RecordStats = {
 
 type KlasseProgress = Record<Klasse, RecordStats>;
 
+type MandatoryPromotion = { from: Klasse; to: Klasse; reason: string } | null;
+
 type RecordAdvice = {
   currentClass: Klasse;
   minimumClass: Klasse;
   recordInCurrentClass: RecordStats;
   totalOfficial: number;
   totalOther: number;
+  mandatoryPromotion: MandatoryPromotion;
 };
 
 const KLASSE_VOLGORDE: Klasse[] = ["R", "N", "C", "B", "A"];
@@ -220,7 +223,23 @@ function normalizeKlasseText(v: unknown): string {
 function isJeugdKlasseText(v: unknown): boolean {
   const x = normalizeKlasseText(v);
   if (!x) return false;
-  return x === "J" || x === "J+" || x.startsWith("J ") || x.startsWith("J ") || x.includes("JEUGD") || x.includes("YOUTH");
+
+  // Zelfde uitgangspunt als rulesEngine:
+  // jeugd/Youth mag nooit als volwassen N/C/B/A historie meetellen.
+  // Extra ruim gemaakt voor FightPassport-teksten zoals:
+  // "Jeugd/Youth • Nieuweling/Newcomer", "Junioren A", "Jongens A", enz.
+  return (
+    x === "J" ||
+    x === "J+" ||
+    x.startsWith("J ") ||
+    x.startsWith("J-") ||
+    x.includes("JEUGD") ||
+    x.includes("YOUTH") ||
+    x.includes("JUNIOR") ||
+    x.includes("JUNIOREN") ||
+    x.includes("JONGEN") ||
+    x.includes("MEISJE")
+  );
 }
 
 function normalizeKlasse(v: unknown): NormKlasse | null {
@@ -463,77 +482,109 @@ export function recordStatsFromUitslagen(rows: UitslagRow[] = [], currentClass?:
   };
 }
 
-function minimumAfterClass(base: Klasse, rec: RecordStats): Klasse {
-  if (base === "R") {
-    if (rec.wins >= 2 || rec.total >= 3) return "N";
-    return "R";
+function getMandatoryPromotionInfo(
+  k: Klasse,
+  wins: number,
+  total: number,
+): MandatoryPromotion {
+  if (k === "R") {
+    if (wins >= 2) return { from: "R", to: "N", reason: `${wins} gewonnen R-klasse partijen` };
+    if (total >= 3) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
+    return null;
   }
 
-  if (base === "N") {
-    // Admin-control: na 3 gewonnen N-partijen mag C, maar pas na 4 winst of 6 totaal moet C.
-    if (rec.wins >= 4 || rec.total >= 6) return "C";
-    return "N";
+  if (k === "N") {
+    // Zelfde als rulesEngine: 3 gewonnen N = MAG naar C, maar is nog niet verplicht.
+    // Verplicht naar C is pas vanaf 4 gewonnen N of 6 totaal N.
+    if (wins >= 4) return { from: "N", to: "C", reason: `${wins} gewonnen N-klasse partijen` };
+    if (total >= 6) return { from: "N", to: "C", reason: `${total} gevochten N-klasse partijen` };
+    return null;
   }
 
-  if (base === "C") {
-    if (rec.wins >= 6 || rec.total >= 8) return "B";
-    return "C";
+  if (k === "C") {
+    if (wins >= 6) return { from: "C", to: "B", reason: `${wins} gewonnen C-klasse partijen` };
+    if (total >= 8) return { from: "C", to: "B", reason: `${total} gevochten C-klasse partijen` };
+    return null;
   }
 
-  if (base === "B") {
-    if (rec.wins >= 8 || rec.total >= 10) return "A";
-    return "B";
+  if (k === "B") {
+    if (wins >= 8) return { from: "B", to: "A", reason: `${wins} gewonnen B-klasse partijen` };
+    if (total >= 10) return { from: "B", to: "A", reason: `${total} gevochten B-klasse partijen` };
+    return null;
   }
 
-  return "A";
+  return null;
+}
+
+function promoteFrom(k: Klasse, wins: number, total: number): Klasse {
+  const mandatory = getMandatoryPromotionInfo(k, wins, total);
+  return mandatory?.to ?? k;
+}
+
+function highestAdultClassFromProgress(progress: KlasseProgress): Klasse | null {
+  let best: Klasse | null = null;
+
+  for (const k of KLASSE_VOLGORDE) {
+    if (progress[k].total > 0) best = k;
+  }
+
+  return best;
+}
+
+function countOtherKbMtExperience(rows: UitslagRow[]): number {
+  let totalOther = 0;
+
+  for (const row of rows) {
+    if (!isKbMtUitslagRow(row)) continue;
+
+    const k = normalizeUitslagKlasse(row.klasse);
+    const outcome = parseOutcome(row.uitslag);
+
+    // Jeugd, onbekende klasse, demo/no contest en overige uitslagen zijn ervaring,
+    // maar nooit volwassen promotie naar C/B/A.
+    if (!isAdultKlasse(k) || outcome === "OTHER") totalOther += 1;
+  }
+
+  return totalOther;
 }
 
 function getRecordAdvice(rows: UitslagRow[], fpKlasse: NormKlasse | null): RecordAdvice {
   const progress = buildKlasseProgress(rows);
 
-  let currentClass: Klasse | null = isAdultKlasse(fpKlasse) ? fpKlasse : null;
-
-  for (const k of KLASSE_VOLGORDE) {
-    if (progress[k].total > 0 || progress[k].other > 0) currentClass = k;
-  }
-
-  // Heeft iemand alleen jeugdpartijen, dan start die vanaf 18 jaar in N.
-  // Jeugdpartijen worden wel ervaring/overige, maar nooit volwassen promotie.
-  if (!currentClass) currentClass = "N";
-
-  let minimumClass: Klasse = "N";
-
-  // R is optioneel voor echte beginners. Met eerdere jeugd- of volwassen ervaring
-  // behandelen we iemand niet als beginner en is N het startpunt.
-  if (currentClass === "R") minimumClass = minimumAfterClass("R", progress.R);
-  else minimumClass = currentClass;
-
-  // Doorloop verplichte promoties alleen op basis van volwassen klasse-records.
-  for (const k of KLASSE_VOLGORDE) {
-    if (klasseIndex(k) < klasseIndex(minimumClass)) continue;
-    const next = minimumAfterClass(k, progress[k]);
-    if (klasseIndex(next) > klasseIndex(minimumClass)) minimumClass = next;
-  }
-
   let totalOfficial = 0;
-  let totalOther = 0;
-  for (const k of KLASSE_VOLGORDE) {
-    totalOfficial += progress[k].total;
-    totalOther += progress[k].other;
+  for (const k of KLASSE_VOLGORDE) totalOfficial += progress[k].total;
+
+  const totalOther = countOtherKbMtExperience(rows);
+  const historyClass = highestAdultClassFromProgress(progress);
+
+  // Zelfde principe als rulesEngine:
+  // 1. echte volwassen KB/MT uitslagen zijn leidend;
+  // 2. nulmeting/FP is alleen fallback als er géén volwassen uitslagen zijn;
+  // 3. jeugdpartijen blijven apart en geven nooit promotie naar C/B/A.
+  let baseClass: Klasse;
+  if (historyClass) {
+    baseClass = historyClass;
+  } else if (totalOther > 0) {
+    // Alleen jeugd/overige ervaring: vanaf 18 jaar start volwassen traject in N.
+    // Ook 20 jeugdpartijen maken iemand dus niet automatisch C/B/A/A.
+    baseClass = "N";
+  } else if (isAdultKlasse(fpKlasse)) {
+    baseClass = fpKlasse;
+  } else {
+    baseClass = "N";
   }
 
-  for (const row of rows) {
-    if (!isKbMtUitslagRow(row)) continue;
-    const k = normalizeUitslagKlasse(row.klasse);
-    if (!isAdultKlasse(k)) totalOther += 1;
-  }
+  const recordInBase = progress[baseClass];
+  const mandatoryPromotion = getMandatoryPromotionInfo(baseClass, recordInBase.wins, recordInBase.total);
+  const minimumClass = promoteFrom(baseClass, recordInBase.wins, recordInBase.total);
 
   return {
-    currentClass,
+    currentClass: baseClass,
     minimumClass,
-    recordInCurrentClass: progress[currentClass],
+    recordInCurrentClass: recordInBase,
     totalOfficial,
     totalOther,
+    mandatoryPromotion,
   };
 }
 
@@ -546,7 +597,7 @@ function canFightRequestedClass(advice: RecordAdvice, requested: Klasse, progres
 
   // N -> C met precies 3 gewonnen N-partijen is toegestaan, maar niet verplicht.
   // Daardoor mag single-fighter dit niet als "te hoog" afkeuren/dispensatie maken.
-  if (advice.minimumClass === "N" && requested === "C" && mayMoveFromNToC(progress.N)) return true;
+  if (advice.currentClass === "N" && requested === "C" && progress.N.wins >= 3 && progress.N.wins < 4 && progress.N.total < 6) return true;
 
   return false;
 }
@@ -726,8 +777,11 @@ export function runMatchmakerFighterRules(
     if (requested) {
       const requestedRecordLabel = recordLabelForRequestedClass(uitslagen, requested);
 
-      if (klasseIndex(requested) < klasseIndex(advice.minimumClass)) {
-        add("MATCHMAKER_KLASSE_TE_LAAG", "ACTIE", `Vechter is opgegeven voor klasse ${requested}, maar hoort minimaal in klasse ${advice.minimumClass}. Record in deze klasse: ${requestedRecordLabel}. Jeugd/vorige klasse/demo/no contest staan tussen haakjes als overige.`, "warning", "Klasse te laag");
+      // Zelfde als rulesEngine: "te laag" komt alleen uit een verplichte promotie
+      // binnen de volwassen klasse waarin het record is opgebouwd. Jeugd/overige
+      // tussen haakjes mag deze melding nooit veroorzaken.
+      if (advice.mandatoryPromotion && klasseIndex(requested) < klasseIndex(advice.mandatoryPromotion.to)) {
+        add("MATCHMAKER_KLASSE_TE_LAAG", "ACTIE", `Vechter is opgegeven voor klasse ${requested}, maar moet naar klasse ${advice.mandatoryPromotion.to} door ${advice.mandatoryPromotion.reason}. Record in klasse ${advice.mandatoryPromotion.from}: ${recordLabelForRequestedClass(uitslagen, advice.mandatoryPromotion.from)}. Jeugd/vorige klasse/demo/no contest staan tussen haakjes als overige.`, "warning", "Klasse te laag");
       }
 
       const progress = buildKlasseProgress(uitslagen);

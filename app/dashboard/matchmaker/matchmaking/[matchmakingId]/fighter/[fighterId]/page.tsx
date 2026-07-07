@@ -188,6 +188,28 @@ function normalizeClassToken(v?: string | null) {
   return x.replace(/[^a-z0-9+]/g, "");
 }
 
+
+function isYouthResultClass(v?: string | null) {
+  const x = String(v ?? "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\/_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    x === "J" ||
+    x === "J+" ||
+    x.startsWith("J ") ||
+    x.startsWith("J-") ||
+    x.includes("JEUGD") ||
+    x.includes("YOUTH") ||
+    x.includes("JUNIOR") ||
+    x.includes("JUNIOREN")
+  );
+}
+
 function classRank(token?: string | null) {
   const t = normalizeClassToken(token);
   const order: Record<string, number> = { j: 1, r: 2, n: 3, c: 4, b: 5, a: 6 };
@@ -199,6 +221,10 @@ function highestRecordClass(rows: Uitslag[]) {
   let bestRank = 0;
 
   for (const row of rows) {
+    // Zelfde principe als rulesEngine/fighterRules:
+    // jeugdpartijen bepalen nooit de volwassen hoogste klasse.
+    if (isYouthResultClass(row.klasse)) continue;
+
     const token = normalizeClassToken(row.klasse);
     const rank = classRank(token);
     if (rank > bestRank) {
