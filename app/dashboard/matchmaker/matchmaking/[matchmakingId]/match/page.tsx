@@ -504,7 +504,8 @@ function recordOf(f: Fighter, allRows: ResultRow[] = []) {
   const fromRows = recordStatsFromUitslagen(rows);
 
   if (fromRows.hasRows) {
-    return `${fromRows.w}-${fromRows.l}-${fromRows.d} (${fromRows.other})`;
+    const cls = (fromRows.highestClass || normalizeClassToken(klasseOf(f)) || "?").toUpperCase();
+    return `${cls} ${fromRows.w}-${fromRows.l}-${fromRows.d} (${fromRows.other})`;
   }
 
   const w = Number(
@@ -549,7 +550,8 @@ function recordOf(f: Fighter, allRows: ResultRow[] = []) {
   const fromTotal = Number.isFinite(total) ? Math.max(0, total - safeW - safeL - safeD) : 0;
   const other = Math.max(Number.isFinite(explicitOther) ? explicitOther : 0, fromTotal);
 
-  return `${safeW}-${safeL}-${safeD} (${other})`;
+  const cls = normalizeClassToken(klasseOf(f)).toUpperCase() || "?";
+  return `${cls} ${safeW}-${safeL}-${safeD} (${other})`;
 }
 function statusLic(f: Fighter) {
   const x = lower(
