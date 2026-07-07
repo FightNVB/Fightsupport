@@ -52,6 +52,16 @@ function normalizeDate(input: unknown): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+function isUuid(input: unknown): boolean {
+  const value = String(input ?? "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function uuidOrNull(input: unknown): string | null {
+  const value = String(input ?? "").trim();
+  return isUuid(value) ? value : null;
+}
+
 function splitName(fullName: string | null) {
   const name = String(fullName ?? "").trim().replace(/\s+/g, " ");
   if (!name) return { voornaam: null as string | null, achternaam: null as string | null };
@@ -296,7 +306,10 @@ async function syncMatchmakerFightersRawCorrection(args: {
   const correctedValues = {
     va_nummer: newVa ?? undefined,
     va: newVa ?? undefined,
-    fighter_id: newVa ?? undefined,
+    // fighter_id is in meerdere matchmaker-tabellen een UUID-kolom.
+    // Een VA-nummer zoals "19773" mag daar nooit in geschreven worden.
+    // VA hoort uitsluitend in va_nummer/va.
+    fighter_id: uuidOrNull(args.patch.fighter_id) ?? undefined,
     naam: args.patch.naam,
     fp_naam: args.patch.naam,
     naam_input: args.patch.naam,

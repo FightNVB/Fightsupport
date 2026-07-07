@@ -375,12 +375,20 @@ async function loadFighterFromDb(matchmakingId: string, idOrVa: string) {
   if (!key) return null;
 
   const va = key.replace(/[^0-9]/g, "");
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(key);
 
   const orParts = [
     `id.eq.${key}`,
     `inschrijving_id.eq.${key}`,
-    `fighter_id.eq.${key}`,
   ];
+
+  // fighter_id is een UUID-kolom. Een VA-nummer zoals "19773" mag hier nooit
+  // in een filter terechtkomen, anders geeft Postgres: invalid input syntax for type uuid.
+  if (isUuid) {
+    orParts.push(`fighter_id.eq.${key}`);
+  }
+
   if (va) {
     orParts.push(`va_nummer.eq.${va}`, `va.eq.${va}`);
   }
