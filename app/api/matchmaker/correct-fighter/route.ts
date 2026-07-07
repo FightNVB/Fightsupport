@@ -192,6 +192,185 @@ async function loadUitslagen(matchmaking_id: string, va_nummer: string | null) {
   return (data ?? []) as AnyRow[];
 }
 
+function setIfColumnExists(
+  target: Record<string, any>,
+  row: Record<string, any>,
+  column: string,
+  value: any,
+) {
+  if (value === undefined) return;
+  if (Object.prototype.hasOwnProperty.call(row, column)) target[column] = value;
+}
+
+function mergeCorrectionIntoJson(rawJson: any, values: Record<string, any>, userId: string | null) {
+  const json = safeJson(rawJson);
+  const correctedAt = new Date().toISOString();
+  const cleanValues = Object.fromEntries(
+    Object.entries(values).filter(([, value]) => value !== undefined)
+  );
+
+  const patchRawFighter = (source: any) => {
+    const obj = source && typeof source === "object" ? source : {};
+    return {
+      ...obj,
+      ...cleanValues,
+      corrected_at: correctedAt,
+      corrected_by: userId,
+      corrected_via: "matchmaker_correct_fighter",
+    };
+  };
+
+  return {
+    ...json,
+    ...cleanValues,
+    corrected_at: correctedAt,
+    corrected_by: userId,
+    corrected_via: "matchmaker_correct_fighter",
+    corrected_values: {
+      ...(json.corrected_values && typeof json.corrected_values === "object"
+        ? json.corrected_values
+        : {}),
+      ...cleanValues,
+    },
+    aanmelding: patchRawFighter(json.aanmelding),
+    raw: patchRawFighter(json.raw),
+    extra: {
+      ...(json.extra && typeof json.extra === "object" ? json.extra : {}),
+      raw: {
+        ...(json.extra?.raw && typeof json.extra.raw === "object" ? json.extra.raw : {}),
+        aanmelding: patchRawFighter(json.extra?.raw?.aanmelding),
+      },
+    },
+  };
+}
+
+async function syncMatchmakerFightersRawCorrection(args: {
+  matchmaking_id: string;
+  old_va_nummer: string | null;
+  new_va_nummer: string | null;
+  aanmelding_id: string | number | null;
+  patch: Record<string, any>;
+  userId: string | null;
+}) {
+  const oldVa = normalizeVa(args.old_va_nummer);
+  const newVa = normalizeVa(args.new_va_nummer);
+  const aanmeldingId = String(args.aanmelding_id ?? "").trim();
+  const vaList = Array.from(new Set([oldVa, newVa].filter(Boolean))) as string[];
+
+  let query = supabase
+    .from("matchmaker_fighters_raw")
+    .select("*")
+    .eq("matchmaking_id", args.matchmaking_id);
+
+  if (vaList.length) {
+    query = query.in("va_nummer", vaList);
+  } else if (aanmeldingId) {
+    query = query.eq("aanmelding_id", aanmeldingId);
+  } else {
+    return {
+      synced: false,
+      rows: 0,
+      reason: "Geen VA of aanmelding_id om matchmaker_fighters_raw te vinden.",
+    };
+  }
+
+  const { data: rawRows, error: loadError } = await query;
+
+  if (loadError) {
+    console.warn(
+      "[matchmaker/correct-fighter] matchmaker_fighters_raw sync laden mislukt:",
+      loadError.message,
+    );
+    return { synced: false, rows: 0, reason: loadError.message };
+  }
+
+  const rows = (rawRows ?? []) as Record<string, any>[];
+  if (!rows.length) {
+    return {
+      synced: false,
+      rows: 0,
+      reason: "Geen matchmaker_fighters_raw rij gevonden voor deze correctie.",
+    };
+  }
+
+  const correctedValues = {
+    va_nummer: newVa ?? undefined,
+    va: newVa ?? undefined,
+    fighter_id: newVa ?? undefined,
+    naam: args.patch.naam,
+    fp_naam: args.patch.naam,
+    naam_input: args.patch.naam,
+    voornaam: args.patch.voornaam,
+    achternaam: args.patch.achternaam,
+    gym: args.patch.gym,
+    sportschool: args.patch.gym,
+    fp_gym: args.patch.gym,
+    sportschool_input: args.patch.gym,
+    discipline: args.patch.discipline,
+    discipline_input: args.patch.discipline,
+    klasse: args.patch.klasse,
+    fp_klasse: args.patch.klasse,
+    klasse_fp: args.patch.klasse,
+    klasse_input: args.patch.klasse,
+    geslacht: args.patch.geslacht,
+    gender: args.patch.geslacht,
+    geboortedatum: args.patch.geboortedatum,
+    fp_geboortedatum: args.patch.geboortedatum,
+    geboortedatum_fp: args.patch.geboortedatum,
+    gewicht: args.patch.gewicht,
+    gewicht_input: args.patch.gewicht,
+    fp_gewicht: args.patch.gewicht,
+    win: args.patch.win,
+    wins: args.patch.win,
+    record_w: args.patch.win,
+    loss: args.patch.loss,
+    losses: args.patch.loss,
+    record_l: args.patch.loss,
+    draw: args.patch.draw,
+    draws: args.patch.draw,
+    record_d: args.patch.draw,
+  };
+
+  let updatedRows = 0;
+
+  for (const row of rows) {
+    const rawPatch: Record<string, any> = {};
+
+    for (const [column, value] of Object.entries(correctedValues)) {
+      setIfColumnExists(rawPatch, row, column, value);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(row, "updated_at")) {
+      rawPatch.updated_at = new Date().toISOString();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(row, "raw_json")) {
+      rawPatch.raw_json = mergeCorrectionIntoJson(row.raw_json, correctedValues, args.userId);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(row, "raw")) {
+      rawPatch.raw = mergeCorrectionIntoJson(row.raw, correctedValues, args.userId);
+    }
+
+    if (!Object.keys(rawPatch).length) continue;
+
+    let updateQuery = supabase.from("matchmaker_fighters_raw").update(rawPatch);
+    if (row.id !== null && row.id !== undefined) {
+      updateQuery = updateQuery.eq("id", row.id);
+    } else {
+      updateQuery = updateQuery
+        .eq("matchmaking_id", args.matchmaking_id)
+        .eq("va_nummer", row.va_nummer);
+    }
+
+    const { error: updateError } = await updateQuery;
+    if (updateError) throw updateError;
+    updatedRows += 1;
+  }
+
+  return { synced: updatedRows > 0, rows: updatedRows, reason: null };
+}
+
 async function recalculateSingleFighter(args: {
   matchmaking_id: string;
   controle_run_id: string | null;
@@ -359,6 +538,15 @@ export async function POST(req: Request) {
 
     if (updateError) throw updateError;
 
+    const fighterRawSync = await syncMatchmakerFightersRawCorrection({
+      matchmaking_id,
+      old_va_nummer: aanmelding.va_nummer,
+      new_va_nummer: updated.va_nummer,
+      aanmelding_id: updated.id,
+      patch,
+      userId: userId ?? null,
+    });
+
     const shouldRecalculate =
       body?.recalculate === true ||
       body?.herberekenen === true ||
@@ -380,12 +568,13 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       message: shouldRecalculate
-        ? "Aanmelding bijgewerkt + context/keurmerk/rules opnieuw berekend."
-        : "Aanmelding bijgewerkt.",
+        ? "Aanmelding + fighter snapshot bijgewerkt en context/keurmerk/rules opnieuw berekend."
+        : "Aanmelding + fighter snapshot bijgewerkt.",
       matchmaking_id,
       old_va_nummer: normalizeVa(aanmelding.va_nummer),
       new_va_nummer: normalizeVa(updated.va_nummer),
       aanmelding: updated,
+      matchmaker_fighters_raw_sync: fighterRawSync,
       ...recalculation,
     });
   } catch (e: any) {
