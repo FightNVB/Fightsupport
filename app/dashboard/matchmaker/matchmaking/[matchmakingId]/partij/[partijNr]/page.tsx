@@ -1340,6 +1340,16 @@ export default function PartijDetailPage() {
     return lower.includes("admin") || lower.includes("superadmin");
   }, [roleNames]);
 
+  const isMatchmaker = useMemo(() => {
+    const lower = roleNames.map((r) => r.toLowerCase());
+    return lower.includes("matchmaker");
+  }, [roleNames]);
+
+  const canEditFighterData = useMemo(
+    () => Boolean(isAdmin || isSuperadmin || isMatchmaker),
+    [isAdmin, isSuperadmin, isMatchmaker],
+  );
+
   const [editOpen, setEditOpen] = useState<null | "rood" | "blauw">(null);
   const [editVa, setEditVa] = useState("");
   const [editNaam, setEditNaam] = useState("");
@@ -2817,7 +2827,7 @@ export default function PartijDetailPage() {
                 nulKlasse={String(ctx?.rood_nulmeting_klasse ?? "-")}
                 nulTotaal={verschillen?.roodNulmetingTotaal ?? "-"}
                 nulOpmerking={String(ctx?.rood_nulmeting_opmerking ?? "")}
-                canEdit={Boolean(isAdmin || isSuperadmin)}
+                canEdit={canEditFighterData}
                 onEdit={() => openEdit("rood")}
               />
             </div>
@@ -2935,7 +2945,7 @@ export default function PartijDetailPage() {
                 nulKlasse={String(ctx?.blauw_nulmeting_klasse ?? "-")}
                 nulTotaal={verschillen?.blauwNulmetingTotaal ?? "-"}
                 nulOpmerking={String(ctx?.blauw_nulmeting_opmerking ?? "")}
-                canEdit={Boolean(isAdmin || isSuperadmin)}
+                canEdit={canEditFighterData}
                 onEdit={() => openEdit("blauw")}
               />
             </div>
