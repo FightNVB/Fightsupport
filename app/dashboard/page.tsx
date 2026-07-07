@@ -313,6 +313,13 @@ export default function DashboardPage() {
       }
 
       setProfile(json as UserProfileRow);
+
+      // Rolrechten zitten op meerdere pagina's in client state.
+      // Na rolwissel daarom hard refreshen zodat menu's, guards en rechten opnieuw laden.
+      router.refresh();
+      if (typeof window !== "undefined") {
+        window.location.reload();
+      }
     } catch (error: any) {
       setRoleError(String(error?.message ?? error));
     } finally {
