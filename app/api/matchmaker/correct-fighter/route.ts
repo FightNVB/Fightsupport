@@ -560,29 +560,17 @@ export async function POST(req: Request) {
       userId: userId ?? null,
     });
 
-    const shouldRecalculate =
-      body?.recalculate === true ||
-      body?.herberekenen === true ||
-      body?.rebuild_context === true;
-
-    let recalculation: any = {
-      recalculated: false,
-      reason: "Alleen aanmelding opgeslagen; geen herberekening gevraagd.",
-    };
-
-    if (shouldRecalculate) {
-      recalculation = await recalculateSingleFighter({
-        matchmaking_id,
-        controle_run_id: body?.controle_run_id ? String(body.controle_run_id) : null,
-        aanmelding: updated,
-      });
-    }
+    const recalculation = await recalculateSingleFighter({
+      matchmaking_id,
+      controle_run_id: body?.controle_run_id ? String(body.controle_run_id) : null,
+      aanmelding: updated,
+    });
 
     return NextResponse.json({
       ok: true,
-      message: shouldRecalculate
+      message: recalculation?.recalculated
         ? "Aanmelding + fighter snapshot bijgewerkt en context/keurmerk/rules opnieuw berekend."
-        : "Aanmelding + fighter snapshot bijgewerkt.",
+        : "Aanmelding + fighter snapshot bijgewerkt; herberekening niet uitgevoerd omdat geen controle_run gevonden is.",
       matchmaking_id,
       old_va_nummer: normalizeVa(aanmelding.va_nummer),
       new_va_nummer: normalizeVa(updated.va_nummer),
