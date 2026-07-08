@@ -481,7 +481,9 @@ export default function FighterDetailPage() {
         geslacht: firstFilled(ctx?.geslacht, ctx?.fp_geslacht, rawScraped?.geslacht, sourceAanmelding?.geslacht),
         gewicht: toNum(ctx?.gewicht ?? sourceAanmelding?.gewicht),
         discipline: firstFilled(ctx?.discipline, sourceAanmelding?.discipline),
-        klasse: firstFilled(ctx?.klasse, sourceAanmelding?.klasse, ctx?.fp_klasse),
+        // Aanmelding is leidend na handmatige correctie.
+        // Context/FightPassport zijn alleen fallback, anders springt de klasse na opslaan terug naar de oude waarde.
+        klasse: firstFilled(sourceAanmelding?.klasse, ctx?.klasse, ctx?.fp_klasse),
         gym: firstFilled(ctx?.gym_input, ctx?.fp_gym, sourceAanmelding?.gym, rawScraped?.sportschool),
         va_nummer: va,
         licentie: firstFilled(ctx?.licentie, rawScraped?.licentie),
@@ -508,7 +510,7 @@ export default function FighterDetailPage() {
         naam: safe(nextFighter.naam, ""),
         gym: safe(nextFighter.gym, ""),
         discipline: safe(nextFighter.discipline, ""),
-        klasse: safe(nextFighter.klasse, ""),
+        klasse: safe(sourceAanmelding?.klasse ?? nextFighter.klasse, ""),
         geslacht: safe(nextFighter.geslacht, ""),
         geboortedatum: safe(nextFighter.geboortedatum ?? nextFighter.fp_geboortedatum, ""),
         gewicht: safe(nextFighter.gewicht, ""),
