@@ -321,10 +321,13 @@ async function syncMatchmakerFightersRawCorrection(args: {
     sportschool_input: args.patch.gym,
     discipline: args.patch.discipline,
     discipline_input: args.patch.discipline,
+    // Handmatige correctie van de matchmaking-klasse.
+    // nulmeting_klasse blijft bewust ongemoeid: dat is alleen bron/fallback-data uit FightPassport.
     klasse: args.patch.klasse,
     fp_klasse: args.patch.klasse,
     klasse_fp: args.patch.klasse,
     klasse_input: args.patch.klasse,
+    klasse_advies: args.patch.klasse,
     geslacht: args.patch.geslacht,
     gender: args.patch.geslacht,
     geboortedatum: args.patch.geboortedatum,

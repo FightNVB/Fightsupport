@@ -699,8 +699,12 @@ export default function FighterDetailPage() {
   const hoogsteUitslagenKlasse = highestRecordClass(uitslagen);
   const klasseVolgensControle = hoogsteUitslagenKlasse
     ? displayClassToken(hoogsteUitslagenKlasse)
-    : displayClassToken(fighter?.nulmeting_klasse ?? raw?.nulmeting?.klasse ?? fighter?.klasse);
-  const klasseControleBron = hoogsteUitslagenKlasse ? "uitslagen" : "nulmeting";
+    : displayClassToken(fighter?.klasse ?? raw?.corrected_values?.klasse ?? raw?.aanmelding?.klasse ?? fighter?.nulmeting_klasse ?? raw?.nulmeting?.klasse);
+  const klasseControleBron = hoogsteUitslagenKlasse
+    ? "uitslagen"
+    : fighter?.klasse || raw?.corrected_values?.klasse || raw?.aanmelding?.klasse
+      ? "aanmelding"
+      : "nulmeting";
 
   const hasLicense = yes(fighter?.licentie);
   const startverbod = yes(fighter?.heeft_startverbod, ["ja", "yes", "true"]);
