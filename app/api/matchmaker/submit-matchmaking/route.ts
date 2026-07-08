@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { parseExcelToBouts } from "./parse_matchmaking";
-import { getUserBondteam, requireAnyRole, RoleName } from "../../_utils/authz";
+import { requireAnyRole, RoleName } from "../../_utils/authz";
 import { ensureLifecycleRecord } from "../../_utils/matchmakingLifecycle";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -652,30 +652,11 @@ export async function POST(req: Request) {
     // De Excel-parser hoort hier niets mee te doen; dit komt uit het formulier/profiel.
     bondteam = normalizedBondteam;
 
-    if (role === "official" || role === "hoofdofficial") {
-      const userBond = await getUserBondteam(userId);
-      if (!userBond) return bad("Je profiel mist bondteam.", 403);
-
-      const normalizedUserBond = String(userBond).trim().toUpperCase();
-      const normalizedUploadBond = normalizedBondteam;
-
-      if (normalizedUserBond !== normalizedUploadBond) {
-        return bad(
-          "Bondteam mismatch: je mag alleen uploaden voor je eigen bondteam.",
-          403
-        );
-      }
-
-      const mm = String(matchmaker ?? "").trim();
-      const pr = String(promotor ?? "").trim();
-      if (!mm && !pr) {
-        return bad("Vul matchmaker of promotor in (minimaal één).", 400);
-      }
-    } else {
-      const mm = String(matchmaker ?? "").trim();
-      if (!mm) {
-        return bad("Matchmaker is verplicht.", 400);
-      }
+    // Deze route is uitsluitend voor de actieve rol matchmaker.
+    // Official/admin uploads horen via hun eigen routes te lopen.
+    const mm = String(matchmaker ?? "").trim();
+    if (!mm) {
+      return bad("Matchmaker is verplicht.", 400);
     }
 
     const now = new Date().toISOString();
@@ -721,29 +702,16 @@ export async function POST(req: Request) {
 
     let mmId = "";
 
-    const isOfficialUpload =
-      role === "official" ||
-      role === "hoofdofficial";
-
     // Belangrijk:
     // - uploaded_by moet altijd public.user_profiles.id zijn, niet auth.users.id.
-    // - Een hoofdofficial/official uploadt namens het eigen bondteam en houdt de MM daar om hem zelf te controleren.
-    // - Superadmin/admin uploads blijven altijd in de admin-flow.
-    // - Alleen matchmaker-uploads met submit gaan automatisch naar admin-controle.
-    const makerType =
-      role === "matchmaker"
-        ? "matchmaker"
-        : isOfficialUpload
-          ? role
-          : role === "admin" || role === "superadmin"
-            ? "admin"
-            : null;
+    // - Deze route is alleen voor matchmaker-uploads.
+    // - Matchmaker-upload blijft lokaal bij de matchmaker tot /api/matchmaker/send-to-admin.
+    const makerType = "matchmaker" as const;
 
     const makerUserId = userId;
 
-    // matchmaker_id alleen vullen als de ingelogde maker echt matchmaker is.
-    // Bij hoofdofficial/admin uploads is er vaak alleen een tekstveld matchmaker/promotor.
-    const matchmakerIdForRow = role === "matchmaker" ? userId : null;
+    // matchmaker_id vullen met de ingelogde matchmaker.
+    const matchmakerIdForRow = userId;
 
     // Matchmaker-upload blijft ALTIJD eerst bij de matchmaker.
     // Pas /api/matchmaker/send-to-admin zet hem op ingediend_admin.
@@ -863,19 +831,14 @@ export async function POST(req: Request) {
       }
     }
 
-    const lifecycleMakerType =
-      makerType === "matchmaker"
-        ? "matchmaker"
-        : makerType === "official" || makerType === "hoofdofficial"
-          ? "official"
-          : "admin";
+    const lifecycleMakerType = "matchmaker" as const;
 
     await ensureLifecycleRecord({
       matchmakingId: String(mmId),
       naam: evenement_naam || null,
       datum: evenement_datum || null,
       locatie: locatie || null,
-      matchmakerId: role === "matchmaker" ? makerUserId : null,
+      matchmakerId: makerUserId,
       makerType: lifecycleMakerType,
       makerUserId,
       bondteam: normalizedBondteam,
