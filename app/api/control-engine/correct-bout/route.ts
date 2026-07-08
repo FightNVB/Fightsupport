@@ -12,6 +12,8 @@ import {
   requireUserWithRole,
 } from "@/app/api/_utils/authz";
 
+type AccessRole = Parameters<typeof assertCanAccessMatchmaking>[0]["role"];
+
 export const runtime = "nodejs";
 
 const supabase = createClient(
@@ -217,7 +219,11 @@ async function assertCanCorrectBout(opts: {
     if (owns) return;
   }
 
-  await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+  await assertCanAccessMatchmaking({
+    matchmaking_id,
+    userId,
+    role: role as AccessRole,
+  });
 }
 
 function readToernooiInput(body: any) {
