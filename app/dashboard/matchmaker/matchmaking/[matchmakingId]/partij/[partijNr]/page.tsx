@@ -746,7 +746,6 @@ function FighterMetalCard({
   nulTotaal,
   nulOpmerking,
   resultBadges = [],
-  canEdit,
   onEdit,
 }: {
   side: "rood" | "blauw";
@@ -763,7 +762,6 @@ function FighterMetalCard({
   nulTotaal: any;
   nulOpmerking: string;
   resultBadges?: any[];
-  canEdit: boolean;
   onEdit: () => void;
 }) {
   const isR = side === "rood";
@@ -792,22 +790,18 @@ function FighterMetalCard({
           </div>
         </div>
 
-        {canEdit ? (
-          <button
-            type="button"
-            onClick={onEdit}
-            className="inline-flex items-center px-3 py-1.5 rounded-md border text-xs font-semibold"
-            style={{
-              borderColor: "rgba(63,63,70,0.28)",
-              background: "rgba(255,255,255,0.70)",
-              color: "#111827",
-            }}
-          >
-            ✎ Bewerken
-          </button>
-        ) : (
-          <div />
-        )}
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex items-center px-3 py-1.5 rounded-md border text-xs font-semibold"
+          style={{
+            borderColor: "rgba(63,63,70,0.28)",
+            background: "rgba(255,255,255,0.70)",
+            color: "#111827",
+          }}
+        >
+          ✎ Bewerken
+        </button>
       </div>
 
       <div
@@ -1345,10 +1339,6 @@ export default function PartijDetailPage() {
     return lower.includes("matchmaker");
   }, [roleNames]);
 
-  // Op deze detailpagina mag de bewerkknop zichtbaar zijn voor iedereen die de pagina mag openen.
-  // De API (/api/control-engine/correct-bout) blijft de echte autorisatie voor opslaan controleren.
-  const canEditFighterData = true;
-
   const [editOpen, setEditOpen] = useState<null | "rood" | "blauw">(null);
   const [editVa, setEditVa] = useState("");
   const [editNaam, setEditNaam] = useState("");
@@ -1552,7 +1542,10 @@ export default function PartijDetailPage() {
       } else {
         for (const r of rr ?? []) {
           const name = String((r as any)?.name ?? "").trim();
-          if (name && !names.some((x) => x.toLowerCase() === name.toLowerCase())) {
+          if (
+            name &&
+            !names.some((x) => x.toLowerCase() === name.toLowerCase())
+          ) {
             names.push(name);
           }
         }
@@ -2846,7 +2839,6 @@ export default function PartijDetailPage() {
                 nulKlasse={String(ctx?.rood_nulmeting_klasse ?? "-")}
                 nulTotaal={verschillen?.roodNulmetingTotaal ?? "-"}
                 nulOpmerking={String(ctx?.rood_nulmeting_opmerking ?? "")}
-                canEdit={canEditFighterData}
                 onEdit={() => openEdit("rood")}
               />
             </div>
@@ -2964,7 +2956,6 @@ export default function PartijDetailPage() {
                 nulKlasse={String(ctx?.blauw_nulmeting_klasse ?? "-")}
                 nulTotaal={verschillen?.blauwNulmetingTotaal ?? "-"}
                 nulOpmerking={String(ctx?.blauw_nulmeting_opmerking ?? "")}
-                canEdit={canEditFighterData}
                 onEdit={() => openEdit("blauw")}
               />
             </div>
