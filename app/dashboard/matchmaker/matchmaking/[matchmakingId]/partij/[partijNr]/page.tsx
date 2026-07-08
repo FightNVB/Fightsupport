@@ -2823,6 +2823,36 @@ export default function PartijDetailPage() {
                           linear-gradient(180deg, #f0f0f2 0%, #dadade 52%, #c9c9cf 100%)`,
           }}
         >
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-300/70 bg-white/70 p-3 shadow-sm">
+            <div className="text-sm font-black uppercase tracking-wide text-zinc-800">
+              Vechters bewerken
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => openEdit("rood")}
+                className="rounded-lg px-4 py-2 text-sm font-black text-white shadow active:scale-95"
+                style={{
+                  background:
+                    "linear-gradient(180deg, #ef4444 0%, #991b1b 100%)",
+                }}
+              >
+                ✎ Rood bewerken
+              </button>
+              <button
+                type="button"
+                onClick={() => openEdit("blauw")}
+                className="rounded-lg px-4 py-2 text-sm font-black text-white shadow active:scale-95"
+                style={{
+                  background:
+                    "linear-gradient(180deg, #3b82f6 0%, #1e3a8a 100%)",
+                }}
+              >
+                ✎ Blauw bewerken
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px_1fr] gap-4 items-start">
             <div className="order-1">
               <FighterMetalCard
