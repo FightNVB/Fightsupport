@@ -300,7 +300,85 @@ type UploadUserProfile = {
   email: string | null;
   bondteam: string | null;
   role: string | null;
+  active_role: string | null;
 };
+
+
+function normalizeAppRole(v: any): RoleName {
+  const x = String(v ?? "").trim().toLowerCase();
+  if (
+    x === "superadmin" ||
+    x === "admin" ||
+    x === "matchmaker" ||
+    x === "official" ||
+    x === "hoofdofficial" ||
+    x === "dispensatie_admin"
+  ) {
+    return x as RoleName;
+  }
+  return "unknown";
+}
+
+async function getUserRoleNamesFromUserRoles(profileId: string): Promise<string[]> {
+  const id = String(profileId ?? "").trim();
+  if (!id) return [];
+
+  const { data: rows, error: userRolesErr } = await supabaseAdmin
+    .from("user_roles")
+    .select("role_id")
+    .eq("user_id", id);
+
+  if (userRolesErr) {
+    throw new Error(`Rollen ophalen uit user_roles mislukt: ${userRolesErr.message}`);
+  }
+
+  const roleIds = (rows ?? [])
+    .map((r: any) => r?.role_id)
+    .filter((v: any) => v != null && String(v).trim() !== "");
+
+  if (roleIds.length === 0) return [];
+
+  const { data: roles, error: rolesErr } = await supabaseAdmin
+    .from("roles")
+    .select("id, name")
+    .in("id", roleIds);
+
+  if (rolesErr) {
+    throw new Error(`Rollen ophalen uit roles mislukt: ${rolesErr.message}`);
+  }
+
+  return Array.from(
+    new Set(
+      (roles ?? [])
+        .map((r: any) => String(r?.name ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+async function resolveActiveAppRoleForUpload(profile: UploadUserProfile): Promise<{
+  activeRole: RoleName;
+  allowedRoles: string[];
+}> {
+  const activeRole = normalizeAppRole(profile.active_role ?? profile.role);
+  const profileRole = normalizeAppRole(profile.role);
+  const allowedRoles = await getUserRoleNamesFromUserRoles(profile.id);
+
+  const allowedSet = new Set(allowedRoles.map((r) => r.toLowerCase()));
+  if (profileRole !== "unknown") allowedSet.add(profileRole);
+
+  if (activeRole === "unknown") {
+    throw new Error("Geen geldige active_role gevonden in user_profiles.");
+  }
+
+  if (!allowedSet.has(activeRole)) {
+    throw new Error(
+      `Actieve rol '${activeRole}' staat niet in user_roles voor deze gebruiker.`
+    );
+  }
+
+  return { activeRole, allowedRoles: Array.from(allowedSet) };
+}
 
 async function findUserProfileForUpload(auth: any): Promise<UploadUserProfile> {
   const authProfileId = String(
@@ -318,7 +396,7 @@ async function findUserProfileForUpload(auth: any): Promise<UploadUserProfile> {
   // Daarom zoeken we eerst op profiel-id als authz die meegeeft, anders op e-mail.
   let query = supabaseAdmin
     .from("user_profiles")
-    .select("id, full_name, email, bondteam, role");
+    .select("id, full_name, email, bondteam, role, active_role");
 
   if (authProfileId) {
     query = query.eq("id", authProfileId);
@@ -380,7 +458,7 @@ async function assertPublicUserProfileId(profileId: string): Promise<UploadUserP
 ========================================================= */
 export async function POST(req: Request) {
   try {
-    const auth = await requireAnyRole(req, ["matchmaker"]);
+    const auth = await requireAnyRole(req, ["matchmaker", "admin", "superadmin", "official", "hoofdofficial", "dispensatie_admin"]);
     const authUserId = String((auth as any)?.userId ?? "").trim();
     const authRole = roleLower((auth as any)?.role);
     let profileForUpload: UploadUserProfile | null = null;
@@ -517,13 +595,26 @@ export async function POST(req: Request) {
 
     profileForUpload = await findUserProfileForUpload(auth);
 
+    const { activeRole, allowedRoles } = await resolveActiveAppRoleForUpload(profileForUpload);
+
     console.log("[submit-matchmaking] ingelogde user_profiles gebruiker", {
       id: profileForUpload.id,
       email: profileForUpload.email,
       role: profileForUpload.role,
+      active_role: profileForUpload.active_role,
+      allowedRoles,
+      resolved_active_role: activeRole,
       bondteam: profileForUpload.bondteam,
       authUserId,
+      authRole,
     });
+
+    if (activeRole !== "matchmaker") {
+      return bad(
+        `Deze upload hoort bij de actieve rol matchmaker. Huidige actieve rol: ${activeRole}.`,
+        403
+      );
+    }
 
     // BELANGRIJK VOOR fk_upload_user:
     // matchmaking_uploads.uploaded_by verwijst naar public.user_profiles(id).
@@ -532,7 +623,7 @@ export async function POST(req: Request) {
     userId = String(profileForUpload.id).trim();
     uploaded_by = userId;
 
-    role = "matchmaker" as RoleName;
+    role = activeRole;
 
     if (!matchmaker && role === "matchmaker") {
       matchmaker = profileForUpload.full_name || profileForUpload.email || null;
