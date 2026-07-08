@@ -57,6 +57,17 @@ function unwrapUuid(v: any): string | null {
   return s;
 }
 
+function isUuid(v: any): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(
+    String(v ?? "").trim()
+  );
+}
+
+function unwrapRealUuid(v: any): string | null {
+  const s = unwrapUuid(v);
+  return s && isUuid(s) ? s : null;
+}
+
 function normLower(v: any): string {
   return String(v ?? "").toLowerCase().trim();
 }
@@ -641,7 +652,7 @@ function getAdultKbMtBaseKlasse(ctx: any, hoek: "rood" | "blauw", rows: UitslagR
 
 async function fetchUitslagenByVa(opts: {
   matchmaking_id: string;
-  controle_run_id: string;
+  controle_run_id?: string | null;
   vaList: string[];
 }): Promise<Map<string, UitslagRow[]>> {
   const { matchmaking_id, controle_run_id, vaList } = opts;
@@ -1385,13 +1396,21 @@ function buildTournamentPairRowsFromParticipants(participants: any[]): any[] {
 }
 
 async function fetchToernooiContextRows(opts: {
-  controle_run_id: string;
+  controle_run_id?: string | null;
   matchmaking_id: string;
 }): Promise<any[]> {
+  const controleRunId = unwrapRealUuid(opts?.controle_run_id);
+
+  // In matchmaker-preview kan er nog geen echte controle_run bestaan.
+  // Dan kwam hier eerder "match-preview-<matchmaking_uuid>" terecht, maar
+  // controle_run_id is een uuid-kolom en Postgres geeft dan 22P02.
+  // Zonder echte UUID slaan we deze tabel over en gebruiken we alleen de ctxRows.
+  if (!controleRunId) return [];
+
   const { data, error } = await supabaseAdmin
     .from("controle_toernooi_context")
     .select("*")
-    .eq("controle_run_id", opts.controle_run_id)
+    .eq("controle_run_id", controleRunId)
     .eq("matchmaking_id", opts.matchmaking_id)
     .order("toernooi_code", { ascending: true })
     .order("naam", { ascending: true });
@@ -1406,7 +1425,7 @@ async function fetchToernooiContextRows(opts: {
 }
 
 async function runTournamentRules(opts: {
-  controle_run_id: string;
+  controle_run_id?: string | null;
   matchmaking_id: string;
   rows: any[];
   scoped_bout_id?: string | null;
@@ -2051,7 +2070,7 @@ export async function matchEngine(opts: {
   scoped_partij_nr?: number | null;
 }) {
   const { matchmaking_id, ctxRows } = opts;
-  const controle_run_id = String(opts?.controle_run_id ?? "match-preview");
+  const controle_run_id = unwrapRealUuid(opts?.controle_run_id);
 
   const scopedBoutId = unwrapUuid(opts?.scoped_bout_id);
   const scopedPartijNr =
