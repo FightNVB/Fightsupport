@@ -1657,7 +1657,7 @@ function MatchmakingPageContent() {
                                         {formatDateTime(getLogDate(r))}
                                       </td>
                                       <td className="px-2 py-2">
-                                        {rowType === "uploads" || rowType === "retour" ? (
+                                        {rowType === "uploads" ? (
                                           <div className="flex flex-nowrap items-center gap-2">
                                             <ActionSquare
                                               title="Matchmaking / upload openen"
@@ -1693,6 +1693,34 @@ function MatchmakingPageContent() {
                                             >
                                               {reuploadingId === r.id ? "…" : "⬆"}
                                             </ActionFileSquare>
+
+                                            <ActionSquare
+                                              title={rowBusy ? "Verwijderen bezig" : "Verwijderen"}
+                                              onClick={() => deleteMM(r.id)}
+                                              disabled={rowBusy}
+                                              color={ACTION_COLORS.verwijderen}
+                                            >
+                                              {rowBusy ? "…" : "🗑"}
+                                            </ActionSquare>
+                                          </div>
+                                        ) : rowType === "retour" ? (
+                                          <div className="flex flex-nowrap items-center gap-2">
+                                            <ActionSquare
+                                              title="Matchmaking openen"
+                                              onClick={() => goToMatchmaking(r.id)}
+                                              color={ACTION_COLORS.matchmaking}
+                                            >
+                                              M
+                                            </ActionSquare>
+
+                                            <ActionSquare
+                                              title="Stuur naar admin"
+                                              onClick={() => stuurNaarAdmin(r)}
+                                              disabled={busyId === r.id}
+                                              color={ACTION_COLORS.admin}
+                                            >
+                                              ⇧
+                                            </ActionSquare>
 
                                             <ActionSquare
                                               title={rowBusy ? "Verwijderen bezig" : "Verwijderen"}

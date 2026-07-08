@@ -174,11 +174,12 @@ async function matchmakerOwnsMatchmaking(opts: {
 }): Promise<boolean> {
   const { matchmaking_id, userId } = opts;
 
+  // Alleen kolommen selecteren die op matchmakings zeker bestaan.
+  // Een nieuwe matchmaker-account kan anders door een ontbrekende kolom al vóór
+  // de echte toegangscheck stuklopen.
   const { data: mm, error: mmErr } = await supabase
     .from("matchmakings")
-    .select(
-      "id, matchmaker_id, huidige_eigenaar_user_id, uploaded_by, maker_user_id"
-    )
+    .select("id, matchmaker_id, huidige_eigenaar_user_id")
     .eq("id", matchmaking_id)
     .maybeSingle();
 
@@ -186,9 +187,7 @@ async function matchmakerOwnsMatchmaking(opts: {
 
   if (
     String(mm?.matchmaker_id ?? "") === userId ||
-    String(mm?.huidige_eigenaar_user_id ?? "") === userId ||
-    String(mm?.uploaded_by ?? "") === userId ||
-    String(mm?.maker_user_id ?? "") === userId
+    String(mm?.huidige_eigenaar_user_id ?? "") === userId
   ) {
     return true;
   }
@@ -596,8 +595,11 @@ export async function POST(req: Request) {
       patch.va_blauw = normalizeVa(body.new_va_blauw);
     }
 
+    const normalizedRole = String(role ?? "").trim().toLowerCase();
     const canEditNames =
-      role === "admin" || role === "superadmin" || role === "matchmaker";
+      normalizedRole === "admin" ||
+      normalizedRole === "superadmin" ||
+      normalizedRole === "matchmaker";
 
     if (canEditNames) {
       if (hasOwn(body, "new_rood_naam")) {

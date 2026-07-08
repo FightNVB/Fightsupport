@@ -1509,37 +1509,57 @@ export default function PartijDetailPage() {
       return { uid: null as string | null, roles: [] as string[] };
     }
 
+    const names: string[] = [];
+
+    // Nieuwe accounts staan soms alleen in user_profiles.role / active_role
+    // en hebben nog geen rij in user_roles. Dan moet de matchmaker nog steeds
+    // de bewerkknop krijgen.
+    const { data: profile, error: profileErr } = await supabase
+      .from("user_profiles")
+      .select("role, active_role")
+      .eq("id", uid)
+      .maybeSingle();
+
+    if (profileErr) {
+      console.error("Fout bij laden user_profiles:", profileErr);
+    }
+
+    for (const value of [profile?.role, profile?.active_role]) {
+      const name = String(value ?? "").trim();
+      if (name && !names.some((x) => x.toLowerCase() === name.toLowerCase())) {
+        names.push(name);
+      }
+    }
+
     const { data: ur, error: urErr } = await supabase
       .from("user_roles")
       .select("role_id")
       .eq("user_id", uid);
     if (urErr) {
       console.error("Fout bij laden user_roles:", urErr);
-      setRoleNames([]);
-      return { uid, roles: [] as string[] };
     }
 
     const roleIds = (ur ?? [])
       .map((x: any) => x.role_id)
       .filter(Boolean) as string[];
-    if (roleIds.length === 0) {
-      setRoleNames([]);
-      return { uid, roles: [] as string[] };
+
+    if (roleIds.length > 0) {
+      const { data: rr, error: rrErr } = await supabase
+        .from("roles")
+        .select("id, name")
+        .in("id", roleIds);
+      if (rrErr) {
+        console.error("Fout bij laden roles:", rrErr);
+      } else {
+        for (const r of rr ?? []) {
+          const name = String((r as any)?.name ?? "").trim();
+          if (name && !names.some((x) => x.toLowerCase() === name.toLowerCase())) {
+            names.push(name);
+          }
+        }
+      }
     }
 
-    const { data: rr, error: rrErr } = await supabase
-      .from("roles")
-      .select("id, name")
-      .in("id", roleIds);
-    if (rrErr) {
-      console.error("Fout bij laden roles:", rrErr);
-      setRoleNames([]);
-      return { uid, roles: [] as string[] };
-    }
-
-    const names = (rr ?? [])
-      .map((r: any) => String(r?.name ?? "").trim())
-      .filter(Boolean);
     setRoleNames(names);
     return { uid, roles: names };
   }
