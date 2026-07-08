@@ -1345,10 +1345,9 @@ export default function PartijDetailPage() {
     return lower.includes("matchmaker");
   }, [roleNames]);
 
-  const canEditFighterData = useMemo(
-    () => Boolean(isAdmin || isSuperadmin || isMatchmaker),
-    [isAdmin, isSuperadmin, isMatchmaker],
-  );
+  // Op deze detailpagina mag de bewerkknop zichtbaar zijn voor iedereen die de pagina mag openen.
+  // De API (/api/control-engine/correct-bout) blijft de echte autorisatie voor opslaan controleren.
+  const canEditFighterData = true;
 
   const [editOpen, setEditOpen] = useState<null | "rood" | "blauw">(null);
   const [editVa, setEditVa] = useState("");
