@@ -158,8 +158,8 @@ function formatControleStatusLabel(row: MatchmakingRow) {
     return "🔵 Controle draait";
   }
 
-  if (s === "klaar" || s === "done" || s === "completed" || s === "ok") {
-    return "🟢 Controle gereed";
+  if (s === "klaar" || s === "done" || s === "completed" || s === "ok" || s === "gecontroleerd") {
+    return "🟢 Gecontroleerd";
   }
 
   if (s === "unlock_required" || s === "fp_unlock_required") {
@@ -512,6 +512,53 @@ function isLikelyStartControleTimeout(status: number, payload: any) {
   );
 }
 
+function isControleRunningStatus(status: string | null | undefined) {
+  const s = normalizeStatus(status);
+  return s === "running" || s === "bezig" || s === "in_progress" || s === "started";
+}
+
+function isControleDoneStatus(status: string | null | undefined) {
+  const s = normalizeStatus(status);
+  return (
+    s === "klaar" ||
+    s === "done" ||
+    s === "completed" ||
+    s === "ok" ||
+    s === "gecontroleerd"
+  );
+}
+
+function isControleFailedStatus(status: string | null | undefined) {
+  const s = normalizeStatus(status);
+  return s === "failed" || s === "mislukt" || s === "error";
+}
+
+function isControleUnlockStatus(status: string | null | undefined) {
+  const s = normalizeStatus(status);
+  return s === "unlock_required" || s === "fp_unlock_required" || s === "admin_required" || s === "wacht_op_admin_unlock";
+}
+
+function getRowControleState(row: MatchmakingRow) {
+  const statuses = [
+    row.controle_status,
+    row.upload_flow_status,
+    row.laatste_run?.status,
+    row.status,
+    row.stadium,
+    row.final_status,
+  ];
+
+  if (statuses.some(isControleDoneStatus) || !!row.laatste_run?.afgerond_op) {
+    return "done" as const;
+  }
+
+  if (statuses.some(isControleUnlockStatus)) return "unlock" as const;
+  if (statuses.some(isControleFailedStatus)) return "failed" as const;
+  if (statuses.some(isControleRunningStatus)) return "running" as const;
+
+  return "unknown" as const;
+}
+
 function mergeRows(apiRows: MatchmakingRow[], ownDbRows: MatchmakingDbRow[]) {
   const map = new Map<string, MatchmakingRow>();
 
@@ -629,7 +676,7 @@ function MatchmakingPageContent() {
     setUploadMsg("");
   }
 
-  async function load() {
+  async function load(): Promise<MatchmakingRow[]> {
     setLoading(true);
 
     const {
@@ -642,7 +689,7 @@ function MatchmakingPageContent() {
       setRows([]);
       setProfile(null);
       setLoading(false);
-      return;
+      return [];
     }
 
     const { data: profileData, error: profileError } = await supabase
@@ -744,8 +791,10 @@ function MatchmakingPageContent() {
       );
     }
 
-    setRows(mergeRows(apiRows, ownDbRows));
+    const mergedRows = mergeRows(apiRows, ownDbRows);
+    setRows(mergedRows);
     setLoading(false);
+    return mergedRows;
   }
 
   async function createMatchmaking() {
@@ -887,6 +936,68 @@ function MatchmakingPageContent() {
     setControleOverlayOpen(false);
   }
 
+  function sleep(ms: number) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function pollControleStatus(matchmakingId: string) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const latestRows = await load();
+      const latest = latestRows.find((row) => row.id === matchmakingId);
+      const state = latest ? getRowControleState(latest) : "unknown";
+
+      if (state === "done" || state === "failed" || state === "unlock") {
+        return { state, row: latest ?? null };
+      }
+
+      await sleep(2500);
+    }
+
+    return { state: "timeout" as const, row: null };
+  }
+
+  async function finishControleOverlayFromPoll(matchmakingId: string) {
+    const result = await pollControleStatus(matchmakingId);
+
+    if (result.state === "done") {
+      setControleOverlayMessage("Controle is afgerond. Resultaten worden geladen...");
+      setControleOverlaySub("");
+      setSuccessMsg("✅ Controle is afgerond en gecontroleerd.");
+      await load();
+      setControleOverlayOpen(false);
+      return true;
+    }
+
+    if (result.state === "unlock") {
+      setControleOverlayMode("unlock");
+      setControleOverlayTitle("Fightpaspoort verificatie vereist");
+      setControleOverlayMessage("MM wordt automatisch overgedragen aan beheerder.");
+      setControleOverlaySub("");
+      setSuccessMsg(
+        "⚠️ FightPassport verificatie vereist. De matchmaking is automatisch overgedragen aan beheerder.",
+      );
+      await load();
+      return true;
+    }
+
+    if (result.state === "failed") {
+      setControleOverlayMode("error");
+      setControleOverlayTitle("Controle mislukt");
+      setControleOverlayMessage("De scraper is gestopt, maar de controle is niet succesvol afgerond.");
+      setControleOverlaySub("Controleer de VPS-log voor de exacte foutmelding.");
+      setSuccessMsg("🔴 Controle mislukt. Controleer de VPS-log.");
+      await load();
+      return true;
+    }
+
+    setControleOverlayMode("error");
+    setControleOverlayTitle("Controle status onbekend");
+    setControleOverlayMessage("De VPS geeft geen actieve controle meer terug, maar de eindstatus is niet duidelijk.");
+    setControleOverlaySub("Ververs de pagina of controleer de VPS-log.");
+    await load();
+    return false;
+  }
+
   async function startControle(target: MatchmakingRow) {
     if (!target) return;
 
@@ -937,10 +1048,10 @@ function MatchmakingPageContent() {
             "Laat dit scherm open.",
           );
           setSuccessMsg(
-            "🔵 Controle loopt nog. De scraper kan nog bezig zijn op de VPS.",
+            "🔵 Controle loopt nog. Status wordt automatisch bijgewerkt.",
           );
           setViewTab("uploads");
-          await load();
+          await finishControleOverlayFromPoll(target.id);
           return;
         }
 
@@ -951,12 +1062,11 @@ function MatchmakingPageContent() {
         return;
       }
 
-      setControleOverlayMessage("Controle is afgerond. Resultaten worden geladen...");
-      setControleOverlaySub("Nog heel even geduld.");
-      setSuccessMsg("✅ Controle is gestart/uitgevoerd. Bekijk de resultaten in de matchmaking.");
+      setControleOverlayMessage("Controle loopt. Status wordt gecontroleerd...");
+      setControleOverlaySub("Resultaten worden automatisch geladen zodra de VPS klaar is.");
+      setSuccessMsg("🔵 Controle loopt. Status wordt automatisch bijgewerkt.");
       setViewTab("uploads");
-      await load();
-      setControleOverlayOpen(false);
+      await finishControleOverlayFromPoll(target.id);
     } catch (e) {
       console.error("start controle request afgebroken/timeout:", e);
       setControleOverlayMode("running");
@@ -968,10 +1078,10 @@ function MatchmakingPageContent() {
         "Laat dit scherm open of ververs straks de pagina.",
       );
       setSuccessMsg(
-        "🔵 Controle loopt nog. De scraper kan nog bezig zijn op de VPS.",
+        "🔵 Controle loopt nog. Status wordt automatisch bijgewerkt.",
       );
       setViewTab("uploads");
-      await load();
+      await finishControleOverlayFromPoll(target.id);
     } finally {
       setBusyId(null);
     }
