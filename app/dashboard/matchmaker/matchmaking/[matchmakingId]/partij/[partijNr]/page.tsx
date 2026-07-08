@@ -793,11 +793,14 @@ function FighterMetalCard({
         <button
           type="button"
           onClick={onEdit}
-          className="inline-flex items-center px-3 py-1.5 rounded-md border text-xs font-semibold"
+          aria-label={`${label} vechter bewerken`}
+          className="relative z-[9999] inline-flex shrink-0 items-center justify-center rounded-md border px-3 py-1.5 text-xs font-black uppercase tracking-wide shadow-lg"
           style={{
-            borderColor: "rgba(63,63,70,0.28)",
-            background: "rgba(255,255,255,0.70)",
+            borderColor: "rgba(0,0,0,0.55)",
+            background: "linear-gradient(180deg, #ffffff 0%, #d4d4d8 55%, #a1a1aa 100%)",
             color: "#111827",
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,0.85), 0 8px 18px rgba(0,0,0,0.45)",
           }}
         >
           ✎ Bewerken
@@ -2823,36 +2826,6 @@ export default function PartijDetailPage() {
                           linear-gradient(180deg, #f0f0f2 0%, #dadade 52%, #c9c9cf 100%)`,
           }}
         >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-300/70 bg-white/70 p-3 shadow-sm">
-            <div className="text-sm font-black uppercase tracking-wide text-zinc-800">
-              Vechters bewerken
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => openEdit("rood")}
-                className="rounded-lg px-4 py-2 text-sm font-black text-white shadow active:scale-95"
-                style={{
-                  background:
-                    "linear-gradient(180deg, #ef4444 0%, #991b1b 100%)",
-                }}
-              >
-                ✎ Rood bewerken
-              </button>
-              <button
-                type="button"
-                onClick={() => openEdit("blauw")}
-                className="rounded-lg px-4 py-2 text-sm font-black text-white shadow active:scale-95"
-                style={{
-                  background:
-                    "linear-gradient(180deg, #3b82f6 0%, #1e3a8a 100%)",
-                }}
-              >
-                ✎ Blauw bewerken
-              </button>
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px_1fr] gap-4 items-start">
             <div className="order-1">
               <FighterMetalCard
