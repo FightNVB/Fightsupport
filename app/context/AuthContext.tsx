@@ -74,27 +74,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const u = session.user;
     setUser(u);
 
-    // 1) Rollen ophalen (SOURCE OF TRUTH: public.user_profiles.role)
-    const { data: prof, error: profErr } = await supabase
+    let { data: prof, error: profErr } = await supabase
       .from("user_profiles")
-      .select("role")
+      .select("id, email, role, active_role")
       .eq("id", u.id)
       .maybeSingle();
 
-    if (!profErr) {
-      const r = asRoleName((prof as any)?.role);
-      if (r) {
-        setRoles([r]);
-        setLoading(false);
-        return;
-      }
+    if (!profErr && !(prof as any)?.id && u.email) {
+      const byEmail = await supabase
+        .from("user_profiles")
+        .select("id, email, role, active_role")
+        .ilike("email", u.email)
+        .maybeSingle();
+      prof = byEmail.data;
+      profErr = byEmail.error;
     }
 
-    // 2) legacy fallback: user_roles -> roles
+    if (profErr || !(prof as any)?.id) {
+      setRoles([]);
+      setLoading(false);
+      return;
+    }
+
     const { data: userRoles, error: userRolesError } = await supabase
       .from("user_roles")
       .select("role_id")
-      .eq("user_id", u.id);
+      .eq("user_id", (prof as any).id);
 
     if (userRolesError || !userRoles) {
       setRoles([]);
@@ -124,8 +129,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .map((r: any) => asRoleName(r?.name))
       .filter(Boolean) as RoleName[];
 
-    // uniek
-    setRoles(Array.from(new Set(mapped)));
+    const allowed = Array.from(new Set(mapped));
+    const activeRole = asRoleName((prof as any)?.active_role);
+    const legacyRole = asRoleName((prof as any)?.role);
+
+    if (activeRole) {
+      setRoles(allowed.includes(activeRole) ? [activeRole] : []);
+    } else if (legacyRole && allowed.includes(legacyRole)) {
+      setRoles([legacyRole]);
+    } else {
+      setRoles([]);
+    }
     setLoading(false);
   };
 

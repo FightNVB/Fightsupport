@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,57 +65,29 @@ async function getUserRoleNames(userId: string): Promise<string[]> {
 }
 
 async function requireAdmin(req: Request) {
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.toLowerCase().startsWith("bearer ")
-    ? auth.slice(7).trim()
-    : "";
-
-  if (!token)
-    return { ok: false as const, error: "Niet ingelogd", status: 401 };
-
-  const { data: userData, error: userError } =
-    await supabaseAdmin.auth.getUser(token);
-  const user = userData?.user;
-
-  if (userError || !user) {
+  try {
+    const auth = await requireAnyRole(req, ["admin", "superadmin"]);
     return {
-      ok: false as const,
-      error: "Sessie ongeldig",
-      status: 401,
-      extra: userError?.message,
+      ok: true as const,
+      user: { id: auth.userId },
+      profile: auth.profile,
+      roles: [auth.role],
     };
-  }
-
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from("user_profiles")
-    .select(
-      "id, email, full_name, role, active_role, bondteam, active_sportschool_id, meekijk_sportschool_id",
-    )
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
+  } catch (error: any) {
+    if (error instanceof Response) {
+      return {
+        ok: false as const,
+        error: error.status === 401 ? "Niet ingelogd" : "Geen toegang",
+        status: error.status,
+      };
+    }
     return {
       ok: false as const,
-      error: "Profiel laden mislukt",
+      error: "Autorisatie mislukt",
       status: 500,
-      extra: profileError.message,
+      extra: error?.message,
     };
   }
-
-  const roles = await getUserRoleNames(user.id).catch(() => []);
-  const activeRole = normalizeRole(profile?.active_role || profile?.role);
-  const fallbackRole = normalizeRole(profile?.role);
-  const allRoles = Array.from(
-    new Set([activeRole, fallbackRole, ...roles].filter(Boolean)),
-  );
-
-  const allowed = allRoles.includes("admin") || allRoles.includes("superadmin");
-
-  if (!allowed)
-    return { ok: false as const, error: "Geen toegang", status: 403 };
-
-  return { ok: true as const, user, profile, roles: allRoles };
 }
 
 function dateValue(row: AnyRow) {

@@ -360,24 +360,34 @@ async function resolveActiveAppRoleForUpload(profile: UploadUserProfile): Promis
   activeRole: RoleName;
   allowedRoles: string[];
 }> {
-  const activeRole = normalizeAppRole(profile.active_role ?? profile.role);
+  const activeRole = normalizeAppRole(profile.active_role);
   const profileRole = normalizeAppRole(profile.role);
   const allowedRoles = await getUserRoleNamesFromUserRoles(profile.id);
 
   const allowedSet = new Set(allowedRoles.map((r) => r.toLowerCase()));
-  if (profileRole !== "unknown") allowedSet.add(profileRole);
 
-  if (activeRole === "unknown") {
-    throw new Error("Geen geldige active_role gevonden in user_profiles.");
+  if (activeRole !== "unknown") {
+    if (!allowedSet.has(activeRole)) {
+      throw new Error(
+        `Actieve rol '${activeRole}' staat niet in user_roles voor deze gebruiker.`
+      );
+    }
+    return { activeRole, allowedRoles: Array.from(allowedSet) };
   }
 
-  if (!allowedSet.has(activeRole)) {
+  if (profileRole !== "unknown" && allowedSet.has(profileRole)) {
+    return { activeRole: profileRole, allowedRoles: Array.from(allowedSet) };
+  }
+
+  if (profileRole !== "unknown") {
     throw new Error(
-      `Actieve rol '${activeRole}' staat niet in user_roles voor deze gebruiker.`
+      `Legacy rol '${profileRole}' staat niet in user_roles voor deze gebruiker.`
     );
   }
 
-  return { activeRole, allowedRoles: Array.from(allowedSet) };
+  {
+    throw new Error("Geen geldige active_role gevonden in user_profiles.");
+  }
 }
 
 async function findUserProfileForUpload(auth: any): Promise<UploadUserProfile> {

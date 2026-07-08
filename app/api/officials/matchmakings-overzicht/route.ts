@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -65,59 +66,9 @@ function inferTab(bronType: string | null | undefined): "uploaded" | "received" 
 
 export async function GET(req: Request) {
   try {
-    const token = getBearerToken(req);
-
-    if (!token) {
-      return NextResponse.json(
-        { ok: false, error: "Geen geldige sessie gevonden." },
-        { status: 401 }
-      );
-    }
-
-    const { data: authUser, error: authError } = await supabaseAdmin.auth.getUser(token);
-
-    if (authError || !authUser?.user?.id) {
-      console.error("[officials/matchmakings-overzicht] auth error:", authError);
-      return NextResponse.json(
-        { ok: false, error: "Sessie ongeldig of verlopen." },
-        { status: 401 }
-      );
-    }
-
-    const userId = authUser.user.id;
-
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from("user_profiles")
-      .select("id, full_name, email, role, active_role, bondteam")
-      .eq("id", userId)
-      .maybeSingle<UserProfileRow>();
-
-    if (profileError) {
-      console.error("[officials/matchmakings-overzicht] profile error:", profileError);
-      return NextResponse.json(
-        { ok: false, error: profileError.message },
-        { status: 500 }
-      );
-    }
-
-    if (!profile) {
-      return NextResponse.json(
-        { ok: false, error: "Geen profiel gevonden voor deze gebruiker." },
-        { status: 404 }
-      );
-    }
-
-    const profileRoles = getProfileRoles(profile);
-
-    if (!canOpenOfficialsOverview(profile)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: `Geen toegang tot officials overzicht. Rollen gevonden: ${profileRoles.join(", ") || "-"}`,
-        },
-        { status: 403 }
-      );
-    }
+    const auth = await requireAnyRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    const profile = auth.profile as UserProfileRow;
+    const profileRoles = [auth.role];
 
     const bondteam = String(profile.bondteam ?? "").trim();
 

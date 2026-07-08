@@ -19,6 +19,25 @@ export type RoleName =
   | "trainer"
   | "unknown";
 
+export type AuthzUser = {
+  userId: string;
+  profileId: string;
+  authUserId: string;
+  role: RoleName;
+  allowedRoles: RoleName[];
+  bondteam: string | null;
+  email: string | null;
+  profile: {
+    id: string;
+    email: string | null;
+    full_name?: string | null;
+    bondteam: string | null;
+    role: string | null;
+    active_role: string | null;
+  };
+  user: { id: string; email?: string | null };
+};
+
 function getBearerToken(req: Request): string | null {
   const h = req.headers.get("authorization") || req.headers.get("Authorization") || "";
   const token = h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : null;
@@ -26,7 +45,7 @@ function getBearerToken(req: Request): string | null {
 }
 
 function normalizeRole(v: any): RoleName {
-  const r = String(v ?? "").trim().toLowerCase();
+  const r = String(v ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (
     [
       "superadmin",
@@ -49,48 +68,141 @@ export function canUseMatchmakerMenu(role: RoleName) {
   return ["matchmaker", "official", "hoofdofficial", "admin", "superadmin"].includes(role);
 }
 
-export async function getUserRole(userId: string): Promise<RoleName> {
-  // Eén hoofdrol: user_profiles.role is de bron van waarheid.
-  const { data: prof } = await supabaseAdmin
+async function findUserProfile(authUserId: string, email?: string | null): Promise<AuthzUser["profile"]> {
+  const { data: byId, error: byIdErr } = await supabaseAdmin
     .from("user_profiles")
-    .select("role")
+    .select("id, email, full_name, bondteam, role, active_role")
+    .eq("id", authUserId)
+    .maybeSingle();
+
+  if (byIdErr) throw byIdErr;
+  if ((byId as any)?.id) return byId as AuthzUser["profile"];
+
+  const normalizedEmail = String(email ?? "").trim();
+  if (!normalizedEmail) throw new Response("Forbidden", { status: 403 });
+
+  const { data: byEmail, error: byEmailErr } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, email, full_name, bondteam, role, active_role")
+    .ilike("email", normalizedEmail)
+    .maybeSingle();
+
+  if (byEmailErr) throw byEmailErr;
+  if (!(byEmail as any)?.id) throw new Response("Forbidden", { status: 403 });
+
+  return byEmail as AuthzUser["profile"];
+}
+
+async function getRoleNamesForProfile(profileId: string, authUserId?: string): Promise<RoleName[]> {
+  async function loadRoleIds(userId: string) {
+    const { data, error } = await supabaseAdmin
+      .from("user_roles")
+      .select("role_id")
+      .eq("user_id", userId);
+
+    if (error) throw error;
+    return (data ?? [])
+      .map((row: any) => row?.role_id)
+      .filter((roleId: any) => roleId != null && String(roleId).trim() !== "");
+  }
+
+  let roleIds = await loadRoleIds(profileId);
+  if (roleIds.length === 0 && authUserId && authUserId !== profileId) {
+    roleIds = await loadRoleIds(authUserId);
+  }
+
+  if (roleIds.length === 0) return [];
+
+  const { data: roles, error } = await supabaseAdmin
+    .from("roles")
+    .select("id, name")
+    .in("id", roleIds);
+
+  if (error) throw error;
+
+  return Array.from(
+    new Set(
+      (roles ?? [])
+        .map((role: any) => normalizeRole(role?.name))
+        .filter((role): role is RoleName => role !== "unknown")
+    )
+  );
+}
+
+function resolveActiveRole(profile: AuthzUser["profile"], allowedRoles: RoleName[]): RoleName {
+  const allowedSet = new Set(allowedRoles);
+  const activeRole = normalizeRole(profile.active_role);
+
+  if (activeRole !== "unknown") {
+    if (!allowedSet.has(activeRole)) throw new Response("Forbidden", { status: 403 });
+    return activeRole;
+  }
+
+  const legacyRole = normalizeRole(profile.role);
+  if (legacyRole !== "unknown" && allowedSet.has(legacyRole)) return legacyRole;
+
+  throw new Response("Forbidden", { status: 403 });
+}
+
+export async function getUserRole(userId: string): Promise<RoleName> {
+  const { data: prof, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, email, full_name, bondteam, role, active_role")
     .eq("id", userId)
     .maybeSingle();
 
-  return normalizeRole((prof as any)?.role);
+  if (error || !(prof as any)?.id) return "unknown";
+
+  const allowedRoles = await getRoleNamesForProfile(String((prof as any).id));
+  try {
+    return resolveActiveRole(prof as AuthzUser["profile"], allowedRoles);
+  } catch {
+    return "unknown";
+  }
 }
 
-export async function requireUserWithRole(
-  req: Request,
-  allowed?: RoleName[]
-): Promise<{ userId: string; role: RoleName; user: { id: string; email?: string | null } }> {
+export async function requireUserWithRole(req: Request, allowed?: RoleName[]): Promise<AuthzUser> {
   const token = getBearerToken(req);
   if (!token) throw new Response("Unauthorized", { status: 401 });
 
   const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
   if (userErr || !userData?.user?.id) throw new Response("Unauthorized", { status: 401 });
 
-  const userId = userData.user.id;
-  const role = await getUserRole(userId);
+  const authUserId = userData.user.id;
+  const authEmail = userData.user.email ?? null;
+  const profile = await findUserProfile(authUserId, authEmail);
+  const profileId = String(profile.id);
+  const allowedRoles = await getRoleNamesForProfile(profileId, authUserId);
+  const role = resolveActiveRole(profile, allowedRoles);
 
   if (allowed?.length && role !== "superadmin" && !allowed.includes(role)) {
     throw new Response("Forbidden", { status: 403 });
   }
 
-  return { userId, role, user: { id: userId, email: userData.user.email ?? null } };
+  return {
+    userId: profileId,
+    profileId,
+    authUserId,
+    role,
+    allowedRoles,
+    bondteam: profile.bondteam ? String(profile.bondteam) : null,
+    email: profile.email ?? authEmail,
+    profile,
+    user: { id: authUserId, email: authEmail },
+  };
 }
 
-export async function requireAdmin(req: Request): Promise<{ userId: string; role: RoleName }> {
-  const { userId, role } = await requireUserWithRole(req);
-  if (role !== "admin" && role !== "superadmin") throw new Response("Forbidden", { status: 403 });
-  return { userId, role };
+export async function requireAdmin(req: Request): Promise<AuthzUser> {
+  const auth = await requireUserWithRole(req);
+  if (auth.role !== "admin" && auth.role !== "superadmin") throw new Response("Forbidden", { status: 403 });
+  return auth;
 }
 
-export async function requireAnyRole(req: Request, allowed: RoleName[]): Promise<{ userId: string; role: RoleName }> {
-  const { userId, role } = await requireUserWithRole(req);
-  if (role === "superadmin") return { userId, role };
-  if (!allowed.includes(role)) throw new Response("Forbidden", { status: 403 });
-  return { userId, role };
+export async function requireAnyRole(req: Request, allowed: RoleName[]): Promise<AuthzUser> {
+  const auth = await requireUserWithRole(req);
+  if (auth.role === "superadmin") return auth;
+  if (!allowed.includes(auth.role)) throw new Response("Forbidden", { status: 403 });
+  return auth;
 }
 
 export async function getUserBondteam(userId: string): Promise<string | null> {
@@ -148,13 +260,10 @@ export async function assertCanAccessMatchmaking(opts: {
     .filter(Boolean)
     .map(String);
 
-  // Official/Hoofdofficial mogen ook het matchmaker-menu gebruiken.
-  // Daarom mogen ze bij eigen/door hen geüploade matchmakings dezelfde owner-check passeren.
   if (["matchmaker", "official", "hoofdofficial"].includes(role) && allowedOwnerIds.includes(userId)) {
     return;
   }
 
-  // Officials blijven daarnaast toegang houden via bondteam bij official/admin flows.
   if (role === "official" || role === "hoofdofficial") {
     const userBond = await getUserBondteam(userId);
     if (userBond && meta.bondteam && String(userBond) === String(meta.bondteam)) return;

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -302,20 +303,16 @@ async function getProfile(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, us
 
 export async function GET(req: NextRequest) {
   try {
-    const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
-    if (!token) return jsonError("Niet ingelogd", 401);
-
     const supabaseAdmin = getSupabaseAdmin();
-    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !userData.user) return jsonError("Ongeldige sessie", 401);
+    const auth = await requireAnyRole(req, ["sportschool", "admin", "superadmin"]);
 
-    const profile = await getProfile(supabaseAdmin, userData.user.id, userData.user.email);
+    const profile = await getProfile(supabaseAdmin, auth.userId, auth.email);
     if (!profile) return jsonError("Gebruikersprofiel niet gevonden", 404);
 
     const url = new URL(req.url);
     const requestedSportschoolId = normalizeSportschoolId(url.searchParams.get("sportschool_id"));
     const ownSportschoolId = normalizeSportschoolId(profile.active_sportschool_id ?? profile.meekijk_sportschool_id);
-    const role = String(profile.role ?? "").toLowerCase();
+    const role = String(auth.role ?? "").toLowerCase();
     const bondteam = String(profile.bondteam ?? "").toUpperCase();
 
     const mayChooseSportschool = ["superadmin", "admin"].includes(role) || (role === "superadmin" && bondteam === "NVB");

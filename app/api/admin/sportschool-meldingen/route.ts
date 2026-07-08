@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,46 +71,26 @@ async function getUserRoleNames(userId: string): Promise<string[]> {
 }
 
 async function requireAdmin(req: Request) {
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.toLowerCase().startsWith("bearer ")
-    ? authHeader.slice(7).trim()
-    : "";
-
-  if (!token) return { ok: false as const, response: bad("Niet ingelogd", 401) };
-
-  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
-  const user = userData?.user;
-
-  if (userError || !user) {
+  try {
+    const auth = await requireAnyRole(req, ["admin", "superadmin"]);
+    return {
+      ok: true as const,
+      user: { id: auth.userId },
+      profile: auth.profile,
+      roles: [auth.role],
+    };
+  } catch (error: any) {
+    if (error instanceof Response) {
+      return {
+        ok: false as const,
+        response: bad(error.status === 401 ? "Niet ingelogd" : "Geen toegang", error.status),
+      };
+    }
     return {
       ok: false as const,
-      response: bad("Ongeldige sessie", 401, userError?.message),
+      response: bad("Autorisatie mislukt", 500, error?.message),
     };
   }
-
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from("user_profiles")
-    .select("id, email, full_name, role, active_role, bondteam, active_sportschool_id, meekijk_sportschool_id")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    return {
-      ok: false as const,
-      response: bad("Profiel laden mislukt", 500, profileError.message),
-    };
-  }
-
-  const roles = await getUserRoleNames(user.id).catch(() => []);
-  const activeRole = normalizeRole(profile?.active_role || profile?.role);
-  const fallbackRole = normalizeRole(profile?.role);
-  const allRoles = Array.from(new Set([activeRole, fallbackRole, ...roles].filter(Boolean)));
-
-  const allowed = allRoles.includes("admin") || allRoles.includes("superadmin");
-
-  if (!allowed) return { ok: false as const, response: bad("Geen toegang", 403) };
-
-  return { ok: true as const, user, profile, roles: allRoles };
 }
 
 export async function GET(req: Request) {

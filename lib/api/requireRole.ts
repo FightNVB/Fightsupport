@@ -1,19 +1,16 @@
-// lib/api/requireRole.ts
-// ✅ Single auth mechanism for API routes: Authorization: Bearer <access_token>
-// ✅ No cookie-based auth / SSR session required
-// ✅ Source of truth for roles: public.user_profiles.role (single role)
-//    (legacy fallback: user_roles + roles)
+// Single auth mechanism for API routes: Authorization: Bearer <access_token>
+// Source of truth for authorization: user_profiles.active_role validated against user_roles.
 
 import { createClient, SupabaseClient, User } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 export type AuthedContext = {
-  supabase: SupabaseClient; // service-role client for DB operations
+  supabase: SupabaseClient;
   user: User;
   userId: string;
+  profileId: string;
 };
 
-// Service role client (bypasses RLS for server-side reads/writes)
 export const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -27,49 +24,41 @@ function getBearerToken(req: Request): string | null {
   return m ? m[1].trim() : null;
 }
 
-/**
- * ✅ Authenticate user via Authorization: Bearer <token>
- */
-export async function requireUserFromAuthHeader(req: Request): Promise<AuthedContext> {
-  const token = getBearerToken(req);
-  if (!token) {
-    // 401
-    throw NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
-  }
-
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user) {
-    // 401
-    throw NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
-  }
-
-  return { supabase: supabaseAdmin, user: data.user, userId: data.user.id };
+function normalizeRole(v: any): string | null {
+  const r = String(v ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return r || null;
 }
 
-/**
- * ✅ Role source of truth: public.user_profiles.role (single role)
- * Returns array for backward compatibility.
- */
-export async function getUserRoleNames(supabase: SupabaseClient, userId: string): Promise<string[]> {
-  // 1) preferred: user_profiles.role
-  const { data: prof, error: pErr } = await supabase
+async function getUserProfileForAuthUser(user: User): Promise<any> {
+  const { data: byId, error: byIdErr } = await supabaseAdmin
     .from("user_profiles")
-    .select("role")
-    .eq("id", userId)
+    .select("id, email, role, active_role")
+    .eq("id", user.id)
     .maybeSingle();
 
-  if (!pErr) {
-    const r = String((prof as any)?.role ?? "")
-      .trim()
-      .toLowerCase();
-    if (r) return [r];
-  }
+  if (byIdErr) throw byIdErr;
+  if ((byId as any)?.id) return byId;
 
-  // 2) legacy fallback: user_roles + roles
+  const email = String(user.email ?? "").trim();
+  if (!email) throw NextResponse.json({ error: "Geen toegang." }, { status: 403 });
+
+  const { data: byEmail, error: byEmailErr } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, email, role, active_role")
+    .ilike("email", email)
+    .maybeSingle();
+
+  if (byEmailErr) throw byEmailErr;
+  if (!(byEmail as any)?.id) throw NextResponse.json({ error: "Geen toegang." }, { status: 403 });
+
+  return byEmail;
+}
+
+async function getAllowedRoleNames(supabase: SupabaseClient, profileId: string): Promise<string[]> {
   const { data: ur, error: urErr } = await supabase
     .from("user_roles")
     .select("role_id")
-    .eq("user_id", userId);
+    .eq("user_id", profileId);
   if (urErr) throw urErr;
 
   const roleIds = (ur ?? [])
@@ -86,48 +75,73 @@ export async function getUserRoleNames(supabase: SupabaseClient, userId: string)
   if (rErr) throw rErr;
 
   const names = (roles ?? [])
-    .map((x: any) => String(x?.name ?? "").trim().toLowerCase())
-    .filter(Boolean);
+    .map((x: any) => normalizeRole(x?.name))
+    .filter(Boolean) as string[];
 
   return Array.from(new Set(names));
 }
 
-/**
- * ✅ Role check with superadmin bypass.
- */
+export async function requireUserFromAuthHeader(req: Request): Promise<AuthedContext> {
+  const token = getBearerToken(req);
+  if (!token) {
+    throw NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
+  }
+
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !data?.user) {
+    throw NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
+  }
+
+  const profile = await getUserProfileForAuthUser(data.user);
+  return { supabase: supabaseAdmin, user: data.user, userId: profile.id, profileId: profile.id };
+}
+
+export async function getUserRoleNames(supabase: SupabaseClient, userId: string): Promise<string[]> {
+  const { data: prof, error: pErr } = await supabase
+    .from("user_profiles")
+    .select("id, role, active_role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (pErr) throw pErr;
+  if (!(prof as any)?.id) return [];
+
+  const allowed = await getAllowedRoleNames(supabase, String((prof as any).id));
+  const allowedSet = new Set(allowed);
+  const activeRole = normalizeRole((prof as any)?.active_role);
+
+  if (activeRole) {
+    return allowedSet.has(activeRole) ? [activeRole] : [];
+  }
+
+  const legacyRole = normalizeRole((prof as any)?.role);
+  return legacyRole && allowedSet.has(legacyRole) ? [legacyRole] : [];
+}
+
 export function hasAnyRole(userRoles: string[] | null | undefined, wanted: string | string[]) {
   const roles = (userRoles ?? [])
-    .map((s) => String(s ?? "").trim().toLowerCase())
-    .filter(Boolean);
+    .map((s) => normalizeRole(s))
+    .filter(Boolean) as string[];
 
   const wantedArr = (Array.isArray(wanted) ? wanted : [wanted])
-    .map((s) => String(s ?? "").trim().toLowerCase())
-    .filter(Boolean);
+    .map((s) => normalizeRole(s))
+    .filter(Boolean) as string[];
 
   if (roles.includes("superadmin")) return true;
   return wantedArr.some((w) => roles.includes(w));
 }
 
-/**
- * ✅ Convenience for route handlers that only have `req`.
- */
 export async function hasAnyRoleFromReq(req: Request, wanted: string | string[]) {
   const { userId } = await requireUserFromAuthHeader(req);
   const roles = await getUserRoleNames(supabaseAdmin, userId);
   return hasAnyRole(roles, wanted);
 }
 
-/**
- * ✅ Enforce role(s) for API routes.
- * Returns { userId, roles } when ok.
- * Throws a NextResponse 401/403 when not allowed.
- */
 export async function requireRole(req: Request, wanted: string | string[]) {
   const { userId } = await requireUserFromAuthHeader(req);
   const roles = await getUserRoleNames(supabaseAdmin, userId);
 
   if (!hasAnyRole(roles, wanted)) {
-    // 403
     throw NextResponse.json({ error: "Geen toegang." }, { status: 403 });
   }
 
