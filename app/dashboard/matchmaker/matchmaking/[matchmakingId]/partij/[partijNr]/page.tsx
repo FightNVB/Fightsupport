@@ -1560,42 +1560,21 @@ export default function PartijDetailPage() {
   }
 
   function canApproveRule(r: ControleResultaatRow) {
-    const res = normResultaat(r?.resultaat);
     const reviewStatus = String(r?.review_status ?? "")
       .trim()
       .toLowerCase();
 
     if (isApprovedOverride(r)) return false;
-    if (!res || res === "ok") return false;
     if (reviewStatus === "goedgekeurd" || reviewStatus === "approved") {
       return false;
     }
 
-    const roles = (roleNames ?? []).map((role) =>
-      String(role ?? "")
-        .trim()
-        .toLowerCase(),
-    );
+    const display = displayResultaat(r);
+    const label = String(display.label ?? "").trim().toUpperCase();
 
-    const hasSuperadmin = roles.includes("superadmin");
-    const hasMatchmaker = roles.includes("matchmaker");
-    const hasAdminRole =
-      roles.includes("admin") || roles.includes("hoofdofficial");
-    const hasDispensatieAdmin = roles.includes("dispensatie_admin");
-
-    if (hasSuperadmin) return true;
-
-    // Matchmakers mogen alleen actie/info-meldingen beoordelen.
-    // Dispensatie en afkeur blijven voor admin/dispensatie-admin.
-    if (hasMatchmaker && !hasAdminRole && !hasDispensatieAdmin) {
-      const display = displayResultaat(r);
-      return res === "actie" || display.tone === "info";
-    }
-
-    if (hasDispensatieAdmin) return res === "dispensatie";
-    if (hasAdminRole) return res === "actie" || res === "afgekeurd";
-
-    return false;
+    // Matchmaker-partijpagina: alleen ACTIE en INFO mogen knoppen tonen.
+    // AFKEUR, VERBOD/STARTVERBOD, DISPENSATIE en OK tonen nooit reviewknoppen.
+    return label === "ACTIE" || label === "INFO";
   }
 
   async function saveAantekeningen(resultaatId: string, text: string) {

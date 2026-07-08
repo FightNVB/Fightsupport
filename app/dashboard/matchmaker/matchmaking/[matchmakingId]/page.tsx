@@ -5069,9 +5069,7 @@ export default function ControleMatchmakingPage() {
                       placeholder="bijv. 72.0"
                     />
                     <div className="md:col-span-2 text-xs text-zinc-700 flex items-center">
-                      Tip: als je "max gewicht" als tolerantie bedoelt (bv 3kg),
-                      zeg het even — dan maak ik er 2 velden van:
-                      "gewichtsklasse" + "max afwijking".
+                      
                     </div>
                   </div>
                 </div>
