@@ -165,6 +165,61 @@ async function getToernooiContextRow(opts: {
   return data?.[0] ?? null;
 }
 
+
+async function matchmakerOwnsMatchmaking(opts: {
+  matchmaking_id: string;
+  userId: string;
+}): Promise<boolean> {
+  const { matchmaking_id, userId } = opts;
+
+  const { data: mm, error: mmErr } = await supabase
+    .from("matchmakings")
+    .select(
+      "id, matchmaker_id, huidige_eigenaar_user_id, uploaded_by, maker_user_id"
+    )
+    .eq("id", matchmaking_id)
+    .maybeSingle();
+
+  if (mmErr) throw mmErr;
+
+  if (
+    String(mm?.matchmaker_id ?? "") === userId ||
+    String(mm?.huidige_eigenaar_user_id ?? "") === userId ||
+    String(mm?.uploaded_by ?? "") === userId ||
+    String(mm?.maker_user_id ?? "") === userId
+  ) {
+    return true;
+  }
+
+  const { data: upload, error: uploadErr } = await supabase
+    .from("matchmaking_uploads")
+    .select("id, uploaded_by, matchmaking_id")
+    .eq("matchmaking_id", matchmaking_id)
+    .order("uploaded_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (uploadErr) throw uploadErr;
+
+  return String(upload?.uploaded_by ?? "") === userId;
+}
+
+async function assertCanCorrectBout(opts: {
+  matchmaking_id: string;
+  userId: string;
+  role: string;
+}) {
+  const { matchmaking_id, userId, role } = opts;
+  const accessRole = String(role ?? "").trim().toLowerCase();
+
+  if (accessRole === "matchmaker") {
+    const owns = await matchmakerOwnsMatchmaking({ matchmaking_id, userId });
+    if (owns) return;
+  }
+
+  await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+}
+
 function readToernooiInput(body: any) {
   const toernooi_code = String(body?.toernooi_code ?? body?.toernooiCode ?? "")
     .trim()
@@ -486,7 +541,7 @@ export async function POST(req: Request) {
       );
     }
 
-    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+    await assertCanCorrectBout({ matchmaking_id, userId, role });
 
     // Toernooi-flow: geen partij_nr, maar wel toernooi_code + VA.
     if (toernooi_code && !Number.isFinite(partij_nr)) {
