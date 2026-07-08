@@ -931,10 +931,10 @@ function MatchmakingPageContent() {
           setControleOverlayMode("running");
           setControleOverlayTitle("Controle loopt nog");
           setControleOverlayMessage(
-            "De controle is gestart, maar de browser kreeg nog geen eindantwoord terug.",
+            "De controle is gestart.",
           );
           setControleOverlaySub(
-            "Laat dit scherm open of ververs straks de pagina. Toon pas mislukt als de run echt failed is.",
+            "Laat dit scherm open.",
           );
           setSuccessMsg(
             "🔵 Controle loopt nog. De scraper kan nog bezig zijn op de VPS.",
@@ -965,7 +965,7 @@ function MatchmakingPageContent() {
         "De startaanvraag is mogelijk door een timeout afgebroken, maar de scraper kan nog gewoon draaien.",
       );
       setControleOverlaySub(
-        "Laat dit scherm open of ververs straks de pagina. Toon pas mislukt als de run echt failed is.",
+        "Laat dit scherm open of ververs straks de pagina.",
       );
       setSuccessMsg(
         "🔵 Controle loopt nog. De scraper kan nog bezig zijn op de VPS.",
