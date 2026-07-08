@@ -497,6 +497,21 @@ function toMatchmakingRow(row: MatchmakingDbRow): MatchmakingRow {
   };
 }
 
+function isLikelyStartControleTimeout(status: number, payload: any) {
+  if (payload?.controle_run_id || payload?.status === "running") return true;
+
+  return (
+    status === 408 ||
+    status === 425 ||
+    status === 499 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    status === 524 ||
+    !payload
+  );
+}
+
 function mergeRows(apiRows: MatchmakingRow[], ownDbRows: MatchmakingDbRow[]) {
   const map = new Map<string, MatchmakingRow>();
 
@@ -910,7 +925,25 @@ function MatchmakingPageContent() {
           return;
         }
 
-        console.error("start controle failed:", res.status, payload);
+        console.error("start controle response niet ok:", res.status, payload);
+
+        if (isLikelyStartControleTimeout(res.status, payload)) {
+          setControleOverlayMode("running");
+          setControleOverlayTitle("Controle loopt nog");
+          setControleOverlayMessage(
+            "De controle is gestart, maar de browser kreeg nog geen eindantwoord terug.",
+          );
+          setControleOverlaySub(
+            "Laat dit scherm open of ververs straks de pagina. Toon pas mislukt als de run echt failed is.",
+          );
+          setSuccessMsg(
+            "🔵 Controle loopt nog. De scraper kan nog bezig zijn op de VPS.",
+          );
+          setViewTab("uploads");
+          await load();
+          return;
+        }
+
         setControleOverlayMode("error");
         setControleOverlayTitle("Controle starten mislukt");
         setControleOverlayMessage(payload?.error || "Start controle mislukt.");
@@ -925,13 +958,20 @@ function MatchmakingPageContent() {
       await load();
       setControleOverlayOpen(false);
     } catch (e) {
-      console.error(e);
-      setControleOverlayMode("error");
-      setControleOverlayTitle("Controle loopt mogelijk nog");
+      console.error("start controle request afgebroken/timeout:", e);
+      setControleOverlayMode("running");
+      setControleOverlayTitle("Controle loopt nog");
       setControleOverlayMessage(
-        "De browser kreeg geen nette response terug, maar de server kan nog bezig zijn met scrapen.",
+        "De startaanvraag is mogelijk door een timeout afgebroken, maar de scraper kan nog gewoon draaien.",
       );
-      setControleOverlaySub("Vernieuw straks de pagina of check de VPS-log.");
+      setControleOverlaySub(
+        "Laat dit scherm open of ververs straks de pagina. Toon pas mislukt als de run echt failed is.",
+      );
+      setSuccessMsg(
+        "🔵 Controle loopt nog. De scraper kan nog bezig zijn op de VPS.",
+      );
+      setViewTab("uploads");
+      await load();
     } finally {
       setBusyId(null);
     }

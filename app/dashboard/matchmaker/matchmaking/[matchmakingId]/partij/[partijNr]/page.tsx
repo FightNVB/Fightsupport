@@ -1560,17 +1560,42 @@ export default function PartijDetailPage() {
   }
 
   function canApproveRule(r: ControleResultaatRow) {
-    // Niet meer verbergen door client-side rol-detectie.
-    // De server/API controleert de echte rechten; de UI toont de knoppen voor elke open/niet-OK melding.
     const res = normResultaat(r?.resultaat);
     const reviewStatus = String(r?.review_status ?? "")
       .trim()
       .toLowerCase();
+
     if (isApprovedOverride(r)) return false;
-    if (res === "ok") return false;
-    if (reviewStatus === "goedgekeurd" || reviewStatus === "approved")
+    if (!res || res === "ok") return false;
+    if (reviewStatus === "goedgekeurd" || reviewStatus === "approved") {
       return false;
-    return true;
+    }
+
+    const roles = (roleNames ?? []).map((role) =>
+      String(role ?? "")
+        .trim()
+        .toLowerCase(),
+    );
+
+    const hasSuperadmin = roles.includes("superadmin");
+    const hasMatchmaker = roles.includes("matchmaker");
+    const hasAdminRole =
+      roles.includes("admin") || roles.includes("hoofdofficial");
+    const hasDispensatieAdmin = roles.includes("dispensatie_admin");
+
+    if (hasSuperadmin) return true;
+
+    // Matchmakers mogen alleen actie/info-meldingen beoordelen.
+    // Dispensatie en afkeur blijven voor admin/dispensatie-admin.
+    if (hasMatchmaker && !hasAdminRole && !hasDispensatieAdmin) {
+      const display = displayResultaat(r);
+      return res === "actie" || display.tone === "info";
+    }
+
+    if (hasDispensatieAdmin) return res === "dispensatie";
+    if (hasAdminRole) return res === "actie" || res === "afgekeurd";
+
+    return false;
   }
 
   async function saveAantekeningen(resultaatId: string, text: string) {
@@ -2798,20 +2823,20 @@ export default function PartijDetailPage() {
           runStatus={run?.status ?? null}
           onBack={() => router.back()}
           onBackToMatchmaking={() =>
-            router.push(`/dashboard/admin/controle/${matchmakingId}`)
+            router.push(`/dashboard/matchmaker/matchmaking/${encodeURIComponent(String(matchmakingId))}`)
           }
           navPrev={nav.prev ?? null}
           navNext={nav.next ?? null}
           onPrev={() =>
             nav.prev &&
             router.push(
-              `/dashboard/admin/controle/${matchmakingId}/partij/${nav.prev}`,
+              `/dashboard/matchmaker/matchmaking/${encodeURIComponent(String(matchmakingId))}/partij/${encodeURIComponent(String(nav.prev))}`,
             )
           }
           onNext={() =>
             nav.next &&
             router.push(
-              `/dashboard/admin/controle/${matchmakingId}/partij/${nav.next}`,
+              `/dashboard/matchmaker/matchmaking/${encodeURIComponent(String(matchmakingId))}/partij/${encodeURIComponent(String(nav.next))}`,
             )
           }
         />
