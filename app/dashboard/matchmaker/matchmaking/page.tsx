@@ -138,6 +138,10 @@ function formatStatusLabel(status: string | null | undefined) {
 }
 
 function formatControleStatusLabel(row: MatchmakingRow) {
+  if (isRetourVanNvb(row)) {
+    return "🟢 Gecontroleerd";
+  }
+
   if (row.nvb_controle_ingestuurd) return "🟠 Ingestuurd naar NVB/admin";
 
   const controleStatus = normalizeStatus(row.controle_status);
@@ -174,6 +178,10 @@ function formatControleStatusLabel(row: MatchmakingRow) {
 }
 
 function getControleStatusTitle(row: MatchmakingRow) {
+  if (isRetourVanNvb(row)) {
+    return "Deze matchmaking is gecontroleerd door de NVB en retour gestuurd naar de matchmaker.";
+  }
+
   if (row.nvb_controle_ingestuurd) {
     return "Deze matchmaking is naar NVB/admin gestuurd.";
   }
@@ -527,6 +535,18 @@ function MatchmakingPageContent() {
   const [reuploadingId, setReuploadingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState("");
 
+  const [controleOverlayOpen, setControleOverlayOpen] = useState(false);
+  const [controleOverlayMode, setControleOverlayMode] = useState<
+    "running" | "unlock" | "error"
+  >("running");
+  const [controleOverlayTitle, setControleOverlayTitle] = useState("Even wachten");
+  const [controleOverlayMessage, setControleOverlayMessage] = useState(
+    "Autocheck loopt. Wacht op resultaten...",
+  );
+  const [controleOverlaySub, setControleOverlaySub] = useState(
+    "De controle loopt. Dit kan even duren.",
+  );
+
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState("");
@@ -847,21 +867,30 @@ function MatchmakingPageContent() {
     }
   }
 
-  async function startControle(row: MatchmakingRow) {
-    const ok = window.confirm(
-      "Start controle voor deze upload?\n\nAls FightPassport om een unlock-code vraagt, wordt de matchmaking automatisch naar admin gestuurd.",
-    );
-    if (!ok) return;
+  function closeControleOverlay() {
+    if (controleOverlayMode === "running") return;
+    setControleOverlayOpen(false);
+  }
+
+  async function startControle(target: MatchmakingRow) {
+    if (!target) return;
 
     try {
-      setBusyId(row.id);
+      setBusyId(target.id);
       setSuccessMsg("");
+      setControleOverlayMode("running");
+      setControleOverlayTitle("Even wachten");
+      setControleOverlayMessage("Autocheck loopt. Wacht op resultaten...");
+      setControleOverlaySub(
+        "Controle loopt. Dit kan even duren.",
+      );
+      setControleOverlayOpen(true);
 
       const res = await authedFetch("/api/control-engine/matchmaker/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          matchmaking_id: row.id,
+          matchmaking_id: target.id,
           do_scrape: true,
         }),
       });
@@ -870,24 +899,39 @@ function MatchmakingPageContent() {
 
       if (!res.ok || payload?.ok === false) {
         if (payload?.code === "FP_UNLOCK_REQUIRED" || payload?.unlock_required) {
+          setControleOverlayMode("unlock");
+          setControleOverlayTitle("Fightpaspoort verificatie vereist");
+          setControleOverlayMessage("MM wordt automatisch overgedragen aan beheerder.");
+          setControleOverlaySub("");
           setSuccessMsg(
-            "⚠️ FightPassport vraagt om een unlock-code. De matchmaking is automatisch doorgestuurd naar admin.",
+            "⚠️ FightPassport verificatie vereist. De matchmaking is automatisch overgedragen aan beheerder.",
           );
           await load();
           return;
         }
 
         console.error("start controle failed:", res.status, payload);
-        alert(payload?.error || "Start controle mislukt.");
+        setControleOverlayMode("error");
+        setControleOverlayTitle("Controle starten mislukt");
+        setControleOverlayMessage(payload?.error || "Start controle mislukt.");
+        setControleOverlaySub("Controleer de VPS-log of probeer het opnieuw.");
         return;
       }
 
+      setControleOverlayMessage("Controle is afgerond. Resultaten worden geladen...");
+      setControleOverlaySub("Nog heel even geduld.");
       setSuccessMsg("✅ Controle is gestart/uitgevoerd. Bekijk de resultaten in de matchmaking.");
       setViewTab("uploads");
       await load();
+      setControleOverlayOpen(false);
     } catch (e) {
       console.error(e);
-      alert("Onverwachte fout bij start controle.");
+      setControleOverlayMode("error");
+      setControleOverlayTitle("Controle loopt mogelijk nog");
+      setControleOverlayMessage(
+        "De browser kreeg geen nette response terug, maar de server kan nog bezig zijn met scrapen.",
+      );
+      setControleOverlaySub("Vernieuw straks de pagina of check de VPS-log.");
     } finally {
       setBusyId(null);
     }
@@ -1625,7 +1669,7 @@ function MatchmakingPageContent() {
 
                                             <ActionSquare
                                               title={busyId === r.id ? "Controle bezig" : "Start controle"}
-                                              onClick={() => startControle(r)}
+                                              onClick={() => void startControle(r)}
                                               disabled={busyId === r.id}
                                               color={ACTION_COLORS.controle}
                                             >
@@ -1727,6 +1771,156 @@ function MatchmakingPageContent() {
             </div>
           </div>
 
+          {controleOverlayOpen ? (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 9999,
+                background:
+                  "radial-gradient(circle at center, rgba(255,255,255,0.10) 0%, rgba(0,0,0,0.74) 62%, rgba(0,0,0,0.88) 100%)",
+                backdropFilter: "blur(6px)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 24,
+              }}
+            >
+              <div
+                style={{
+                  width: "min(96vw, 720px)",
+                  borderRadius: 28,
+                  overflow: "hidden",
+                  border: "3px solid rgba(255,77,0,0.45)",
+                  boxShadow:
+                    "0 30px 90px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12)",
+                  background:
+                    "linear-gradient(180deg, rgba(42,42,46,0.98) 0%, rgba(20,20,24,0.98) 100%)",
+                }}
+              >
+                <div
+                  style={{
+                    height: 5,
+                    background:
+                      "linear-gradient(90deg, rgba(255,106,0,0.95) 0%, rgba(255,77,0,1) 50%, rgba(255,106,0,0.95) 100%)",
+                  }}
+                />
+
+                <div
+                  style={{
+                    padding: "34px 28px 30px",
+                    textAlign: "center",
+                    color: "#fff",
+                  }}
+                >
+                  {controleOverlayMode === "running" ? (
+                    <div
+                      style={{
+                        margin: "0 auto 18px",
+                        width: 86,
+                        height: 86,
+                        borderRadius: "50%",
+                        border: "4px solid rgba(255,255,255,0.16)",
+                        borderTop: "4px solid #ff4d00",
+                        animation: "scrapeSpin 1s linear infinite",
+                        boxShadow: "0 0 0 10px rgba(255,77,0,0.08)",
+                      }}
+                    />
+                  ) : null}
+
+                  <div
+                    style={{
+                      fontSize: 28,
+                      fontWeight: 900,
+                      letterSpacing: "0.03em",
+                      textTransform: "uppercase",
+                      color: NVB_ORANGE,
+                      textShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                    }}
+                  >
+                    {controleOverlayTitle}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 14,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      lineHeight: 1.45,
+                      color: "#ffffff",
+                    }}
+                  >
+                    {controleOverlayMessage}
+                  </div>
+
+                  {controleOverlaySub ? (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        color: "rgba(255,255,255,0.78)",
+                      }}
+                    >
+                      {controleOverlaySub}
+                    </div>
+                  ) : null}
+
+                  {controleOverlayMode === "unlock" || controleOverlayMode === "error" ? (
+                    <div className="mt-7 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={closeControleOverlay}
+                        style={{
+                          borderRadius: 0,
+                          padding: "12px 18px",
+                          background:
+                            "linear-gradient(180deg, #3b3b40 0%, #202025 100%)",
+                          color: "#fff",
+                          border: "1px solid rgba(255,255,255,0.18)",
+                          fontSize: 14,
+                          fontWeight: 800,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Sluiten
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {controleOverlayMode === "running" ? (
+                    <div
+                      style={{
+                        marginTop: 24,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 10,
+                        borderRadius: 999,
+                        padding: "10px 16px",
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          background: NVB_ORANGE,
+                          boxShadow: "0 0 18px rgba(255,77,0,0.75)",
+                        }}
+                      />
+                      Controle bezig
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <style jsx global>{`
             :root {
               --brand-orange: ${NVB_ORANGE};
@@ -1744,6 +1938,15 @@ function MatchmakingPageContent() {
             .orange-input:focus {
               border-color: rgba(255, 77, 0, 0.75);
               box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.18);
+            }
+
+            @keyframes scrapeSpin {
+              0% {
+                transform: rotate(0deg);
+              }
+              100% {
+                transform: rotate(360deg);
+              }
             }
 
           `}</style>

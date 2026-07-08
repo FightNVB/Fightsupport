@@ -660,9 +660,7 @@ export default function AanmeldingenPage() {
         );
       }).length;
 
-      setWaitMessage(
-        `Fightpaspoort check loopt. Verwerkt: ${finishedCount}/${selectedOrAll.length}.`,
-      );
+      setWaitMessage("Fightpaspoort check loopt.");
 
       const allFinished =
         selectedOrAll.length > 0 &&
@@ -1431,13 +1429,6 @@ export default function AanmeldingenPage() {
               >
                 Alles
               </button>
-
-              <Link
-                href="/dashboard/matchmaker/fightpassport"
-                className="fs-silver-btn compact"
-              >
-                FightPassport koppelen
-              </Link>
 
               <button
                 className="fs-green-btn compact"

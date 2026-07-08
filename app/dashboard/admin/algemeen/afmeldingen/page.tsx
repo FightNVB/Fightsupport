@@ -521,7 +521,7 @@ function AfmeldingenTable({ rows }: { rows: AnyRow[] }) {
                     className={
                       dark
                         ? "bg-[#171717] text-white"
-                        : "bg-[#202020] text-white"
+                        : "bg-white text-black"
                     }
                   >
                     <td className="border border-zinc-800 px-4 py-3 font-semibold">
@@ -674,7 +674,7 @@ function MinPuntenPanel({ rows }: { rows: MinPuntArchiveRow[] }) {
                           className={
                             index % 2 === 0
                               ? "bg-[#171717] text-white"
-                              : "bg-[#202020] text-white"
+                              : "bg-white text-black"
                           }
                         >
                           <td className="border border-zinc-800 px-4 py-2 font-black text-[#ff4d00]">

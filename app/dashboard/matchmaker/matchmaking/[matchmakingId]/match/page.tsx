@@ -153,9 +153,8 @@ function tabKeyOf(f: Fighter) {
   const k = klasseTabOf(f);
   const g = geslachtTabOf(f);
   const gender = g === "Vrouw" ? "dame" : g === "Man" ? "heer" : "?";
-  const youthGender = g === "Vrouw" ? "dame" : g === "Man" ? "man" : "?";
 
-  if (k === "Jeugd") return `J/${youthGender}`;
+  if (k === "Jeugd") return g === "Vrouw" ? "Jeugd/V" : "Jeugd/M";
   if (k === "MMA AMA") return `Amateur/${gender}`;
   if (k === "MMA PRO") return `Pro/${gender}`;
   if (["R", "N", "C", "B", "A"].includes(k))
@@ -1164,8 +1163,8 @@ export default function FightersPage() {
       map.set(key, (map.get(key) ?? 0) + 1);
     }
     const orderKlasse = [
-      "J/man",
-      "J/dame",
+      "Jeugd/M",
+      "Jeugd/V",
       "R/man",
       "R/dame",
       "N/man",
@@ -1192,13 +1191,7 @@ export default function FightersPage() {
       })
       .map(([key, count]) => ({ key, count }));
 
-    return [
-      {
-        key: "Alles",
-        count: fighters.filter((f) => !isBlockedFromMatching(f)).length,
-      },
-      ...classTabs,
-    ];
+return classTabs;
   }, [fighters]);
 
   useEffect(() => {
@@ -1248,7 +1241,7 @@ export default function FightersPage() {
         if (filter === "afgemeld") return isAfgemeld(f);
 
         if (isBlockedFromMatching(f)) return false;
-        if (activeTab && activeTab !== "Alles" && tabKeyOf(f) !== activeTab) return false;
+        if (activeTab && tabKeyOf(f) !== activeTab) return false;
         if (filter === "no_license" && statusLic(f) !== "bad") return false;
         if (filter === "no_keurmerk" && statusKeur(f) !== "bad") return false;
         return true;

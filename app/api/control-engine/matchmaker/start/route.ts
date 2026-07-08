@@ -566,10 +566,10 @@ export async function POST(req: Request) {
           await supabase
             .from("controle_runs")
             .update({
-              status: "failed",
-              foutmelding: "FightPassport unlock vereist",
+              status: "waiting_for_admin_unlock",
+              foutmelding: null,
               afgerond_op: nowIso,
-              current_step: "Unlock vereist; doorgestuurd naar admin.",
+              current_step: "FightPassport verificatie vereist; doorgestuurd naar admin.",
             })
             .eq("id", controle_run_id!);
 
@@ -611,7 +611,7 @@ export async function POST(req: Request) {
               code: "FP_UNLOCK_REQUIRED",
               unlock_required: true,
               message:
-                "FightPassport vraagt om een unlock-code. De matchmaking is automatisch doorgestuurd naar admin.",
+                "Fightpaspoort verificatie vereist. MM wordt automatisch overgedragen aan beheerder.",
               controle_run_id,
               matchmaking_id,
             },

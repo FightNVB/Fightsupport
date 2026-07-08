@@ -196,9 +196,9 @@ export default function MatchmakerDashboardPage() {
       icon: ClipboardList as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
-      label: "Inlog FightPassport",
-      subtitle: "Log in voor automatische controle fightpaspoort",
-      href: "/dashboard/matchmaker/fightpassport",
+      label: "FightPassport",
+      subtitle: "Open FightPassport",
+      external: "https://fightpassport.nl/",
       icon: Users as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
