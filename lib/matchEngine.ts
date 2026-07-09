@@ -1537,6 +1537,25 @@ async function runTournamentRules(opts: {
     const gymR = getFighterGymName(ctx, "rood");
     const gymB = getFighterGymName(ctx, "blauw");
 
+// Zelfde sportschool (informatieve melding)
+if (
+  gymR &&
+  gymB &&
+  gymR.trim().toLowerCase() === gymB.trim().toLowerCase()
+) {
+  pushTournamentUniquePairHit(ctx, {
+    matchmaking_id,
+    bout_id,
+    partij_nr: null,
+    rule: "Zelfde sportschool",
+    rule_code: "ZELFDE_SPORTSCHOOL",
+    resultaat: "INFO",
+    severity: "info",
+    boodschap: `${naamR} en ${naamB} komen beide uit sportschool "${gymR}". Controleer of deze partij bewust is ingepland.`,
+  });
+}
+
+
     const vaRood = String(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.va_rood_mm ?? "").trim();
     const vaBlauw = String(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.va_blauw_mm ?? "").trim();
     const hasRood = hasMeaningfulTournamentCorner(ctx, "rood");

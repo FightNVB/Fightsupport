@@ -141,8 +141,8 @@ export default function BeheerPortalPage() {
             <OrangeHotspot right={30} bottom={14} width={40} small variant={2} />
 
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 26, fontWeight: 950, lineHeight: 1, color: "#f1f1f1", textTransform: "uppercase", textShadow: "0 3px 8px rgba(0,0,0,0.75)" }}>Beheer Portaal</div>
-              <div style={{ marginTop: 6, fontSize: 10, letterSpacing: 2, color: NVB_ORANGE, textTransform: "uppercase", textShadow: "0 0 8px rgba(255,106,0,0.28)" }}>Admin tools voor events, accounts en sportschool-contactpersonen</div>
+              <div style={{ fontSize: 26, fontWeight: 950, lineHeight: 1, color: "#f1f1f1", textTransform: "uppercase", textShadow: "0 3px 8px rgba(0,0,0,0.75)" }}>Administratie</div>
+              <div style={{ marginTop: 6, fontSize: 10, letterSpacing: 2, color: NVB_ORANGE, textTransform: "uppercase", textShadow: "0 0 8px rgba(255,106,0,0.28)" }}>Gebruikers, sportscholen, agenda, talentstatus en audit</div>
             </div>
 
             <div style={{ marginTop: 10, height: 1, background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)" }} />
@@ -180,8 +180,8 @@ function TitleBand({ onDashboard }: { onDashboard: () => void }) {
           <HeaderSilverButton label="ADMIN MENU" icon={<ArrowLeft size={14} strokeWidth={2.8} />} onClick={onDashboard} />
         </div>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1, lineHeight: 1, color: "#ececec", textTransform: "uppercase", textShadow: "0 1px 0 rgba(255,255,255,0.18), 0 4px 10px rgba(0,0,0,0.82)" }}>Beheer</div>
-          <div style={{ marginTop: 5, fontSize: 9, letterSpacing: 2.5, color: NVB_ORANGE, textTransform: "uppercase", textShadow: "0 0 8px rgba(255,106,0,0.28)" }}>FightSupport Admin</div>
+          <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1, lineHeight: 1, color: "#ececec", textTransform: "uppercase", textShadow: "0 1px 0 rgba(255,255,255,0.18), 0 4px 10px rgba(0,0,0,0.82)" }}>Administratie</div>
+          <div style={{ marginTop: 5, fontSize: 9, letterSpacing: 2.5, color: NVB_ORANGE, textTransform: "uppercase", textShadow: "0 0 8px rgba(255,106,0,0.28)" }}>Gebruikers, sportscholen, agenda, talentstatus en audit</div>
         </div>
       </div>
     </div>

@@ -513,7 +513,7 @@ export default function AlgemeenBeheerPortalPage() {
                   textShadow: "0 3px 8px rgba(0,0,0,0.75)",
                 }}
               >
-                Algemeen Beheer Portaal
+                Organisatie
               </div>
 
               <div
@@ -526,7 +526,7 @@ export default function AlgemeenBeheerPortalPage() {
                   textShadow: "0 0 8px rgba(255,106,0,0.28)",
                 }}
               >
-                Admin tools voor events, afmeldingen en meer
+                Matchmakings, archief, afmeldingen, sancties en snapshots
               </div>
             </div>
 
@@ -736,7 +736,7 @@ function TitleBand({ onDashboard }: { onDashboard: () => void }) {
               textShadow: "0 0 8px rgba(255,106,0,0.28)",
             }}
           >
-            FightSupport Admin
+            Events, matchmakings, archief en afmeldingen
           </div>
         </div>
       </div>

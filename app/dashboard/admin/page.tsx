@@ -10,7 +10,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { ClipboardList, Scale, Trophy, ArrowLeft, History } from "lucide-react";
+import { Scale, Trophy, ArrowLeft, Building2, UsersRound } from "lucide-react";
 
 type MenuAction = {
   label: string;
@@ -268,10 +268,10 @@ export default function AdminDashboardPage() {
 
   const actions: MenuAction[] = [
     {
-      label: "Algemeen",
-      subtitle: "Algemeen beheer",
+      label: "Organisatie",
+      subtitle: "Matchmakings, archief, afmeldingen, sancties en snapshots",
       href: "/dashboard/admin/algemeen",
-      icon: History,
+      icon: Building2,
       rootAdminOnly: true,
     },
     {
@@ -281,10 +281,10 @@ export default function AdminDashboardPage() {
       icon: Scale,
     },
     {
-      label: "Beheer",
-      subtitle: "Gebruikers, rollen en eventbeheer",
+      label: "Administratie",
+      subtitle: "Gebruikers, sportscholen, agenda, talentstatus en audit",
       href: "/dashboard/admin/beheer",
-      icon: ClipboardList,
+      icon: UsersRound,
       rootAdminOnly: true,
     },
 
