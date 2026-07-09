@@ -103,6 +103,10 @@ export async function POST(req: Request) {
       matchmaking_id,
       row_nr: null,
 
+      // Status moet voldoen aan aanmeldingen_status_chk.
+      // Handmatig toegevoegde vechters starten als niet gecheckt.
+      status: "rauw",
+
       discipline: s(body?.discipline) || null,
       klasse: s(body?.klasse) || null,
       geslacht: s(body?.geslacht) || null,
