@@ -270,6 +270,68 @@ function runNodeScript(
   });
 }
 
+
+function isMissingColumnError(error: any) {
+  const msg = String(error?.message || "");
+  const code = String(error?.code || "");
+
+  return (
+    code === "PGRST204" ||
+    code === "42703" ||
+    msg.includes("Could not find the") ||
+    msg.includes("column") ||
+    msg.includes("schema cache")
+  );
+}
+
+async function setMatchmakingControlLock(matchmakingId: string, locked: boolean) {
+  const now = new Date().toISOString();
+
+  const payloads = locked
+    ? [
+        { locked_for_editing: true, control_engine_busy: true, control_engine_started_at: now },
+        { locked_for_editing: true, control_engine_busy: true },
+        { locked_for_editing: true },
+      ]
+    : [
+        { locked_for_editing: false, control_engine_busy: false, control_engine_finished_at: now },
+        { locked_for_editing: false, control_engine_busy: false },
+        { locked_for_editing: false },
+      ];
+
+  for (const payload of payloads) {
+    const { error } = await supabase
+      .from("matchmakings")
+      .update(payload)
+      .eq("id", matchmakingId);
+
+    if (!error) return;
+    if (!isMissingColumnError(error)) {
+      console.warn("[control-engine/matchmaker/start] matchmaking lock update mislukt", error);
+      return;
+    }
+  }
+}
+
+function selectedPartijNrsFromBody(body: any): number[] {
+  const raw = Array.isArray(body?.partij_nrs)
+    ? body.partij_nrs
+    : Array.isArray(body?.partij_nummers)
+      ? body.partij_nummers
+      : body?.partij_nr != null
+        ? [body.partij_nr]
+        : [];
+
+  return Array.from(
+    new Set(
+      raw
+        .map((v: any) => Number(v))
+        .filter((v: number) => Number.isFinite(v) && v > 0)
+        .map((v: number) => Math.floor(v)),
+    ),
+  );
+}
+
 function uniqueBy<T>(arr: T[], getKey: (row: T) => string): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
@@ -292,6 +354,12 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     matchmaking_id = (body?.matchmaking_id as string | undefined) || null;
+
+    const selectedPartijNrs = selectedPartijNrsFromBody(body);
+    const selectedOnly =
+      body?.scope === "selected" ||
+      body?.selected_only === true ||
+      selectedPartijNrs.length > 0;
 
     const do_scrape = body?.do_scrape !== false;
 
@@ -338,6 +406,8 @@ export async function POST(req: Request) {
 
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
+    await setMatchmakingControlLock(matchmaking_id, true);
+
     await abortActiveRuns(matchmaking_id);
 
     const run = await createControleRun({
@@ -351,35 +421,17 @@ export async function POST(req: Request) {
     await updateRunProgress({
       controle_run_id: controle_run_id!,
       progress: 2,
-      current_step: "Oude controlegegevens opruimen...",
+      current_step: selectedOnly
+        ? "Nieuwe partij voorbereiden..."
+        : "Oude controlegegevens opruimen...",
     });
-
-    console.log("[control-engine/matchmaker/start] 🧹 cleanup oude raw data...");
-
-    const cleanupTargets = [
-      "fighters_raw",
-      "uitslagen_raw",
-      "controle_uitslagen",
-      "controle_resultaten",
-      "controle_bout_context",
-      "controle_toernooi_context",
-    ] as const;
-
-    for (const table of cleanupTargets) {
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .eq("matchmaking_id", matchmaking_id);
-
-      if (error) throw error;
-    }
-
-    console.log("[control-engine/matchmaker/start] ✅ cleanup klaar");
 
     await updateRunProgress({
       controle_run_id: controle_run_id!,
       progress: 5,
-      current_step: "Partijen en toernooi-deelnemers verzamelen...",
+      current_step: selectedOnly
+        ? "Geselecteerde partij verzamelen..."
+        : "Partijen en toernooi-deelnemers verzamelen...",
     });
 
     const { data: bouts, error: boutsErr } = await supabase
@@ -390,6 +442,17 @@ export async function POST(req: Request) {
 
     if (boutsErr) throw boutsErr;
 
+    const allBouts = bouts ?? [];
+    const selectedBouts = selectedOnly
+      ? allBouts.filter((b: any) => selectedPartijNrs.includes(Number(b?.partij_nr)))
+      : allBouts;
+
+    if (selectedOnly && selectedPartijNrs.length > 0 && selectedBouts.length === 0) {
+      throw new Error(`Geen partij gevonden voor partij_nr ${selectedPartijNrs.join(", ")}.`);
+    }
+
+    const boutsForRun = selectedOnly ? selectedBouts : allBouts;
+
     const { data: toernooiDeelnemers, error: tErr } = await supabase
       .from("controle_toernooi_context")
       .select("fighter_id, va_nummer, toernooi_code")
@@ -398,24 +461,83 @@ export async function POST(req: Request) {
     if (tErr && String((tErr as any)?.code ?? "") !== "42P01") throw tErr;
 
     const vaSet = new Set<string>();
-    (bouts ?? []).forEach((b: any) => {
+    boutsForRun.forEach((b: any) => {
       const rood = pickVA(b, "rood");
       const blauw = pickVA(b, "blauw");
       if (rood) vaSet.add(rood);
       if (blauw) vaSet.add(blauw);
     });
 
-    (toernooiDeelnemers ?? []).forEach((d: any) => {
-      const va = toVaStrict(d?.fighter_id) ?? toVaStrict(d?.va_nummer);
-      if (va) vaSet.add(va);
-    });
+    if (!selectedOnly) {
+      (toernooiDeelnemers ?? []).forEach((d: any) => {
+        const va = toVaStrict(d?.fighter_id) ?? toVaStrict(d?.va_nummer);
+        if (va) vaSet.add(va);
+      });
+    }
 
     const va_nummers = [...vaSet].filter(Boolean);
+
+    console.log("[control-engine/matchmaker/start] 🧹 cleanup oude controlegegevens...", {
+      selectedOnly,
+      selectedPartijNrs,
+      va_count: va_nummers.length,
+    });
+
+    if (selectedOnly) {
+      const contextCleanupTargets = [
+        "controle_uitslagen",
+        "controle_resultaten",
+        "controle_bout_context",
+        "controle_toernooi_context",
+      ] as const;
+
+      for (const table of contextCleanupTargets) {
+        const { error } = await supabase
+          .from(table)
+          .delete()
+          .eq("matchmaking_id", matchmaking_id)
+          .in("partij_nr", selectedPartijNrs);
+
+        if (error && !isMissingColumnError(error)) throw error;
+      }
+
+      if (va_nummers.length > 0) {
+        for (const table of ["fighters_raw", "uitslagen_raw"] as const) {
+          const { error } = await supabase
+            .from(table)
+            .delete()
+            .eq("matchmaking_id", matchmaking_id)
+            .in("va_nummer", va_nummers);
+
+          if (error && !isMissingColumnError(error)) throw error;
+        }
+      }
+    } else {
+      const cleanupTargets = [
+        "fighters_raw",
+        "uitslagen_raw",
+        "controle_uitslagen",
+        "controle_resultaten",
+        "controle_bout_context",
+        "controle_toernooi_context",
+      ] as const;
+
+      for (const table of cleanupTargets) {
+        const { error } = await supabase
+          .from(table)
+          .delete()
+          .eq("matchmaking_id", matchmaking_id);
+
+        if (error) throw error;
+      }
+    }
+
+    console.log("[control-engine/matchmaker/start] ✅ cleanup klaar");
 
     const totaalAantal =
       va_nummers.length > 0
         ? va_nummers.length
-        : (bouts ?? []).length + (toernooiDeelnemers ?? []).length;
+        : boutsForRun.length + (selectedOnly ? 0 : (toernooiDeelnemers ?? []).length);
 
     await updateRunProgress({
       controle_run_id: controle_run_id!,
@@ -429,7 +551,7 @@ export async function POST(req: Request) {
       matchmaking_id,
       controle_run_id,
       do_scrape,
-      bouts: (bouts ?? []).length,
+      bouts: boutsForRun.length,
       toernooi_deelnemers: (toernooiDeelnemers ?? []).length,
       va_count: va_nummers.length,
       workers,
@@ -566,6 +688,8 @@ export async function POST(req: Request) {
             })
             .eq("id", matchmaking_id!);
 
+          await setMatchmakingControlLock(matchmaking_id!, false);
+
           return NextResponse.json(
             {
               ok: false,
@@ -659,7 +783,7 @@ export async function POST(req: Request) {
       (r: any) => String(r?.controle_run_id ?? "") === String(controle_run_id)
     );
 
-    const ctxRows =
+    const ctxRowsBase =
       ctxRowsCurrentRun.length > 0
         ? ctxRowsCurrentRun
         : uniqueBy(
@@ -673,6 +797,10 @@ export async function POST(req: Request) {
                   }`
               )
           );
+
+    const ctxRows = selectedOnly
+      ? ctxRowsBase.filter((r: any) => selectedPartijNrs.includes(Number(r?.partij_nr)))
+      : ctxRowsBase;
 
     console.log("[control-engine/matchmaker/start] ✅ ctxRows loaded", {
       matchmaking_rows: rawCtxRows?.length ?? 0,
@@ -751,12 +879,14 @@ export async function POST(req: Request) {
       })
       .eq("id", controle_run_id);
 
+    await setMatchmakingControlLock(matchmaking_id!, false);
+
     return NextResponse.json({
       ok: true,
       matchmaking_id,
       controle_run_id,
       do_scrape,
-      bouts: bouts?.length ?? 0,
+      bouts: boutsForRun.length,
       va_count: va_nummers.length,
       ctx_rows_used: ctxRows.length,
       toernooi_rows_used: Array.isArray(toernooiRows) ? toernooiRows.length : 0,
@@ -770,6 +900,8 @@ export async function POST(req: Request) {
       uitslagen_tries,
       scraper: SCRAPER_FILE,
       role,
+      selectedOnly,
+      selectedPartijNrs,
     });
   } catch (err: any) {
     console.error("❌ ControlEngine matchmaker fout:", err);
@@ -784,6 +916,10 @@ export async function POST(req: Request) {
           current_step: "Controle mislukt.",
         })
         .eq("id", controle_run_id);
+    }
+
+    if (matchmaking_id) {
+      await setMatchmakingControlLock(matchmaking_id, false);
     }
 
     return NextResponse.json(

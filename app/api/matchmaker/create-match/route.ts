@@ -201,7 +201,7 @@ function startControlEngineFireAndForget(req: Request, matchmakingId: string, pa
     process.env.NEXT_PUBLIC_SITE_URL ||
     "http://localhost:3000";
 
-  fetch(`${origin}/api/control-engine/start`, {
+  fetch(`${origin}/api/control-engine/matchmaker/start`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -216,10 +216,10 @@ function startControlEngineFireAndForget(req: Request, matchmakingId: string, pa
     .then(async (controlResponse) => {
       if (!controlResponse.ok) {
         const controlText = await controlResponse.text().catch(() => "");
-        console.error("control-engine/start gaf fout", controlResponse.status, controlText);
+        console.error("control-engine/matchmaker/start gaf fout", controlResponse.status, controlText);
       }
     })
-    .catch((e) => console.error("control-engine/start fout", e))
+    .catch((e) => console.error("control-engine/matchmaker/start fout", e))
     .finally(() => {
       void setMatchmakingControlLock(matchmakingId, false);
     });

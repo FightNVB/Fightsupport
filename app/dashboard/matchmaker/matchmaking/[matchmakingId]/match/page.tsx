@@ -2040,7 +2040,7 @@ return classTabs;
                     const detailId = encodeURIComponent(detailIdOf(f));
                     const va = vaOf(f);
                     const checked = selected.includes(rowKey);
-                    const disabled = !matchId || isBlockedFromMatching(f);
+                    const disabled = scraperRunning || !matchId || isBlockedFromMatching(f);
                     const isRed = matchRed === matchId;
 
                     return (
@@ -2053,7 +2053,7 @@ return classTabs;
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggle(rowKey)}
-                            disabled={!rowKey || isBlockedFromMatching(f)}
+                            disabled={scraperRunning || !rowKey || isBlockedFromMatching(f)}
                             title="Selecteer alleen voor opnieuw controleren"
                           />
                         </td>
@@ -2069,6 +2069,7 @@ return classTabs;
                               tournamentMode ? toggleTournament(f) : undefined
                             }
                             disabled={
+                              scraperRunning ||
                               !tournamentMode ||
                               !matchId ||
                               isBlockedFromMatching(f)
@@ -2105,7 +2106,7 @@ return classTabs;
                           <button
                             className="fs-icon-btn"
                             disabled={
-                              busyId === matchId || !matchId || isGematcht(f)
+                              scraperRunning || busyId === matchId || !matchId || isGematcht(f)
                             }
                             onClick={() => afmelden(f)}
                             title={

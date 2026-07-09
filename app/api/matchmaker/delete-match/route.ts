@@ -67,6 +67,81 @@ async function getUser(req: Request) {
   return data.user;
 }
 
+async function getUserProfileForAuth(user: any) {
+  const ids = [s(user?.id)].filter(Boolean);
+  const email = s(user?.email).toLowerCase();
+
+  for (const id of ids) {
+    const { data, error } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, email, role, rol, type, bondteam")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (!error && data) return data as AnyRow;
+  }
+
+  if (email) {
+    const { data, error } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, email, role, rol, type, bondteam")
+      .ilike("email", email)
+      .maybeSingle();
+
+    if (!error && data) return data as AnyRow;
+  }
+
+  return null;
+}
+
+function roleOf(user: any, profile: AnyRow | null) {
+  return s(profile?.role ?? profile?.rol ?? profile?.type ?? user?.app_metadata?.role).toLowerCase();
+}
+
+function isAdminRole(role: string) {
+  return role === "admin" || role === "superadmin" || role.includes("admin");
+}
+
+async function assertCanManageOwnMatchmaking(matchmakingId: string, user: any) {
+  const { data, error } = await supabaseAdmin
+    .from("matchmakings")
+    .select("id, matchmaker_id, maker_user_id, uploaded_by, huidige_eigenaar_type, huidige_eigenaar_user_id, status, stadium")
+    .eq("id", matchmakingId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("Matchmaking niet gevonden.");
+
+  const profile = await getUserProfileForAuth(user);
+  const role = roleOf(user, profile);
+
+  if (isAdminRole(role)) return data as AnyRow;
+
+  const actorIds = Array.from(
+    new Set([s(user?.id), s(profile?.id), s(user?.email).toLowerCase(), s(profile?.email).toLowerCase()].filter(Boolean)),
+  );
+
+  const ownerIds = [
+    (data as AnyRow).matchmaker_id,
+    (data as AnyRow).maker_user_id,
+    (data as AnyRow).uploaded_by,
+    (data as AnyRow).huidige_eigenaar_user_id,
+  ]
+    .map((x) => s(x).toLowerCase())
+    .filter(Boolean);
+
+  const isOwner = actorIds.some((id) => ownerIds.includes(id.toLowerCase()));
+
+  if (!isOwner) {
+    throw new Error("Geen rechten om deze partij te verwijderen.");
+  }
+
+  // Bewust géén stadium/status beperking: dit is de MM van de matchmaker.
+  // Een matchmaker mag partijen beheren zolang hij eigenaar/toegang heeft;
+  // alleen NVB-beslissingen zoals dispensatie/afkeur/verbod goedkeuren blijven verboden.
+  return data as AnyRow;
+}
+
 async function readBody(req: Request): Promise<AnyRow> {
   const url = new URL(req.url);
   const fromQuery: AnyRow = Object.fromEntries(url.searchParams.entries());
@@ -490,31 +565,34 @@ async function unmarkContextMatched(
         };
       }
 
-      const withUpdated = await supabaseAdmin
-        .from("matchmaker_fighter_context")
-        .update({ extra, updated_at: new Date().toISOString() })
-        .eq("id", row.id);
+      const contextPayloads = [
+        { extra, status: "gescrapt", updated_at: new Date().toISOString() },
+        { extra, status: "gescrapt" },
+        { extra, updated_at: new Date().toISOString() },
+        { extra },
+      ];
 
-      if (withUpdated.error && isMissingSchemaError(withUpdated.error)) {
-        const fallback = await supabaseAdmin
+      let updated = false;
+      for (const payload of contextPayloads) {
+        const result = await supabaseAdmin
           .from("matchmaker_fighter_context")
-          .update({ extra })
+          .update(payload)
           .eq("id", row.id);
 
-        if (fallback.error && !isMissingSchemaError(fallback.error)) {
-          console.warn(
-            "matchmaker_fighter_context unmatch mislukt",
-            fallback.error,
-          );
+        if (!result.error) {
+          updated = true;
+          break;
         }
-      } else if (
-        withUpdated.error &&
-        !isMissingSchemaError(withUpdated.error)
-      ) {
-        console.warn(
-          "matchmaker_fighter_context unmatch mislukt",
-          withUpdated.error,
-        );
+
+        if (!isMissingSchemaError(result.error)) {
+          console.warn("matchmaker_fighter_context unmatch mislukt", result.error);
+          updated = true;
+          break;
+        }
+      }
+
+      if (!updated) {
+        console.warn("matchmaker_fighter_context unmatch overgeslagen: schema ondersteunt geen payload");
       }
     }
   }
@@ -589,7 +667,7 @@ async function verifyDeleted(matchmakingId: string, rows: AnyRow[]) {
 
 export async function DELETE(req: Request) {
   try {
-    await getUser(req);
+    const user = await getUser(req);
 
     const body = await readBody(req);
     const matchmakingId = getMatchmakingId(body);
@@ -600,6 +678,8 @@ export async function DELETE(req: Request) {
         { status: 400 },
       );
     }
+
+    await assertCanManageOwnMatchmaking(matchmakingId, user);
 
     const rows = await findBoutRows(matchmakingId, body);
 
