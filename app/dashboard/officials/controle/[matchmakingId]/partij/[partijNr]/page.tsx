@@ -2687,7 +2687,7 @@ export default function PartijDetailPage() {
 
       const j1 = await r1.json().catch(() => ({}));
       if (!r1.ok)
-        throw new Error(j1?.error ?? "Opslaan mislukt (admin-correct-bout)");
+        throw new Error(j1?.error ?? "Opslaan mislukt (correct-bout)");
 
       const va_rood =
         editOpen === "rood"
@@ -2773,20 +2773,20 @@ export default function PartijDetailPage() {
           runStatus={run?.status ?? null}
           onBack={() => router.back()}
           onBackToMatchmaking={() =>
-            router.push(`/dashboard/admin/controle/${matchmakingId}`)
+            router.push(`/dashboard/officials/controle/${matchmakingId}`)
           }
           navPrev={nav.prev ?? null}
           navNext={nav.next ?? null}
           onPrev={() =>
             nav.prev &&
             router.push(
-              `/dashboard/admin/controle/${matchmakingId}/partij/${nav.prev}`,
+              `/dashboard/officials/controle/${matchmakingId}/partij/${nav.prev}`,
             )
           }
           onNext={() =>
             nav.next &&
             router.push(
-              `/dashboard/admin/controle/${matchmakingId}/partij/${nav.next}`,
+              `/dashboard/officials/controle/${matchmakingId}/partij/${nav.next}`,
             )
           }
         />

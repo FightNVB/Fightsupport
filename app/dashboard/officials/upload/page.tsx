@@ -269,7 +269,7 @@ export default function UploadMatchmakingOfficialPage() {
 
       setMelding("Matchmaking verwerken...");
 
-      const response = await authedFetch("/api/submit-matchmaking", {
+      const response = await authedFetch("/api/officials/submit-matchmaking", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -2,9 +2,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
-import { parseExcelToBouts } from "@/app/api/matchmaker/submit-matchmaking/parse_matchmaking";
-import { getUserBondteam, requireAnyRole, RoleName } from "@/app/api/_utils/authz";
-import { ensureLifecycleRecord } from "@/app/api/_utils/matchmakingLifecycle";
+import { parseExcelToBouts } from "../../submit-matchmaking/parse_matchmaking";
+import { getUserBondteam, requireAnyRole, RoleName } from "../../_utils/authz";
+import { ensureLifecycleRecord } from "../../_utils/matchmakingLifecycle";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -59,6 +59,10 @@ function toVaStrict(v: any): string | null {
 }
 
 function normUpper(v: any): string {
+  return String(v ?? "").trim().toUpperCase();
+}
+
+function normalizeBondteamValue(v: any): string {
   return String(v ?? "").trim().toUpperCase();
 }
 
@@ -224,15 +228,11 @@ const ALLOWED_BONDTEAMS = new Set([
   "MON",
 ]);
 
-function normalizeBondteamValue(v: unknown): string {
-  return String(v ?? "").trim().toUpperCase();
-}
-
 function bad(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
 }
 
-function findDuplicatePartijNrs(bouts: any[]): number[] {
+function findDuplicatePartijNrs(bouts: any[]) {
   const seen = new Set<number>();
   const duplicates = new Set<number>();
 
@@ -243,13 +243,13 @@ function findDuplicatePartijNrs(bouts: any[]): number[] {
     if (raw == null || raw === "") continue;
 
     const nr = Number(raw);
-    if (!Number.isFinite(nr)) continue;
+    if (!Number.isInteger(nr)) continue;
 
     if (seen.has(nr)) duplicates.add(nr);
     seen.add(nr);
   }
 
-  return Array.from(duplicates).sort((a, b) => a - b);
+  return [...duplicates].sort((a, b) => a - b);
 }
 
 function duplicatePartijNrsResponse(duplicatePartijNrs: number[]) {
@@ -282,17 +282,6 @@ function isNvbOrEmptyBondteam(v: any): boolean {
   const s = String(v ?? "").trim().toUpperCase();
   return !s || s === "NVB";
 }
-
-function resolveLifecycleBronType(role: RoleName): string {
-  if (role === "matchmaker") return "matchmaker_upload";
-
-  // Superadmin en admin uploaden altijd via de admin-flow,
-  // ook wanneer zij een specifiek bondteam selecteren.
-  if (role === "superadmin" || role === "admin") return "admin_upload";
-
-  return "official_upload";
-}
-
 
 type UploadUserProfile = {
   id: string;
@@ -380,7 +369,12 @@ async function assertPublicUserProfileId(profileId: string): Promise<UploadUserP
 ========================================================= */
 export async function POST(req: Request) {
   try {
-    const auth = await requireAnyRole(req, ["official", "hoofdofficial"]);
+    const auth = await requireAnyRole(req, [
+      "superadmin",
+      "admin",
+      "official",
+      "hoofdofficial",
+    ]);
     const authUserId = String((auth as any)?.userId ?? "").trim();
     const authRole = roleLower((auth as any)?.role);
     let profileForUpload: UploadUserProfile | null = null;
@@ -509,9 +503,32 @@ export async function POST(req: Request) {
       );
     }
 
+    console.log("[submit-matchmaking] parser resultaat", {
+      raw_filename,
+      bouts: bouts.length,
+      normal_bouts: bouts.filter((b) => (b as any)?.is_toernooi !== true).length,
+      tournament_bouts: bouts.filter((b) => (b as any)?.is_toernooi === true).length,
+      va_rood: bouts.filter((b) => (b as any)?.va_rood).length,
+      va_blauw: bouts.filter((b) => (b as any)?.va_blauw).length,
+      unique_va: new Set(
+        bouts
+          .flatMap((b) => [(b as any)?.va_rood, (b as any)?.va_blauw])
+          .filter(Boolean)
+      ).size,
+      sample: bouts.slice(0, 5).map((b) => ({
+        partij_nr: (b as any)?.partij_nr ?? null,
+        is_toernooi: (b as any)?.is_toernooi ?? null,
+        toernooi_code: (b as any)?.toernooi_code ?? null,
+        rood_naam: (b as any)?.rood_naam ?? null,
+        va_rood: (b as any)?.va_rood ?? null,
+        blauw_naam: (b as any)?.blauw_naam ?? null,
+        va_blauw: (b as any)?.va_blauw ?? null,
+      })),
+    });
+
     const duplicatePartijNrs = findDuplicatePartijNrs(bouts);
     if (duplicatePartijNrs.length > 0) {
-      console.warn("[officials submit-matchmaking] dubbele partijnummers in upload", {
+      console.warn("[submit-matchmaking] dubbele partijnummers in upload", {
         raw_filename,
         duplicate_partij_nrs: duplicatePartijNrs,
       });
@@ -535,21 +552,22 @@ export async function POST(req: Request) {
     userId = String(profileForUpload.id).trim();
     uploaded_by = userId;
 
-    role = roleLower((auth as any)?.role ?? profileForUpload.role);
-    if (role !== "official" && role !== "hoofdofficial") role = "official" as RoleName;
+    role = roleLower(profileForUpload.role ?? authRole);
 
-    if (!matchmaker) {
+    if (!matchmaker && role === "matchmaker") {
       matchmaker = profileForUpload.full_name || profileForUpload.email || null;
     }
 
     if (!bondteam && profileForUpload.bondteam) {
-      const profileBondteam = String(profileForUpload.bondteam).trim().toUpperCase();
+      const profileBondteam = normalizeBondteamValue(profileForUpload.bondteam);
       if (ALLOWED_BONDTEAMS.has(profileBondteam)) bondteam = profileBondteam;
     }
 
-    lifecycleBronType = resolveLifecycleBronType(role);
-
     const normalizedBondteam = normalizeBondteamValue(bondteam);
+
+    // Official-submit route houdt de upload bij het bondteam en stuurt niet direct naar admin.
+    // Ook wanneer admin/superadmin deze route gebruikt om te testen, blijft dit een official_upload.
+    lifecycleBronType = "official_upload";
 
     if (!evenement_naam || !evenement_datum) {
       return bad("Vul verplicht in: evenement_naam en evenement_datum.");
@@ -558,12 +576,8 @@ export async function POST(req: Request) {
       return bad("Bondteam is verplicht.");
     }
     if (!ALLOWED_BONDTEAMS.has(normalizedBondteam)) {
-      return bad(`Onbekend bondteam: ${normalizedBondteam}.`);
+      return bad("Onbekend bondteam.");
     }
-
-    // Vanaf hier is normalizedBondteam de enige bron voor matchmakings.bondteam.
-    // De Excel-parser hoort hier niets mee te doen; dit komt uit het formulier/profiel.
-    bondteam = normalizedBondteam;
 
     if (role === "official" || role === "hoofdofficial") {
       const userBond = await getUserBondteam(userId);
@@ -578,17 +592,12 @@ export async function POST(req: Request) {
           403
         );
       }
+    }
 
-      const mm = String(matchmaker ?? "").trim();
-      const pr = String(promotor ?? "").trim();
-      if (!mm && !pr) {
-        return bad("Vul matchmaker of promotor in (minimaal één).", 400);
-      }
-    } else {
-      const mm = String(matchmaker ?? "").trim();
-      if (!mm) {
-        return bad("Matchmaker is verplicht.", 400);
-      }
+    const mm = String(matchmaker ?? "").trim();
+    const pr = String(promotor ?? "").trim();
+    if (!mm && !pr) {
+      return bad("Vul matchmaker of promotor in (minimaal één).", 400);
     }
 
     const now = new Date().toISOString();
@@ -634,36 +643,19 @@ export async function POST(req: Request) {
 
     let mmId = "";
 
-    const isOfficialUpload =
-      role === "official" ||
-      role === "hoofdofficial";
+    const isOfficialUser = role === "official" || role === "hoofdofficial";
 
-    // Belangrijk:
-    // - uploaded_by moet altijd public.user_profiles.id zijn, niet auth.users.id.
-    // - Een hoofdofficial/official uploadt namens het eigen bondteam en houdt de MM daar om hem zelf te controleren.
-    // - Superadmin/admin uploads blijven altijd in de admin-flow.
-    // - Alleen matchmaker-uploads met submit gaan automatisch naar admin-controle.
-    const makerType =
-      role === "matchmaker"
-        ? "matchmaker"
-        : isOfficialUpload
-          ? role
-          : role === "admin" || role === "superadmin"
-            ? "admin"
-            : null;
-
+    // Official-submit: altijd eerst concept bij het eigen bondteam.
+    // Dus nooit direct naar admin na upload. De official kan daarna zelf /control-engine/officials/start draaien.
+    const makerType = isOfficialUser ? role : "admin";
     const makerUserId = userId;
 
-    // matchmaker_id alleen vullen als de ingelogde maker echt matchmaker is.
-    // Bij hoofdofficial/admin uploads is er vaak alleen een tekstveld matchmaker/promotor.
-    const matchmakerIdForRow = role === "matchmaker" ? userId : null;
+    // Official uploads hebben geen matchmaker_id als user-id; matchmaker/promotor zijn tekstvelden.
+    const matchmakerIdForRow = null;
 
-    // Official-upload blijft onder eigenaarschap van het bondteam.
-    // De official/hoofdofficial is de uploader/maker, maar niet de matchmaker en niet de eigenaar.
-    // Alleen bij FightPassport unlock in /api/control-engine/officials/start gaat hij naar admin.
     const lifecycleStage = "concept_matchmaking" as const;
     const lifecycleOwnerType = "bondteam" as const;
-    const lifecycleOwnerUserId = null;
+    const lifecycleOwnerUserId = isOfficialUser ? userId : null;
     const lifecycleOwnerBondteam = normalizedBondteam;
     const submittedToAdminAt = null;
 
@@ -778,18 +770,16 @@ export async function POST(req: Request) {
     }
 
     const lifecycleMakerType =
-      makerType === "matchmaker"
-        ? "matchmaker"
-        : makerType === "official" || makerType === "hoofdofficial"
-          ? "official"
-          : "admin";
+      makerType === "official" || makerType === "hoofdofficial"
+        ? "official"
+        : "admin";
 
     await ensureLifecycleRecord({
       matchmakingId: String(mmId),
       naam: evenement_naam || null,
       datum: evenement_datum || null,
       locatie: locatie || null,
-      matchmakerId: role === "matchmaker" ? makerUserId : null,
+      matchmakerId: null,
       makerType: lifecycleMakerType,
       makerUserId,
       bondteam: normalizedBondteam,
@@ -806,8 +796,6 @@ export async function POST(req: Request) {
         auth_user_id: authUserId,
         requested_lifecycle_mode: requestedLifecycleMode,
         requested_keep_owner: requestedKeepOwner,
-        official_upload_kept_at_bondteam: true,
-        official_uploader_user_id: userId,
         maker_type: makerType,
         lifecycle_maker_type: lifecycleMakerType,
       },
@@ -991,7 +979,6 @@ export async function POST(req: Request) {
         bron_type: lifecycleBronType,
         stadium: lifecycleStage,
         eigenaar_type: lifecycleOwnerType,
-        eigenaar_user_id: lifecycleOwnerUserId,
         eigenaar_bondteam: lifecycleBondteam,
       },
       stats: {
