@@ -3,12 +3,14 @@
 import React, {
   useEffect,
   useMemo,
+  useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { authedFetch } from "@/lib/api/authedFetch";
 import {
   ArrowLeft,
   Settings,
@@ -153,15 +155,75 @@ type ActionCard = {
   icon: any;
 };
 
+type UserProfileRow = {
+  role?: string | null;
+  active_role?: string | null;
+  bondteam?: string | null;
+};
+
+function normalizeRole(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeBondteam(value: unknown): string {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return normalized === "NULL" ? "" : normalized;
+}
+
+async function fetchUserProfile(): Promise<UserProfileRow | null> {
+  const response = await authedFetch("/api/me/profile", {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    console.error("/api/me/profile laden mislukt", response.status);
+    return null;
+  }
+
+  return (await response.json()) as UserProfileRow;
+}
+
 export default function AlgemeenBeheerPortalPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const [profile, setProfile] = useState<UserProfileRow | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
     }
   }, [loading, user, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfile() {
+      if (loading) return;
+
+      if (!user?.id) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+
+      setProfileLoading(true);
+      const data = await fetchUserProfile();
+
+      if (!cancelled) {
+        setProfile(data);
+        setProfileLoading(false);
+      }
+    }
+
+    void loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user?.id]);
 
   const actions = useMemo<ActionCard[]>(
     () => [
@@ -206,7 +268,7 @@ export default function AlgemeenBeheerPortalPage() {
     [],
   );
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <main style={pageBackground}>
         <div
@@ -236,11 +298,17 @@ export default function AlgemeenBeheerPortalPage() {
     );
   }
 
-  const activeRole = String(user?.user_metadata?.active_role || user?.user_metadata?.role || "").toLowerCase();
-  const userBondteam = String(user?.user_metadata?.bondteam || "").toUpperCase();
-  const allowed = (activeRole === "superadmin" || activeRole === "admin") && userBondteam === "NVB";
-
   if (!user) return null;
+
+  const activeRole = normalizeRole(
+    profile?.active_role || profile?.role || user?.user_metadata?.active_role || user?.user_metadata?.role,
+  );
+  const userBondteam = normalizeBondteam(
+    profile?.bondteam || user?.user_metadata?.bondteam,
+  );
+  const allowed =
+    (activeRole === "superadmin" || activeRole === "admin") &&
+    (userBondteam === "" || userBondteam === "NVB");
 
   if (!allowed) {
     return (
