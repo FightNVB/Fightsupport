@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
-import DeleteAfmeldingButton from "./DeleteAfmeldingButton";
+import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +51,99 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } },
 );
+
+async function deleteAfmeldingFromPage(formData: FormData) {
+  "use server";
+
+  const id = String(formData.get("afmelding_id") ?? "").trim();
+  if (!id) return;
+
+  const { data: afmelding, error: loadError } = await supabase
+    .from("afmeldingen")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (loadError || !afmelding) {
+    console.error("[afmeldingen] verwijderen: afmelding laden mislukt", loadError);
+    revalidatePath("/dashboard/admin/algemeen/afmeldingen");
+    return;
+  }
+
+  const now = new Date().toISOString();
+
+  if (afmelding.inschrijving_id && afmelding.matchmaking_id) {
+    const raw =
+      afmelding.raw && typeof afmelding.raw === "object" && !Array.isArray(afmelding.raw)
+        ? afmelding.raw
+        : {};
+
+    const { error: aanmeldingError } = await supabase
+      .from("aanmeldingen")
+      .update({
+        status: "gescrapt",
+        raw: {
+          ...raw,
+          afmelding_verwijderd: true,
+          afmelding_verwijderd_at: now,
+          verwijderde_afmelding_id: id,
+        },
+        updated_at: now,
+      })
+      .eq("id", afmelding.inschrijving_id)
+      .eq("matchmaking_id", afmelding.matchmaking_id);
+
+    if (aanmeldingError) {
+      console.error("[afmeldingen] aanmelding herstellen mislukt", aanmeldingError);
+    }
+  }
+
+  if (afmelding.fighter_context_id) {
+    const { data: ctx } = await supabase
+      .from("matchmaker_fighter_context")
+      .select("id, extra")
+      .eq("id", afmelding.fighter_context_id)
+      .maybeSingle();
+
+    const extra =
+      ctx?.extra && typeof ctx.extra === "object" && !Array.isArray(ctx.extra)
+        ? ctx.extra
+        : {};
+
+    const { error: contextError } = await supabase
+      .from("matchmaker_fighter_context")
+      .update({
+        status: "gescrapt",
+        afgemeld: false,
+        beschikbaar: true,
+        extra: {
+          ...extra,
+          afmelding_verwijderd: true,
+          afmelding_verwijderd_at: now,
+          verwijderde_afmelding_id: id,
+          afgemeld: false,
+          beschikbaar: true,
+        },
+        updated_at: now,
+      })
+      .eq("id", afmelding.fighter_context_id);
+
+    if (contextError) {
+      console.error("[afmeldingen] fighter context herstellen mislukt", contextError);
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("afmeldingen")
+    .delete()
+    .eq("id", id);
+
+  if (deleteError) {
+    console.error("[afmeldingen] verwijderen mislukt", deleteError);
+  }
+
+  revalidatePath("/dashboard/admin/algemeen/afmeldingen");
+}
 
 function s(v: unknown) {
   return String(v ?? "").trim();
@@ -576,10 +669,15 @@ function AfmeldingenTable({ rows }: { rows: AnyRow[] }) {
                           </Link>
                         ) : null}
 
-                        <DeleteAfmeldingButton
-                          afmeldingId={s(row.id)}
-                          naam={naam(row)}
-                        />
+                        <form action={deleteAfmeldingFromPage}>
+                          <input type="hidden" name="afmelding_id" value={s(row.id)} />
+                          <button
+                            type="submit"
+                            className="inline-flex border border-red-500 bg-red-700 px-3 py-1 text-xs font-black uppercase !text-white"
+                          >
+                            Delete
+                          </button>
+                        </form>
                       </div>
                     </td>
                   </tr>
