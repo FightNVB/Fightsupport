@@ -118,13 +118,19 @@ export async function POST(req: NextRequest) {
     // ===== 🔥 CONTROL ENGINE START =====
     const controle_run_id = crypto.randomUUID();
 
-    await supabaseAdmin.from("controle_runs").insert({
-      id: controle_run_id,
-      matchmaking_id,
-      status: "running",
-      run_type: "manual_add_bout",
-      gestart_op: new Date().toISOString(),
-    });
+    const { error: runErr } = await supabaseAdmin
+      .from("controle_runs")
+      .insert({
+        id: controle_run_id,
+        matchmaking_id,
+        status: "running",
+        run_type: "manual_add_bout",
+        gestart_op: new Date().toISOString(),
+      });
+
+    if (runErr) {
+      throw new Error(`Controle-run aanmaken mislukt: ${runErr.message}`);
+    }
 
     // ===== SCRAPER =====
     const vas = [toVa(body.va_rood), toVa(body.va_blauw)].filter(Boolean) as string[];
@@ -152,19 +158,32 @@ export async function POST(req: NextRequest) {
     }
 
     // ===== BUILD / ENRICH / RULES =====
-    await buildControleBoutContext(matchmaking_id, controle_run_id);
+    // Bij handmatig toevoegen rebuilden we alleen de nieuwe partij.
+    // Zo raak je bestaande context niet kwijt tijdens matchen/controle.
+    await buildControleBoutContext(matchmaking_id, controle_run_id, {
+      partij_nr,
+    });
     await enrichControleBoutContext(matchmaking_id, controle_run_id);
 
-    const { data: ctxRows } = await supabaseAdmin
+    const { data: ctxRows, error: ctxErr } = await supabaseAdmin
       .from("controle_bout_context")
       .select("*")
       .eq("matchmaking_id", matchmaking_id)
-      .eq("controle_run_id", controle_run_id);
+      .eq("controle_run_id", controle_run_id)
+      .eq("partij_nr", partij_nr);
+
+    if (ctxErr) throw ctxErr;
+
+    if (!ctxRows?.length) {
+      throw new Error(
+        `Geen context gevonden voor partij ${partij_nr}. Controleer of matchmaking_bouts_raw, fighters_raw en RLS goed gevuld zijn.`
+      );
+    }
 
     await rulesEngine({
       matchmaking_id,
       controle_run_id,
-      ctxRows: ctxRows ?? [],
+      ctxRows,
     });
 
     // ===== afronden =====
@@ -179,10 +198,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       message: "Bout toegevoegd + volledig gecontroleerd",
+      partij_nr,
+      controle_run_id,
+      context_rows: ctxRows.length,
     });
   } catch (err: any) {
+    console.error("[control-engine/add-bout] error:", err);
+
     return NextResponse.json(
-      { ok: false, error: err.message },
+      { ok: false, error: err?.message || "Bout toevoegen mislukt" },
       { status: 500 }
     );
   }

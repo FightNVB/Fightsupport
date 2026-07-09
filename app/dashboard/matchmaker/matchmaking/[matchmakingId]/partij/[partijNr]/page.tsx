@@ -342,7 +342,7 @@ function Badge({
   invert,
 }: {
   text: string;
-  tone: "ok" | "warn" | "disp" | "err" | "info";
+  tone: "ok" | "warn" | "disp" | "err" | "info" | "verbod";
   invert?: boolean;
 }) {
   const cls =
@@ -362,7 +362,11 @@ function Badge({
             ? invert
               ? "bg-blue-700 text-white border-blue-800"
               : "bg-blue-50 text-blue-900 border-blue-300"
-            : invert
+            : tone === "verbod"
+              ? invert
+                ? "bg-purple-700 text-white border-purple-800"
+                : "bg-purple-50 text-purple-900 border-purple-300"
+              : invert
               ? "bg-red-700 text-white border-red-800"
               : "bg-red-50 text-red-900 border-red-300";
 
@@ -1040,7 +1044,7 @@ function isApprovedOverride(row: ControleResultaatRow): boolean {
 
 function displayResultaat(row: ControleResultaatRow): {
   label: string;
-  tone: "ok" | "warn" | "disp" | "err" | "info";
+  tone: "ok" | "warn" | "disp" | "err" | "info" | "verbod";
 } {
   if (isApprovedOverride(row)) {
     return { label: "OK", tone: "ok" };
@@ -1058,7 +1062,7 @@ function displayResultaat(row: ControleResultaatRow): {
   }
 
   if (code.startsWith("STARTVERBOD_")) {
-    return { label: "STARTVERBOD", tone: "err" };
+    return { label: "STARTVERBOD", tone: "verbod" };
   }
 
   // Belgische keurmerkcontrole is altijd informatief en nooit afkeur.
@@ -1071,6 +1075,9 @@ function displayResultaat(row: ControleResultaatRow): {
   }
 
   const r = normResultaat(row.resultaat);
+  if (r === "verbod" || r.includes("verbod")) {
+    return { label: "VERBOD", tone: "verbod" };
+  }
   if (r === "afgekeurd") return { label: "AFKEUR", tone: "err" };
   if (r === "dispensatie") return { label: "DISPENSATIE", tone: "disp" };
   if (r === "actie") return { label: "ACTIE", tone: "warn" };
@@ -1140,12 +1147,12 @@ function buildSideResultBadges(
 ): Array<{
   key: string;
   text: string;
-  tone: "ok" | "warn" | "disp" | "err" | "info";
+  tone: "ok" | "warn" | "disp" | "err" | "info" | "verbod";
 }> {
   const out: Array<{
     key: string;
     text: string;
-    tone: "ok" | "warn" | "disp" | "err" | "info";
+    tone: "ok" | "warn" | "disp" | "err" | "info" | "verbod";
   }> = [];
   const seen = new Set<string>();
 
