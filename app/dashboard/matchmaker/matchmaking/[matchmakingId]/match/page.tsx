@@ -1217,7 +1217,7 @@ return classTabs;
     };
   }, [fighters, allScraperBusyCount]);
 
-  const scraperRunning = matchmakingLocked || allScraperBusyCount > 0 || !!busyId;
+  const scraperRunning = matchmakingLocked || allScraperBusyCount > 0;
 
   const visible = useMemo(() => {
     const needle = q.toLowerCase().trim();
@@ -2040,7 +2040,7 @@ return classTabs;
                     const detailId = encodeURIComponent(detailIdOf(f));
                     const va = vaOf(f);
                     const checked = selected.includes(rowKey);
-                    const disabled = scraperRunning || !matchId || isBlockedFromMatching(f);
+                    const disabled = !matchId || isBlockedFromMatching(f);
                     const isRed = matchRed === matchId;
 
                     return (
@@ -2053,7 +2053,7 @@ return classTabs;
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggle(rowKey)}
-                            disabled={scraperRunning || !rowKey || isBlockedFromMatching(f)}
+                            disabled={!!busyId || !rowKey || isBlockedFromMatching(f)}
                             title="Selecteer alleen voor opnieuw controleren"
                           />
                         </td>
@@ -2069,7 +2069,7 @@ return classTabs;
                               tournamentMode ? toggleTournament(f) : undefined
                             }
                             disabled={
-                              scraperRunning ||
+                              !!busyId ||
                               !tournamentMode ||
                               !matchId ||
                               isBlockedFromMatching(f)
@@ -2106,7 +2106,7 @@ return classTabs;
                           <button
                             className="fs-icon-btn"
                             disabled={
-                              scraperRunning || busyId === matchId || !matchId || isGematcht(f)
+                              busyId === matchId || !matchId || isGematcht(f)
                             }
                             onClick={() => afmelden(f)}
                             title={
