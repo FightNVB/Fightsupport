@@ -5,6 +5,7 @@ import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,21 +15,10 @@ function normalizeKey(raw: unknown) {
   return key || null;
 }
 
-function bearer(req: NextRequest) {
-  const h = req.headers.get("authorization") || "";
-  return h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : null;
-}
-
 function getBaseUrl() {
   const env = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (env) return env;
   throw new Error("NEXT_PUBLIC_SUPABASE_URL ontbreekt");
-}
-
-function getAnonKey() {
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!key) throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY ontbreekt");
-  return key;
 }
 
 function getServiceKey() {
@@ -229,10 +219,7 @@ export async function POST(req: NextRequest) {
   let logFile = "";
 
   try {
-    const token = bearer(req);
-    if (!token) {
-      return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
-    }
+    await requireAnyRole(req, ["admin", "superadmin", "trainer"]);
 
     const body = await req.json().catch(() => ({}));
     const sportschoolKey = normalizeKey(
@@ -244,34 +231,6 @@ export async function POST(req: NextRequest) {
         { error: "sportschool_id ontbreekt" },
         { status: 400 }
       );
-    }
-
-    const userClient = createClient(getBaseUrl(), getAnonKey(), {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false },
-    });
-
-    const { data: userRes, error: userErr } = await userClient.auth.getUser(token);
-
-    if (userErr || !userRes?.user) {
-      return NextResponse.json({ error: "Ongeldige sessie" }, { status: 401 });
-    }
-
-    const { data: profile, error: profileErr } = await userClient
-      .from("user_profiles")
-      .select("id, role, email, full_name, bondteam")
-      .eq("id", userRes.user.id)
-      .maybeSingle();
-
-    if (profileErr) {
-      return NextResponse.json({ error: profileErr.message }, { status: 500 });
-    }
-
-    const role = String(profile?.role ?? "").trim().toLowerCase();
-    const allowed = ["admin", "superadmin", "trainer"].includes(role);
-
-    if (!allowed) {
-      return NextResponse.json({ error: "Geen rechten" }, { status: 403 });
     }
 
     const admin = createClient(getBaseUrl(), getServiceKey(), {

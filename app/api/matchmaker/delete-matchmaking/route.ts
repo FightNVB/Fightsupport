@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -30,36 +31,7 @@ function isMissingTableOrColumn(error: any): boolean {
   );
 }
 
-async function getUser(req: Request) {
-  const auth =
-    req.headers.get("authorization") ||
-    req.headers.get("Authorization") ||
-    "";
-
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-
-  if (!token) throw new Error("Niet ingelogd.");
-
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-
-  if (error || !data.user) {
-    throw new Error(error?.message || "Niet ingelogd.");
-  }
-
-  return data.user;
-}
-
-async function getUserProfile(userId: string) {
-  const { data } = await supabaseAdmin
-    .from("user_profiles")
-    .select("id, role, rol, type, bondteam")
-    .eq("id", userId)
-    .maybeSingle();
-
-  return data as any | null;
-}
-
-async function assertCanDelete(matchmakingId: string, userId: string) {
+async function assertCanDelete(matchmakingId: string, auth: any) {
   const { data, error } = await supabaseAdmin
     .from("matchmakings")
     .select(
@@ -71,13 +43,8 @@ async function assertCanDelete(matchmakingId: string, userId: string) {
   if (error) throw error;
   if (!data) throw new Error("Matchmaking niet gevonden.");
 
-  const profile = await getUserProfile(userId);
-  const role = s(profile?.role || profile?.rol || profile?.type).toLowerCase();
-
-  const isAdmin =
-    role.includes("superadmin") ||
-    role === "admin" ||
-    role.includes("admin");
+  const role = s(auth?.role).toLowerCase();
+  const isAdmin = role === "superadmin" || role === "admin";
 
   if (isAdmin) return data;
 
@@ -101,7 +68,17 @@ async function assertCanDelete(matchmakingId: string, userId: string) {
     .map(s)
     .filter(Boolean);
 
-  const isOwner = ownerIds.includes(userId);
+  const actorIds = [
+    auth?.userId,
+    auth?.profileId,
+    auth?.authUserId,
+    auth?.email,
+    auth?.profile?.email,
+  ]
+    .map(s)
+    .filter(Boolean);
+
+  const isOwner = actorIds.some((id) => ownerIds.includes(id));
 
   if (!isOwner || !editableStages.has(stage)) {
     throw new Error(
@@ -150,7 +127,11 @@ async function deleteByAny(
 
 export async function POST(req: Request) {
   try {
-    const user = await getUser(req);
+    const auth = await requireUserWithRole(req, [
+      "matchmaker",
+      "admin",
+      "superadmin",
+    ]);
 
     const body = await req.json().catch(() => ({}));
     const matchmakingId = s(
@@ -166,7 +147,7 @@ export async function POST(req: Request) {
       );
     }
 
-    await assertCanDelete(matchmakingId, user.id);
+    await assertCanDelete(matchmakingId, auth);
 
     /**
      * Volgorde is belangrijk:

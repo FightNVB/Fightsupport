@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getWeegstationAuthContext } from "@/lib/weegstation/routeAuth";
 
 export const runtime = "nodejs";
 
@@ -13,28 +14,8 @@ function jsonError(message: string, status = 400, extra?: unknown) {
   return NextResponse.json({ ok: false, error: message, extra }, { status });
 }
 
-function bearerToken(req: NextRequest) {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
-}
-
-function normalizeRole(v: unknown) {
-  return String(v ?? "").trim().toLowerCase();
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const token = bearerToken(req);
-    if (!token) return jsonError("Niet ingelogd.", 401);
-
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabaseAdmin.auth.getUser(token);
-
-    if (userErr || !user?.id) return jsonError("Ongeldige sessie.", 401);
-
     const body = await req.json().catch(() => ({}));
     const matchmakingId = String(body?.matchmakingId ?? body?.matchmaking_id ?? "").trim();
 
@@ -42,41 +23,7 @@ export async function POST(req: NextRequest) {
       return jsonError("matchmakingId ontbreekt.", 400);
     }
 
-    const { data: profile, error: profileErr } = await supabaseAdmin
-      .from("user_profiles")
-      .select("id, bondteam")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profileErr) throw profileErr;
-
-    const { data: userRoles, error: urErr } = await supabaseAdmin
-      .from("user_roles")
-      .select("role_id")
-      .eq("user_id", user.id);
-
-    if (urErr) throw urErr;
-
-    const roleIds = (userRoles ?? []).map((r: any) => r.role_id).filter(Boolean);
-
-    let roles: string[] = [];
-    if (roleIds.length) {
-      const { data: roleRows, error: roleErr } = await supabaseAdmin
-        .from("roles")
-        .select("id, name")
-        .in("id", roleIds);
-
-      if (roleErr) throw roleErr;
-      roles = (roleRows ?? []).map((r: any) => normalizeRole(r?.name)).filter(Boolean);
-    }
-
-    const canReset = roles.some((r) =>
-      ["official", "hoofdofficial", "admin", "superadmin", "dispensatie_admin"].includes(r),
-    );
-
-    if (!canReset) {
-      return jsonError("Je hebt geen rechten om weegdata te verwijderen.", 403);
-    }
+    const auth = await getWeegstationAuthContext(req, matchmakingId);
 
     const { data: mm, error: mmErr } = await supabaseAdmin
       .from("matchmaking_uploads")
@@ -87,14 +34,14 @@ export async function POST(req: NextRequest) {
     if (mmErr) throw mmErr;
     if (!mm) return jsonError("Matchmaking niet gevonden.", 404);
 
-    const isSuperOrAdmin = roles.some((r) =>
+    const isSuperOrAdmin = auth.roles.some((r) =>
       ["admin", "superadmin", "dispensatie_admin"].includes(r),
     );
 
     const isOwnBondOfficial =
-      roles.some((r) => r === "official" || r === "hoofdofficial") &&
+      auth.roles.some((r) => r === "official" || r === "hoofdofficial") &&
       String(mm?.bondteam ?? "").trim().toLowerCase() ===
-        String((profile as any)?.bondteam ?? "").trim().toLowerCase();
+        String(auth.bondteam ?? "").trim().toLowerCase();
 
     if (!isSuperOrAdmin && !isOwnBondOfficial) {
       return jsonError("Je mag alleen weegdata van je eigen bondteam verwijderen.", 403);

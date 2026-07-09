@@ -1,22 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
-function getSupabaseFromAuthHeader(authHeader: string): any {
+function getSupabaseAdmin(): any {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !anonKey) {
+  if (!url || !serviceKey) {
     throw new Error("Supabase env vars ontbreken.");
   }
 
-  return createClient(url, anonKey, {
-    global: {
-      headers: {
-        Authorization: authHeader,
-      },
-    },
+  return createClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
@@ -63,21 +60,8 @@ function asSafeDateOrNull(value: unknown): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader) {
-      return NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
-    }
-
-    const supabase = getSupabaseFromAuthHeader(authHeader);
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
-    }
+    const auth = await requireAdmin(req);
+    const supabase = getSupabaseAdmin();
 
     const body = await req.json().catch(() => ({}));
     const matchmaking_id = String(body?.matchmaking_id ?? "").trim();
@@ -90,16 +74,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: profile } = await supabase
-      .from("user_profiles")
-      .select("role, bondteam, full_name")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const actorRole =
-      String(profile?.role ?? "")
-        .trim()
-        .toLowerCase() || null;
+    const profile = auth.profile;
+    const actorRole = auth.role;
 
     const { data: uploads, error: uploadError } = await supabase
       .from("matchmaking_uploads")
@@ -232,8 +208,8 @@ export async function POST(req: NextRequest) {
     const snapshot = {
       matchmaking_id,
       upload_id: upload.id ?? null,
-      saved_by_user_id: user.id ?? null,
-      saved_by_email: user.email ?? null,
+      saved_by_user_id: auth.userId ?? null,
+      saved_by_email: auth.email ?? null,
       saved_by_name: profile?.full_name ?? null,
 
       evenement_naam: upload.evenement_naam ?? null,
@@ -282,8 +258,8 @@ export async function POST(req: NextRequest) {
     }
 
     await writeAuditLog(supabase, {
-      actor_user_id: user.id,
-      actor_email: user.email ?? null,
+      actor_user_id: auth.userId,
+      actor_email: auth.email ?? null,
       actor_role: actorRole,
       action: "snapshot_created",
       entity_type: "matchmaking_snapshot",

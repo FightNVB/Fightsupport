@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { assertCanAccessMatchmaking, requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,27 +21,6 @@ function adminClient() {
   }
   return createClient(url, key, { auth: { persistSession: false } });
 }
-
-async function getUserIdFromBearer(req: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) {
-    throw new Error("Supabase env mist: NEXT_PUBLIC_SUPABASE_URL of NEXT_PUBLIC_SUPABASE_ANON_KEY");
-  }
-
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return null;
-
-  const authClient = createClient(url, anon, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-
-  const { data, error } = await authClient.auth.getUser();
-  if (error || !data?.user?.id) return null;
-  return data.user.id;
-}
-
 
 function pickFirst(...vals: any[]) {
   for (const v of vals) {
@@ -83,9 +63,6 @@ function resultaatType(winnaarHoek: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const userId = await getUserIdFromBearer(req);
-    if (!userId) return bad("Unauthorized", 401);
-
     const body = await req.json().catch(() => ({}));
 
     const uitslagenBoutId = clean(body.uitslagen_bout_id ?? body.bout_id);
@@ -99,6 +76,13 @@ export async function POST(req: NextRequest) {
     if (!matchmakingId) return bad("matchmaking_id ontbreekt");
     if (!winnaarHoek) return bad("winnaar_hoek ontbreekt");
     if (!methode) return bad("methode ontbreekt");
+
+    const auth = await requireAnyRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    await assertCanAccessMatchmaking({
+      matchmaking_id: matchmakingId,
+      userId: auth.userId,
+      role: auth.role,
+    });
 
     const supabase = adminClient();
 
@@ -130,7 +114,7 @@ export async function POST(req: NextRequest) {
       ronde: body.ronde ?? null,
       tijd_in_ronde: body.tijd_in_ronde ?? null,
       opmerkingen: opmerkingen || null,
-      ingevuld_door: userId,
+      ingevuld_door: auth.userId,
       ingevuld_op: now,
       updated_at: now,
     };

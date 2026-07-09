@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,126 @@ async function loadHistorie(row: AnyRow) {
   return (data || []).map(normalize);
 }
 
+
+function isMissingColumnError(error: any) {
+  const msg = String(error?.message || "").toLowerCase();
+  const code = String(error?.code || "");
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    msg.includes("could not find") ||
+    msg.includes("does not exist")
+  );
+}
+
+function missingColumnName(error: any) {
+  const msg = String(error?.message || "");
+  return (
+    msg.match(/column\s+["']?([a-zA-Z0-9_]+)["']?\s+does not exist/i)?.[1] ||
+    msg.match(/Could not find the ['"]?([a-zA-Z0-9_]+)['"]? column/i)?.[1] ||
+    msg.match(/'([a-zA-Z0-9_]+)' column/i)?.[1] ||
+    null
+  );
+}
+
+function dropUndefined(row: AnyRow) {
+  return Object.fromEntries(
+    Object.entries(row).filter(([, value]) => value !== undefined),
+  );
+}
+
+function mergeJson(current: unknown, patch: AnyRow) {
+  const base =
+    current && typeof current === "object" && !Array.isArray(current)
+      ? (current as AnyRow)
+      : {};
+  return { ...base, ...patch };
+}
+
+async function safeUpdate(table: string, filters: AnyRow, patch: AnyRow) {
+  let payload = dropUndefined({ ...patch });
+
+  for (let i = 0; i < 20; i += 1) {
+    let query = supabase.from(table).update(payload);
+    for (const [key, value] of Object.entries(filters)) {
+      query = query.eq(key, value);
+    }
+
+    const { error } = await query;
+    if (!error) return { error: null, payload };
+    if (!isMissingColumnError(error)) return { error, payload };
+
+    const col = missingColumnName(error);
+    if (!col || !(col in payload)) return { error, payload };
+    delete payload[col];
+  }
+
+  return {
+    error: { message: `Update in ${table} mislukt door schema-afwijkingen` },
+    payload,
+  };
+}
+
+async function restoreAanmeldingAfterDelete(row: AnyRow, userId: string | null) {
+  if (!row?.inschrijving_id || !row?.matchmaking_id) return null;
+
+  const rawPatch = {
+    afmelding_verwijderd: true,
+    afmelding_verwijderd_at: new Date().toISOString(),
+    afmelding_verwijderd_door: userId,
+    verwijderde_afmelding_id: row.id,
+    afgemeld: false,
+    afmelding_status: "verwijderd",
+  };
+
+  const result = await safeUpdate(
+    "aanmeldingen",
+    { id: row.inschrijving_id, matchmaking_id: row.matchmaking_id },
+    {
+      status: "gescrapt",
+      raw: mergeJson(row.raw, rawPatch),
+      updated_at: new Date().toISOString(),
+    },
+  );
+
+  return result.error;
+}
+
+async function restoreContextAfterDelete(row: AnyRow, userId: string | null) {
+  if (!row?.fighter_context_id) return null;
+
+  const { data: ctx } = await supabase
+    .from("matchmaker_fighter_context")
+    .select("id, extra")
+    .eq("id", row.fighter_context_id)
+    .maybeSingle();
+
+  const extraPatch = {
+    afmelding_verwijderd: true,
+    afmelding_verwijderd_at: new Date().toISOString(),
+    afmelding_verwijderd_door: userId,
+    verwijderde_afmelding_id: row.id,
+    afgemeld: false,
+    afmelding_status: "verwijderd",
+    beschikbaar: true,
+  };
+
+  const result = await safeUpdate(
+    "matchmaker_fighter_context",
+    { id: row.fighter_context_id },
+    {
+      status: "gescrapt",
+      afmelding_status: "verwijderd",
+      afgemeld: false,
+      beschikbaar: true,
+      extra: mergeJson(ctx?.extra, extraPatch),
+      updated_at: new Date().toISOString(),
+    },
+  );
+
+  return result.error;
+}
+
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> | { id: string } }) {
   try {
     const params = await ctx.params;
@@ -97,4 +218,63 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   } catch (e: any) {
     return bad(e?.message || "Server fout", 500);
   }
+}
+
+
+export async function DELETE(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> | { id: string } },
+) {
+  try {
+    const { userId } = await requireUserWithRole(req, ["admin", "superadmin"]);
+    const params = await ctx.params;
+    const id = params.id;
+
+    if (!isValidId(id)) return bad("Geldige afmelding id ontbreekt");
+
+    const { data: current, error: loadError } = await supabase
+      .from("afmeldingen")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (loadError) return bad("Afmelding laden mislukt", 500, loadError.message);
+    if (!current) return bad("Afmelding niet gevonden", 404);
+
+    // Verwijderen betekent: afmelding weg en gekoppelde vechter terug naar gecontroleerd/matchbaar.
+    const aanmeldingError = await restoreAanmeldingAfterDelete(current, userId ?? null);
+    if (aanmeldingError) {
+      return bad("Aanmelding herstellen mislukt", 500, aanmeldingError.message);
+    }
+
+    const contextError = await restoreContextAfterDelete(current, userId ?? null);
+    if (contextError) {
+      return bad("Fighter context herstellen mislukt", 500, contextError.message);
+    }
+
+    const { error: deleteError } = await supabase
+      .from("afmeldingen")
+      .delete()
+      .eq("id", id);
+
+    if (deleteError) {
+      return bad("Afmelding verwijderen mislukt", 500, deleteError.message);
+    }
+
+    return NextResponse.json({
+      ok: true,
+      deleted: true,
+      afmelding_id: id,
+      herstel_status: "gescrapt",
+    });
+  } catch (e: any) {
+    return bad(e?.message || "Server fout", 500);
+  }
+}
+
+export async function POST(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> | { id: string } },
+) {
+  return DELETE(req, ctx);
 }

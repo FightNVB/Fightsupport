@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -55,54 +56,11 @@ function isMissingSchemaError(error: any) {
   );
 }
 
-async function getUser(req: Request) {
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-
-  if (!token) throw new Error("Niet ingelogd.");
-
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data.user) throw new Error("Niet ingelogd.");
-
-  return data.user;
-}
-
-async function getUserProfileForAuth(user: any) {
-  const ids = [s(user?.id)].filter(Boolean);
-  const email = s(user?.email).toLowerCase();
-
-  for (const id of ids) {
-    const { data, error } = await supabaseAdmin
-      .from("user_profiles")
-      .select("id, email, role, rol, type, bondteam")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (!error && data) return data as AnyRow;
-  }
-
-  if (email) {
-    const { data, error } = await supabaseAdmin
-      .from("user_profiles")
-      .select("id, email, role, rol, type, bondteam")
-      .ilike("email", email)
-      .maybeSingle();
-
-    if (!error && data) return data as AnyRow;
-  }
-
-  return null;
-}
-
-function roleOf(user: any, profile: AnyRow | null) {
-  return s(profile?.role ?? profile?.rol ?? profile?.type ?? user?.app_metadata?.role).toLowerCase();
-}
-
 function isAdminRole(role: string) {
-  return role === "admin" || role === "superadmin" || role.includes("admin");
+  return role === "admin" || role === "superadmin";
 }
 
-async function assertCanManageOwnMatchmaking(matchmakingId: string, user: any) {
+async function assertCanManageOwnMatchmaking(matchmakingId: string, auth: any) {
   const { data, error } = await supabaseAdmin
     .from("matchmakings")
     .select("id, matchmaker_id, maker_user_id, uploaded_by, huidige_eigenaar_type, huidige_eigenaar_user_id, status, stadium")
@@ -112,13 +70,20 @@ async function assertCanManageOwnMatchmaking(matchmakingId: string, user: any) {
   if (error) throw error;
   if (!data) throw new Error("Matchmaking niet gevonden.");
 
-  const profile = await getUserProfileForAuth(user);
-  const role = roleOf(user, profile);
+  const role = s(auth?.role).toLowerCase();
 
   if (isAdminRole(role)) return data as AnyRow;
 
   const actorIds = Array.from(
-    new Set([s(user?.id), s(profile?.id), s(user?.email).toLowerCase(), s(profile?.email).toLowerCase()].filter(Boolean)),
+    new Set(
+      [
+        s(auth?.userId),
+        s(auth?.profileId),
+        s(auth?.authUserId),
+        s(auth?.email).toLowerCase(),
+        s(auth?.profile?.email).toLowerCase(),
+      ].filter(Boolean),
+    ),
   );
 
   const ownerIds = [
@@ -667,7 +632,11 @@ async function verifyDeleted(matchmakingId: string, rows: AnyRow[]) {
 
 export async function DELETE(req: Request) {
   try {
-    const user = await getUser(req);
+    const auth = await requireUserWithRole(req, [
+      "matchmaker",
+      "admin",
+      "superadmin",
+    ]);
 
     const body = await readBody(req);
     const matchmakingId = getMatchmakingId(body);
@@ -679,7 +648,7 @@ export async function DELETE(req: Request) {
       );
     }
 
-    await assertCanManageOwnMatchmaking(matchmakingId, user);
+    await assertCanManageOwnMatchmaking(matchmakingId, auth);
 
     const rows = await findBoutRows(matchmakingId, body);
 

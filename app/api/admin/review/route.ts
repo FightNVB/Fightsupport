@@ -1,5 +1,4 @@
 import { requireAdmin } from "@/app/api/_utils/authz";
-// app/api/control-engine/review/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -12,32 +11,8 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
 
 type Decision = "approve" | "reject";
 
-/**
- * ✅ Enige bron van waarheid:
- * user_roles → roles.name
- */
-async function getUserRole(userId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from("user_roles")
-    .select(`
-      role_id,
-      roles:roles ( name )
-    `)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[getUserRole] error", error);
-    return null;
-  }
-
-  const roleRow = Array.isArray((data as any)?.roles) ? (data as any).roles[0] : (data as any)?.roles;
-  const roleName = roleRow?.name;
-  return roleName ? String(roleName).toLowerCase() : null;
-}
-
 export async function POST(req: Request) {
-  await requireAdmin(req);
+  const auth = await requireAdmin(req);
 
   try {
     const body = await req.json();
@@ -66,46 +41,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Auth
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : null;
+    const userId = auth.userId;
+    const role = auth.role;
 
-    if (!token) {
-      return NextResponse.json(
-        { error: "Geen Bearer token" },
-        { status: 401 }
-      );
-    }
-
-    const { data: userData, error: userErr } =
-      await supabaseAdmin.auth.getUser(token);
-
-    if (userErr || !userData?.user?.id) {
-      return NextResponse.json(
-        { error: "Ongeldige gebruiker" },
-        { status: 401 }
-      );
-    }
-
-    const userId = userData.user.id;
-
-    // ✅ ROLE CHECK — JOUW ECHTE MODEL
-    const role = await getUserRole(userId);
-
-    const allowed = role === "admin" || role === "superadmin";
-    if (!allowed) {
-      return NextResponse.json(
-        {
-          error: "Geen rechten (alleen admin/superadmin)",
-          debug_role: role,
-        },
-        { status: 403 }
-      );
-    }
-
-    // ✅ Huidige resultaat ophalen
     const { data: current, error: curErr } = await supabaseAdmin
       .from("controle_resultaten")
       .select(
@@ -150,7 +88,7 @@ export async function POST(req: Request) {
           ? String(current.aantekeningen) + "\n"
           : "") +
         `[${now}] ${decision.toUpperCase()} door ${role}${
-          note ? ` — ${note}` : ""
+          note ? ` - ${note}` : ""
         }`,
     };
 

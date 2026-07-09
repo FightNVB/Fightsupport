@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
+import DeleteAfmeldingButton from "./DeleteAfmeldingButton";
 
 export const dynamic = "force-dynamic";
 
@@ -565,16 +566,21 @@ function AfmeldingenTable({ rows }: { rows: AnyRow[] }) {
                       </span>
                     </td>
                     <td className="border border-zinc-800 px-4 py-3">
-                      {s(row.matchmaking_id) ? (
-                        <Link
-                          href={`/dashboard/admin/algemeen/afmeldingen/${row.id}`}
-                          className="inline-flex border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black uppercase !text-black"
-                        >
-                          Open
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {s(row.matchmaking_id) ? (
+                          <Link
+                            href={`/dashboard/admin/algemeen/afmeldingen/${row.id}`}
+                            className="inline-flex border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black uppercase !text-black"
+                          >
+                            Open
+                          </Link>
+                        ) : null}
+
+                        <DeleteAfmeldingButton
+                          afmeldingId={s(row.id)}
+                          naam={naam(row)}
+                        />
+                      </div>
                     </td>
                   </tr>
                 );

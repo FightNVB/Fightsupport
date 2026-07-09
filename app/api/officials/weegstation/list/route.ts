@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getWeegstationAuthContext } from "@/lib/weegstation/routeAuth";
 
 export const runtime = "nodejs";
 
@@ -44,77 +45,13 @@ function isWeegstationFlow(row: any) {
   return stages.has(stadium) || stages.has(status);
 }
 
-async function getUserFromBearer(req: NextRequest) {
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-
-  if (!token) return { user: null, error: "Geen bearer token ontvangen." };
-
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user) {
-    return { user: null, error: error?.message ?? "Niet ingelogd." };
-  }
-
-  return { user: data.user, error: null };
-}
-
-async function getRolesForUser(userId: string): Promise<string[]> {
-  const { data, error } = await supabaseAdmin
-    .from("user_roles")
-    .select("roles(name)")
-    .eq("user_id", userId);
-
-  if (error) throw error;
-
-  return Array.from(
-    new Set(
-      (data ?? [])
-        .map((r: any) => s(r?.roles?.name).toLowerCase())
-        .filter(Boolean),
-    ),
-  );
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const { user, error: authErr } = await getUserFromBearer(req);
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: authErr ?? "Niet ingelogd." },
-        { status: 401 },
-      );
-    }
-
-    const [roles, profileRes] = await Promise.all([
-      getRolesForUser(user.id),
-      supabaseAdmin
-        .from("user_profiles")
-        .select("id, bondteam")
-        .eq("id", user.id)
-        .maybeSingle(),
-    ]);
-
-    if (profileRes.error) throw profileRes.error;
-
-    const canAccess = roles.some((r) =>
-      [
-        "official",
-        "hoofdofficial",
-        "admin",
-        "superadmin",
-        "dispensatie_admin",
-      ].includes(r),
-    );
-
-    if (!canAccess) {
-      return NextResponse.json(
-        { ok: false, error: "Je hebt geen toegang tot het weegstation." },
-        { status: 403 },
-      );
-    }
+    const auth = await getWeegstationAuthContext(req);
+    const roles = auth.roles;
 
     const isSuperadmin = roles.includes("superadmin");
-    const myBondteam = s(profileRes.data?.bondteam);
+    const myBondteam = s(auth.bondteam);
     const myBondteamKey = myBondteam.toLowerCase();
 
     const { data, error } = await supabaseAdmin

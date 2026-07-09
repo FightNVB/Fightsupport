@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { assertCanAccessMatchmaking, requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,26 +24,6 @@ function adminClient() {
     throw new Error("Supabase env mist: NEXT_PUBLIC_SUPABASE_URL of SUPABASE_SERVICE_ROLE_KEY");
   }
   return createClient(url, key, { auth: { persistSession: false } });
-}
-
-async function getUserIdFromBearer(req: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) {
-    throw new Error("Supabase env mist: NEXT_PUBLIC_SUPABASE_URL of NEXT_PUBLIC_SUPABASE_ANON_KEY");
-  }
-
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return null;
-
-  const authClient = createClient(url, anon, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-
-  const { data, error } = await authClient.auth.getUser();
-  if (error || !data?.user?.id) return null;
-  return data.user.id;
 }
 
 function missingColumn(error: any) {
@@ -169,12 +150,16 @@ async function syncTalentstatusPartijen(supabase: any, matchmakingId: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const userId = await getUserIdFromBearer(req);
-    if (!userId) return bad("Unauthorized", 401);
-
     const body = await req.json().catch(() => ({}));
     const matchmakingId = clean(body.matchmaking_id);
     if (!matchmakingId) return bad("matchmaking_id ontbreekt");
+
+    const auth = await requireAnyRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    await assertCanAccessMatchmaking({
+      matchmaking_id: matchmakingId,
+      userId: auth.userId,
+      role: auth.role,
+    });
 
     const supabase = adminClient();
 
@@ -246,7 +231,7 @@ export async function POST(req: NextRequest) {
           huidige_eigenaar_type: "bondteam",
           huidige_eigenaar_user_id: null,
           last_updated_at: now,
-          last_updated_by: userId,
+          last_updated_by: auth.userId,
         })
         .eq("id", matchmakingId);
 
@@ -293,7 +278,7 @@ export async function POST(req: NextRequest) {
 
     const { error: optionalRunErr } = await supabase
       .from("uitslagen_runs")
-      .update({ afgerond_op: now, afgerond_door: userId })
+      .update({ afgerond_op: now, afgerond_door: auth.userId })
       .eq("id", (run as any).id);
 
     if (optionalRunErr && !missingColumn(optionalRunErr)) {
@@ -316,7 +301,7 @@ export async function POST(req: NextRequest) {
         locked_for_editing: true,
         results_finalized_at: now,
         last_updated_at: now,
-        last_updated_by: userId,
+        last_updated_by: auth.userId,
       })
       .eq("id", matchmakingId);
 

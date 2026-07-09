@@ -82,21 +82,8 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from("user_profiles")
-      .select("id, full_name, email, role, bondteam")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profileError) {
-      console.error("[matchmaker/controle-overzicht] profile error:", profileError);
-      return NextResponse.json(
-        { ok: false, error: profileError.message },
-        { status: 500 }
-      );
-    }
-
-    const role = String(profile?.role ?? auth?.role ?? "").trim().toLowerCase();
+    const profile = auth.profile;
+    const role = String(auth?.role ?? "").trim().toLowerCase();
 
     /*
       Belangrijk:

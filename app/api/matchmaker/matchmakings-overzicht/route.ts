@@ -146,7 +146,11 @@ function isMatchmakerVisibleRow(row: any, userId: string) {
 
 export async function GET(req: Request) {
   try {
-    const auth = await requireUserWithRole(req);
+    const auth = await requireUserWithRole(req, [
+      "matchmaker",
+      "admin",
+      "superadmin",
+    ]);
 
     const userId = getUserIdFromAuth(auth);
 
@@ -157,31 +161,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from("user_profiles")
-      .select("id, full_name, email, role, bondteam")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profileError) {
-      console.error(
-        "[matchmaker/matchmakings-overzicht] profile error:",
-        profileError,
-      );
-      return NextResponse.json(
-        { ok: false, error: profileError.message },
-        { status: 500 },
-      );
-    }
-
-    const role = lower(profile?.role);
-
-    if (role !== "matchmaker" && role !== "admin" && role !== "superadmin") {
-      return NextResponse.json(
-        { ok: false, error: "Gebruiker is geen matchmaker." },
-        { status: 403 },
-      );
-    }
+    const profile = auth.profile;
 
     const { data: matchmakingsRaw, error } = await supabaseAdmin
       .from("matchmakings")

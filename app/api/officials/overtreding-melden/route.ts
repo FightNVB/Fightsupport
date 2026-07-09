@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,19 +69,6 @@ async function safeInsertCase(supabase: any, row: Record<string, any>) {
   );
 }
 
-async function getBearerUserId(req: NextRequest, supabase: any) {
-  const auth =
-    req.headers.get("authorization") || req.headers.get("Authorization") || "";
-  const token = auth.toLowerCase().startsWith("bearer ")
-    ? auth.slice(7).trim()
-    : "";
-  if (!token) return null;
-
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error) return null;
-  return data?.user?.id || null;
-}
-
 async function findEventByName(supabase: any, value: string | null) {
   const eventNaam = cleanString(value);
   if (!eventNaam) return null;
@@ -122,18 +110,9 @@ async function findEventByName(supabase: any, value: string | null) {
   return null;
 }
 
-async function getProfile(supabase: any, userId: string | null) {
-  if (!userId) return null;
-  const { data } = await supabase
-    .from("user_profiles")
-    .select("id, full_name, email, bondteam, role")
-    .eq("id", userId)
-    .maybeSingle();
-  return data || null;
-}
-
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireAnyRole(req, ["official", "hoofdofficial"]);
     const body = await req.json().catch(() => ({}));
     const supabase = supabaseAdmin();
 
@@ -159,12 +138,8 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
 
-    const authUserId = await getBearerUserId(req, supabase);
-    const melderUserId =
-      authUserId ||
-      cleanString(body.melder_user_id) ||
-      cleanString(body.aangemaakt_door);
-    const profile = await getProfile(supabase, melderUserId);
+    const melderUserId = auth.userId;
+    const profile = auth.profile;
 
     const melderNaam =
       cleanString(body.melder_naam) ||
@@ -174,8 +149,7 @@ export async function POST(req: NextRequest) {
       cleanString(body.melder_email) || cleanString(profile?.email);
     const melderBondteam =
       cleanString(body.melder_bondteam) || cleanString(profile?.bondteam);
-    const melderRole =
-      cleanString(profile?.role) || cleanString(body.melder_role) || "official";
+    const melderRole = auth.role;
 
     if (!melderUserId) {
       return NextResponse.json(
