@@ -125,7 +125,7 @@ export default function SetPasswordPage() {
           type="password"
           value={pw1}
           onChange={setPw1}
-          placeholder="••••••••"
+          placeholder="Vul een wachtwoord in"
           autoComplete="new-password"
         />
 
@@ -134,7 +134,7 @@ export default function SetPasswordPage() {
           type="password"
           value={pw2}
           onChange={setPw2}
-          placeholder="••••••••"
+          placeholder="Herhaal je wachtwoord"
           autoComplete="new-password"
         />
 
