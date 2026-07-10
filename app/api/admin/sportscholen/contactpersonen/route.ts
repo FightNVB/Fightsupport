@@ -15,6 +15,40 @@ function getBaseUrl(req: Request) {
   return `${url.protocol}//${url.host}`;
 }
 
+async function findAuthUserByEmail(email: string) {
+  const wanted = email.trim().toLowerCase();
+  let page = 1;
+
+  while (page <= 100) {
+    const result = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage: 1000,
+    });
+
+    if (result.error) throw result.error;
+
+    const found = result.data.users.find(
+      (user) => String(user.email ?? "").trim().toLowerCase() === wanted,
+    );
+
+    if (found) {
+      const metadata = (found.user_metadata ?? {}) as Record<string, unknown>;
+      return {
+        id: found.id,
+        email: String(found.email ?? email),
+        name:
+          String(metadata.full_name ?? metadata.name ?? "").trim() || null,
+        invited: false,
+      };
+    }
+
+    if (result.data.users.length < 1000) break;
+    page += 1;
+  }
+
+  return null;
+}
+
 async function findExistingUserByEmail(email: string) {
   const profile = await supabaseAdmin
     .from("user_profiles")
@@ -22,11 +56,18 @@ async function findExistingUserByEmail(email: string) {
     .ilike("email", email)
     .maybeSingle();
 
+  if (profile.error) throw profile.error;
+
   if ((profile.data as any)?.id) {
     return {
       id: String((profile.data as any).id),
       email: String((profile.data as any).email ?? email),
-      name: String((profile.data as any).full_name ?? (profile.data as any).naam ?? "").trim() || null,
+      name:
+        String(
+          (profile.data as any).full_name ??
+            (profile.data as any).naam ??
+            "",
+        ).trim() || null,
       invited: false,
     };
   }
@@ -37,16 +78,25 @@ async function findExistingUserByEmail(email: string) {
     .ilike("email", email)
     .maybeSingle();
 
+  if (ownUsers.error) throw ownUsers.error;
+
   if ((ownUsers.data as any)?.id) {
     return {
       id: String((ownUsers.data as any).id),
       email: String((ownUsers.data as any).email ?? email),
-      name: String((ownUsers.data as any).full_name ?? (ownUsers.data as any).naam ?? "").trim() || null,
+      name:
+        String(
+          (ownUsers.data as any).full_name ??
+            (ownUsers.data as any).naam ??
+            "",
+        ).trim() || null,
       invited: false,
     };
   }
 
-  return null;
+  // Een bestaand Supabase Auth-account hoeft niet altijd al in
+  // user_profiles of users te staan. Zoek daarom ook rechtstreeks in Auth.
+  return findAuthUserByEmail(email);
 }
 
 async function upsertProfile(userId: string, email: string, naam: string | null) {
