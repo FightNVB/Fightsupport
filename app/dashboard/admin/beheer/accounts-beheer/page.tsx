@@ -42,6 +42,10 @@ type UserProfile = {
   bondteam?: string | null;
   active_sportschool_id?: string | number | null;
   meekijk_sportschool_id?: string | number | null;
+  auth_status?: "active" | "invited" | null;
+  last_sign_in_at?: string | null;
+  invited_at?: string | null;
+  email_confirmed_at?: string | null;
   created_at?: string | null;
 };
 
