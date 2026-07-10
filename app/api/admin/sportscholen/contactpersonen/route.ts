@@ -52,7 +52,7 @@ async function findAuthUserByEmail(email: string) {
 async function findExistingUserByEmail(email: string) {
   const profile = await supabaseAdmin
     .from("user_profiles")
-    .select("id, email, full_name, naam")
+    .select("id, email, full_name")
     .ilike("email", email)
     .maybeSingle();
 
@@ -62,12 +62,7 @@ async function findExistingUserByEmail(email: string) {
     return {
       id: String((profile.data as any).id),
       email: String((profile.data as any).email ?? email),
-      name:
-        String(
-          (profile.data as any).full_name ??
-            (profile.data as any).naam ??
-            "",
-        ).trim() || null,
+      name: String((profile.data as any).full_name ?? "").trim() || null,
       invited: false,
     };
   }
