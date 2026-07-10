@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 const LOCK_FILE = path.join(os.tmpdir(), "fightsupport-cron-teams.lock");
 
 function isCronAllowed(req: Request) {
-  const secret = process.env.SPORTSCHOOL_SYNC_SECRET || process.env.CRON_SECRET;
+  const secret = process.env.CRON_SECRET || process.env.SPORTSCHOOL_SYNC_SECRET;
   if (!secret) return false;
 
   const authorization = req.headers.get("authorization") || "";
@@ -33,20 +33,8 @@ function findScraperPath() {
 
   const candidates = [
     configured ? path.resolve(process.cwd(), configured) : null,
-    path.join(
-      process.cwd(),
-      "control-engine",
-      "scrapers",
-      "team",
-      "scraper_team.js",
-    ),
-    path.join(
-      process.cwd(),
-      "ControlEngine",
-      "scrapers",
-      "team",
-      "scraper_team.js",
-    ),
+    path.join(process.cwd(), "ControlEngine", "scrapers", "team", "scraper_team.js"),
+    path.join(process.cwd(), "control-engine", "scrapers", "team", "scraper_team.js"),
     path.join(process.cwd(), "scrapers", "team", "scraper_team.js"),
   ].filter(Boolean) as string[];
 
@@ -82,7 +70,7 @@ export async function POST(req: Request) {
         started: false,
         already_running: true,
         pid: runningPid,
-        message: "De wekelijkse teamscraper draait al.",
+        message: "De teamscraper draait al.",
       });
     }
 
@@ -98,12 +86,8 @@ export async function POST(req: Request) {
       cwd: process.cwd(),
       env: {
         ...process.env,
-
-        // Teamscraper gebruikt altijd de centrale master-login.
         FP_MATCHMAKER_ID: "",
         FP_SESSION_MODE: "master",
-
-        // Op de VPS standaard headless draaien.
         HEADLESS: process.env.HEADLESS ?? "true",
         PUPPETEER_HEADLESS:
           process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "true",
@@ -112,41 +96,35 @@ export async function POST(req: Request) {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    if (!child.pid) {
-      throw new Error("Teamscraper kon niet worden gestart.");
-    }
+    if (!child.pid) throw new Error("Teamscraper kon niet worden gestart.");
 
     fs.writeFileSync(LOCK_FILE, String(child.pid), "utf8");
 
     child.stdout?.on("data", (chunk) => {
-      console.log(`[team-run-all] ${String(chunk).trimEnd()}`);
+      console.log(`[cron-teams] ${String(chunk).trimEnd()}`);
     });
-
     child.stderr?.on("data", (chunk) => {
-      console.error(`[team-run-all][stderr] ${String(chunk).trimEnd()}`);
+      console.error(`[cron-teams][stderr] ${String(chunk).trimEnd()}`);
     });
-
     child.on("error", (error) => {
-      console.error("[team-run-all] Startfout:", error);
+      console.error("[cron-teams] Startfout:", error);
       fs.rmSync(LOCK_FILE, { force: true });
     });
-
     child.on("close", (code, signal) => {
-      console.log("[team-run-all] Afgerond", { code, signal });
+      console.log("[cron-teams] Afgerond", { code, signal });
       fs.rmSync(LOCK_FILE, { force: true });
     });
 
     return NextResponse.json({
       ok: true,
       started: true,
-      mode: "run-all",
       pid: child.pid,
+      mode: "run-all",
       message:
-        "De wekelijkse teamscraper is gestart voor sportscholen met een actieve contactpersoon.",
+        "De teamscraper is gestart voor alle sportscholen met een actieve contactpersoon.",
     });
   } catch (error: any) {
     if (error instanceof Response) return error;
-
     return NextResponse.json(
       { error: error?.message ?? "server_error" },
       { status: 500 },

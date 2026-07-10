@@ -100,6 +100,28 @@ async function findAuthUserByEmail(email: string) {
   return null;
 }
 
+async function listAllAuthUsers() {
+  const allUsers: any[] = [];
+  let page = 1;
+  const perPage = 1000;
+
+  while (page <= 20) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+
+    if (error) throw error;
+
+    const batch = data?.users ?? [];
+    allUsers.push(...batch);
+    if (batch.length < perPage) break;
+    page += 1;
+  }
+
+  return allUsers;
+}
+
 async function sendResetLoginMail(req: Request, email: string) {
   const redirectTo = `${getBaseUrl(req)}/login/reset`;
 
@@ -365,17 +387,27 @@ export async function GET(req: Request) {
     if (error) return jsonError(error.message, 500);
 
     const rows = data ?? [];
+    const authUsers = await listAllAuthUsers();
+    const authById = new Map(authUsers.map((u: any) => [u.id, u]));
+
     const users = await Promise.all(
       rows.map(async (u: any) => {
         const roles = await getUserRoleNames(u.id).catch(() => []);
         const fallbackRole = normalizeRole(u.role);
         const finalRoles =
           roles.length > 0 ? roles : fallbackRole ? [fallbackRole] : [];
+        const authUser: any = authById.get(u.id);
+        const lastSignInAt = authUser?.last_sign_in_at ?? null;
+
         return {
           ...u,
           roles: finalRoles,
           role: fallbackRole,
           active_role: normalizeRole(u.active_role),
+          auth_status: lastSignInAt ? "active" : "invited",
+          last_sign_in_at: lastSignInAt,
+          invited_at: authUser?.invited_at ?? null,
+          email_confirmed_at: authUser?.email_confirmed_at ?? null,
         };
       }),
     );
@@ -401,13 +433,14 @@ export async function POST(req: Request) {
     if (roles.length === 0)
       return jsonError("Minimaal één rol is verplicht", 400);
 
-    const { authUser, invited, reactivated, mailSent, mailType } = await ensureAuthUser({
-      req,
-      email,
-      full_name,
-      roles,
-      bondteam,
-    });
+    const { authUser, invited, reactivated, mailSent, mailType } =
+      await ensureAuthUser({
+        req,
+        email,
+        full_name,
+        roles,
+        bondteam,
+      });
 
     const publicUser = await syncPublicUser({
       userId: authUser.id,
@@ -440,6 +473,41 @@ export async function POST(req: Request) {
   } catch (e: any) {
     if (e instanceof Response) return e;
     return jsonError(e?.message ?? "Server error", 500);
+  }
+}
+
+export async function PUT(req: Request) {
+  await requireAdmin(req);
+
+  try {
+    const body = await req.json().catch(() => null);
+    const id = cleanString(body?.id);
+    if (!id) return jsonError("Missing id", 400);
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id,email")
+      .eq("id", id)
+      .single();
+
+    if (profileError || !profile?.email) {
+      return jsonError(
+        profileError?.message || "Gebruiker of e-mailadres niet gevonden",
+        404,
+      );
+    }
+
+    const email = normalizeEmail(profile.email);
+    await sendResetLoginMail(req, email);
+
+    return NextResponse.json({
+      ok: true,
+      email,
+      message: "Nieuwe loginlink verzonden.",
+    });
+  } catch (e: any) {
+    if (e instanceof Response) return e;
+    return jsonError(e?.message ?? "Nieuwe loginlink verzenden mislukt", 500);
   }
 }
 

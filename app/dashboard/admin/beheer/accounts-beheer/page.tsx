@@ -26,6 +26,10 @@ type AccountRequest = {
   team?: string | null;
   notes?: string | null;
   created_at?: string | null;
+  auth_status?: "active" | "invited" | null;
+  last_sign_in_at?: string | null;
+  invited_at?: string | null;
+  email_confirmed_at?: string | null;
 };
 
 type UserProfile = {
@@ -344,6 +348,7 @@ function UserEditPanel({
   onChange,
   onSave,
   onDelete,
+  onResend,
 }: {
   user: UserProfile | null;
   busy: boolean;
@@ -351,6 +356,7 @@ function UserEditPanel({
   onChange: (next: UserProfile) => void;
   onSave: () => void;
   onDelete: () => void;
+  onResend: () => void;
 }) {
   if (!user) {
     return (
@@ -439,6 +445,22 @@ function UserEditPanel({
             </b>
           </div>
           <div className="flex justify-between gap-3">
+            <span>Status</span>
+            <b
+              className={
+                user.auth_status === "active"
+                  ? "text-green-300"
+                  : "text-orange-300"
+              }
+            >
+              {user.auth_status === "active" ? "Actief" : "Uitgenodigd"}
+            </b>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>Laatste login</span>
+            <b className="text-zinc-200">{prettyDate(user.last_sign_in_at)}</b>
+          </div>
+          <div className="flex justify-between gap-3">
             <span>Aangemaakt</span>
             <b className="text-zinc-200">{prettyDate(user.created_at)}</b>
           </div>
@@ -448,10 +470,21 @@ function UserEditPanel({
           <OrangeButton onClick={onSave} disabled={busy}>
             <Save size={16} /> Opslaan
           </OrangeButton>
-          <SilverButton onClick={onDelete} disabled={busy}>
-            <Trash2 size={16} /> Verwijder
-          </SilverButton>
+          {user.auth_status !== "active" ? (
+            <SilverButton onClick={onResend} disabled={busy}>
+              <Mail size={16} /> Opnieuw sturen
+            </SilverButton>
+          ) : (
+            <SilverButton onClick={onDelete} disabled={busy}>
+              <Trash2 size={16} /> Verwijder
+            </SilverButton>
+          )}
         </div>
+        {user.auth_status !== "active" && (
+          <SilverButton onClick={onDelete} disabled={busy}>
+            <Trash2 size={16} /> Gebruiker verwijderen
+          </SilverButton>
+        )}
       </div>
     </aside>
   );
@@ -609,6 +642,28 @@ export default function AccountsBeheerPage() {
 
       setToast("✔ Gebruiker verwijderd.");
       setSelectedUserId(null);
+      await loadAll();
+    } catch (e: any) {
+      setToast(String(e?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendInvite(id: string) {
+    setBusy(true);
+    setToast("");
+    try {
+      const res = await authedFetch("/api/admin/users", {
+        method: "PUT",
+        body: JSON.stringify({ id }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || "Opnieuw verzenden mislukt");
+
+      setToast(
+        `✔ Nieuwe loginlink verzonden naar ${j.email || "de gebruiker"}.`,
+      );
       await loadAll();
     } catch (e: any) {
       setToast(String(e?.message ?? e));
@@ -866,6 +921,7 @@ export default function AccountsBeheerPage() {
                     <th className="border border-zinc-700 p-2">Gebruiker</th>
                     <th className="border border-zinc-700 p-2">Rollen</th>
                     <th className="border border-zinc-700 p-2">Actieve rol</th>
+                    <th className="border border-zinc-700 p-2">Status</th>
                     <th className="border border-zinc-700 p-2">Bond/team</th>
                     <th className="border border-zinc-700 p-2">Gym</th>
                     <th className="border border-zinc-700 p-2 text-right">
@@ -877,7 +933,7 @@ export default function AccountsBeheerPage() {
                   {filteredUsers.length === 0 ? (
                     <tr className="bg-[#171717]">
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="border border-zinc-800 p-4 text-zinc-300"
                       >
                         Geen gebruikers gevonden.
@@ -934,6 +990,15 @@ export default function AccountsBeheerPage() {
                             {normalizeRole(u.active_role || u.role)}
                           </td>
                           <td className="border border-zinc-800 p-2 align-top">
+                            <Badge
+                              type={u.auth_status === "active" ? "ok" : "warn"}
+                            >
+                              {u.auth_status === "active"
+                                ? "Actief"
+                                : "Uitgenodigd"}
+                            </Badge>
+                          </td>
+                          <td className="border border-zinc-800 p-2 align-top">
                             {u.bondteam || "-"}
                           </td>
                           <td className="border border-zinc-800 p-2 align-top">
@@ -959,6 +1024,7 @@ export default function AccountsBeheerPage() {
               onChange={(next) => patchUserLocal(next.id, next)}
               onSave={() => saveUser(selectedUser)}
               onDelete={() => selectedUser && deleteUser(selectedUser.id)}
+              onResend={() => selectedUser && resendInvite(selectedUser.id)}
             />
           </div>
         ) : (
