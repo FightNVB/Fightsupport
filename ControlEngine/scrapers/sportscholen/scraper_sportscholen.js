@@ -385,8 +385,11 @@ export async function scraperSportscholen() {
   }
 }
 
-if (process.argv[2] === "run") {
+if (["run", "run-all"].includes(process.argv[2])) {
   scraperSportscholen()
     .then(() => process.exit(0))
-    .catch(() => process.exit(1));
+    .catch((error) => {
+      console.error(error?.stack ?? error);
+      process.exit(1);
+    });
 }

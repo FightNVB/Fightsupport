@@ -1306,28 +1306,57 @@ export async function scraperFightcrew(sportschoolKey) {
 }
 
 export async function scraperFightcrewAll() {
-  const { data, error } = await supabase
+  // Alleen sportscholen met minimaal één actieve contactpersoon automatisch verversen.
+  const { data: contacts, error: contactError } = await supabase
+    .from("sportschool_contactpersonen")
+    .select("sportschool_id")
+    .eq("actief", true)
+    .not("sportschool_id", "is", null);
+
+  if (contactError) throw contactError;
+
+  const sportschoolIds = [
+    ...new Set(
+      (contacts ?? [])
+        .map((row) => normalizeSportschoolKey(row.sportschool_id))
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!sportschoolIds.length) {
+    console.log("ℹ️ Geen sportscholen met een actieve contactpersoon gevonden.");
+    return [];
+  }
+
+  const { data: schools, error: schoolError } = await supabase
     .from("sportscholen")
     .select("sportschool_id, naam")
-    .not("sportschool_id", "is", null)
+    .in("sportschool_id", sportschoolIds.map(Number))
     .order("naam", { ascending: true });
 
-  if (error) throw error;
+  if (schoolError) throw schoolError;
+
+  console.log("🏫 Wekelijkse teamscrape gestart", {
+    actieve_contact_sportscholen: sportschoolIds.length,
+    gevonden_sportscholen: schools?.length ?? 0,
+  });
 
   const results = [];
 
-  for (const sportschool of data ?? []) {
+  for (const sportschool of schools ?? []) {
     try {
       const vaList = await scraperFightcrew(sportschool.sportschool_id);
 
       results.push({
         sportschool_id: sportschool.sportschool_id,
+        sportschool_naam: sportschool.naam ?? null,
         ok: true,
         count: vaList.length,
       });
     } catch (e) {
       results.push({
         sportschool_id: sportschool.sportschool_id,
+        sportschool_naam: sportschool.naam ?? null,
         ok: false,
         error: e?.message ?? String(e),
       });
@@ -1335,6 +1364,15 @@ export async function scraperFightcrewAll() {
 
     await sleep(Number(process.env.FIGHTCREW_BETWEEN_SCHOOLS_MS ?? "1500"));
   }
+
+  const succeeded = results.filter((row) => row.ok).length;
+  const failed = results.length - succeeded;
+
+  console.log("✅ Wekelijkse teamscrape afgerond", {
+    totaal: results.length,
+    geslaagd: succeeded,
+    mislukt: failed,
+  });
 
   return results;
 }
