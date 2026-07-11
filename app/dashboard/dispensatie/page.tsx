@@ -372,13 +372,13 @@ export default function DispensatiePage() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#ff4d00]">
-                FightSupport Admin / Dispensatie
+                FightSupport / Dispensatie
               </p>
               <h1 className="text-2xl font-black uppercase">
                 Dispensatie overzicht
               </h1>
               <p className="mt-1 text-sm text-zinc-300">
-                Echte dispensatie-aanvragen vanuit de controleflow.
+                Dispensatie-aanvragen vanuit de controleflow voor bevoegde beheerders en superadmins.
               </p>
             </div>
 

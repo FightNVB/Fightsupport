@@ -348,15 +348,15 @@ export default function DashboardPage() {
   const isMatchmaker = role === "matchmaker";
   const isTrainerOrSportschool = role === "trainer" || role === "sportschool";
 
-  // Alleen NVB-admin/superadmin mag het Admin-menu en Dispensatie-menu zien.
-  // Superadmins van andere bondteams zijn dus géén root-admin op dit dashboard.
+  // Alleen NVB-admin/superadmin mag het Admin-menu zien.
+  // Het Dispensatie-menu is daarnaast beschikbaar voor superadmins van alle bondteams.
   const isNvbAdmin = isAdmin && bondteam === "NVB";
   const isNvbSuperadmin = isSuperadmin && bondteam === "NVB";
   const isRootAdmin = isNvbAdmin || isNvbSuperadmin;
   const isOtherBondAdmin = (isAdmin || isSuperadmin) && !isRootAdmin;
 
   const canOpenAdmin = isRootAdmin;
-  const canOpenDispensatie = isRootAdmin;
+  const canOpenDispensatie = isNvbAdmin || isSuperadmin;
   const canOpenOfficial = isRootAdmin || isOtherBondAdmin || isOfficialPortalRole;
   const canOpenMatchmaker = isRootAdmin || isOtherBondAdmin || isMatchmaker;
   const canOpenSportscholen = isRootAdmin || isTrainerOrSportschool;
