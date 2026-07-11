@@ -42,6 +42,14 @@ function n(v: unknown, fallback = 0) {
   return Number.isFinite(x) ? x : fallback;
 }
 
+function bigintOrNull(...values: unknown[]): string | null {
+  for (const value of values) {
+    const candidate = s(value);
+    if (/^\d+$/.test(candidate)) return candidate;
+  }
+  return null;
+}
+
 function jsonError(message: string, status = 400, extra?: unknown) {
   return NextResponse.json({ ok: false, error: message, extra }, { status });
 }
@@ -706,7 +714,14 @@ export async function POST(req: NextRequest) {
       return {
         uitslagen_run_id: uitslagenRunId,
         matchmaking_id: matchmakingId,
-        bron_bout_id: row.bron_bout_id ?? row.matchmaking_bout_id ?? row.raw_bout_id ?? row.bout_id ?? row.id,
+        // bron_bout_id is bigint. Bij directe doorstroom komt row.id uit
+        // matchmaking_bouts_raw en is dat een UUID; die mag hier dus niet in.
+        bron_bout_id: bigintOrNull(
+          row.bron_bout_id,
+          row.matchmaking_bout_id,
+          row.raw_bout_id,
+          row.bout_id,
+        ),
         // Belangrijk: uitslagen moet het echte partijnummer uit de definitieve lineup behouden.
         // Niet opnieuw nummeren met index + 1, want dan klopt de koppeling naar partij/detail/rapport niet meer
         // zodra er partijen zijn overgeslagen door open meldingen of verbod.
