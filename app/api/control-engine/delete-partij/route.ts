@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserFromAuthHeader, hasAnyRoleFromReq } from "@/lib/api/requireRole";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -47,16 +47,14 @@ async function getControleRunIds(matchmaking_id: string, controle_run_id: string
   return [...ids];
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const user = await requireUserFromAuthHeader(req);
-    const allowed = await hasAnyRoleFromReq(req, ["superadmin", "admin"]);
-    if (!allowed) {
-      return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
-    }
+    const { userId, role } = await requireUserWithRole(req);
 
     const body = await req.json().catch(() => ({}));
-    const matchmaking_id = asUuid(body?.matchmaking_id);
+    const matchmaking_id = asUuid(
+      body?.matchmaking_id ?? body?.matchmakingId,
+    );
     const partij_nr = Number(body?.partij_nr);
     const controle_run_id = asUuid(body?.controle_run_id);
     const bout_id = asUuid(body?.bout_id);
@@ -68,6 +66,14 @@ export async function POST(req: Request) {
     if (!Number.isFinite(partij_nr)) {
       return NextResponse.json({ error: "partij_nr ontbreekt." }, { status: 400 });
     }
+
+    // Geen aparte rollenlijst: dezelfde centrale toegangscontrole bepaalt
+    // of deze gebruiker binnen deze matchmaking mag werken.
+    await assertCanAccessMatchmaking({
+      matchmaking_id,
+      userId,
+      role,
+    });
 
     const controleRunIds = await getControleRunIds(matchmaking_id, controle_run_id);
 
@@ -336,8 +342,8 @@ export async function POST(req: Request) {
         renumbered: false,
       },
       by: {
-        user_id: user?.userId ?? user?.user?.id ?? null,
-        email: user?.user?.email ?? null,
+        user_id: userId,
+        role,
       },
     });
   } catch (e: any) {
