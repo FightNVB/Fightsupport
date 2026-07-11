@@ -1372,19 +1372,19 @@ export default function OfficialsOverzichtPage() {
                                               title="Verplaatst deze afgeronde matchmaking naar Admin Archief"
                                               color={ACTION_COLORS.verwijderen}
                                             >
-                                              {rowBusy && isBusy ? "…" : "×"}
+                                              {rowBusy && isBusy ? "…" : "🗑"}
                                             </ActionSquare>
                                           </>
                                         ) : null}
 
-                                        {activeTab !== "archive" && activeTab !== "weegstation" ? (
+                                        {activeTab !== "archive" ? (
                                           <ActionSquare
                                             onClick={() => deleteMatchmaking(r)}
                                             disabled={rowBusy || isBusy}
                                             title="Verwijdert deze matchmaking met gekoppelde controledata"
                                             color={ACTION_COLORS.verwijderen}
                                           >
-                                            {rowBusy && isBusy && !rowHeruploadBusy ? "…" : "×"}
+                                            {rowBusy && isBusy && !rowHeruploadBusy ? "…" : "🗑"}
                                           </ActionSquare>
                                         ) : null}
 
