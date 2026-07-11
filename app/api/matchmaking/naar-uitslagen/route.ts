@@ -619,12 +619,25 @@ export async function POST(req: NextRequest) {
       .order("partij_nr", { ascending: true });
 
     if (weighErr) throw weighErr;
-    if (!weighRows?.length) {
-      return jsonError("Geen partijen gevonden in weegstation. Bouw/ververs eerst het weegstation.", 404);
+
+    let rawBouts = weighRows ?? [];
+
+    // Weegstation is optioneel. Als er geen weegstationpartijen zijn, gebruiken we
+    // de oorspronkelijke matchmakingpartijen als bron voor de uitslagenflow.
+    if (!rawBouts.length) {
+      const { data: matchmakingRows, error: matchmakingErr } = await supabaseAdmin
+        .from("matchmaking_bouts_raw")
+        .select("*")
+        .eq("matchmaking_id", matchmakingId)
+        .order("partij_nr", { ascending: true });
+
+      if (matchmakingErr) throw matchmakingErr;
+      rawBouts = matchmakingRows ?? [];
     }
 
-    // Naar uitslagen gebruikt exact dezelfde lijst, volgorde en context als het weegstation.
-    const rawBouts = weighRows;
+    if (!rawBouts.length) {
+      return jsonError("Geen partijen gevonden voor de uitslagenflow.", 404);
+    }
 
     const { data: controleRows, error: controleErr } = await supabaseAdmin
       .from("controle_resultaten")
