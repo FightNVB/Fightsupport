@@ -2624,20 +2624,23 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/control-engine/delete-partij", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          matchmaking_id: matchmakingId,
-          matchmakingId,
-          partij_nr: partijNr,
-          controle_run_id: run?.id ?? null,
-          bout_id: boutId ?? null,
-        }),
+      const deleteParams = new URLSearchParams({
+        matchmaking_id: matchmakingId,
+        partij_nr: String(partijNr),
       });
+
+      if (run?.id) deleteParams.set("controle_run_id", String(run.id));
+      if (boutId) deleteParams.set("bout_id", String(boutId));
+
+      const resp = await authedFetch(
+        `/api/control-engine/delete-partij?${deleteParams.toString()}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
 
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(json?.error ?? "Verwijderen mislukt.");

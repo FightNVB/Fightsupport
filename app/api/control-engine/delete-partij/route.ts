@@ -13,7 +13,7 @@ const supabaseAdmin = createClient(
 function asUuid(v: any): string | null {
   const s = String(v ?? "").trim();
   if (!s) return null;
-  const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+  const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
   return ok ? s : null;
 }
 
@@ -49,15 +49,28 @@ async function getControleRunIds(matchmaking_id: string, controle_run_id: string
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, role } = await requireUserWithRole(req);
-
+    // URL-parameters zijn leidend. Zo is deze route niet afhankelijk van
+    // JSON-body parsing of een fetch-wrapper.
+    const params = new URL(req.url).searchParams;
     const body = await req.json().catch(() => ({}));
+
     const matchmaking_id = asUuid(
-      body?.matchmaking_id ?? body?.matchmakingId,
+      params.get("matchmaking_id") ??
+        params.get("matchmakingId") ??
+        body?.matchmaking_id ??
+        body?.matchmakingId,
     );
-    const partij_nr = Number(body?.partij_nr);
-    const controle_run_id = asUuid(body?.controle_run_id);
-    const bout_id = asUuid(body?.bout_id);
+    const partij_nr = Number(
+      params.get("partij_nr") ?? body?.partij_nr,
+    );
+    const controle_run_id = asUuid(
+      params.get("controle_run_id") ?? body?.controle_run_id,
+    );
+    const bout_id = asUuid(
+      params.get("bout_id") ?? body?.bout_id,
+    );
+
+    const { userId, role } = await requireUserWithRole(req);
 
     if (!matchmaking_id) {
       return NextResponse.json({ error: "matchmaking_id ontbreekt." }, { status: 400 });
@@ -67,8 +80,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "partij_nr ontbreekt." }, { status: 400 });
     }
 
-    // Geen aparte rollenlijst: dezelfde centrale toegangscontrole bepaalt
-    // of deze gebruiker binnen deze matchmaking mag werken.
     await assertCanAccessMatchmaking({
       matchmaking_id,
       userId,
