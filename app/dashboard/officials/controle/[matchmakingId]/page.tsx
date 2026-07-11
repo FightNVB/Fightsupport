@@ -2817,7 +2817,31 @@ export default function ControleMatchmakingPage() {
 
   async function stuurNaarUitslagen() {
     await withHeaderBusy("uitslagen", async () => {
-      setMsg("ℹ️ Naar uitslagen is nog niet gekoppeld in deze pagina.");
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+
+      const resp = await authedFetch("/api/matchmaking/naar-uitslagen", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchmakingId,
+          matchmaking_id: matchmakingId,
+        }),
+      });
+
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(json?.error ?? "Naar uitslagen sturen mislukt.");
+      }
+
+      setMsg(
+        json?.message ??
+          `✅ Matchmaking is naar uitslagen gestuurd (${json?.bouts ?? 0} partijen).`,
+      );
+      setReloadTick((x) => x + 1);
     });
   }
 
