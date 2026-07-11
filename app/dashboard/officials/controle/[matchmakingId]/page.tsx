@@ -2632,6 +2632,7 @@ export default function ControleMatchmakingPage() {
         },
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
+          matchmakingId,
           partij_nr: partijNr,
           controle_run_id: run?.id ?? null,
           bout_id: boutId ?? null,
