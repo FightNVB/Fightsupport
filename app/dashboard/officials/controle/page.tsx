@@ -506,7 +506,7 @@ export default function OfficialsOverzichtPage() {
       setIsBusy(true);
       setBusyId(matchmakingId);
       setOverlayTitle("Controle loopt");
-      setOverlayMessage("Wacht op resultaten... Fightpaspoort controle loopt.");
+      setOverlayMessage("De controle wordt uitgevoerd. Een ogenblik geduld...");
       setOverlaySubMessage(
         "Sluit deze pagina niet af totdat de resultaten zijn geladen."
       );
@@ -535,14 +535,12 @@ export default function OfficialsOverzichtPage() {
 
       if (!res.ok) {
         console.warn("Start controle response was niet OK:", json);
-        setOverlayTitle("Controle status controleren");
+        setOverlayTitle("Controle wordt afgerond");
         setOverlayMessage(
-          json?.error
-            ? `Controle gaf een melding: ${json.error}. Overzicht wordt opnieuw geladen...`
-            : "Controle gaf geen OK-response. Overzicht wordt opnieuw geladen..."
+          "De controle wordt afgerond. Het overzicht wordt automatisch bijgewerkt..."
         );
         setOverlaySubMessage(
-          "Als de server de controle toch heeft afgerond, verschijnt de juiste status na verversen."
+          "Dit kan enkele minuten duren. Sluit deze pagina niet af."
         );
 
         await new Promise((resolve) => window.setTimeout(resolve, 4000));
@@ -550,7 +548,7 @@ export default function OfficialsOverzichtPage() {
         return;
       }
 
-      setOverlayMessage("Resultaten worden geladen...");
+      setOverlayMessage("De resultaten worden verwerkt...");
       await load();
     } finally {
       setBusyId(null);
