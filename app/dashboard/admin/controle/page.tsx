@@ -41,6 +41,14 @@ interface FpSessionStatus {
 type TabKey = "eigen" | "matchmaker" | "official";
 type EigenaarType = "admin" | "matchmaker" | "official" | "unknown";
 
+type MatchmakingPresenceUser = {
+  user_id: string;
+  user_name: string | null;
+  user_role: string | null;
+  page: string | null;
+  last_seen: string;
+};
+
 interface MatchmakingRow {
   id: string;
   naam: string | null;
@@ -74,6 +82,7 @@ interface MatchmakingRow {
   is_archived: boolean | null;
 
   matchmaker_id?: string | null;
+  matchmaker_naam?: string | null;
   hoofdofficial_id?: string | null;
 
   laatste_run: ControleRun | null;
@@ -320,6 +329,9 @@ const ACTION_COLORS = {
 
 export default function ControleOverzichtPage() {
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
+  const [presenceByMatchmaking, setPresenceByMatchmaking] = useState<
+    Record<string, MatchmakingPresenceUser[]>
+  >({});
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -365,6 +377,17 @@ export default function ControleOverzichtPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (rows.length === 0) return;
+
+    const timer = window.setInterval(() => {
+      void loadPresenceForRows(rows);
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [rows]);
+
 
 
   useEffect(() => {
@@ -488,6 +511,36 @@ export default function ControleOverzichtPage() {
       ...prev,
       [rowId]: message,
     }));
+  }
+
+
+  async function loadPresenceForRows(matchmakings: MatchmakingRow[]) {
+    const results = await Promise.all(
+      matchmakings.slice(0, 100).map(async (row) => {
+        try {
+          const res = await authedFetch(
+            `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(row.id)}&page=admin_controle`,
+            { method: "GET", cache: "no-store" },
+          );
+
+          if (!res.ok) return [row.id, []] as const;
+
+          const json = await res.json().catch(() => ({}));
+          const users = (Array.isArray(json?.users) ? json.users : []).filter(
+            (u: MatchmakingPresenceUser) => {
+              const seen = new Date(u?.last_seen ?? 0).getTime();
+              return Number.isFinite(seen) && Date.now() - seen < 90_000;
+            },
+          );
+
+          return [row.id, users] as const;
+        } catch {
+          return [row.id, []] as const;
+        }
+      }),
+    );
+
+    setPresenceByMatchmaking(Object.fromEntries(results));
   }
 
   async function load() {
@@ -620,7 +673,30 @@ export default function ControleOverzichtPage() {
         return bTime - aTime;
       });
 
-      setRows(sorted);
+      const sortedIds = sorted.map((r) => r.id).filter(Boolean);
+      const { data: uploadInfo } = sortedIds.length
+        ? await supabase
+            .from("matchmaking_uploads")
+            .select("matchmaking_id, matchmaker, uploaded_at")
+            .in("matchmaking_id", sortedIds)
+        : { data: [] as any[] };
+
+      const matchmakerByMatchmakingId = new Map<string, string>();
+      for (const upload of uploadInfo ?? []) {
+        const mmId = String(upload?.matchmaking_id ?? "").trim();
+        const naam = String(upload?.matchmaker ?? "").trim();
+        if (mmId && naam && !matchmakerByMatchmakingId.has(mmId)) {
+          matchmakerByMatchmakingId.set(mmId, naam);
+        }
+      }
+
+      const rowsMetMatchmaker = sorted.map((r) => ({
+        ...r,
+        matchmaker_naam: matchmakerByMatchmakingId.get(r.id) ?? null,
+      }));
+
+      setRows(rowsMetMatchmaker);
+      void loadPresenceForRows(rowsMetMatchmaker);
     } catch (e) {
       console.error("Onverwachte fout bij load:", e);
       setRows([]);
@@ -1409,12 +1485,10 @@ export default function ControleOverzichtPage() {
                           >
                             <tr>
                               <th className="px-3 py-2 text-left">Datum</th>
-                              <th className="px-3 py-2 text-left">Evenement</th>
-                              <th className="px-3 py-2 text-left">Bron</th>
-                              <th className="px-3 py-2 text-left">Eigenaar</th>
-                              <th className="px-3 py-2 text-left">Bondteam</th>
-                              <th className="px-3 py-2 text-left">Laatst bijgewerkt</th>
-                              <th className="px-3 py-2 text-left">Acties</th>
+                              <th className="px-3 py-2 text-left">Naam evenement</th>
+                              <th className="px-3 py-2 text-left">Naam matchmaker</th>
+                              <th className="px-3 py-2 text-left">Status</th>
+                              <th className="px-3 py-2 text-left">Actie</th>
                             </tr>
                           </thead>
 
@@ -1422,7 +1496,7 @@ export default function ControleOverzichtPage() {
                             {filteredRows.length === 0 ? (
                               <tr>
                                 <td
-                                  colSpan={7}
+                                  colSpan={5}
                                   className="px-4 py-8 text-center text-sm"
                                   style={{ background: "#ffffff", color: "#555" }}
                                 >
@@ -1442,6 +1516,7 @@ export default function ControleOverzichtPage() {
                                 const rowSnapshotBusy = snapshotSavingId === r.id;
                                 const rowHeruploadBusy = heruploadBusyId === r.id;
                                 const rowMsg = rowMsgById[r.id] ?? "";
+                                const openUsers = presenceByMatchmaking[r.id] ?? [];
 
                                 return (
                                   <tr
@@ -1473,38 +1548,25 @@ export default function ControleOverzichtPage() {
                                       )}
                                     </td>
 
-                                    <td className="px-3 py-2">{formatBronLabel(r.bron_type)}</td>
-
                                     <td className="px-3 py-2">
-                                      <div className="font-semibold">{getOwnerLabel(r)}</div>
-                                      {r.huidige_eigenaar_bondteam ? (
-                                        <div className="text-xs opacity-75">
-                                          Bondteam: {r.huidige_eigenaar_bondteam}
-                                        </div>
-                                      ) : null}
+                                      {r.matchmaker_naam ?? "-"}
                                     </td>
 
                                     <td className="px-3 py-2">
-                                      {isEditing ? (
-                                        <input
-                                          className="orange-input h-9 w-full"
-                                          value={editBondteam}
-                                          onChange={(e) => setEditBondteam(e.target.value)}
-                                          placeholder="Bondteam"
-                                        />
+                                      {openUsers.length > 0 ? (
+                                        <span className="font-semibold text-green-700">
+                                          Geopend door {openUsers
+                                            .map((u) => u.user_name || "Onbekend")
+                                            .join(", ")}
+                                        </span>
                                       ) : (
-                                        r.bondteam ?? "-"
+                                        formatStatusLabel(
+                                          r.laatste_run?.status ??
+                                            r.stadium ??
+                                            r.status ??
+                                            "Niet gecontroleerd"
+                                        )
                                       )}
-                                    </td>
-
-                                    <td className="px-3 py-2 text-sm">
-                                      <div>{formatDateTime(r.last_updated_at)}</div>
-                                      {r.last_updated_by ? (
-                                        <div className="text-xs opacity-75">
-                                          {ownerMap.get(r.last_updated_by) ??
-                                            shortId(r.last_updated_by)}
-                                        </div>
-                                      ) : null}
                                     </td>
 
                                     <td className="px-3 py-2">

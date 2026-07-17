@@ -39,6 +39,14 @@ interface ControleRun {
 
 type ActiveTab = "received" | "weegstation" | "lineup" | "results" | "archive" | "uploaded";
 
+type MatchmakingPresenceUser = {
+  user_id: string;
+  user_name: string | null;
+  user_role: string | null;
+  page: string | null;
+  last_seen: string;
+};
+
 interface MatchmakingRow {
   id: string;
   naam: string | null;
@@ -72,6 +80,7 @@ interface MatchmakingRow {
   is_archived: boolean | null;
 
   matchmaker_id?: string | null;
+  matchmaker_naam?: string | null;
   hoofdofficial_id?: string | null;
 
   tab: ActiveTab;
@@ -386,6 +395,9 @@ const ACTION_COLORS = {
 
 export default function OfficialsOverzichtPage() {
   const [rows, setRows] = useState<MatchmakingRow[]>([]);
+  const [presenceByMatchmaking, setPresenceByMatchmaking] = useState<
+    Record<string, MatchmakingPresenceUser[]>
+  >({});
   const [bondteam, setBondteam] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -414,6 +426,47 @@ export default function OfficialsOverzichtPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (rows.length === 0) return;
+
+    const timer = window.setInterval(() => {
+      void loadPresenceForRows(rows);
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [rows]);
+
+
+
+  async function loadPresenceForRows(matchmakings: MatchmakingRow[]) {
+    const results = await Promise.all(
+      matchmakings.slice(0, 100).map(async (row) => {
+        try {
+          const res = await authedFetch(
+            `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(row.id)}&page=officials_controle`,
+            { method: "GET", cache: "no-store" },
+          );
+
+          if (!res.ok) return [row.id, []] as const;
+
+          const json = await res.json().catch(() => ({}));
+          const users = (Array.isArray(json?.users) ? json.users : []).filter(
+            (u: MatchmakingPresenceUser) => {
+              const seen = new Date(u?.last_seen ?? 0).getTime();
+              return Number.isFinite(seen) && Date.now() - seen < 90_000;
+            },
+          );
+
+          return [row.id, users] as const;
+        } catch {
+          return [row.id, []] as const;
+        }
+      }),
+    );
+
+    setPresenceByMatchmaking(Object.fromEntries(results));
+  }
 
   async function load() {
     setLoading(true);
@@ -472,7 +525,36 @@ export default function OfficialsOverzichtPage() {
         }
       }
 
-      setRows(rowsWithUitslagen);
+      const overzichtIds = rowsWithUitslagen
+        .map((r: any) => String(r?.id ?? "").trim())
+        .filter(Boolean);
+
+      const { data: uploadInfo } = overzichtIds.length
+        ? await supabase
+            .from("matchmaking_uploads")
+            .select("matchmaking_id, matchmaker, uploaded_at")
+            .in("matchmaking_id", overzichtIds)
+        : { data: [] as any[] };
+
+      const matchmakerByMatchmakingId = new Map<string, string>();
+      for (const upload of uploadInfo ?? []) {
+        const mmId = String(upload?.matchmaking_id ?? "").trim();
+        const naam = String(upload?.matchmaker ?? "").trim();
+        if (mmId && naam && !matchmakerByMatchmakingId.has(mmId)) {
+          matchmakerByMatchmakingId.set(mmId, naam);
+        }
+      }
+
+      const rowsMetMatchmaker = rowsWithUitslagen.map((r: any) => ({
+        ...r,
+        matchmaker_naam:
+          matchmakerByMatchmakingId.get(String(r.id)) ??
+          r.matchmaker_naam ??
+          null,
+      }));
+
+      setRows(rowsMetMatchmaker);
+      void loadPresenceForRows(rowsMetMatchmaker);
       setBondteam(String(json?.bondteam ?? "").trim());
     } catch (e: any) {
       console.error("Fout bij laden official overzicht:", e);
@@ -1204,14 +1286,10 @@ export default function OfficialsOverzichtPage() {
                           >
                             <tr>
                               <th className="px-3 py-2 text-left">Datum</th>
-                              <th className="px-3 py-2 text-left">Evenement</th>
-                              <th className="px-3 py-2 text-left">Bron</th>
-                              <th className="px-3 py-2 text-left">Eigenaar</th>
-                              <th className="px-3 py-2 text-left">Bondteam</th>
-                              <th className="px-3 py-2 text-left">
-                                Laatst bijgewerkt
-                              </th>
-                              <th className="px-3 py-2 text-left">Acties</th>
+                              <th className="px-3 py-2 text-left">Naam evenement</th>
+                              <th className="px-3 py-2 text-left">Naam matchmaker</th>
+                              <th className="px-3 py-2 text-left">Status</th>
+                              <th className="px-3 py-2 text-left">Actie</th>
                             </tr>
                           </thead>
 
@@ -1219,7 +1297,7 @@ export default function OfficialsOverzichtPage() {
                             {filteredRows.length === 0 ? (
                               <tr>
                                 <td
-                                  colSpan={7}
+                                  colSpan={5}
                                   className="px-4 py-8 text-center text-sm"
                                   style={{ background: "#ffffff", color: "#555" }}
                                 >
@@ -1242,6 +1320,7 @@ export default function OfficialsOverzichtPage() {
                                 const rowBusy = busyId === r.id;
                                 const rowHeruploadBusy = heruploadBusyId === r.id;
                                 const rowMsg = rowMsgById[r.id] ?? "";
+                                const openUsers = presenceByMatchmaking[r.id] ?? [];
                                 const rowStatus =
                                   r.laatste_run?.status ??
                                   r.uitslagen_run_status ??
@@ -1273,24 +1352,19 @@ export default function OfficialsOverzichtPage() {
                                     </td>
 
                                     <td className="px-3 py-2">
-                                      {formatBronLabel(r.bron_type)}
+                                      {r.matchmaker_naam ?? "-"}
                                     </td>
 
                                     <td className="px-3 py-2">
-                                      {formatOwnerLabel(r)}
-                                    </td>
-
-                                    <td className="px-3 py-2">
-                                      {r.bondteam ??
-                                        r.huidige_eigenaar_bondteam ??
-                                        "-"}
-                                    </td>
-
-                                    <td className="px-3 py-2 text-sm">
-                                      <div>{formatDateTime(r.last_updated_at)}</div>
-                                      <div className="text-xs opacity-75">
-                                        {formatStatusLabel(rowStatus)}
-                                      </div>
+                                      {openUsers.length > 0 ? (
+                                        <span className="font-semibold text-green-700">
+                                          Geopend door {openUsers
+                                            .map((u) => u.user_name || "Onbekend")
+                                            .join(", ")}
+                                        </span>
+                                      ) : (
+                                        formatStatusLabel(rowStatus)
+                                      )}
                                     </td>
 
                                     <td className="px-3 py-2">

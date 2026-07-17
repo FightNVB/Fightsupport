@@ -2314,6 +2314,9 @@ export default function ControleMatchmakingPage() {
   const [presenceUsers, setPresenceUsers] = useState<MatchmakingPresenceUser[]>(
     [],
   );
+  const [currentPresenceUserId, setCurrentPresenceUserId] = useState<string | null>(
+    null,
+  );
 
   async function getAccessToken(): Promise<string | null> {
     const { data } = await supabase.auth.getSession();
@@ -2324,8 +2327,11 @@ export default function ControleMatchmakingPage() {
     if (!matchmakingId) return;
 
     try {
-      const token = await getAccessToken();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? null;
+      const userId = sessionData.session?.user?.id ?? null;
       if (!token) return;
+      if (userId) setCurrentPresenceUserId(userId);
 
       const resp = await authedFetch(
         `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}&page=admin_controle`,
@@ -2349,6 +2355,33 @@ export default function ControleMatchmakingPage() {
     } catch {
       // Presence mag de controlepagina nooit blokkeren.
     }
+  }
+
+  const otherPresenceUsers = useMemo(
+    () =>
+      presenceUsers.filter((u) => {
+        if (!u?.user_id || u.user_id === currentPresenceUserId) return false;
+        const seen = new Date(u.last_seen ?? 0).getTime();
+        return Number.isFinite(seen) && Date.now() - seen < 90_000;
+      }),
+    [presenceUsers, currentPresenceUserId],
+  );
+
+  const isReadOnly = otherPresenceUsers.length > 0;
+
+  function blockReadOnlyInteraction(event: React.SyntheticEvent) {
+    if (!isReadOnly) return;
+    const target = event.target as HTMLElement | null;
+    const control = target?.closest("button, input, select, textarea");
+    if (!control) return;
+    if (control.getAttribute("data-readonly-allowed") === "true") return;
+    event.preventDefault();
+    event.stopPropagation();
+    setMsg(
+      `🔒 Alleen-lezen: ${otherPresenceUsers
+        .map((u) => safeText(u.user_name, "een andere gebruiker"))
+        .join(", ")} heeft deze matchmaking geopend.`,
+    );
   }
 
   const subtitle = useMemo(() => {
@@ -3769,7 +3802,7 @@ export default function ControleMatchmakingPage() {
               </button>
             </div>
 
-            {presenceUsers.length > 0 && (
+            {otherPresenceUsers.length > 0 && (
               <div
                 className="mx-auto mt-4 max-w-4xl rounded-xl px-4 py-3 text-sm"
                 style={{
@@ -3781,10 +3814,10 @@ export default function ControleMatchmakingPage() {
                 }}
               >
                 <div className="font-black">
-                  ⚠️ Deze matchmaking is ook geopend door:
+                  🔒 Alleen-lezen: deze matchmaking wordt momenteel bewerkt door:
                 </div>
                 <div className="mt-1 flex flex-wrap gap-2 font-semibold">
-                  {presenceUsers.map((u) => (
+                  {otherPresenceUsers.map((u) => (
                     <span
                       key={u.user_id}
                       className="rounded-full bg-white/70 px-3 py-1"
@@ -4440,7 +4473,8 @@ export default function ControleMatchmakingPage() {
 
                   <div className="flex-1 min-w-[220px]">
                     <input
-                      value={search}
+                      data-readonly-allowed="true"
+                value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       disabled={lineupMode}
                       placeholder="Zoek op naam, sportschool of VA…"

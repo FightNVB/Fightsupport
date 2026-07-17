@@ -181,9 +181,9 @@ export default function InformatiePage() {
       icon: ClipboardList,
     },
     {
-      label: "Gedragsregels Full Contact",
-      subtitle: "Algemene gedragsregels full contact",
-      external: "/algemene_gedragsregels_full_contact.pdf",
+      label: "MMA Reglement",
+      subtitle: "Open het actuele MMA reglement",
+      external: "/MMA_reglement.pdf",
       icon: Users,
     },
     {
@@ -193,9 +193,9 @@ export default function InformatiePage() {
       icon: Scale,
     },
     {
-      label: "Tuchtreglement 2025",
+      label: "Sanctie Beleid 2026",
       subtitle: "Open het tuchtreglement 2025",
-      external: "/tuchtreglement_2025.pdf",
+      external: "/sanctiebeleid.pdf",
       icon: Trophy,
     },
   ];

@@ -628,6 +628,14 @@ function getAdultKbMtBaseKlasse(ctx: any, hoek: "rood" | "blauw", rows: UitslagR
   const historyKlasse = hoogsteKlasseUitUitslagen(rows);
   if (historyKlasse) return historyKlasse;
 
+  const jeugdStats = getJeugdExperienceStats(rows);
+
+  // Zelfde uitgangspunt als matchEngine en fighterRules:
+  // alleen jeugdpartijen geven bij de overgang naar senioren niet automatisch
+  // een volwassen C/B/A-klasse. Zonder aantoonbare hoofdcontact-doorstroom
+  // start de reguliere volwassen controle daarom in N.
+  if (jeugdStats.total > 0) return "N";
+
   const nulmetingKlasse = fallbackAdultKbMtKlasseFromNulmeting(ctx, hoek);
   return nulmetingKlasse ?? "N";
 }
@@ -671,8 +679,7 @@ function getMandatoryPromotionInfo(
   total: number
 ): { from: Klasse; to: Klasse; reason: string } | null {
   if (k === "R") {
-    if (wins >= 2) return { from: "R", to: "N", reason: `${wins} gewonnen R-klasse partijen` };
-    if (total >= 3) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
+    if (total >= 2) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
     return null;
   }
 
@@ -2956,23 +2963,7 @@ export async function rulesEngine(opts: {
             ctx
           );
         }
-        if (statsR.rWins >= 2) {
-          pushHitTournamentAware(
-            {
-              matchmaking_id,
-              partij_nr,
-              bout_id,
-              hoek: "rood",
-              rule: "R-klasse maximum winst bereikt",
-              rule_code: "R_KLASSE_MAX_WINS",
-              resultaat: "AFKEUR",
-              severity: "error",
-              boodschap: `${naamR} heeft al ${statsR.rWins} gewonnen R-klasse partij${statsR.rWins === 1 ? "" : "en"} en moet verplicht door naar de N-klasse.`,
-            },
-            ctx
-          );
-        }
-        if (statsR.rTotal >= 3) {
+        if (statsR.rTotal >= 2) {
           pushHitTournamentAware(
             {
               matchmaking_id,
@@ -2983,7 +2974,7 @@ export async function rulesEngine(opts: {
               rule_code: "R_KLASSE_MAX_TOTAL",
               resultaat: "AFKEUR",
               severity: "error",
-              boodschap: `${naamR} heeft al ${statsR.rTotal} R-klasse partijen gedaan en moet verplicht door naar de N-klasse.`,
+              boodschap: `${naamR} heeft al ${statsR.rTotal} R-klasse partijen gedaan. Na maximaal 2 R-klasse wedstrijden promoveert een vechter naar de N-klasse.`,
             },
             ctx
           );
@@ -3026,23 +3017,7 @@ export async function rulesEngine(opts: {
             ctx
           );
         }
-        if (statsB.rWins >= 2) {
-          pushHitTournamentAware(
-            {
-              matchmaking_id,
-              partij_nr,
-              bout_id,
-              hoek: "blauw",
-              rule: "R-klasse maximum winst bereikt",
-              rule_code: "R_KLASSE_MAX_WINS",
-              resultaat: "AFKEUR",
-              severity: "error",
-              boodschap: `${naamB} heeft al ${statsB.rWins} gewonnen R-klasse partij${statsB.rWins === 1 ? "" : "en"} en moet verplicht door naar de N-klasse.`,
-            },
-            ctx
-          );
-        }
-        if (statsB.rTotal >= 3) {
+        if (statsB.rTotal >= 2) {
           pushHitTournamentAware(
             {
               matchmaking_id,
@@ -3053,7 +3028,7 @@ export async function rulesEngine(opts: {
               rule_code: "R_KLASSE_MAX_TOTAL",
               resultaat: "AFKEUR",
               severity: "error",
-              boodschap: `${naamB} heeft al ${statsB.rTotal} R-klasse partijen gedaan en moet verplicht door naar de N-klasse.`,
+              boodschap: `${naamB} heeft al ${statsB.rTotal} R-klasse partijen gedaan. Na maximaal 2 R-klasse wedstrijden promoveert een vechter naar de N-klasse.`,
             },
             ctx
           );

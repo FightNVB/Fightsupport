@@ -644,7 +644,16 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
 }
 
 async function downloadExcel(page, sportschoolId, va, scrapeRunId) {
-  const downloadDir = path.resolve(__dirname, ".tmp_download");
+  const safeRunId = String(scrapeRunId ?? "run").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeSportschoolId = String(sportschoolId ?? "school").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeVa = String(va ?? "va").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const downloadDir = path.resolve(
+    __dirname,
+    ".tmp_download",
+    safeRunId,
+    safeSportschoolId,
+    safeVa,
+  );
 
   if (fs.existsSync(downloadDir)) {
     fs.rmSync(downloadDir, { recursive: true, force: true });

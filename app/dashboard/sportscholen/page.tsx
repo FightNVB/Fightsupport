@@ -606,6 +606,21 @@ export default function SportschoolPage() {
 
               <button
                 type="button"
+                onClick={() =>
+                  window.open(
+                    "/algemene_gedragsregels_full_contact.pdf",
+                    "_blank",
+                    "noopener,noreferrer",
+                  )
+                }
+                className="sportschool-silver-btn fs-metal-btn inline-flex min-h-11 items-center justify-center gap-2 border border-zinc-300 bg-[linear-gradient(180deg,#ffffff,#eeeeee_18%,#bdbdbd_55%,#f8f8f8)] px-5 text-xs font-black uppercase tracking-[0.16em] text-black shadow-lg shadow-black/40"
+              >
+                <ShieldCheck size={17} />
+                Gedragsregels Full Contact
+              </button>
+
+              <button
+                type="button"
                 onClick={load}
                 disabled={loading}
                 className="fs-metal-btn inline-flex min-h-11 items-center justify-center gap-2 border border-[#ff4d00]/70 bg-[linear-gradient(180deg,#ff7a2f,#ff4d00_48%,#8f2800)] px-5 text-xs font-black uppercase tracking-[0.16em] text-white shadow-lg shadow-orange-950/40 disabled:cursor-not-allowed disabled:opacity-60"

@@ -488,8 +488,7 @@ function getMandatoryPromotionInfo(
   total: number,
 ): MandatoryPromotion {
   if (k === "R") {
-    if (wins >= 2) return { from: "R", to: "N", reason: `${wins} gewonnen R-klasse partijen` };
-    if (total >= 3) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
+    if (total >= 2) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
     return null;
   }
 
@@ -769,8 +768,8 @@ export function runMatchmakerFighterRules(
 
       if (hasNonRExperience) {
         add("MATCHMAKER_R_KLASSE_MET_WEDSTRIJDERVARING", "AFKEUR", `R-klasse is alleen bedoeld als optionele instapklasse voor vechters zonder wedstrijdervaring. Deze vechter heeft al ${recordStats.other} partij(en) uit jeugd/vorige klasse/demo/no contest. Start daarom in N.`, "error", "R-klasse met wedstrijdervaring");
-      } else if (rRec.wins >= 2 || rRec.total >= 3) {
-        add("MATCHMAKER_R_KLASSE_MAX_BEREIKT", "AFKEUR", `R-klasse maximum bereikt. Record in R: ${rRec.recordLabel}. Na 2 winst of 3 totaal moet deze vechter naar N klasse.`, "error", "R-klasse maximum bereikt");
+      } else if (rRec.total >= 2) {
+        add("MATCHMAKER_R_KLASSE_MAX_BEREIKT", "AFKEUR", `R-klasse maximum bereikt. Record in R: ${rRec.recordLabel}. Na maximaal 2 R-klasse wedstrijden promoveert deze vechter naar de N-klasse.`, "error", "R-klasse maximum bereikt");
       }
     }
 

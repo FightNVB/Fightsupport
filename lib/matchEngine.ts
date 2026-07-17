@@ -689,8 +689,7 @@ function getMandatoryPromotionInfo(
   total: number
 ): { from: Klasse; to: Klasse; reason: string } | null {
   if (k === "R") {
-    if (wins >= 2) return { from: "R", to: "N", reason: `${wins} gewonnen R-klasse partijen` };
-    if (total >= 3) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
+    if (total >= 2) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
     return null;
   }
 
@@ -1734,8 +1733,8 @@ if (
         partij_nr: null,
         rule: "Keurmerk sportschool ongeldig",
         rule_code: "TOERNOOI_KEURMERK_ONGELDIG",
-        resultaat: "AFKEUR",
-        severity: "error",
+        resultaat: "INFO",
+        severity: "info",
         boodschap: `${naamR} (${gymR}): ${redenR || "geen geldig keurmerk op eventdatum."}`,
       });
     }
@@ -1769,8 +1768,8 @@ if (
         partij_nr: null,
         rule: "Keurmerk sportschool ongeldig",
         rule_code: "TOERNOOI_KEURMERK_ONGELDIG",
-        resultaat: "AFKEUR",
-        severity: "error",
+        resultaat: "INFO",
+        severity: "info",
         boodschap: `${naamB} (${gymB}): ${redenB || "geen geldig keurmerk op eventdatum."}`,
       });
     }
@@ -2199,6 +2198,27 @@ export async function matchEngine(opts: {
     const hasBlauw = true;
     const skipLicentieEnKeurmerk = isPureBoksenZonderLicentieKeurmerk(ctx);
 
+    // Informatief voor de matchmaker: twee vechters van dezelfde sportschool.
+    const gymRood = getFighterGymName(ctx, "rood");
+    const gymBlauw = getFighterGymName(ctx, "blauw");
+    if (
+      gymRood &&
+      gymBlauw &&
+      normNameSoft(gymRood) &&
+      normNameSoft(gymRood) === normNameSoft(gymBlauw)
+    ) {
+      pushHit({
+        matchmaking_id,
+        partij_nr,
+        bout_id,
+        rule: "Zelfde sportschool",
+        rule_code: "ZELFDE_SPORTSCHOOL",
+        resultaat: "INFO",
+        severity: "info",
+        boodschap: `${getFighterDisplayName(ctx, "rood")} en ${getFighterDisplayName(ctx, "blauw")} komen beide uit sportschool "${gymRood}". Controleer of deze partij bewust is ingepland.`,
+      });
+    }
+
     if (!skipLicentieEnKeurmerk && !vaRood) {
       const naam = getFighterDisplayName(ctx, "rood");
 
@@ -2506,8 +2526,8 @@ export async function matchEngine(opts: {
             bout_id,
             rule: "Keurmerk NL sportschool ongeldig",
             rule_code: "KEURMERK_ONGELDIG",
-            resultaat: "AFKEUR",
-            severity: "error",
+            resultaat: "INFO",
+            severity: "info",
             boodschap: `${naam} (${gym}): ${
               redenR || "NL gym: geen geldig keurmerk (ontbreekt/verlopen)."
             }`,
@@ -2550,8 +2570,8 @@ export async function matchEngine(opts: {
             bout_id,
             rule: "Keurmerk NL sportschool ongeldig",
             rule_code: "KEURMERK_ONGELDIG",
-            resultaat: "AFKEUR",
-            severity: "error",
+            resultaat: "INFO",
+            severity: "info",
             boodschap: `${naam} (${gym}): ${
               redenB || "NL gym: geen geldig keurmerk (ontbreekt/verlopen)."
             }`,
@@ -2994,23 +3014,7 @@ export async function matchEngine(opts: {
             ctx
           );
         }
-        if (statsR.rWins >= 2) {
-          pushHitTournamentAware(
-            {
-              matchmaking_id,
-              partij_nr,
-              bout_id,
-              hoek: "rood",
-              rule: "R-klasse maximum winst bereikt",
-              rule_code: "R_KLASSE_MAX_WINS",
-              resultaat: "AFKEUR",
-              severity: "error",
-              boodschap: `${naamR} heeft al ${statsR.rWins} gewonnen R-klasse partij${statsR.rWins === 1 ? "" : "en"} en moet verplicht door naar de N-klasse.`,
-            },
-            ctx
-          );
-        }
-        if (statsR.rTotal >= 3) {
+        if (statsR.rTotal >= 2) {
           pushHitTournamentAware(
             {
               matchmaking_id,
@@ -3021,7 +3025,7 @@ export async function matchEngine(opts: {
               rule_code: "R_KLASSE_MAX_TOTAL",
               resultaat: "AFKEUR",
               severity: "error",
-              boodschap: `${naamR} heeft al ${statsR.rTotal} R-klasse partijen gedaan en moet verplicht door naar de N-klasse.`,
+              boodschap: `${naamR} heeft al ${statsR.rTotal} R-klasse partijen gedaan. Na maximaal 2 R-klasse wedstrijden promoveert een vechter naar de N-klasse.`,
             },
             ctx
           );
@@ -3064,23 +3068,7 @@ export async function matchEngine(opts: {
             ctx
           );
         }
-        if (statsB.rWins >= 2) {
-          pushHitTournamentAware(
-            {
-              matchmaking_id,
-              partij_nr,
-              bout_id,
-              hoek: "blauw",
-              rule: "R-klasse maximum winst bereikt",
-              rule_code: "R_KLASSE_MAX_WINS",
-              resultaat: "AFKEUR",
-              severity: "error",
-              boodschap: `${naamB} heeft al ${statsB.rWins} gewonnen R-klasse partij${statsB.rWins === 1 ? "" : "en"} en moet verplicht door naar de N-klasse.`,
-            },
-            ctx
-          );
-        }
-        if (statsB.rTotal >= 3) {
+        if (statsB.rTotal >= 2) {
           pushHitTournamentAware(
             {
               matchmaking_id,
@@ -3091,7 +3079,7 @@ export async function matchEngine(opts: {
               rule_code: "R_KLASSE_MAX_TOTAL",
               resultaat: "AFKEUR",
               severity: "error",
-              boodschap: `${naamB} heeft al ${statsB.rTotal} R-klasse partijen gedaan en moet verplicht door naar de N-klasse.`,
+              boodschap: `${naamB} heeft al ${statsB.rTotal} R-klasse partijen gedaan. Na maximaal 2 R-klasse wedstrijden promoveert een vechter naar de N-klasse.`,
             },
             ctx
           );
