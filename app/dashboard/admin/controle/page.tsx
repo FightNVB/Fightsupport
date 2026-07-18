@@ -778,12 +778,12 @@ export default function ControleOverzichtPage() {
           return;
         }
 
-        setScrapeOverlayTitle("Controle loopt mogelijk nog");
+        setScrapeOverlayTitle("Controle loopt nog");
         setScrapeOverlayMessage(
-          "De server heeft nog geen nette eindmelding teruggegeven, maar de autocheck kan nog gewoon draaien."
+          "De controle loopt nog. Sluit deze pagina niet af."
         );
         setScrapeOverlaySub(
-          "Wacht nog even. FightSupport controleert automatisch of de run klaar is."
+          "FightSupport controleert automatisch wanneer de controle klaar is."
         );
 
         const finished = await waitForControleRunFinished(matchmakingId);
@@ -796,12 +796,12 @@ export default function ControleOverzichtPage() {
           return;
         }
 
-        setScrapeOverlayTitle("Controle niet bevestigd");
+        setScrapeOverlayTitle("Controle loopt nog");
         setScrapeOverlayMessage(
-          "De server gaf geen bevestiging binnen de wachttijd. Vernieuw de pagina of check de logs."
+          "De controle duurt langer dan verwacht. Sluit deze pagina niet af."
         );
         setScrapeOverlaySub(
-          "Dit betekent niet automatisch dat de controle mislukt is; de resultaten kunnen al opgeslagen zijn."
+          "Controleer over enkele ogenblikken opnieuw of de resultaten beschikbaar zijn."
         );
         return;
       }
@@ -814,12 +814,12 @@ export default function ControleOverzichtPage() {
     } catch (e) {
       console.error("Start controle request gaf een fout of timeout:", e);
 
-      setScrapeOverlayTitle("Controle loopt mogelijk nog");
+      setScrapeOverlayTitle("Controle loopt nog");
       setScrapeOverlayMessage(
-        "De browser kreeg geen nette response terug, maar de server kan nog bezig zijn met scrapen."
+        "De controle loopt nog. Sluit deze pagina niet af."
       );
       setScrapeOverlaySub(
-        "Wacht nog even. FightSupport controleert automatisch of de run klaar is."
+        "FightSupport controleert automatisch wanneer de controle klaar is."
       );
 
       const finished = await waitForControleRunFinished(matchmakingId);
@@ -832,12 +832,12 @@ export default function ControleOverzichtPage() {
         return;
       }
 
-      setScrapeOverlayTitle("Controle niet bevestigd");
+      setScrapeOverlayTitle("Controle loopt nog");
       setScrapeOverlayMessage(
-        "De server gaf geen bevestiging binnen de wachttijd. Vernieuw de pagina of check de logs."
+        "De controle duurt langer dan verwacht. Sluit deze pagina niet af."
       );
       setScrapeOverlaySub(
-        "Dit betekent niet automatisch dat de controle mislukt is; de resultaten kunnen al opgeslagen zijn."
+        "Controleer over enkele ogenblikken opnieuw of de resultaten beschikbaar zijn."
       );
     } finally {
       setBusyId(null);
