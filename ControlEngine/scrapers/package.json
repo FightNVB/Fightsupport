@@ -10,7 +10,8 @@
     "scrape:keurmerk": "node scraper_keurmerk.js",
     "scrape:sportschool": "node scraper_sportschool.js",
     "scrape:matchmaker": "node scraper_matchmaker.js",
-    "test:full_fighter": "node test_full_fighter.js"
+    "test:full_fighter": "node test_full_fighter.js",
+    "scrape:fp-total": "node fp_total/scraper_fp_total.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

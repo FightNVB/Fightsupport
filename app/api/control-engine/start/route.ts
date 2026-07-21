@@ -280,12 +280,12 @@ export async function POST(req: Request) {
     const do_scrape = body?.do_scrape !== false;
 
     const workers = clampInt(body?.workers ?? 8, 8, 1, 20);
-    const stagger_ms = clampInt(body?.stagger_ms ?? 250, 250, 0, 5000);
-    const tab_attempts = clampInt(body?.tab_attempts ?? 8, 8, 1, 30);
+    const stagger_ms = clampInt(body?.stagger_ms ?? 500, 500, 0, 5000);
+    const tab_attempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
     const soft_wait_ms = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);
     const between_attempts_ms = clampInt(
-      body?.between_attempts_ms ?? 450,
-      450,
+      body?.between_attempts_ms ?? 600,
+      600,
       0,
       5000
     );

@@ -10,7 +10,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { Scale, Trophy, ArrowLeft, Building2, UsersRound } from "lucide-react";
+import { Scale, Trophy, ArrowLeft, Building2, UsersRound, FileText, ShieldCheck, BrainCircuit, RefreshCw } from "lucide-react";
 
 type MenuAction = {
   label: string;
@@ -295,6 +295,20 @@ export default function AdminDashboardPage() {
       icon: Trophy,
       rootAdminOnly: true,
     },
+    {
+      label: "Formulieren",
+      subtitle: "Open het NVB formulierenportaal",
+      external: "https://nvbformulieren.nl",
+      icon: FileText,
+      rootAdminOnly: true,
+    },
+    {
+      label: "Doping Autoriteit",
+      subtitle: "Vechters, mailingen en certificaten beheren",
+      href: "/dashboard/admin/doping",
+      icon: ShieldCheck,
+      rootAdminOnly: true,
+    },
   ].filter((action) => !action.rootAdminOnly || mayOpenRootAdminTiles);
 
   return (
@@ -317,11 +331,15 @@ export default function AdminDashboardPage() {
           padding: "22px 24px 14px",
         }}
       >
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+          <HeaderSilverButton label="Slim dashboard" icon={<BrainCircuit size={15} />} onClick={() => router.push("/dashboard/admin/aandacht")} />
+          <HeaderSilverButton label="FightPaspoort Beheer" icon={<RefreshCw size={15} />} onClick={() => router.push("/dashboard/admin/fightpassport-beheer")} />
+        </div>
         <div
           className="dashboard-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
             gap: 20,
           }}
         >
@@ -715,8 +733,8 @@ function PortalCard({
       <div
         style={{
           ...darkPlate,
-          minHeight: 154,
-          padding: "14px 14px 12px",
+          minHeight: 126,
+          padding: "11px 11px 10px",
         }}
       >
         <OrangeHotspot left={16} bottom={8} width={58} />
@@ -735,7 +753,7 @@ function PortalCard({
           <div style={{ minWidth: 0, flex: 1, paddingTop: 1 }}>
             <div
               style={{
-                fontSize: 20,
+                fontSize: 17,
                 fontWeight: 900,
                 lineHeight: 1,
                 color: "#f1f1f1",
@@ -758,7 +776,7 @@ function PortalCard({
             <div
               style={{
                 marginTop: 9,
-                fontSize: 12.5,
+                fontSize: 11.5,
                 color: "#d7d7d7",
                 lineHeight: 1.2,
               }}
@@ -780,8 +798,8 @@ function IconPlate({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        width: 92,
-        height: 72,
+        width: 68,
+        height: 58,
         flexShrink: 0,
         display: "flex",
         alignItems: "center",
@@ -813,7 +831,7 @@ function SteelButton({
       className="fs-metal-button"
       style={{
         width: "100%",
-        height: 40,
+        height: 34,
         border: "1px solid #8f8f8f",
         background: `
           linear-gradient(180deg,
@@ -825,7 +843,7 @@ function SteelButton({
             #f0f0f0 100%)
         `,
         color: "#131313",
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: 900,
         boxShadow: `
           inset 0 2px 1px rgba(255,255,255,1),
