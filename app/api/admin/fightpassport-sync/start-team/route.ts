@@ -106,10 +106,13 @@ export async function POST(req: Request) {
       robot: TEAM_ROBOT_FILE,
       teamRobotPath,
       role,
-      school_workers: 8,
+      school_tabs: 8,
     });
 
-    const result = await runNodeScript(
+    // Start de scraper op de achtergrond en geef direct antwoord aan de browser.
+    // Zo kan een lange sportscholensynchronisatie niet meer als HTTP-timeout
+    // of "starten mislukt" in de UI eindigen terwijl de scraper gewoon draait.
+    void runNodeScript(
       teamRobotPath,
       ["run-all"],
       {
@@ -121,25 +124,34 @@ export async function POST(req: Request) {
           process.env.HEADLESS ??
           "false",
 
-        // Acht sportscholen tegelijk; per sportschool wordt alleen
-        // de VECHTERS Excel gedownload, geparsed en opgeslagen.
-        TEAM_SCHOOL_WORKERS: "8",
+        TEAM_SCHOOL_TABS: "8",
         TEAM_SCHOOL_STAGGER_MS:
           process.env.TEAM_SCHOOL_STAGGER_MS ?? "800",
       },
       "fp_team_all"
+    )
+      .then((result) => {
+        console.log("[fightpassport-sync/start-team] ✅ sportscholen robot klaar", {
+          ms: result.ms,
+          school_tabs: 8,
+        });
+      })
+      .catch((err) => {
+        console.error(
+          "[fightpassport-sync/start-team] ❌ sportscholen robot achtergrondfout:",
+          err
+        );
+      });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        started: true,
+        tabs: 8,
+        message: "Sportscholensynchronisatie gestart met 1 browser en 8 tabs.",
+      },
+      { status: 202 }
     );
-
-    console.log("[fightpassport-sync/start-team] ✅ sportscholen robot klaar", {
-      ms: result.ms,
-      school_workers: 8,
-    });
-
-    return NextResponse.json({
-      ok: true,
-      workers: 8,
-      ms: result.ms,
-    });
   } catch (err: any) {
     console.error(
       "[fightpassport-sync/start-team] ❌ sportscholen robot mislukt:",

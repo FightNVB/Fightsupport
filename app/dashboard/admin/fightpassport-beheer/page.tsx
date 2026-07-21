@@ -70,7 +70,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTotal(false);
     setMessage(
       res.ok
-        ? `Total AutoCheck afgerond voor VA ${startVa} t/m ${endVa}.`
+        ? `Total AutoCheck gestart voor VA ${startVa} t/m ${endVa}.`
         : json.error || "Total AutoCheck starten mislukt."
     );
     setTimeout(loadRuns, 1200);
@@ -85,7 +85,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTeam(false);
     setMessage(
       res.ok
-        ? "Sportscholensynchronisatie afgerond."
+        ? "Sportscholensynchronisatie gestart."
         : json.error || "Sportscholensynchronisatie starten mislukt."
     );
     setTimeout(loadFighters, 1200);

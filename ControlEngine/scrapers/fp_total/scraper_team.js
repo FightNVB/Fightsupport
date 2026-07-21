@@ -180,6 +180,9 @@ async function getPageDebug(page) {
 }
 
 async function setDownloadBehavior(page, browser, downloadDir) {
+  // Bij één browser met meerdere tabs mag Browser.setDownloadBehavior NIET
+  // per tab opnieuw gezet worden: dat is browser-breed en tabs zouden elkaars
+  // downloadmap overschrijven. Daarom alleen target/page-level instellen.
   try {
     const client = await page.target().createCDPSession();
 
@@ -187,20 +190,11 @@ async function setDownloadBehavior(page, browser, downloadDir) {
       behavior: "allow",
       downloadPath: downloadDir,
     });
+
+    await client.detach().catch(() => {});
   } catch (e) {
     console.log("⚠️ Page.setDownloadBehavior fout:", e?.message ?? e);
-  }
-
-  try {
-    const bClient = await browser.target().createCDPSession();
-
-    await bClient.send("Browser.setDownloadBehavior", {
-      behavior: "allow",
-      downloadPath: downloadDir,
-      eventsEnabled: true,
-    });
-  } catch (e) {
-    console.log("⚠️ Browser.setDownloadBehavior overgeslagen:", e?.message ?? e);
+    throw e;
   }
 }
 
@@ -1112,26 +1106,13 @@ async function updateSportschoolSyncStatus(key, status, errorMessage = null) {
     .eq("sportschool_id", Number(key));
 }
 
-export async function scraperFightcrew(sportschoolKey) {
-  const key = normalizeSportschoolKey(sportschoolKey);
+async function scrapeSportschoolWithPage(page, browser, sportschool) {
+  const key = normalizeSportschoolKey(sportschool?.sportschool_id);
 
   if (!key) {
     throw new Error("sportschoolKey ontbreekt");
   }
 
-  const { data: sportschool, error } = await supabase
-    .from("sportscholen")
-    .select("*")
-    .eq("sportschool_id", Number(key))
-    .single();
-
-  if (error) throw error;
-
-  if (!sportschool) {
-    throw new Error(`Sportschool niet gevonden: ${key}`);
-  }
-
-  const { browser, page } = await loginFightPassport();
   let downloadedExcelFile = null;
 
   try {
@@ -1142,10 +1123,7 @@ export async function scraperFightcrew(sportschoolKey) {
 
     downloadedExcelFile = await downloadVechtersExcel(page, browser, key);
 
-    // Alleen de VECHTERS Excel uitlezen.
     const fighters = await parseVechtersExcel(downloadedExcelFile, sportschool);
-
-    // Alleen sportschool <-> VA koppelingen opslaan.
     const vaList = await saveSportschoolFighterLinks(key, fighters);
 
     await updateSportschoolSyncStatus(key, "klaar");
@@ -1168,9 +1146,41 @@ export async function scraperFightcrew(sportschoolKey) {
     console.error("❌ Sportschool scrape fout:", err?.stack ?? err);
     throw err;
   } finally {
-    // Excel pas na parse/databaseverwerking opruimen.
     await removeDownloadedExcel(downloadedExcelFile);
 
+    try {
+      await page.goto("about:blank", {
+        waitUntil: "domcontentloaded",
+        timeout: 10000,
+      });
+    } catch {}
+  }
+}
+
+export async function scraperFightcrew(sportschoolKey) {
+  const key = normalizeSportschoolKey(sportschoolKey);
+
+  if (!key) {
+    throw new Error("sportschoolKey ontbreekt");
+  }
+
+  const { data: sportschool, error } = await supabase
+    .from("sportscholen")
+    .select("*")
+    .eq("sportschool_id", Number(key))
+    .single();
+
+  if (error) throw error;
+
+  if (!sportschool) {
+    throw new Error(`Sportschool niet gevonden: ${key}`);
+  }
+
+  const { browser, page } = await loginFightPassport();
+
+  try {
+    return await scrapeSportschoolWithPage(page, browser, sportschool);
+  } finally {
     try {
       await browser.close();
     } catch {}
@@ -1178,8 +1188,6 @@ export async function scraperFightcrew(sportschoolKey) {
 }
 
 export async function scraperFightcrewAll() {
-  // Alle sportscholen uit de tabel sportscholen verwerken.
-  // sportschool_id is de FightPassport organisation-key.
   const { data: schools, error: schoolError } = await supabase
     .from("sportscholen")
     .select(
@@ -1190,97 +1198,137 @@ export async function scraperFightcrewAll() {
 
   if (schoolError) throw schoolError;
 
-  const schoolWorkersRaw = Number(process.env.TEAM_SCHOOL_WORKERS ?? "8");
-  const schoolWorkers =
-    Number.isFinite(schoolWorkersRaw) && schoolWorkersRaw > 0
-      ? Math.min(12, Math.max(1, Math.floor(schoolWorkersRaw)))
-      : 8;
+  const tabsRaw = Number(
+    process.env.TEAM_SCHOOL_TABS ??
+    process.env.TEAM_SCHOOL_WORKERS ??
+    "8"
+  );
 
-  console.log("🏫 Volledige sportscholenscrape gestart", {
-    gevonden_sportscholen: schools?.length ?? 0,
-    parallelle_puppeteers: schoolWorkers,
-    doel: "alleen VECHTERS Excel en sportschool-VA koppelingen",
-  });
+  const tabCount =
+    Number.isFinite(tabsRaw) && tabsRaw > 0
+      ? Math.min(12, Math.max(1, Math.floor(tabsRaw)))
+      : 8;
 
   const schoolList = schools ?? [];
   const results = [];
   let nextIndex = 0;
 
-  async function schoolWorker(workerIndex) {
-    // Kleine stagger zodat niet alle 8 browsers exact tegelijk inloggen.
-    await sleep(workerIndex * Number(process.env.TEAM_SCHOOL_STAGGER_MS ?? "800"));
+  console.log("🏫 Volledige sportscholenscrape gestart", {
+    gevonden_sportscholen: schoolList.length,
+    browsers: 1,
+    parallelle_tabs: tabCount,
+    doel: "alleen VECHTERS Excel en sportschool-VA koppelingen",
+  });
 
-    while (true) {
-      const myIndex = nextIndex++;
-      if (myIndex >= schoolList.length) break;
+  // Eén login = één Chromium-browser en één gedeelde FightPassport-sessie.
+  const { browser, page: loginPage } = await loginFightPassport();
+  const pages = [loginPage];
 
-      const sportschool = schoolList[myIndex];
-      const key = normalizeSportschoolKey(sportschool.sportschool_id);
-
-      if (!key) {
-        results.push({
-          sportschool_id: sportschool.sportschool_id,
-          sportschool_naam: sportschool.naam ?? null,
-          ok: false,
-          error: "Ongeldige sportschool_id",
-        });
-        continue;
-      }
-
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-      console.log(`🏫 [school-worker ${workerIndex + 1}/${schoolWorkers}] Sportschool starten`, {
-        sportschool_id: Number(key),
-        naam: sportschool.naam ?? null,
-        plaats: sportschool.plaats ?? null,
-      });
-
-      try {
-        const vaList = await scraperFightcrew(key);
-
-        results.push({
-          sportschool_id: Number(key),
-          sportschool_naam: sportschool.naam ?? null,
-          ok: true,
-          count: vaList.length,
-        });
-
-        console.log(
-          `✅ [school-worker ${workerIndex + 1}/${schoolWorkers}] Sportschool volledig klaar`,
-          {
-            sportschool_id: Number(key),
-            naam: sportschool.naam ?? null,
-            vechters: vaList.length,
-          }
-        );
-      } catch (e) {
-        const message = e?.message ?? String(e);
-
-        await updateSportschoolSyncStatus(key, "fout", message).catch(() => {});
-
-        results.push({
-          sportschool_id: Number(key),
-          sportschool_naam: sportschool.naam ?? null,
-          ok: false,
-          error: message,
-        });
-
-        console.log(
-          `❌ [school-worker ${workerIndex + 1}/${schoolWorkers}] Sportschool mislukt; doorgaan`,
-          {
-            sportschool_id: Number(key),
-            naam: sportschool.naam ?? null,
-            error: message,
-          }
-        );
-      }
-
-      await sleep(Number(process.env.FIGHTCREW_BETWEEN_SCHOOLS_MS ?? "800"));
+  try {
+    for (let i = 1; i < tabCount; i++) {
+      const page = await browser.newPage();
+      await page.setCacheEnabled(false).catch(() => {});
+      pages.push(page);
     }
-  }
 
-  await Promise.all(
-    Array.from({ length: schoolWorkers }, (_, i) => schoolWorker(i))
-  );
+    async function tabWorker(page, workerIndex) {
+      await sleep(
+        workerIndex *
+          Number(process.env.TEAM_SCHOOL_STAGGER_MS ?? "500")
+      );
+
+      while (true) {
+        const myIndex = nextIndex++;
+        if (myIndex >= schoolList.length) break;
+
+        const sportschool = schoolList[myIndex];
+        const key = normalizeSportschoolKey(sportschool.sportschool_id);
+
+        if (!key) {
+          results.push({
+            sportschool_id: sportschool.sportschool_id,
+            sportschool_naam: sportschool.naam ?? null,
+            ok: false,
+            error: "Ongeldige sportschool_id",
+          });
+          continue;
+        }
+
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log(
+          `🏫 [tab ${workerIndex + 1}/${tabCount}] Sportschool starten`,
+          {
+            sportschool_id: Number(key),
+            naam: sportschool.naam ?? null,
+            plaats: sportschool.plaats ?? null,
+          }
+        );
+
+        try {
+          const vaList = await scrapeSportschoolWithPage(
+            page,
+            browser,
+            sportschool
+          );
+
+          results.push({
+            sportschool_id: Number(key),
+            sportschool_naam: sportschool.naam ?? null,
+            ok: true,
+            count: vaList.length,
+          });
+
+          console.log(
+            `✅ [tab ${workerIndex + 1}/${tabCount}] Sportschool volledig klaar`,
+            {
+              sportschool_id: Number(key),
+              naam: sportschool.naam ?? null,
+              vechters: vaList.length,
+            }
+          );
+        } catch (e) {
+          const message = e?.message ?? String(e);
+
+          await updateSportschoolSyncStatus(key, "fout", message).catch(() => {});
+
+          results.push({
+            sportschool_id: Number(key),
+            sportschool_naam: sportschool.naam ?? null,
+            ok: false,
+            error: message,
+          });
+
+          console.log(
+            `❌ [tab ${workerIndex + 1}/${tabCount}] Sportschool mislukt; doorgaan`,
+            {
+              sportschool_id: Number(key),
+              naam: sportschool.naam ?? null,
+              error: message,
+            }
+          );
+
+          try {
+            await page.goto("about:blank", {
+              waitUntil: "domcontentloaded",
+              timeout: 10000,
+            });
+          } catch {}
+        }
+
+        await sleep(
+          Number(process.env.FIGHTCREW_BETWEEN_SCHOOLS_MS ?? "500")
+        );
+      }
+    }
+
+    await Promise.all(
+      pages.map((page, index) => tabWorker(page, index))
+    );
+  } finally {
+    try {
+      await browser.close();
+    } catch {}
+  }
 
   const succeeded = results.filter((row) => row.ok).length;
   const failed = results.length - succeeded;
@@ -1293,7 +1341,8 @@ export async function scraperFightcrewAll() {
     geslaagd: succeeded,
     mislukt: failed,
     totaal_vechters_verwerkt: fighters,
-    parallelle_puppeteers: schoolWorkers,
+    browsers: 1,
+    parallelle_tabs: tabCount,
   });
 
   return results;

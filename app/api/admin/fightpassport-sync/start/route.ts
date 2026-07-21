@@ -164,7 +164,9 @@ export async function POST(req: Request) {
       Zo komt een echte Puppeteer- of Node-fout terug als HTTP 500
       en verdwijnt die niet in een los detached proces.
     */
-    const totalResult = await runNodeScript(
+    // Start de Total scraper op de achtergrond en geef direct antwoord aan de browser.
+    // Zo voorkomt een lange run een HTTP-timeout terwijl de scraper gewoon doorgaat.
+    void runNodeScript(
       totalRobotPath,
       [String(startVa), String(endVa)],
       {
@@ -187,22 +189,33 @@ export async function POST(req: Request) {
         FP_TOTAL_RESULTS: "true",
       },
       "fp_total_admin"
+    )
+      .then((result) => {
+        console.log("[fightpassport-sync/start] ✅ totaal robot klaar", {
+          ms: result.ms,
+          start_va: startVa,
+          end_va: endVa,
+          workers,
+        });
+      })
+      .catch((err) => {
+        console.error(
+          "[fightpassport-sync/start] ❌ totaal robot achtergrondfout:",
+          err
+        );
+      });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        started: true,
+        start_va: startVa,
+        end_va: endVa,
+        workers,
+        message: `Total AutoCheck gestart voor VA ${startVa} t/m ${endVa}.`,
+      },
+      { status: 202 }
     );
-
-    console.log("[fightpassport-sync/start] ✅ totaal robot klaar", {
-      ms: totalResult.ms,
-      start_va: startVa,
-      end_va: endVa,
-      workers,
-    });
-
-    return NextResponse.json({
-      ok: true,
-      start_va: startVa,
-      end_va: endVa,
-      workers,
-      ms: totalResult.ms,
-    });
   } catch (err: any) {
     console.error(
       "[fightpassport-sync/start] ❌ totaal robot mislukt:",
