@@ -15,7 +15,7 @@ trap 'rm -f "$TMP_FILE"' EXIT
 
 cat >> "$TMP_FILE" <<'CRON'
 0 12,21 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/sportscholen >> /var/log/fightsupport-sportscholen-cron.log 2>&1
-0 22 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/start >> /var/log/fightsupport-total-cron.log 2>&1
+0 19 * * 0 cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/start >> /var/log/fightsupport-total-cron.log 2>&1
 0 8 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/stop >> /var/log/fightsupport-total-cron.log 2>&1
 CRON
 

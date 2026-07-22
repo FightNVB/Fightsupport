@@ -4,6 +4,7 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import { requireUserWithRole } from "@/app/api/_utils/authz";
+import { supabaseAdmin } from "@/lib/api/requireRole";
 
 export const runtime = "nodejs";
 
@@ -96,6 +97,29 @@ export async function POST(req: Request) {
       );
     }
 
+    const { data: activeTeamRun, error: activeRunError } = await supabaseAdmin
+      .from("fightpassport_sync_runs")
+      .select("id,status,started_at")
+      .eq("run_type", "team")
+      .in("status", ["running"])
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (activeRunError) throw activeRunError;
+
+    if (activeTeamRun) {
+      return NextResponse.json(
+        {
+          ok: true,
+          started: false,
+          already_running: true,
+          message: "Er draait al een sportscholensynchronisatie.",
+        },
+        { status: 200 }
+      );
+    }
+
     const teamRobotPath = resolveScriptPath(
       "scrapers",
       "fp_total",
@@ -136,11 +160,31 @@ export async function POST(req: Request) {
           school_tabs: 8,
         });
       })
-      .catch((err) => {
+      .catch(async (err) => {
         console.error(
           "[fightpassport-sync/start-team] ❌ sportscholen robot achtergrondfout:",
           err
         );
+
+        const { data: runningRun } = await supabaseAdmin
+          .from("fightpassport_sync_runs")
+          .select("id")
+          .eq("run_type", "team")
+          .eq("status", "running")
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (runningRun?.id) {
+          await supabaseAdmin
+            .from("fightpassport_sync_runs")
+            .update({
+              status: "failed",
+              finished_at: new Date().toISOString(),
+              error_message: err?.message ?? String(err),
+            })
+            .eq("id", runningRun.id);
+        }
       });
 
     return NextResponse.json(

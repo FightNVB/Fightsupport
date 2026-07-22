@@ -1652,12 +1652,15 @@ async function main() {
 
   async function workerLoop(workerIdx) {
     await sleep(workerIdx * STAGGER);
-    let ctx = await createWorkerContext(browser);
 
+    // Alle workers draaien bewust in DEZELFDE browsercontext als de master-login.
+    // De eerste/master-tab blijft ingelogd staan; worker-tabs openen daarna rechtstreeks
+    // hun eigen VA-url en delen automatisch dezelfde FightPassport-sessie.
     async function resetWorkerContext(reason = "") {
-      console.log(`[fp-total] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
-      await closeWorkerContext(ctx).catch(() => {});
-      ctx = await createWorkerContext(browser);
+      console.log(`[fp-total] 🧨 worker reset (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
+      // Geen aparte browsercontext om te resetten: de gedeelde master-sessie moet blijven leven.
+      // De actieve worker-page wordt door de timeout/finally gesloten en de volgende taak
+      // opent vanzelf een volledig nieuwe tab in dezelfde ingelogde browsercontext.
     }
 
     while (!stopRequested) {
@@ -1673,7 +1676,7 @@ async function main() {
 
       let page = null;
       try {
-        page = await openTabToFighterVerified(browser, ctx, cookies, va, {
+        page = await openTabToFighterVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
           softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
@@ -1690,7 +1693,7 @@ async function main() {
           continue;
         }
 
-        const openFreshPage = async (stepName = "") => openTabToFighterVerified(browser, ctx, cookies, va, {
+        const openFreshPage = async (stepName = "") => openTabToFighterVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
           softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
@@ -1701,7 +1704,11 @@ async function main() {
           () => scrapeOne(page, va, openFreshPage),
           SCRAPE_TIMEOUT_MS,
           `fp-total ${va}`,
-          async () => { await resetWorkerContext(`timeout VA ${va}`); page = null; }
+          async () => {
+            await hardClosePage(page).catch(() => {});
+            page = null;
+            await resetWorkerContext(`timeout VA ${va}`);
+          }
         );
 
         processed++;
@@ -1760,7 +1767,6 @@ async function main() {
       }
     }
 
-    await closeWorkerContext(ctx).catch(() => {});
   }
 
   try {

@@ -5,7 +5,7 @@
 # Total AutoCheck: iedere avond om 22:00 aanroepen.
 # De route hervat eerst een gepauzeerde ronde. Alleen als er niets openstaat,
 # begint hij op dinsdag en vrijdag een nieuwe volledige ronde.
-0 22 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/start >> /var/log/fightsupport-total-cron.log 2>&1
+0 19 * * 0 cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/start >> /var/log/fightsupport-total-cron.log 2>&1
 
 # Iedere ochtend om 08:00 netjes pauzeren. Lopende VA's mogen afronden.
 0 8 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/stop >> /var/log/fightsupport-total-cron.log 2>&1
