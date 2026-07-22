@@ -9,7 +9,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const START_VA = Number(process.env.FP_TOTAL_START_VA || 775);
-const END_VA = Number(process.env.FP_TOTAL_END_VA || 33150);
+const FALLBACK_END_VA = Number(process.env.FP_TOTAL_END_VA || 33108);
+const END_BUFFER = Number(process.env.FP_TOTAL_END_BUFFER || 100);
 const START_WEEKDAYS = new Set(["Tue", "Fri"]);
 
 function isCronAllowed(req: Request) {
@@ -47,6 +48,30 @@ function isProcessAlive(pid: number) {
   } catch {
     return false;
   }
+}
+
+async function resolveDynamicEndVa() {
+  // Bepaal bij iedere NIEUWE ronde het hoogste VA-nummer dat al in de centrale
+  // database staat en controleer ook een buffer daarboven. Zo groeit het bereik
+  // automatisch mee wanneer FightPassport nieuwe VA-nummers uitgeeft.
+  const { data, error } = await supabaseAdmin
+    .from("fightpassport_fighters")
+    .select("va_nummer")
+    .not("va_nummer", "is", null)
+    .order("va_nummer", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error("[cron-fp-total] Hoogste VA kon niet worden bepaald; fallback gebruikt:", error.message);
+    return FALLBACK_END_VA;
+  }
+
+  const highestKnownVa = Number(data?.[0]?.va_nummer);
+  if (!Number.isInteger(highestKnownVa) || highestKnownVa < START_VA) {
+    return FALLBACK_END_VA;
+  }
+
+  return Math.max(FALLBACK_END_VA, highestKnownVa + END_BUFFER);
 }
 
 export async function POST(req: Request) {
@@ -103,7 +128,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Total scraper niet gevonden: ${scraperPath}` }, { status: 500 });
     }
 
-    const args = run ? [String(run.start_va), String(run.end_va)] : [String(START_VA), String(END_VA)];
+    // Een hervatte ronde houdt bewust hetzelfde eindpunt. Alleen bij een nieuwe
+    // dinsdag-/vrijdagronde wordt het bereik opnieuw dynamisch bepaald.
+    const dynamicEndVa = run ? Number(run.end_va) : await resolveDynamicEndVa();
+    const args = run ? [String(run.start_va), String(run.end_va)] : [String(START_VA), String(dynamicEndVa)];
     const child = spawn(process.execPath, [scraperPath, ...args], {
       cwd: path.dirname(scraperPath),
       env: {
@@ -137,7 +165,7 @@ export async function POST(req: Request) {
       pid: child.pid,
       weekday,
       start_va: run?.start_va ?? START_VA,
-      end_va: run?.end_va ?? END_VA,
+      end_va: run?.end_va ?? dynamicEndVa,
       message: run ? "Onvoltooide Total AutoCheck-ronde hervat." : "Nieuwe Total AutoCheck-ronde gestart.",
     }, { status: 202 });
   } catch (error: any) {

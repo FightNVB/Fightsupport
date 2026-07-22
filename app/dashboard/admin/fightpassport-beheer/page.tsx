@@ -14,6 +14,7 @@ export default function FightPaspoortBeheerPage() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("fighters");
   const [fighters, setFighters] = useState<Fighter[]>([]);
+  const [totalFighters, setTotalFighters] = useState(0);
   const [runs, setRuns] = useState<Run[]>([]);
   const [items, setItems] = useState<SyncItem[]>([]);
   const [selectedRun, setSelectedRun] = useState<string>("");
@@ -32,13 +33,30 @@ export default function FightPaspoortBeheerPage() {
   const [stoppingRunId, setStoppingRunId] = useState<string>("");
   const [sortKey, setSortKey] = useState<string>("va_nummer");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 75;
 
   const loadFighters = useCallback(async () => {
-    const sp = new URLSearchParams({ q, licentie, startverbod, discipline, klasse, limit: "50000" });
+    const sp = new URLSearchParams({
+      q,
+      licentie,
+      startverbod,
+      discipline,
+      klasse,
+      page: String(page),
+      pageSize: String(PAGE_SIZE),
+      sortKey,
+      sortDir,
+    });
     const res = await authedFetch(`/api/admin/fightpassport-beheer/fighters?${sp}`);
     const json = await res.json().catch(() => ({}));
-    if (res.ok) setFighters(json.fighters ?? []); else setMessage(json.error || "Laden mislukt");
-  }, [q, licentie, startverbod, discipline, klasse]);
+    if (res.ok) {
+      setFighters(json.fighters ?? []);
+      setTotalFighters(Number(json.total ?? 0));
+    } else {
+      setMessage(json.error || "Laden mislukt");
+    }
+  }, [q, licentie, startverbod, discipline, klasse, page, sortKey, sortDir]);
 
   const loadRuns = useCallback(async () => {
     const res = await authedFetch("/api/admin/fightpassport-sync/runs");
@@ -53,49 +71,25 @@ export default function FightPaspoortBeheerPage() {
     if (res.ok) setItems(json.items ?? []);
   }, []);
 
-  useEffect(() => { loadFighters(); }, [loadFighters]);
+  useEffect(() => {
+    if (tab === "fighters") loadFighters();
+  }, [tab, loadFighters]);
+
   useEffect(() => {
     loadRuns();
-    const t = setInterval(async () => {
-      await loadRuns();
-      await loadFighters();
+    const t = setInterval(() => {
+      loadRuns();
     }, 5000);
     return () => clearInterval(t);
-  }, [loadRuns, loadFighters]);
+  }, [loadRuns]);
   useEffect(() => { if (selectedRun) loadItems(selectedRun); }, [selectedRun, loadItems]);
 
   const allErrors = useMemo(() => items.filter((x) => x.status === "error"), [items]);
 
-  const sortedFighters = useMemo(() => {
-    const rows = [...fighters];
-
-    const valueFor = (fighter: any, key: string) => {
-      switch (key) {
-        case "va_nummer": return Number(fighter?.va_nummer) || 0;
-        case "naam": return String(fighter?.naam ?? "");
-        case "discipline": return String(fighter?.primary_discipline ?? fighter?.nulmeting_discipline ?? "");
-        case "klasse": return String(fighter?.mma_level ?? fighter?.berekende_klasse ?? fighter?.nulmeting_klasse ?? "");
-        case "licentie": return fighter?.licentie_actief ? 1 : 0;
-        case "status": return fighter?.heeft_startverbod ? 1 : 0;
-        case "email": return String(fighter?.email ?? "");
-        default: return "";
-      }
-    };
-
-    rows.sort((a, b) => {
-      const av = valueFor(a, sortKey);
-      const bv = valueFor(b, sortKey);
-      const result =
-        typeof av === "number" && typeof bv === "number"
-          ? av - bv
-          : String(av).localeCompare(String(bv), "nl", { numeric: true, sensitivity: "base" });
-      return sortDir === "asc" ? result : -result;
-    });
-
-    return rows;
-  }, [fighters, sortKey, sortDir]);
+  const totalPages = Math.max(1, Math.ceil(totalFighters / PAGE_SIZE));
 
   function toggleSort(key: string) {
+    setPage(1);
     if (sortKey === key) {
       setSortDir((dir) => dir === "asc" ? "desc" : "asc");
     } else {
@@ -218,22 +212,35 @@ export default function FightPaspoortBeheerPage() {
 
     {tab === "fighters" && <>
       <section style={styles.panel}><div style={styles.filters}>
-        <label style={styles.label}>Zoeken<div style={{position:"relative"}}><Search size={15} style={{position:"absolute",left:10,top:12,color:"#888"}}/><input style={{...styles.input,paddingLeft:34}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Naam of VA-nummer"/></div></label>
-        <Select label="Licentie" value={licentie} set={setLicentie} options={[["all","Alle"],["yes","Geldig"],["no","Geen"]]}/>
-        <Select label="Startverbod" value={startverbod} set={setStartverbod} options={[["all","Alle"],["yes","Ja"],["no","Nee"]]}/>
-        <Select label="Discipline" value={discipline} set={setDiscipline} options={[["all","Alle"],["kbtb","KB/TB"],["mma","MMA"]]}/>
-        <Select label="Klasse" value={klasse} set={setKlasse} options={[["all","Alle"],["J","J"],["R","R"],["N","N"],["C","C"],["B","B"],["A","A"],["AMATEUR","MMA Amateur"],["PRO","MMA Pro"]]}/>
+        <label style={styles.label}>Zoeken<div style={{position:"relative"}}><Search size={15} style={{position:"absolute",left:10,top:12,color:"#888"}}/><input style={{...styles.input,paddingLeft:34}} value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} placeholder="Naam of VA-nummer"/></div></label>
+        <Select label="Licentie" value={licentie} set={(v:any)=>{setLicentie(v);setPage(1)}} options={[["all","Alle"],["yes","Geldig"],["no","Geen"]]}/>
+        <Select label="Startverbod" value={startverbod} set={(v:any)=>{setStartverbod(v);setPage(1)}} options={[["all","Alle"],["yes","Ja"],["no","Nee"]]}/>
+        <Select label="Discipline" value={discipline} set={(v:any)=>{setDiscipline(v);setPage(1)}} options={[["all","Alle"],["kbtb","KB/TB"],["mma","MMA"]]}/>
+        <Select label="Klasse" value={klasse} set={(v:any)=>{setKlasse(v);setPage(1)}} options={[["all","Alle"],["J","J"],["R","R"],["N","N"],["C","C"],["B","B"],["A","A"],["AMATEUR","MMA Amateur"],["PRO","MMA Pro"]]}/>
         <button style={styles.silver} onClick={loadFighters}><RefreshCw size={15}/>Verversen</button>
       </div></section>
-      <section style={{...styles.panel,marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}><b>{fighters.length} vechters zichtbaar</b><span style={{color:"#999",fontSize:12}}>Klik op een vechter voor het volledige dossier</span></div><Table><thead><tr>
-        <SortableTh label="VA" sortKey="va_nummer" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
-        <SortableTh label="Naam" sortKey="naam" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
-        <SortableTh label="Discipline" sortKey="discipline" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
-        <SortableTh label="Klasse" sortKey="klasse" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
-        <SortableTh label="Licentie" sortKey="licentie" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
-        <SortableTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
-        <SortableTh label="E-mailadres" sortKey="email" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
-      </tr></thead><tbody>{sortedFighters.map(f=><tr key={f.va_nummer} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${f.va_nummer}`)} style={{cursor:"pointer"}}><Td>{f.va_nummer}</Td><Td><b>{f.naam||"Onbekend"}</b></Td><Td>{f.primary_discipline||f.nulmeting_discipline||"-"}</Td><Td><ClassBadge text={f.mma_level||f.berekende_klasse||f.nulmeting_klasse||"-"}/></Td><Td>{f.licentie_actief?"✅ Ja":"— Nee"}</Td><Td>{f.heeft_startverbod?<span style={{color:"#ff654d"}}>⛔ Startverbod</span>:<span style={{color:"#70dc8a"}}>✓ Fit to fight</span>}</Td><Td>{f.email||"Geen e-mail"}</Td></tr>)}</tbody></Table></section>
+      <section style={{...styles.panel,marginTop:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
+          <b>{totalFighters} vechters gevonden · pagina {page} van {totalPages}</b>
+          <span style={{color:"#999",fontSize:12}}>Klik op een vechter voor het volledige dossier</span>
+        </div>
+        <Table><thead><tr>
+          <SortableTh label="VA" sortKey="va_nummer" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+          <SortableTh label="Naam" sortKey="naam" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+          <SortableTh label="Discipline" sortKey="discipline" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+          <SortableTh label="Klasse" sortKey="klasse" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+          <SortableTh label="Licentie" sortKey="licentie" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+          <SortableTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+          <SortableTh label="E-mailadres" sortKey="email" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+        </tr></thead><tbody>{fighters.map(f=><tr key={f.va_nummer} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${f.va_nummer}`)} style={{cursor:"pointer"}}><Td>{f.va_nummer}</Td><Td><b>{f.naam||"Onbekend"}</b></Td><Td>{f.primary_discipline||f.nulmeting_discipline||"-"}</Td><Td><ClassBadge text={f.mma_level||f.berekende_klasse||f.nulmeting_klasse||"-"}/></Td><Td><span title={f.licentie_actief?"Geldige licentie":"Geen geldige licentie"} style={{fontSize:18}}>{f.licentie_actief?"✅":"⛔"}</span></Td><Td>{f.heeft_startverbod?<span style={{color:"#ff654d"}}>⛔ Startverbod</span>:<span style={{color:"#70dc8a"}}>✓ Fit to fight</span>}</Td><Td>{f.email||"Geen e-mail"}</Td></tr>)}</tbody></Table>
+        <div style={styles.pagination}>
+          <button style={styles.silver} disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Vorige</button>
+          <span style={{color:"#bbb",fontSize:13}}>
+            {totalFighters ? `${(page-1)*PAGE_SIZE+1}–${Math.min(page*PAGE_SIZE, totalFighters)} van ${totalFighters}` : "0 vechters"}
+          </span>
+          <button style={styles.silver} disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Verder</button>
+        </div>
+      </section>
     </>}
 
     {tab === "sync" && <>
@@ -369,4 +376,4 @@ function formatDuration(start:any,end?:any){
   return `${seconds}s`;
 }
 const styles:any={page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},activeRunBanner:{border:"1px solid #ff7b3b",background:"linear-gradient(180deg,#3a1707,#1a0b05)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #ff4d0033,0 12px 30px #0008"},activeRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #ff7b3b",background:"#ff4d00",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
-orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},stop:{display:"inline-flex",alignItems:"center",gap:5,background:"#6d2020",border:"1px solid #c94a4a",color:"#fff",fontWeight:900,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0}};
+orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},stop:{display:"inline-flex",alignItems:"center",gap:5,background:"#6d2020",border:"1px solid #c94a4a",color:"#fff",fontWeight:900,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0},pagination:{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}};
