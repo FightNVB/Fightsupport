@@ -12,12 +12,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const START_VA = Number(process.argv[2] || process.env.FP_TOTAL_START_VA || 775);
 const END_VA = Number(process.argv[3] || process.env.FP_TOTAL_END_VA || 33150);
-const WORKERS_RAW = Number(process.env.FP_TOTAL_WORKERS ?? process.env.WORKERS ?? "6");
+const WORKERS_RAW = Number(process.env.FP_TOTAL_WORKERS ?? process.env.WORKERS ?? "8");
 const WORKERS = Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
   ? Math.min(10, Math.max(1, Math.floor(WORKERS_RAW)))
-  : 6;
+  : 8;
 const FULL_DETAILS_ONLY_LICENSED = String(process.env.FP_TOTAL_ONLY_LICENSED || "false").toLowerCase() === "true";
 const SCRAPE_RESULTS = String(process.env.FP_TOTAL_RESULTS || "true").toLowerCase() !== "false";
+const RESUME_RUN_ID = String(process.env.FP_TOTAL_RUN_ID || "").trim();
+
+let stopRequested = false;
+let stopSignal = null;
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    if (!stopRequested) {
+      stopRequested = true;
+      stopSignal = signal;
+      console.log(`[fp-total] ⏸️ ${signal} ontvangen: geen nieuwe VA's meer uitdelen; lopende workers ronden af.`);
+    }
+  });
+}
 
 /**
  * HARD timeout wrapper.
@@ -1478,26 +1491,116 @@ async function upsertSyncItem(runId, va, patch) {
     .upsert(payload, { onConflict: "sync_run_id,va_nummer" });
   if (error) console.log(`[fp-total] sync item log fout VA ${va}: ${error.message}`);
 }
+async function loadExistingRunItems(runId) {
+  const items = [];
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("fightpassport_sync_items")
+      .select("va_nummer,status,profiel_gevonden,licentie_actief")
+      .eq("sync_run_id", runId)
+      .order("va_nummer", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    const rows = data ?? [];
+    items.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return items;
+}
+
 async function main() {
   if (!Number.isInteger(START_VA) || !Number.isInteger(END_VA) || END_VA < START_VA) {
     throw new Error("Ongeldig VA-bereik");
   }
 
+  let run;
+  let effectiveStartVa = START_VA;
+  let effectiveEndVa = END_VA;
+  let existingItems = [];
+
+  if (RESUME_RUN_ID) {
+    const { data, error } = await supabase
+      .from("fightpassport_sync_runs")
+      .select("*")
+      .eq("id", RESUME_RUN_ID)
+      .single();
+
+    if (error || !data) throw error || new Error(`Run ${RESUME_RUN_ID} niet gevonden`);
+    if (String(data.run_type || "").toLowerCase() !== "full") {
+      throw new Error("Alleen full-runs kunnen worden hervat");
+    }
+    if (["completed", "cancelled", "canceled"].includes(String(data.status || "").toLowerCase())) {
+      throw new Error(`Run ${RESUME_RUN_ID} is al afgesloten (${data.status})`);
+    }
+
+    run = data;
+    effectiveStartVa = Number(data.start_va);
+    effectiveEndVa = Number(data.end_va);
+    existingItems = await loadExistingRunItems(run.id);
+
+    const meta = { ...(data.meta || {}), workers: WORKERS, pid: process.pid, resumed_at: new Date().toISOString() };
+    const { error: resumeErr } = await supabase
+      .from("fightpassport_sync_runs")
+      .update({ status: "running", finished_at: null, error_message: null, meta })
+      .eq("id", run.id);
+    if (resumeErr) throw resumeErr;
+
+    console.log(`[fp-total] ▶️ hervat run ${run.id} voor VA ${effectiveStartVa}-${effectiveEndVa}`);
+  } else {
+    const { data, error } = await supabase
+      .from("fightpassport_sync_runs")
+      .insert({
+        start_va: effectiveStartVa,
+        end_va: effectiveEndVa,
+        run_type: "full",
+        meta: { workers: WORKERS, pid: process.pid, cycle_started_at: new Date().toISOString() },
+      })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    run = data;
+  }
+
+  const terminalStatuses = new Set(["success", "not_found", "skipped", "error"]);
+  const terminalByVa = new Map(existingItems.map((item) => [String(item.va_nummer), String(item.status || "").toLowerCase()]));
+
   const vaList = [];
-  for (let va = START_VA; va <= END_VA; va++) vaList.push(String(va));
+  for (let va = effectiveStartVa; va <= effectiveEndVa; va++) {
+    const status = terminalByVa.get(String(va));
+    if (!terminalStatuses.has(status)) vaList.push(String(va));
+  }
 
-  const { data: run, error: runErr } = await supabase
-    .from("fightpassport_sync_runs")
-    .insert({
-      start_va: START_VA,
-      end_va: END_VA,
-      run_type: "full",
-      meta: { workers: WORKERS, pid: process.pid },
-    })
-    .select("id")
-    .single();
+  let processed = existingItems.filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase())).length;
+  let found = existingItems.filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase()) && x.profiel_gevonden === true).length;
+  let licensed = existingItems.filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase()) && x.licentie_actief === true).length;
+  let errors = existingItems.filter((x) => String(x.status || "").toLowerCase() === "error").length;
+  let lastProcessedVa = existingItems
+    .filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase()))
+    .reduce((max, x) => Math.max(max, Number(x.va_nummer) || 0), 0) || null;
 
-  if (runErr) throw runErr;
+  if (vaList.length === 0) {
+    await supabase
+      .from("fightpassport_sync_runs")
+      .update({
+        status: "completed",
+        last_processed_va: effectiveEndVa,
+        processed_count: processed,
+        found_count: found,
+        licensed_count: licensed,
+        error_count: errors,
+        finished_at: new Date().toISOString(),
+      })
+      .eq("id", run.id);
+    console.log(`[fp-total] ✅ run ${run.id} was al volledig verwerkt`);
+    return;
+  }
 
   const { browser, page: masterPage } = await loginFightPassport();
 
@@ -1512,45 +1615,33 @@ async function main() {
 
   async function refreshMasterSessionLocked(reason = "") {
     if (masterRefreshPromise) {
-      try {
-        await masterRefreshPromise;
-      } catch {}
+      try { await masterRefreshPromise; } catch {}
       return cookies;
     }
 
     masterRefreshPromise = (async () => {
       console.log(`[fp-total] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
       await ensureLoggedIn(masterPage, { force: true });
-
-      try {
-        cookies = await masterPage.cookies();
-      } catch {}
-
+      try { cookies = await masterPage.cookies(); } catch {}
       console.log("[fp-total] ✅ master refreshed (cookies updated)");
       return cookies;
     })();
 
-    try {
-      return await masterRefreshPromise;
-    } finally {
-      masterRefreshPromise = null;
-    }
+    try { return await masterRefreshPromise; }
+    finally { masterRefreshPromise = null; }
   }
 
   const SCRAPE_TIMEOUT_MS = Number(process.env.FP_TOTAL_TIMEOUT_MS ?? "600000");
-  const STAGGER = Number(process.env.STAGGER_MS ?? "700");
+  const STAGGER = Number(process.env.STAGGER_MS ?? "2500");
 
   let idx = 0;
-  let processed = 0;
-  let found = 0;
-  let licensed = 0;
-  let errors = 0;
 
-  async function updateRunProgress(lastVa) {
+  async function updateRunProgress(lastVa = lastProcessedVa) {
+    if (lastVa != null) lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(lastVa || 0));
     await supabase
       .from("fightpassport_sync_runs")
       .update({
-        last_processed_va: Number(lastVa),
+        last_processed_va: lastProcessedVa,
         processed_count: processed,
         found_count: found,
         licensed_count: licensed,
@@ -1561,18 +1652,15 @@ async function main() {
 
   async function workerLoop(workerIdx) {
     await sleep(workerIdx * STAGGER);
-
     let ctx = await createWorkerContext(browser);
 
     async function resetWorkerContext(reason = "") {
-      console.log(
-        `[fp-total] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`
-      );
+      console.log(`[fp-total] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
       await closeWorkerContext(ctx).catch(() => {});
       ctx = await createWorkerContext(browser);
     }
 
-    while (true) {
+    while (!stopRequested) {
       const myIdx = idx++;
       if (myIdx >= vaList.length) break;
 
@@ -1581,17 +1669,10 @@ async function main() {
       const itemStartedAt = new Date().toISOString();
 
       console.log(`[fp-total] 🤖 ${label} → VA ${va}`);
-
-      await upsertSyncItem(run.id, va, {
-        status: "processing",
-        started_at: itemStartedAt,
-      });
+      await upsertSyncItem(run.id, va, { status: "processing", started_at: itemStartedAt, finished_at: null });
 
       let page = null;
-
       try {
-        // Exact same principle as fp_bundle:
-        // NEW TAB for this VA, direct fighter URL, verify header, close after this VA.
         page = await openTabToFighterVerified(browser, ctx, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
           softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
@@ -1601,39 +1682,30 @@ async function main() {
 
         if (!page) {
           processed++;
-
+          lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
           await upsertSyncItem(run.id, va, {
-            status: "not_found",
-            profiel_gevonden: false,
-            finished_at: new Date().toISOString(),
-            error_step: null,
-            error_message: null,
+            status: "not_found", profiel_gevonden: false, finished_at: new Date().toISOString(), error_step: null, error_message: null,
           });
-
           console.log(`[fp-total] — ${label} VA ${va}: niet gevonden / geen geldige fighter-header`);
           continue;
         }
 
-        const openFreshPage = async (stepName = "") => {
-          return await openTabToFighterVerified(browser, ctx, cookies, va, {
-            maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-            softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
-            betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
-            workerLabel: `[${label}${stepName ? ` ${stepName}` : ""}]`,
-          });
-        };
+        const openFreshPage = async (stepName = "") => openTabToFighterVerified(browser, ctx, cookies, va, {
+          maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
+          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
+          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+          workerLabel: `[${label}${stepName ? ` ${stepName}` : ""}]`,
+        });
 
         const res = await withTimeout(
           () => scrapeOne(page, va, openFreshPage),
           SCRAPE_TIMEOUT_MS,
           `fp-total ${va}`,
-          async () => {
-            await resetWorkerContext(`timeout VA ${va}`);
-            page = null;
-          }
+          async () => { await resetWorkerContext(`timeout VA ${va}`); page = null; }
         );
 
         processed++;
+        lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
         if (res.exists) found++;
         if (res.licensed) licensed++;
 
@@ -1647,33 +1719,24 @@ async function main() {
           gyms_count: res.counts?.gyms ?? 0,
           startbans_count: res.counts?.startbans ?? 0,
           licenses_count: res.counts?.licenses ?? 0,
-          finished_at: new Date().toISOString(),
-          error_step: null,
-          error_message: null,
+          finished_at: new Date().toISOString(), error_step: null, error_message: null,
         });
 
-        console.log(
-          `[fp-total] ✅ ${label} VA ${va}: FULLFIGHTER=${res.exists ? "success" : "not_found"} | UITSLAGEN=${res.resultsStatus || "skipped"}${res.resultsError ? ` (${res.resultsError})` : ""}${res.licensed ? " | licentie" : ""}`
-        );
+        console.log(`[fp-total] ✅ ${label} VA ${va}: FULLFIGHTER=${res.exists ? "success" : "not_found"} | UITSLAGEN=${res.resultsStatus || "skipped"}${res.resultsError ? ` (${res.resultsError})` : ""}${res.licensed ? " | licentie" : ""}`);
       } catch (e) {
         processed++;
         errors++;
-
+        lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
         const msg = e?.message ?? String(e);
 
         await upsertSyncItem(run.id, va, {
-          status: "error",
-          profiel_gevonden: false,
+          status: "error", profiel_gevonden: false,
           error_step: String(msg).startsWith("HARD TIMEOUT") ? "timeout" : "scrape_or_save",
-          error_message: msg,
-          finished_at: new Date().toISOString(),
+          error_message: msg, finished_at: new Date().toISOString(),
         });
 
         if (msg === "LOGIN_PAGE") {
-          console.log(
-            `[fp-total] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`
-          );
-
+          console.log(`[fp-total] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
           try {
             await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
             await resetWorkerContext(`login refresh VA ${va}`);
@@ -1691,10 +1754,8 @@ async function main() {
           }
         } catch {}
 
-        if (processed % 10 === 0 || Number(va) === END_VA) {
-          await updateRunProgress(va).catch((e) =>
-            console.log("[fp-total] run progress update fout:", e?.message ?? String(e))
-          );
+        if (processed % 10 === 0 || Number(va) === effectiveEndVa || stopRequested) {
+          await updateRunProgress(va).catch((e) => console.log("[fp-total] run progress update fout:", e?.message ?? String(e)));
         }
       }
     }
@@ -1704,38 +1765,47 @@ async function main() {
 
   try {
     await Promise.all(Array.from({ length: WORKERS }, (_, i) => workerLoop(i)));
+    await updateRunProgress();
+
+    const allDone = processed >= (effectiveEndVa - effectiveStartVa + 1);
+    const now = new Date().toISOString();
+    const currentMeta = { ...(run.meta || {}), pid: null, last_stopped_at: stopRequested ? now : undefined, last_stop_signal: stopSignal || undefined };
 
     await supabase
       .from("fightpassport_sync_runs")
-      .update({
+      .update(allDone ? {
         status: "completed",
-        last_processed_va: END_VA,
+        last_processed_va: effectiveEndVa,
         processed_count: processed,
         found_count: found,
         licensed_count: licensed,
         error_count: errors,
-        finished_at: new Date().toISOString(),
+        finished_at: now,
+        meta: currentMeta,
+      } : {
+        status: "paused",
+        processed_count: processed,
+        found_count: found,
+        licensed_count: licensed,
+        error_count: errors,
+        finished_at: null,
+        error_message: null,
+        meta: currentMeta,
       })
       .eq("id", run.id);
+
+    console.log(allDone
+      ? `[fp-total] ✅ volledige ronde ${run.id} afgerond`
+      : `[fp-total] ⏸️ ronde ${run.id} gepauzeerd na ${processed} verwerkte VA's`);
   } catch (e) {
     await supabase
       .from("fightpassport_sync_runs")
-      .update({
-        status: "failed",
-        error_message: e?.message ?? String(e),
-        finished_at: new Date().toISOString(),
-      })
+      .update({ status: "failed", error_message: e?.message ?? String(e), finished_at: new Date().toISOString() })
       .eq("id", run.id);
-
     throw e;
   } finally {
-    try {
-      await masterPage.close();
-    } catch {}
-
-    try {
-      await browser.close();
-    } catch {}
+    try { await masterPage.close(); } catch {}
+    try { await browser.close(); } catch {}
   }
 }
 

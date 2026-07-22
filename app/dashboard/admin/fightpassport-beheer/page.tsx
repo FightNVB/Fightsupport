@@ -30,9 +30,11 @@ export default function FightPaspoortBeheerPage() {
   const [busyDeleteTotal, setBusyDeleteTotal] = useState(false);
   const [busyDeleteTeam, setBusyDeleteTeam] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string>("");
+  const [sortKey, setSortKey] = useState<string>("va_nummer");
+  const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
 
   const loadFighters = useCallback(async () => {
-    const sp = new URLSearchParams({ q, licentie, startverbod, discipline, klasse, limit: "1000" });
+    const sp = new URLSearchParams({ q, licentie, startverbod, discipline, klasse, limit: "50000" });
     const res = await authedFetch(`/api/admin/fightpassport-beheer/fighters?${sp}`);
     const json = await res.json().catch(() => ({}));
     if (res.ok) setFighters(json.fighters ?? []); else setMessage(json.error || "Laden mislukt");
@@ -52,10 +54,55 @@ export default function FightPaspoortBeheerPage() {
   }, []);
 
   useEffect(() => { loadFighters(); }, [loadFighters]);
-  useEffect(() => { loadRuns(); const t = setInterval(loadRuns, 5000); return () => clearInterval(t); }, [loadRuns]);
+  useEffect(() => {
+    loadRuns();
+    const t = setInterval(async () => {
+      await loadRuns();
+      await loadFighters();
+    }, 5000);
+    return () => clearInterval(t);
+  }, [loadRuns, loadFighters]);
   useEffect(() => { if (selectedRun) loadItems(selectedRun); }, [selectedRun, loadItems]);
 
   const allErrors = useMemo(() => items.filter((x) => x.status === "error"), [items]);
+
+  const sortedFighters = useMemo(() => {
+    const rows = [...fighters];
+
+    const valueFor = (fighter: any, key: string) => {
+      switch (key) {
+        case "va_nummer": return Number(fighter?.va_nummer) || 0;
+        case "naam": return String(fighter?.naam ?? "");
+        case "discipline": return String(fighter?.primary_discipline ?? fighter?.nulmeting_discipline ?? "");
+        case "klasse": return String(fighter?.mma_level ?? fighter?.berekende_klasse ?? fighter?.nulmeting_klasse ?? "");
+        case "licentie": return fighter?.licentie_actief ? 1 : 0;
+        case "status": return fighter?.heeft_startverbod ? 1 : 0;
+        case "email": return String(fighter?.email ?? "");
+        default: return "";
+      }
+    };
+
+    rows.sort((a, b) => {
+      const av = valueFor(a, sortKey);
+      const bv = valueFor(b, sortKey);
+      const result =
+        typeof av === "number" && typeof bv === "number"
+          ? av - bv
+          : String(av).localeCompare(String(bv), "nl", { numeric: true, sensitivity: "base" });
+      return sortDir === "asc" ? result : -result;
+    });
+
+    return rows;
+  }, [fighters, sortKey, sortDir]);
+
+  function toggleSort(key: string) {
+    if (sortKey === key) {
+      setSortDir((dir) => dir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
 
   const activeTotalRun = useMemo(() => {
     return runs.find((run: any) => {
@@ -178,7 +225,15 @@ export default function FightPaspoortBeheerPage() {
         <Select label="Klasse" value={klasse} set={setKlasse} options={[["all","Alle"],["J","J"],["R","R"],["N","N"],["C","C"],["B","B"],["A","A"],["AMATEUR","MMA Amateur"],["PRO","MMA Pro"]]}/>
         <button style={styles.silver} onClick={loadFighters}><RefreshCw size={15}/>Verversen</button>
       </div></section>
-      <section style={{...styles.panel,marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}><b>{fighters.length} vechters zichtbaar</b><span style={{color:"#999",fontSize:12}}>Klik op een vechter voor het volledige dossier</span></div><Table><thead><tr><Th>VA</Th><Th>Naam</Th><Th>Discipline</Th><Th>Klasse</Th><Th>Licentie</Th><Th>Status</Th><Th>E-mailadres</Th></tr></thead><tbody>{fighters.map(f=><tr key={f.va_nummer} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${f.va_nummer}`)} style={{cursor:"pointer"}}><Td>{f.va_nummer}</Td><Td><b>{f.naam||"Onbekend"}</b></Td><Td>{f.primary_discipline||f.nulmeting_discipline||"-"}</Td><Td><ClassBadge text={f.mma_level||f.berekende_klasse||f.nulmeting_klasse||"-"}/></Td><Td>{f.licentie_actief?"✅ Ja":"— Nee"}</Td><Td>{f.heeft_startverbod?<span style={{color:"#ff654d"}}>⛔ Startverbod</span>:<span style={{color:"#70dc8a"}}>✓ Fit to fight</span>}</Td><Td>{f.email||"Geen e-mail"}</Td></tr>)}</tbody></Table></section>
+      <section style={{...styles.panel,marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}><b>{fighters.length} vechters zichtbaar</b><span style={{color:"#999",fontSize:12}}>Klik op een vechter voor het volledige dossier</span></div><Table><thead><tr>
+        <SortableTh label="VA" sortKey="va_nummer" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+        <SortableTh label="Naam" sortKey="naam" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+        <SortableTh label="Discipline" sortKey="discipline" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+        <SortableTh label="Klasse" sortKey="klasse" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+        <SortableTh label="Licentie" sortKey="licentie" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+        <SortableTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+        <SortableTh label="E-mailadres" sortKey="email" activeKey={sortKey} dir={sortDir} onSort={toggleSort}/>
+      </tr></thead><tbody>{sortedFighters.map(f=><tr key={f.va_nummer} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${f.va_nummer}`)} style={{cursor:"pointer"}}><Td>{f.va_nummer}</Td><Td><b>{f.naam||"Onbekend"}</b></Td><Td>{f.primary_discipline||f.nulmeting_discipline||"-"}</Td><Td><ClassBadge text={f.mma_level||f.berekende_klasse||f.nulmeting_klasse||"-"}/></Td><Td>{f.licentie_actief?"✅ Ja":"— Nee"}</Td><Td>{f.heeft_startverbod?<span style={{color:"#ff654d"}}>⛔ Startverbod</span>:<span style={{color:"#70dc8a"}}>✓ Fit to fight</span>}</Td><Td>{f.email||"Geen e-mail"}</Td></tr>)}</tbody></Table></section>
     </>}
 
     {tab === "sync" && <>
@@ -190,6 +245,7 @@ export default function FightPaspoortBeheerPage() {
             <span>
               {activeTotalRun.processed_count ?? 0}/{Math.max(0,(activeTotalRun.end_va ?? 0)-(activeTotalRun.start_va ?? 0)+1)} verwerkt
             </span>
+            <span>Laatste VA {activeTotalRun.last_processed_va ?? "—"}</span>
             <span>Gestart {fmt(activeTotalRun.started_at)}</span>
             <span>Loopt {formatDuration(activeTotalRun.started_at)}</span>
           </div>
@@ -223,7 +279,7 @@ export default function FightPaspoortBeheerPage() {
         </div>
         {message&&<p style={{color:"#ff8a52"}}>{message}</p>}
       </section>
-      <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Licentie</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{
+      <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Laatste VA</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Licentie</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{
         const finishedAt = r.finished_at ?? r.completed_at ?? r.ended_at ?? null;
         const isDone = ["completed","failed","cancelled","canceled"].includes(String(r.status ?? "").toLowerCase());
         return <tr key={r.id}>
@@ -231,6 +287,7 @@ export default function FightPaspoortBeheerPage() {
           <Td>{finishedAt ? fmt(finishedAt) : isDone ? "-" : "Nog bezig"}</Td>
           <Td>{formatDuration(r.started_at, finishedAt)}</Td>
           <Td>{r.start_va}–{r.end_va}</Td>
+          <Td>{r.last_processed_va ?? "—"}</Td>
           <Td>{r.processed_count}/{r.end_va-r.start_va+1}</Td>
           <Td>{r.found_count}</Td>
           <Td>{r.licensed_count}</Td>
@@ -265,6 +322,14 @@ function Table({children}:any){return <div className="fp-table-wrap" style={{ove
       .fp-table-wrap :global(tbody tr:hover td){background:#242c34}
       .fp-table-wrap :global(tbody small){color:#aeb5bc}
     `}</style><table style={styles.table}>{children}</table></div>}
+function SortableTh({label,sortKey,activeKey,dir,onSort}:any){
+  const active=activeKey===sortKey;
+  return <th style={{...styles.th,cursor:"pointer",userSelect:"none"}} onClick={()=>onSort(sortKey)} title={`Sorteren op ${label}`}>
+    <span style={{display:"inline-flex",alignItems:"center",gap:6}}>
+      {label}<span style={{fontSize:11,opacity:active?1:.35}}>{active?(dir==="asc"?"▲":"▼"):"↕"}</span>
+    </span>
+  </th>
+}
 function Th({children}:any){return <th style={styles.th}>{children}</th>}
 function Td({children,...rest}:any){return <td style={styles.td} {...rest}>{children}</td>}
 function ClassBadge({text}:any){
