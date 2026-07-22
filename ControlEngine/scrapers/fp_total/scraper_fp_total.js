@@ -1492,7 +1492,7 @@ async function main() {
       start_va: START_VA,
       end_va: END_VA,
       run_type: "full",
-      meta: { workers: WORKERS },
+      meta: { workers: WORKERS, pid: process.pid },
     })
     .select("id")
     .single();

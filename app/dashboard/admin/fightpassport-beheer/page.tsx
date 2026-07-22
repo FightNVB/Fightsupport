@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Bug, Database, Play, RefreshCw, Search, Trash2, Users } from "lucide-react";
+import { ArrowLeft, Bug, Database, Play, RefreshCw, Search, StopCircle, Trash2, Users } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
 
 type Fighter = any;
@@ -29,6 +29,7 @@ export default function FightPaspoortBeheerPage() {
   const [busyTeam, setBusyTeam] = useState(false);
   const [busyDeleteTotal, setBusyDeleteTotal] = useState(false);
   const [busyDeleteTeam, setBusyDeleteTeam] = useState(false);
+  const [stoppingRunId, setStoppingRunId] = useState<string>("");
 
   const loadFighters = useCallback(async () => {
     const sp = new URLSearchParams({ q, licentie, startverbod, discipline, klasse, limit: "1000" });
@@ -56,13 +57,15 @@ export default function FightPaspoortBeheerPage() {
 
   const allErrors = useMemo(() => items.filter((x) => x.status === "error"), [items]);
 
-  async function startTotalRobot() {
-    const activeTotalRun = runs.some((run: any) => {
+  const activeTotalRun = useMemo(() => {
+    return runs.find((run: any) => {
       const status = String(run?.status ?? "").toLowerCase();
       const runType = String(run?.run_type ?? "").toLowerCase();
       return runType === "full" && !["completed", "failed", "cancelled", "canceled"].includes(status);
-    });
+    }) ?? null;
+  }, [runs]);
 
+  async function startTotalRobot() {
     if (activeTotalRun) {
       const startAnyway = window.confirm(
         "Er loopt al een Total AutoCheck-run. Weet je zeker dat je een tweede run wilt starten?\n\nKies Annuleren om de bestaande run alleen door te laten lopen."
@@ -102,6 +105,31 @@ export default function FightPaspoortBeheerPage() {
         : json.error || "Sportscholensynchronisatie starten mislukt."
     );
     setTimeout(loadFighters, 1200);
+  }
+
+
+  async function stopRun(runId: string) {
+    if (!window.confirm("Weet je zeker dat je deze actieve Total AutoCheck-run wilt stoppen?")) return;
+
+    setStoppingRunId(runId);
+    setMessage("");
+
+    const res = await authedFetch("/api/admin/fightpassport-sync/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: runId }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    setStoppingRunId("");
+
+    setMessage(
+      res.ok
+        ? "Run gestopt."
+        : json.error || "Run stoppen mislukt."
+    );
+
+    await loadRuns();
   }
 
 
@@ -154,6 +182,26 @@ export default function FightPaspoortBeheerPage() {
     </>}
 
     {tab === "sync" && <>
+      {activeTotalRun&&<section style={styles.activeRunBanner}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <span style={styles.activeRunBadge}>● TOTAL AUTOCHECK ACTIEF</span>
+            <b>VA {activeTotalRun.start_va}–{activeTotalRun.end_va}</b>
+            <span>
+              {activeTotalRun.processed_count ?? 0}/{Math.max(0,(activeTotalRun.end_va ?? 0)-(activeTotalRun.start_va ?? 0)+1)} verwerkt
+            </span>
+            <span>Gestart {fmt(activeTotalRun.started_at)}</span>
+            <span>Loopt {formatDuration(activeTotalRun.started_at)}</span>
+          </div>
+          <button
+            style={styles.stop}
+            disabled={stoppingRunId===activeTotalRun.id}
+            onClick={()=>stopRun(activeTotalRun.id)}
+          >
+            <StopCircle size={15}/>{stoppingRunId===activeTotalRun.id?"Stoppen...":"Stop run"}
+          </button>
+        </div>
+      </section>}
       <section style={styles.panel}>
         <h2 style={{marginTop:0}}>Nieuwe synchronisatie</h2>
         <p style={{color:"#bbb"}}>De Total AutoCheck en Sportscholen Sync zijn losse processen. Je kunt beide tegelijk laten draaien.</p>
@@ -188,7 +236,18 @@ export default function FightPaspoortBeheerPage() {
           <Td>{r.licensed_count}</Td>
           <Td>{r.error_count}</Td>
           <Td>{r.status}</Td>
-          <Td><button style={styles.mini} onClick={()=>{setSelectedRun(r.id);loadItems(r.id)}}>Details</button></Td>
+          <Td>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {!isDone&&<button
+                style={styles.stop}
+                disabled={stoppingRunId===r.id}
+                onClick={()=>stopRun(r.id)}
+              >
+                <StopCircle size={14}/>{stoppingRunId===r.id?"Stoppen...":"Stop run"}
+              </button>}
+              <button style={styles.mini} onClick={()=>{setSelectedRun(r.id);loadItems(r.id)}}>Details</button>
+            </div>
+          </Td>
         </tr>
       })}</tbody></Table>
       {selectedRun&&<div style={{marginTop:18}}><h3>Run-details</h3><Table><thead><tr><Th>VA</Th><Th>Status</Th><Th>Naam</Th><Th>Licentie</Th><Th>Uitslagen</Th><Th>Gyms</Th><Th>Startverboden</Th><Th>Fout</Th></tr></thead><tbody>{items.map(i=><tr key={i.id}><Td>{i.profiel_gevonden?<button style={styles.link} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${i.va_nummer}`)}>{i.va_nummer}</button>:i.va_nummer}</Td><Td>{i.status}</Td><Td>{i.naam||"-"}</Td><Td>{i.licentie_actief===true?"Ja":i.licentie_actief===false?"Nee":"-"}</Td><Td>{i.results_count}</Td><Td>{i.gyms_count}</Td><Td>{i.startbans_count}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||""}</Td></tr>)}</tbody></Table></div>}</section>
@@ -244,5 +303,5 @@ function formatDuration(start:any,end?:any){
   if(minutes>0)return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
 }
-const styles:any={page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
-orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0}};
+const styles:any={page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},activeRunBanner:{border:"1px solid #ff7b3b",background:"linear-gradient(180deg,#3a1707,#1a0b05)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #ff4d0033,0 12px 30px #0008"},activeRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #ff7b3b",background:"#ff4d00",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
+orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},stop:{display:"inline-flex",alignItems:"center",gap:5,background:"#6d2020",border:"1px solid #c94a4a",color:"#fff",fontWeight:900,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0}};
