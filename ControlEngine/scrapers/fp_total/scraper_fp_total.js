@@ -1631,7 +1631,13 @@ async function main() {
     finally { masterRefreshPromise = null; }
   }
 
-  const SCRAPE_TIMEOUT_MS = Number(process.env.FP_TOTAL_TIMEOUT_MS ?? "600000");
+  const SCRAPE_TIMEOUT_RAW = Number(process.env.FP_TOTAL_TIMEOUT_MS ?? "480000");
+  // De bundle heeft 240s voor FULLFIGHTER + 240s voor UITSLAGEN.
+  // Total doet beide binnen één VA-run, dus laat een te lage route/env-timeout
+  // (zoals 150000ms) de scrape niet voortijdig afbreken.
+  const SCRAPE_TIMEOUT_MS = Number.isFinite(SCRAPE_TIMEOUT_RAW)
+    ? Math.max(480000, SCRAPE_TIMEOUT_RAW)
+    : 480000;
   const STAGGER = Number(process.env.STAGGER_MS ?? "2500");
 
   let idx = 0;
@@ -1653,14 +1659,14 @@ async function main() {
   async function workerLoop(workerIdx) {
     await sleep(workerIdx * STAGGER);
 
-    // Alle workers draaien bewust in DEZELFDE browsercontext als de master-login.
-    // De eerste/master-tab blijft ingelogd staan; worker-tabs openen daarna rechtstreeks
-    // hun eigen VA-url en delen automatisch dezelfde FightPassport-sessie.
+    // Zelfde robuuste worker-opzet als fp_bundle:
+    // iedere worker krijgt een eigen, killbare browsercontext.
+    let ctx = await createWorkerContext(browser);
+
     async function resetWorkerContext(reason = "") {
-      console.log(`[fp-total] 🧨 worker reset (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
-      // Geen aparte browsercontext om te resetten: de gedeelde master-sessie moet blijven leven.
-      // De actieve worker-page wordt door de timeout/finally gesloten en de volgende taak
-      // opent vanzelf een volledig nieuwe tab in dezelfde ingelogde browsercontext.
+      console.log(`[fp-total] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
+      await closeWorkerContext(ctx).catch(() => {});
+      ctx = await createWorkerContext(browser);
     }
 
     while (!stopRequested) {
@@ -1676,7 +1682,7 @@ async function main() {
 
       let page = null;
       try {
-        page = await openTabToFighterVerified(browser, null, cookies, va, {
+        page = await openTabToFighterVerified(browser, ctx, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
           softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
@@ -1693,7 +1699,7 @@ async function main() {
           continue;
         }
 
-        const openFreshPage = async (stepName = "") => openTabToFighterVerified(browser, null, cookies, va, {
+        const openFreshPage = async (stepName = "") => openTabToFighterVerified(browser, ctx, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
           softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
@@ -1767,6 +1773,8 @@ async function main() {
       }
     }
 
+    // Zelfde als fp_bundle: workercontext aan het einde volledig opruimen.
+    await closeWorkerContext(ctx).catch(() => {});
   }
 
   try {

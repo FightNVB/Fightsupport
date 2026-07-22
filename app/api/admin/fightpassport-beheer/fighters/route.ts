@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRole, supabaseAdmin } from "@/lib/api/requireRole";
 
 const ALLOWED_SORTS: Record<string, string> = {
-  va_nummer: "va_nummer",
+  va_nummer: "va_nummer_sort",
   naam: "naam",
   discipline: "primary_discipline",
   klasse: "berekende_klasse",
