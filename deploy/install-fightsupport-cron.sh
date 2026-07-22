@@ -20,4 +20,4 @@ cat >> "$TMP_FILE" <<'CRON'
 CRON
 
 crontab "$TMP_FILE"
-echo "FightSupport cron bijgewerkt: sportscholen blijft, teams verwijderd, Total AutoCheck 22:00-08:00 actief."
+echo "FightSupport cron bijgewerkt: sportscholen blijft, teams verwijderd, Total AutoCheck start zondag 19:00; stop 08:00 blijft actief."
