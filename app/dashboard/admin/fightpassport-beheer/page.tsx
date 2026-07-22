@@ -57,6 +57,19 @@ export default function FightPaspoortBeheerPage() {
   const allErrors = useMemo(() => items.filter((x) => x.status === "error"), [items]);
 
   async function startTotalRobot() {
+    const activeTotalRun = runs.some((run: any) => {
+      const status = String(run?.status ?? "").toLowerCase();
+      const runType = String(run?.run_type ?? "").toLowerCase();
+      return runType === "full" && !["completed", "failed", "cancelled", "canceled"].includes(status);
+    });
+
+    if (activeTotalRun) {
+      const startAnyway = window.confirm(
+        "Er loopt al een Total AutoCheck-run. Weet je zeker dat je een tweede run wilt starten?\n\nKies Annuleren om de bestaande run alleen door te laten lopen."
+      );
+      if (!startAnyway) return;
+    }
+
     setBusyTotal(true); setMessage("");
     const res = await authedFetch("/api/admin/fightpassport-sync/start", {
       method: "POST",
