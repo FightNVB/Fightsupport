@@ -1258,6 +1258,7 @@ async function scrapeOne(page, va, openFreshPage) {
   }
 
   const licensed = boolFromJaNee(summary.licentie) === true;
+  const reportedMatches = intFrom(summary.wedstrijden) ?? 0;
   let details = {};
   let gyms = [];
   let startbans = [];
@@ -1283,82 +1284,89 @@ async function scrapeOne(page, va, openFreshPage) {
   }
 
   if (!FULL_DETAILS_ONLY_LICENSED || licensed) {
-    // DETAILS is verplicht. Pas als dit aantoonbaar gelukt is,
-    // mag deze VA verder naar STARTVERBODEN / LICENTIES / UITSLAGEN.
+    // DETAILS is verplicht. Gebruik de reeds geverifieerde hoofdtab voor poging 1.
+    // Alleen bij een echte fout openen we een nieuwe schone VA-tab.
+    // Dit scheelt per geldige vechter een volledige extra paginalaad.
     let detailsLastError = null;
 
-    for (let detailsAttempt = 1; detailsAttempt <= 5; detailsAttempt++) {
+    async function scrapeDetailsFromPage(p) {
+      const opened = await openDetailsLikeBundle(p, va);
+      if (!opened) {
+        throw new Error("DETAILS: exacte VA-url/tegel niet correct geladen");
+      }
+
+      const tileReady = await waitForDetailsTileContentLikeBundle(p, va);
+      if (!tileReady) {
+        throw new Error("DETAILS tegelinhoud niet volledig geladen");
+      }
+
+      // Veel korter dan voorheen: wacht totdat de modalvelden een kleine periode
+      // aantoonbaar stabiel zijn in plaats van meerdere seconden vaste marge.
+      await sleep(500);
+
+      let previousSignature = "";
+      let stableChecks = 0;
+      const detailsWaitStartedAt = Date.now();
+
+      while (Date.now() - detailsWaitStartedAt < 10000) {
+        const signature = await p.evaluate(() => {
+          const visibleModal = [...document.querySelectorAll(".outer, .modal, [role=dialog]")].find((el) => {
+            const r = el.getBoundingClientRect();
+            const st = getComputedStyle(el);
+            return r.width > 300 && r.height > 200 && st.display !== "none" && st.visibility !== "hidden";
+          });
+
+          if (!visibleModal) return "";
+
+          const fields = [...visibleModal.querySelectorAll("input, select, textarea")];
+
+          return fields.map((el) => {
+            const value =
+              el.tagName === "SELECT"
+                ? (el.options?.[el.selectedIndex]?.textContent?.trim() || el.value || "")
+                : String(el.value ?? "").trim();
+
+            return [
+              el.tagName,
+              el.getAttribute("name") || "",
+              el.id || "",
+              typeof el.className === "string" ? el.className : "",
+              value,
+            ].join("|");
+          }).join("||");
+        }).catch(() => "");
+
+        if (signature && signature === previousSignature) {
+          stableChecks++;
+        } else {
+          stableChecks = 0;
+        }
+
+        previousSignature = signature;
+
+        // Ongeveer 0,75 seconde stabiele inhoud is voldoende.
+        if (signature && stableChecks >= 3) break;
+
+        await sleep(250);
+      }
+
+      await sleep(350);
+
+      const scraped = await readDetailsModal(p);
+      if (!detailsScrapeSucceeded(scraped)) {
+        throw new Error("DETAILS geopend maar inhoud onvoldoende/lege scrape");
+      }
+
+      return scraped;
+    }
+
+    for (let detailsAttempt = 1; detailsAttempt <= 3; detailsAttempt++) {
       try {
-        details = await withFreshVaTab(`DETAILS poging ${detailsAttempt}`, async (p) => {
-          const opened = await openDetailsLikeBundle(p, va);
-          if (!opened) {
-            throw new Error("DETAILS: exacte VA-url/tegel niet correct geladen");
-          }
-
-          // Eerst dezelfde controle als de bundle: DETAILS-tegel moet echt inhoud hebben.
-          const tileReady = await waitForDetailsTileContentLikeBundle(p, va);
-          if (!tileReady) {
-            throw new Error("DETAILS tegelinhoud niet volledig geladen");
-          }
-
-          // Total leest daarna méér: volledige modal, e-mail en nulmeting.
-          await sleep(1800);
-
-          let previousSignature = "";
-          let stableChecks = 0;
-          const detailsWaitStartedAt = Date.now();
-
-          while (Date.now() - detailsWaitStartedAt < 30000) {
-            const signature = await p.evaluate(() => {
-              const visibleModal = [...document.querySelectorAll(".outer, .modal, [role=dialog]")].find((el) => {
-                const r = el.getBoundingClientRect();
-                const st = getComputedStyle(el);
-                return r.width > 300 && r.height > 200 && st.display !== "none" && st.visibility !== "hidden";
-              });
-
-              if (!visibleModal) return "";
-
-              const fields = [...visibleModal.querySelectorAll("input, select, textarea")];
-
-              return fields.map((el) => {
-                const value =
-                  el.tagName === "SELECT"
-                    ? (el.options?.[el.selectedIndex]?.textContent?.trim() || el.value || "")
-                    : String(el.value ?? "").trim();
-
-                return [
-                  el.tagName,
-                  el.getAttribute("name") || "",
-                  el.id || "",
-                  typeof el.className === "string" ? el.className : "",
-                  value,
-                ].join("|");
-              }).join("||");
-            }).catch(() => "");
-
-            if (signature && signature === previousSignature) {
-              stableChecks++;
-            } else {
-              stableChecks = 0;
-            }
-
-            previousSignature = signature;
-
-            // Ruim 2 seconden stabiele inhoud.
-            if (signature && stableChecks >= 7) break;
-
-            await sleep(350);
-          }
-
-          await sleep(1500);
-
-          const scraped = await readDetailsModal(p);
-          if (!detailsScrapeSucceeded(scraped)) {
-            throw new Error("DETAILS geopend maar inhoud onvoldoende/lege scrape");
-          }
-
-          return scraped;
-        });
+        if (detailsAttempt === 1) {
+          details = await scrapeDetailsFromPage(page);
+        } else {
+          details = await withFreshVaTab(`DETAILS poging ${detailsAttempt}`, scrapeDetailsFromPage);
+        }
 
         console.log(`[fp-total] ✅ VA ${va} DETAILS gelukt (poging ${detailsAttempt})`);
         detailsLastError = null;
@@ -1366,10 +1374,17 @@ async function scrapeOne(page, va, openFreshPage) {
       } catch (e) {
         detailsLastError = e;
         console.log(
-          `[fp-total] ⚠️ VA ${va} DETAILS poging ${detailsAttempt}/5 mislukt:`,
+          `[fp-total] ⚠️ VA ${va} DETAILS poging ${detailsAttempt}/3 mislukt:`,
           e?.message ?? String(e)
         );
-        await sleep(700);
+
+        // De hoofdtab kan na een mislukte eerste poging een modal bevatten.
+        // Sluit die best-effort; volgende pogingen gebruiken sowieso een verse tab.
+        if (detailsAttempt === 1) {
+          await closeAnyModal(page).catch(() => {});
+        }
+
+        await sleep(300);
       }
     }
 
@@ -1390,7 +1405,7 @@ async function scrapeOne(page, va, openFreshPage) {
       });
     }
 
-    if (SCRAPE_RESULTS) {
+    if (SCRAPE_RESULTS && reportedMatches > 0) {
       const resultStep = await withFreshVaTab("UITSLAGEN", async (p) => {
         return await scrapeResults(p, va);
       }).catch((e) => ({
@@ -1403,6 +1418,14 @@ async function scrapeOne(page, va, openFreshPage) {
       resultsError = resultStep.error;
       results = resultStep.rows || [];
       resultsDownload = resultStep.download || null;
+    } else if (SCRAPE_RESULTS) {
+      // Geen wedstrijden volgens de profielheader: er is dan niets te downloaden.
+      // Markeer dit als een succesvolle lege uitslagensnapshot zodat oude foutieve
+      // resultaten uit een eerdere scrape worden verwijderd.
+      resultsStatus = "no_results";
+      resultsError = null;
+      results = [];
+      resultsDownload = null;
     }
   }
 

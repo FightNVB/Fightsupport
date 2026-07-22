@@ -175,7 +175,22 @@ export default function FightPaspoortBeheerPage() {
         </div>
         {message&&<p style={{color:"#ff8a52"}}>{message}</p>}
       </section>
-      <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Range</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Licentie</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=><tr key={r.id}><Td>{fmt(r.started_at)}</Td><Td>{r.start_va}–{r.end_va}</Td><Td>{r.processed_count}/{r.end_va-r.start_va+1}</Td><Td>{r.found_count}</Td><Td>{r.licensed_count}</Td><Td>{r.error_count}</Td><Td>{r.status}</Td><Td><button style={styles.mini} onClick={()=>{setSelectedRun(r.id);loadItems(r.id)}}>Details</button></Td></tr>)}</tbody></Table>
+      <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Licentie</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{
+        const finishedAt = r.finished_at ?? r.completed_at ?? r.ended_at ?? null;
+        const isDone = ["completed","failed","cancelled","canceled"].includes(String(r.status ?? "").toLowerCase());
+        return <tr key={r.id}>
+          <Td>{fmt(r.started_at)}</Td>
+          <Td>{finishedAt ? fmt(finishedAt) : isDone ? "-" : "Nog bezig"}</Td>
+          <Td>{formatDuration(r.started_at, finishedAt)}</Td>
+          <Td>{r.start_va}–{r.end_va}</Td>
+          <Td>{r.processed_count}/{r.end_va-r.start_va+1}</Td>
+          <Td>{r.found_count}</Td>
+          <Td>{r.licensed_count}</Td>
+          <Td>{r.error_count}</Td>
+          <Td>{r.status}</Td>
+          <Td><button style={styles.mini} onClick={()=>{setSelectedRun(r.id);loadItems(r.id)}}>Details</button></Td>
+        </tr>
+      })}</tbody></Table>
       {selectedRun&&<div style={{marginTop:18}}><h3>Run-details</h3><Table><thead><tr><Th>VA</Th><Th>Status</Th><Th>Naam</Th><Th>Licentie</Th><Th>Uitslagen</Th><Th>Gyms</Th><Th>Startverboden</Th><Th>Fout</Th></tr></thead><tbody>{items.map(i=><tr key={i.id}><Td>{i.profiel_gevonden?<button style={styles.link} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${i.va_nummer}`)}>{i.va_nummer}</button>:i.va_nummer}</Td><Td>{i.status}</Td><Td>{i.naam||"-"}</Td><Td>{i.licentie_actief===true?"Ja":i.licentie_actief===false?"Nee":"-"}</Td><Td>{i.results_count}</Td><Td>{i.gyms_count}</Td><Td>{i.startbans_count}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||""}</Td></tr>)}</tbody></Table></div>}</section>
     </>}
 
@@ -213,5 +228,21 @@ function ClassBadge({text}:any){
   return <span style={{display:"inline-flex",minWidth:36,justifyContent:"center",padding:"5px 9px",border:`1px solid ${c.border}`,background:c.background,color:c.color,fontWeight:900}}>{raw}</span>
 }
 function fmt(v:any){return v?new Date(v).toLocaleString("nl-NL"):"-"}
+
+function formatDuration(start:any,end?:any){
+  if(!start)return "-";
+  const startMs=new Date(start).getTime();
+  const endMs=end?new Date(end).getTime():Date.now();
+  if(Number.isNaN(startMs)||Number.isNaN(endMs)||endMs<startMs)return "-";
+  const totalSeconds=Math.floor((endMs-startMs)/1000);
+  const days=Math.floor(totalSeconds/86400);
+  const hours=Math.floor((totalSeconds%86400)/3600);
+  const minutes=Math.floor((totalSeconds%3600)/60);
+  const seconds=totalSeconds%60;
+  if(days>0)return `${days}d ${hours}u ${minutes}m`;
+  if(hours>0)return `${hours}u ${minutes}m ${seconds}s`;
+  if(minutes>0)return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
 const styles:any={page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
 orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0}};
