@@ -86,6 +86,11 @@ export default function FightPaspoortBeheerPage() {
   useEffect(() => { if (selectedRun) loadItems(selectedRun); }, [selectedRun, loadItems]);
 
   const allErrors = useMemo(() => items.filter((x) => x.status === "error"), [items]);
+  const selectedRunData = useMemo(
+    () => runs.find((r: any) => String(r.id) === String(selectedRun)) ?? null,
+    [runs, selectedRun]
+  );
+  const selectedRunIsTeam = String(selectedRunData?.run_type ?? "").toLowerCase() === "team";
 
   const totalPages = Math.max(1, Math.ceil(totalFighters / PAGE_SIZE));
 
@@ -156,7 +161,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTeam(false);
     setMessage(
       res.ok
-        ? (json.message || "Sportscholensynchronisatie gestart.")
+        ? "Sportscholensynchronisatie gestart."
         : json.error || "Sportscholensynchronisatie starten mislukt."
     );
     setTimeout(loadRuns, 1200);
@@ -182,7 +187,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyRetryTeam(false);
     setMessage(
       res.ok
-        ? (json.message || "Herkansing van mislukte sportscholen gestart.")
+        ? "Herkansing van mislukte sportscholen gestart."
         : json.error || "Herkansing starten mislukt."
     );
 
@@ -372,7 +377,7 @@ export default function FightPaspoortBeheerPage() {
         </div>
         {message&&<p style={{color:"#ff8a52"}}>{message}</p>}
       </section>
-      <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Laatste VA</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Licentie</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{
+      <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Laatste VA</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{
         const finishedAt = r.finished_at ?? r.completed_at ?? r.ended_at ?? null;
         const isDone = ["completed","failed","cancelled","canceled"].includes(String(r.status ?? "").toLowerCase());
         const isTeam = String(r.run_type ?? "").toLowerCase() === "team";
@@ -385,7 +390,6 @@ export default function FightPaspoortBeheerPage() {
           <Td>{isTeam ? "—" : (r.last_processed_va ?? "—")}</Td>
           <Td>{r.processed_count ?? 0}/{isTeam ? totalTeamSchools : (r.end_va-r.start_va+1)}</Td>
           <Td>{isTeam ? (r.meta?.succeeded ?? r.found_count ?? 0) : r.found_count}</Td>
-          <Td>{isTeam ? (r.meta?.fighter_links ?? r.licensed_count ?? 0) : r.licensed_count}</Td>
           <Td>{r.error_count}</Td>
           <Td>{isTeam ? `team · ${r.status}` : r.status}</Td>
           <Td>
@@ -411,12 +415,32 @@ export default function FightPaspoortBeheerPage() {
               >
                 <RefreshCw size={14}/>{busyRetryTeam?"Starten...":`Herprobeer ${r.error_count} fouten`}
               </button>}
-              {!isTeam&&<button style={styles.mini} onClick={()=>{setSelectedRun(r.id);loadItems(r.id)}}>Details</button>}
+              <button style={styles.mini} onClick={()=>{setSelectedRun(r.id);if(!isTeam)loadItems(r.id);else setItems([])}}>Details</button>
             </div>
           </Td>
         </tr>
       })}</tbody></Table>
-      {selectedRun&&<div style={{marginTop:18}}><h3>Run-details</h3><Table><thead><tr><Th>VA</Th><Th>Status</Th><Th>Naam</Th><Th>Licentie</Th><Th>Uitslagen</Th><Th>Gyms</Th><Th>Startverboden</Th><Th>Fout</Th></tr></thead><tbody>{items.map(i=><tr key={i.id}><Td>{i.profiel_gevonden?<button style={styles.link} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${i.va_nummer}`)}>{i.va_nummer}</button>:i.va_nummer}</Td><Td>{i.status}</Td><Td>{i.naam||"-"}</Td><Td>{i.licentie_actief===true?"Ja":i.licentie_actief===false?"Nee":"-"}</Td><Td>{i.results_count}</Td><Td>{i.gyms_count}</Td><Td>{i.startbans_count}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||""}</Td></tr>)}</tbody></Table></div>}</section>
+      {selectedRun&&selectedRunData&&<div style={{marginTop:18}}>
+        <h3>{selectedRunIsTeam ? "Sportscholen Sync-details" : "Total AutoCheck-details"}</h3>
+        {selectedRunIsTeam ? (
+          <Table>
+            <thead><tr><Th>Status</Th><Th>Sportscholen</Th><Th>Verwerkt</Th><Th>Geslaagd</Th><Th>Fouten</Th><Th>Vechterkoppelingen</Th><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th></tr></thead>
+            <tbody><tr>
+              <Td>{selectedRunData.status ?? "-"}</Td>
+              <Td>{selectedRunData.meta?.total_schools ?? selectedRunData.end_va ?? 0}</Td>
+              <Td>{selectedRunData.processed_count ?? 0}</Td>
+              <Td>{selectedRunData.meta?.succeeded ?? selectedRunData.found_count ?? 0}</Td>
+              <Td>{selectedRunData.meta?.failed ?? selectedRunData.error_count ?? 0}</Td>
+              <Td>{selectedRunData.meta?.fighter_links ?? selectedRunData.licensed_count ?? 0}</Td>
+              <Td>{fmt(selectedRunData.started_at)}</Td>
+              <Td>{fmt(selectedRunData.finished_at ?? selectedRunData.completed_at ?? selectedRunData.ended_at)}</Td>
+              <Td>{formatDuration(selectedRunData.started_at, selectedRunData.finished_at ?? selectedRunData.completed_at ?? selectedRunData.ended_at)}</Td>
+            </tr></tbody>
+          </Table>
+        ) : (
+          <Table><thead><tr><Th>VA</Th><Th>Status</Th><Th>Naam</Th><Th>Licentie</Th><Th>Uitslagen</Th><Th>Gyms</Th><Th>Startverboden</Th><Th>Fout</Th></tr></thead><tbody>{items.map(i=><tr key={i.id}><Td>{i.profiel_gevonden?<button style={styles.link} onClick={()=>router.push(`/dashboard/admin/fightpassport-beheer/${i.va_nummer}`)}>{i.va_nummer}</button>:i.va_nummer}</Td><Td>{i.status}</Td><Td>{i.naam||"-"}</Td><Td>{i.licentie_actief===true?"Ja":i.licentie_actief===false?"Nee":"-"}</Td><Td>{i.results_count}</Td><Td>{i.gyms_count}</Td><Td>{i.startbans_count}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||""}</Td></tr>)}</tbody></Table>
+        )}
+      </div>}</section>
     </>}
 
     {tab === "errors" && <section style={styles.panel}><h2 style={{marginTop:0}}>AutoCheck-fouten</h2><p style={{color:"#aaa"}}>Selecteer eerst bij Synchronisaties een run om de bijbehorende fouten te bekijken.</p><Table><thead><tr><Th>VA</Th><Th>Stap</Th><Th>Foutmelding</Th><Th>Tijd</Th></tr></thead><tbody>{allErrors.map(i=><tr key={i.id}><Td>{i.va_nummer}</Td><Td>{i.error_step||"-"}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td><Td>{fmt(i.finished_at)}</Td></tr>)}{!allErrors.length&&<tr><Td colSpan={4}>Geen fouten geladen.</Td></tr>}</tbody></Table></section>}
