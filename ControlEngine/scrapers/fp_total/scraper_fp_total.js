@@ -194,7 +194,7 @@ async function closeWorkerContext(ctx) {
 ------------------------------------------------------- */
 async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   const {
-    maxAttempts = 5,
+    maxAttempts = 4,
     softWaitMs = 1500,
     betweenAttemptsMs = 1200,
     workerLabel = "",
