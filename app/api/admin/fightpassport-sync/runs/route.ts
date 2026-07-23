@@ -16,3 +16,27 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Runs konden niet worden geladen." }, { status: 500 });
   }
 }
+
+
+export async function DELETE(req: Request) {
+  try {
+    await requireRole(req, ["admin", "superadmin"]);
+    const url = new URL(req.url);
+    const runId = url.searchParams.get("run_id");
+
+    if (!runId) {
+      return NextResponse.json({ error: "Run-id ontbreekt." }, { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin
+      .from("fightpassport_sync_runs")
+      .delete()
+      .eq("id", runId);
+
+    if (error) throw error;
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    if (err instanceof NextResponse) return err;
+    return NextResponse.json({ error: "Synchronisatieregel kon niet worden verwijderd." }, { status: 500 });
+  }
+}

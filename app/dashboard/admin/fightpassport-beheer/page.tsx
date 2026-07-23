@@ -17,6 +17,7 @@ export default function FightPaspoortBeheerPage() {
   const [totalFighters, setTotalFighters] = useState(0);
   const [runs, setRuns] = useState<Run[]>([]);
   const [items, setItems] = useState<SyncItem[]>([]);
+  const [teamErrors, setTeamErrors] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<string>("");
   const [q, setQ] = useState("");
   const [licentie, setLicentie] = useState("all");
@@ -32,6 +33,7 @@ export default function FightPaspoortBeheerPage() {
   const [busyDeleteTotal, setBusyDeleteTotal] = useState(false);
   const [busyDeleteTeam, setBusyDeleteTeam] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string>("");
+  const [deletingRunId, setDeletingRunId] = useState<string>("");
   const [sortKey, setSortKey] = useState<string>("va_nummer");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
   const [page, setPage] = useState(1);
@@ -72,6 +74,17 @@ export default function FightPaspoortBeheerPage() {
     if (res.ok) setItems(json.items ?? []);
   }, []);
 
+  const loadTeamErrors = useCallback(async () => {
+    const res = await authedFetch("/api/admin/fightpassport-sync/team-errors");
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setTeamErrors(json.errors ?? []);
+    } else {
+      setTeamErrors([]);
+      setMessage(json.error || "Sportschoolfouten laden mislukt.");
+    }
+  }, []);
+
   useEffect(() => {
     if (tab === "fighters") loadFighters();
   }, [tab, loadFighters]);
@@ -83,7 +96,6 @@ export default function FightPaspoortBeheerPage() {
     }, 5000);
     return () => clearInterval(t);
   }, [loadRuns]);
-  useEffect(() => { if (selectedRun) loadItems(selectedRun); }, [selectedRun, loadItems]);
 
   const allErrors = useMemo(() => items.filter((x) => x.status === "error"), [items]);
   const selectedRunData = useMemo(
@@ -245,6 +257,40 @@ export default function FightPaspoortBeheerPage() {
   }
 
 
+  async function openRunDetails(run: Run) {
+    const isTeam = String(run?.run_type ?? "").toLowerCase() === "team";
+    setSelectedRun(run.id);
+
+    if (isTeam) {
+      setItems([]);
+      await loadTeamErrors();
+    } else {
+      setTeamErrors([]);
+      await loadItems(run.id);
+    }
+  }
+
+
+  async function deleteSyncRun(runId: string) {
+    if (!window.confirm("Deze synchronisatieregel verwijderen?")) return;
+    setDeletingRunId(runId);
+    setMessage("");
+    const res = await authedFetch(`/api/admin/fightpassport-sync/runs?run_id=${encodeURIComponent(runId)}`, {
+      method: "DELETE",
+    });
+    const json = await res.json().catch(() => ({}));
+    setDeletingRunId("");
+    setMessage(res.ok ? "Synchronisatieregel verwijderd." : json.error || "Synchronisatieregel verwijderen mislukt.");
+    if (res.ok) {
+      if (String(selectedRun) === String(runId)) {
+        setSelectedRun("");
+        setItems([]);
+        setTeamErrors([]);
+      }
+      await loadRuns();
+    }
+  }
+
   async function deleteTotalData() {
     if (!window.confirm("Alle data van de Total AutoCheck verwijderen? Dit verwijdert de centrale FightPaspoort scraperdata.")) return;
     setBusyDeleteTotal(true); setMessage("");
@@ -256,7 +302,7 @@ export default function FightPaspoortBeheerPage() {
     const json = await res.json().catch(() => ({}));
     setBusyDeleteTotal(false);
     setMessage(res.ok ? "Total scraperdata verwijderd." : json.error || "Verwijderen mislukt.");
-    if (res.ok) { setFighters([]); setRuns([]); setItems([]); setSelectedRun(""); await Promise.all([loadFighters(), loadRuns()]); }
+    if (res.ok) { setFighters([]); setRuns([]); setItems([]); setTeamErrors([]); setSelectedRun(""); await Promise.all([loadFighters(), loadRuns()]); }
   }
 
   async function deleteTeamData() {
@@ -415,7 +461,16 @@ export default function FightPaspoortBeheerPage() {
               >
                 <RefreshCw size={14}/>{busyRetryTeam?"Starten...":`Herprobeer ${r.error_count} fouten`}
               </button>}
-              <button style={styles.mini} onClick={()=>{setSelectedRun(r.id);if(!isTeam)loadItems(r.id);else setItems([])}}>Details</button>
+              <button style={styles.mini} onClick={()=>openRunDetails(r)}>Details</button>
+              <button
+                style={styles.dangerMini}
+                disabled={deletingRunId===r.id}
+                onClick={()=>deleteSyncRun(r.id)}
+                title={deletingRunId===r.id ? "Verwijderen..." : "Synchronisatieregel verwijderen"}
+                aria-label="Synchronisatieregel verwijderen"
+              >
+                <Trash2 size={14}/>
+              </button>
             </div>
           </Td>
         </tr>
@@ -443,7 +498,34 @@ export default function FightPaspoortBeheerPage() {
       </div>}</section>
     </>}
 
-    {tab === "errors" && <section style={styles.panel}><h2 style={{marginTop:0}}>AutoCheck-fouten</h2><p style={{color:"#aaa"}}>Selecteer eerst bij Synchronisaties een run om de bijbehorende fouten te bekijken.</p><Table><thead><tr><Th>VA</Th><Th>Stap</Th><Th>Foutmelding</Th><Th>Tijd</Th></tr></thead><tbody>{allErrors.map(i=><tr key={i.id}><Td>{i.va_nummer}</Td><Td>{i.error_step||"-"}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td><Td>{fmt(i.finished_at)}</Td></tr>)}{!allErrors.length&&<tr><Td colSpan={4}>Geen fouten geladen.</Td></tr>}</tbody></Table></section>}
+    {tab === "errors" && <section style={styles.panel}>
+      <h2 style={{marginTop:0}}>{selectedRunIsTeam ? "Sportscholen Sync-fouten" : "Total AutoCheck-fouten"}</h2>
+      {!selectedRunData ? (
+        <p style={{color:"#aaa"}}>Selecteer eerst bij Synchronisaties een run via Details.</p>
+      ) : selectedRunIsTeam ? (
+        <Table>
+          <thead><tr><Th>Sportschool ID</Th><Th>Sportschool</Th><Th>Plaats</Th><Th>Status</Th><Th>Foutmelding</Th></tr></thead>
+          <tbody>
+            {teamErrors.map((i:any)=><tr key={i.sportschool_id}>
+              <Td>{i.sportschool_id}</Td>
+              <Td>{i.naam||"-"}</Td>
+              <Td>{i.plaats||"-"}</Td>
+              <Td>{i.team_sync_status||"-"}</Td>
+              <Td style={{color:"#ff7d69"}}>{i.team_sync_error||"Onbekende fout"}</Td>
+            </tr>)}
+            {!teamErrors.length&&<tr><Td colSpan={5}>Geen sportschoolfouten gevonden.</Td></tr>}
+          </tbody>
+        </Table>
+      ) : (
+        <Table>
+          <thead><tr><Th>VA</Th><Th>Stap</Th><Th>Foutmelding</Th><Th>Tijd</Th></tr></thead>
+          <tbody>
+            {allErrors.map(i=><tr key={i.id}><Td>{i.va_nummer}</Td><Td>{i.error_step||"-"}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td><Td>{fmt(i.finished_at)}</Td></tr>)}
+            {!allErrors.length&&<tr><Td colSpan={4}>Geen fouten geladen.</Td></tr>}
+          </tbody>
+        </Table>
+      )}
+    </section>}
   </div></main>;
 }
 
@@ -502,4 +584,4 @@ function formatDuration(start:any,end?:any){
   return `${seconds}s`;
 }
 const styles:any={page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},activeRunBanner:{border:"1px solid #ff7b3b",background:"linear-gradient(180deg,#3a1707,#1a0b05)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #ff4d0033,0 12px 30px #0008"},activeRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #ff7b3b",background:"#ff4d00",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},teamRunBanner:{border:"1px solid #3b9fb7",background:"linear-gradient(180deg,#08252d,#07161b)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #2a9db733,0 12px 30px #0008"},teamRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #55bed6",background:"#167f98",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
-orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},stop:{display:"inline-flex",alignItems:"center",gap:5,background:"#6d2020",border:"1px solid #c94a4a",color:"#fff",fontWeight:900,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0},pagination:{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}};
+orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},dangerMini:{display:"inline-flex",alignItems:"center",gap:5,background:"#4a1717",border:"1px solid #a94444",color:"#fff",fontWeight:800,padding:"6px 10px",cursor:"pointer"},stop:{display:"inline-flex",alignItems:"center",gap:5,background:"#6d2020",border:"1px solid #c94a4a",color:"#fff",fontWeight:900,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0},pagination:{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}};
