@@ -459,7 +459,7 @@ export default function FightPaspoortBeheerPage() {
                 disabled={busyRetryTeam||!!activeTeamRun}
                 onClick={()=>retryTeamErrors(Number(r.error_count||0))}
               >
-                <RefreshCw size={14}/>{busyRetryTeam?"Starten...":`Herprobeer ${r.error_count} fouten`}
+                <RefreshCw size={14}/>{busyRetryTeam?"Starten...":`${r.error_count} fouten`}
               </button>}
               <button style={styles.mini} onClick={()=>openRunDetails(r)}>Details</button>
               <button
