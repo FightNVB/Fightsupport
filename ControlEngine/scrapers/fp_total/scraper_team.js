@@ -389,11 +389,8 @@ async function closeWrongVechtersPopup(page) {
 async function waitForOrganisationPage(page, expectedKey, sportschool) {
   const key = normalizeSportschoolKey(expectedKey);
   const expectedHash = `#organisation/${key}`;
-  const sportschoolName = normalizeText(sportschool?.naam).toLowerCase();
-
   console.log("🔍 Exact controleren of sportschoolpagina geladen is...", {
     key,
-    sportschool: sportschoolName || null,
   });
 
   const start = Date.now();
@@ -442,22 +439,12 @@ async function waitForOrganisationPage(page, expectedKey, sportschool) {
       state.href.includes(`/#organisation/${key}`) ||
       state.href.includes(`#organisation/${key}`);
 
-    const nameOk =
-      !sportschoolName ||
-      normalizeText(state.body).toLowerCase().includes(sportschoolName);
-
-    const tilesOk = state.hasDetailsTile && state.hasVechtersTile;
+    const bodyUpper = normalizeText(state.body).toUpperCase();
+    const tilesOk =
+      (state.hasDetailsTile && state.hasVechtersTile) ||
+      (bodyUpper.includes("DETAILS") && bodyUpper.includes("VECHTERS"));
 
     if (hashOk && tilesOk && !state.hasWrongPopup) {
-      if (!nameOk) {
-        console.log("⚠️ Sportschoolnaam niet zichtbaar, maar key + tegels kloppen:", {
-          key,
-          sportschool: sportschoolName,
-          hash: state.hash,
-          headers: state.tileHeaders,
-        });
-      }
-
       console.log("✅ Exact juiste sportschoolpagina bevestigd:", {
         hash: state.hash,
         key,
@@ -508,7 +495,6 @@ async function forceExactOrganisationUrl(page, key, sportschool, timeoutMs = 300
   const requestedKey = normalizeSportschoolKey(key);
   const url = organisationUrl(requestedKey);
   const wantedHash = `#organisation/${requestedKey}`;
-  const sportschoolName = normalizeText(sportschool?.naam).toLowerCase();
   const startedAt = Date.now();
   let lastForcedAt = 0;
   let hardReloads = 0;
@@ -556,13 +542,15 @@ async function forceExactOrganisationUrl(page, key, sportschool, timeoutMs = 300
     const exactIdentity =
       state &&
       state.hash === wantedHash &&
-      state.headers.includes("DETAILS") &&
-      state.headers.includes("VECHTERS");
+      (
+        (state.headers.includes("DETAILS") && state.headers.includes("VECHTERS")) ||
+        (state.body.includes("details") && state.body.includes("vechters"))
+      );
 
     if (exactIdentity) {
       await sleep(500);
 
-      const confirm = await page.evaluate((forcedHash, expectedName) => {
+      const confirm = await page.evaluate((forcedHash) => {
         const body = String(document.body?.innerText || "")
           .replace(/\s+/g, " ")
           .trim()
@@ -572,17 +560,23 @@ async function forceExactOrganisationUrl(page, key, sportschool, timeoutMs = 300
 
         return (
           String(location.hash || "") === forcedHash &&
-          headers.includes("DETAILS") &&
-          headers.includes("VECHTERS")
+          (
+            (headers.includes("DETAILS") && headers.includes("VECHTERS")) ||
+            (body.includes("details") && body.includes("vechters"))
+          )
         );
-      }, wantedHash, sportschoolName).catch(() => false);
+      }, wantedHash).catch(() => false);
 
       if (confirm) return true;
     }
 
     const now = Date.now();
 
-    if (now - lastForcedAt >= 1200) {
+    const hashAlreadyCorrect = state?.hash === wantedHash;
+
+    // Staat de tab al exact op de gevraagde organisation-hash, dan NIET opnieuw
+    // forceren. FightPassport krijgt eerst tijd om DETAILS en VECHTERS te renderen.
+    if (!hashAlreadyCorrect && now - lastForcedAt >= 1200) {
       lastForcedAt = now;
 
       await page.evaluate((forcedUrl, forcedHash) => {
@@ -598,7 +592,7 @@ async function forceExactOrganisationUrl(page, key, sportschool, timeoutMs = 300
 
       await sleep(600);
 
-      const afterForce = await page.evaluate((forcedHash, expectedName) => {
+      const afterForce = await page.evaluate((forcedHash) => {
         const body = String(document.body?.innerText || "")
           .replace(/\s+/g, " ")
           .trim()
@@ -608,10 +602,12 @@ async function forceExactOrganisationUrl(page, key, sportschool, timeoutMs = 300
 
         return (
           String(location.hash || "") === forcedHash &&
-          headers.includes("DETAILS") &&
-          headers.includes("VECHTERS")
+          (
+            (headers.includes("DETAILS") && headers.includes("VECHTERS")) ||
+            (body.includes("details") && body.includes("vechters"))
+          )
         );
-      }, wantedHash, sportschoolName).catch(() => false);
+      }, wantedHash).catch(() => false);
 
       if (!afterForce && hardReloads < 3) {
         hardReloads++;
@@ -1118,7 +1114,8 @@ async function parseVechtersExcel(filePath, sportschool) {
   });
 
   if (!rows?.length) {
-    throw new Error("Excel is leeg of kon niet gelezen worden");
+    console.log("✅ Lege Vechters Excel: 0 vechters voor deze sportschool");
+    return [];
   }
 
   const headerRowIndex = findHeaderRowIndex(rows);
@@ -1201,29 +1198,16 @@ async function parseVechtersExcel(filePath, sportschool) {
 
   console.log(`✅ ${out.length} vechters gevonden`);
 
-  if (!out.length) {
-    const preview = rows
-      .slice(headerRowIndex + 1, headerRowIndex + 8)
-      .map((r) => (r || []).map((c) => String(c ?? "").trim()).join(" | "));
-
-    throw new Error(
-      `Geen vechters met VA-nummer gevonden in Excel. Headers=${JSON.stringify(
-        headers
-      )}. Preview=${JSON.stringify(preview)}`
-    );
-  }
-
+  // Een geldige Vechters-Excel zonder vechters is geen scraperfout.
   return out;
 }
 
 async function saveSportschoolFighterLinks(sportschoolKey, fighters) {
-  if (!fighters.length) return [];
-
   const key = Number(sportschoolKey);
   const now = new Date().toISOString();
 
-  // Na een succesvolle Excel-parse eerst oude koppelingen voor deze sportschool
-  // inactief zetten. De huidige Excel-leden worden daarna weer actief ge-upsert.
+  // Na iedere succesvolle Excel-parse eerst oude koppelingen voor deze sportschool
+  // inactief zetten. Bij een lege Excel blijven er terecht 0 actieve koppelingen over.
   const { error: deactivateError } = await supabase
     .from("fightpassport_school_fighters")
     .update({
@@ -1234,6 +1218,8 @@ async function saveSportschoolFighterLinks(sportschoolKey, fighters) {
     .eq("actief", true);
 
   if (deactivateError) throw deactivateError;
+
+  if (!fighters.length) return [];
 
   const payload = fighters.map((fighter) => ({
     ...fighter,
@@ -1274,7 +1260,6 @@ async function updateSportschoolSyncStatus(key, status, errorMessage = null) {
 async function pageIsExactOrganisation(page, key, sportschool) {
   const cleanKey = normalizeSportschoolKey(key);
   const expectedHash = `#organisation/${cleanKey}`;
-  const sportschoolName = normalizeText(sportschool?.naam).toLowerCase();
 
   const state = await page.evaluate(() => {
     const body = String(document.body?.innerText || "")
@@ -1294,8 +1279,10 @@ async function pageIsExactOrganisation(page, key, sportschool) {
   return !!(
     state &&
     state.hash === expectedHash &&
-    state.headers.includes("DETAILS") &&
-    state.headers.includes("VECHTERS")
+    (
+      (state.headers.includes("DETAILS") && state.headers.includes("VECHTERS")) ||
+      (state.body.includes("details") && state.body.includes("vechters"))
+    )
   );
 }
 
