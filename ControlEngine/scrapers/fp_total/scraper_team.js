@@ -1121,6 +1121,19 @@ async function parseVechtersExcel(filePath, sportschool) {
   const headerRowIndex = findHeaderRowIndex(rows);
 
   if (headerRowIndex === -1) {
+    const reportTitle = String(rows?.[0]?.[0] ?? "").trim();
+    const groupTitle = String(rows?.[1]?.[0] ?? "").trim();
+
+    // Een geldig leeg Vechters-rapport bevat alleen de rapporttitel en groep,
+    // maar geen headerregel op rij 5 en dus ook geen vechters vanaf rij 6.
+    if (
+      reportTitle === "Rapport: Vechters bij sportschool" &&
+      groupTitle === "Groep: Vechters"
+    ) {
+      console.log("✅ Geldig leeg Vechters-rapport: 0 vechters");
+      return [];
+    }
+
     const preview = rows
       .slice(0, 12)
       .map((r) => (r || []).map((c) => String(c ?? "").trim()).join(" | "));

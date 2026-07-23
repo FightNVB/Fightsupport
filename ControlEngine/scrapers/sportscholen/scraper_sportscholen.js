@@ -44,6 +44,17 @@ function detectColumn(columns, possibleNames) {
   );
 }
 
+function normalizeAliasText(raw) {
+  return String(raw ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['’`´]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -344,18 +355,198 @@ async function parseExcel(filePath) {
 //////////////////////////////////////////////////////////////
 // 3. Save to Supabase → juiste tabel
 //////////////////////////////////////////////////////////////
+async function loadSportschoolAliases() {
+  const aliases = [];
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("sportschool_aliases")
+      .select("alias_text,sportschool_id")
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = data ?? [];
+    aliases.push(...batch);
+
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return aliases;
+}
+
+function canonicalizeSportscholen(rows, aliases) {
+  const aliasMap = new Map();
+
+  for (const alias of aliases ?? []) {
+    const normalized = normalizeAliasText(alias?.alias_text);
+    const canonicalId = Number(alias?.sportschool_id);
+
+    if (!normalized || !Number.isFinite(canonicalId)) continue;
+    aliasMap.set(normalized, canonicalId);
+  }
+
+  const grouped = new Map();
+
+  for (const row of rows ?? []) {
+    const originalId = Number(row?.sportschool_id);
+    if (!Number.isFinite(originalId)) continue;
+
+    const normalizedName = normalizeAliasText(row?.naam);
+    const aliasTargetId = normalizedName ? aliasMap.get(normalizedName) : null;
+    const canonicalId = Number.isFinite(Number(aliasTargetId))
+      ? Number(aliasTargetId)
+      : originalId;
+
+    const candidate = {
+      ...row,
+      sportschool_id: canonicalId,
+      _original_sportschool_id: originalId,
+      _is_canonical_source: originalId === canonicalId,
+    };
+
+    const current = grouped.get(canonicalId);
+
+    if (!current) {
+      grouped.set(canonicalId, candidate);
+      continue;
+    }
+
+    // Als zowel de echte/canonieke FightPassport-ID als een oude alias-ID
+    // aanwezig zijn, krijgt de echte ID altijd voorrang.
+    const preferred =
+      candidate._is_canonical_source && !current._is_canonical_source
+        ? candidate
+        : current;
+
+    const fallback = preferred === candidate ? current : candidate;
+
+    grouped.set(canonicalId, {
+      ...preferred,
+      naam: preferred.naam || fallback.naam || null,
+      plaats: preferred.plaats || fallback.plaats || null,
+      land: preferred.land || fallback.land || null,
+      keurmerk_start: preferred.keurmerk_start || fallback.keurmerk_start || null,
+      keurmerk_einde: preferred.keurmerk_einde || fallback.keurmerk_einde || null,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  return [...grouped.values()].map(
+    ({ _original_sportschool_id, _is_canonical_source, ...row }) => row
+  );
+}
+
+async function loadExistingSportschoolIds() {
+  const ids = [];
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("sportscholen")
+      .select("sportschool_id")
+      .not("sportschool_id", "is", null)
+      .order("sportschool_id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = data ?? [];
+    ids.push(
+      ...batch
+        .map((row) => Number(row?.sportschool_id))
+        .filter(Number.isFinite)
+    );
+
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return ids;
+}
+
+async function deleteStaleSportscholen(currentIds) {
+  // Veiligheidsstop: de normale FightPassport-lijst bevat duizenden sportscholen.
+  // Bij een kapotte of onvolledige Excel mag er absoluut niets verwijderd worden.
+  if (!Array.isArray(currentIds) || currentIds.length < 1000) {
+    throw new Error(
+      `Veiligheidsstop: slechts ${currentIds?.length ?? 0} actuele sportscholen gevonden; oude sportscholen worden niet verwijderd`
+    );
+  }
+
+  const currentSet = new Set(currentIds.map(Number));
+  const existingIds = await loadExistingSportschoolIds();
+  const staleIds = existingIds.filter((id) => !currentSet.has(Number(id)));
+
+  if (!staleIds.length) {
+    console.log("✅ Geen vervallen sportschool-IDs gevonden");
+    return [];
+  }
+
+  console.log("🗑️ Vervallen sportschool-IDs worden verwijderd", {
+    aantal: staleIds.length,
+    ids: staleIds,
+  });
+
+  // In kleine batches verwijderen om URL/query-limieten van PostgREST te vermijden.
+  const batchSize = 100;
+
+  for (let i = 0; i < staleIds.length; i += batchSize) {
+    const batch = staleIds.slice(i, i + batchSize);
+
+    const { error } = await supabase
+      .from("sportscholen")
+      .delete()
+      .in("sportschool_id", batch);
+
+    if (error) throw error;
+  }
+
+  console.log("✅ Vervallen sportscholen verwijderd", {
+    aantal: staleIds.length,
+  });
+
+  return staleIds;
+}
+
 async function saveToSupabase(data) {
-  const { error } = await supabase.from("sportscholen").upsert(data, {
+  const aliases = await loadSportschoolAliases();
+  const canonicalData = canonicalizeSportscholen(data, aliases);
+
+  console.log("🔗 Sportschool-aliassen toegepast", {
+    bron_rijen: data?.length ?? 0,
+    aliasregels: aliases.length,
+    unieke_canonieke_sportscholen: canonicalData.length,
+  });
+
+  // Eerst de actuele lijst volledig en succesvol opslaan.
+  const { error } = await supabase.from("sportscholen").upsert(canonicalData, {
     onConflict: "sportschool_id",
   });
 
   if (error) {
-    console.log("❌ Supabase fout:", error.message);
-    return false;
+    throw error;
   }
 
   console.log("✅ Sportscholen opgeslagen in Supabase");
-  return true;
+
+  // Pas NA een geslaagde upsert oude IDs verwijderen die niet meer in de
+  // actuele, reeds gecanonicaliseerde FightPassport-lijst voorkomen.
+  const currentIds = canonicalData
+    .map((row) => Number(row?.sportschool_id))
+    .filter(Number.isFinite);
+
+  const staleIds = await deleteStaleSportscholen(currentIds);
+
+  return {
+    ok: true,
+    opgeslagen: canonicalData.length,
+    verwijderd: staleIds.length,
+  };
 }
 
 //////////////////////////////////////////////////////////////
