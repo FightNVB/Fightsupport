@@ -28,6 +28,7 @@ export default function FightPaspoortBeheerPage() {
   const [message, setMessage] = useState("");
   const [busyTotal, setBusyTotal] = useState(false);
   const [busyTeam, setBusyTeam] = useState(false);
+  const [busyRetryTeam, setBusyRetryTeam] = useState(false);
   const [busyDeleteTotal, setBusyDeleteTotal] = useState(false);
   const [busyDeleteTeam, setBusyDeleteTeam] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string>("");
@@ -158,6 +159,33 @@ export default function FightPaspoortBeheerPage() {
         ? (json.message || "Sportscholensynchronisatie gestart.")
         : json.error || "Sportscholensynchronisatie starten mislukt."
     );
+    setTimeout(loadRuns, 1200);
+  }
+
+
+  async function retryTeamErrors(errorCount: number) {
+    if (activeTeamRun) {
+      setMessage("Er draait al een sportscholensynchronisatie.");
+      return;
+    }
+
+    if (!window.confirm(`Alle ${errorCount} mislukte sportscholen opnieuw verwerken?`)) return;
+
+    setBusyRetryTeam(true);
+    setMessage("");
+
+    const res = await authedFetch("/api/admin/fightpassport-sync/retry-team-errors", {
+      method: "POST",
+    });
+    const json = await res.json().catch(() => ({}));
+
+    setBusyRetryTeam(false);
+    setMessage(
+      res.ok
+        ? (json.message || "Herkansing van mislukte sportscholen gestart.")
+        : json.error || "Herkansing starten mislukt."
+    );
+
     setTimeout(loadRuns, 1200);
   }
 
@@ -375,6 +403,13 @@ export default function FightPaspoortBeheerPage() {
                 onClick={()=>stopTeamRun(r.id)}
               >
                 <StopCircle size={14}/>{stoppingRunId===r.id?"Stoppen...":"Stop run"}
+              </button>}
+              {isTeam&&isDone&&Number(r.error_count||0)>0&&<button
+                style={styles.mini}
+                disabled={busyRetryTeam||!!activeTeamRun}
+                onClick={()=>retryTeamErrors(Number(r.error_count||0))}
+              >
+                <RefreshCw size={14}/>{busyRetryTeam?"Starten...":`Herprobeer ${r.error_count} fouten`}
               </button>}
               {!isTeam&&<button style={styles.mini} onClick={()=>{setSelectedRun(r.id);loadItems(r.id)}}>Details</button>}
             </div>

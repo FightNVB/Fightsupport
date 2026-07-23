@@ -196,14 +196,11 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   const {
     maxAttempts = 5,
     softWaitMs = 1500,
-    betweenAttemptsMs = 400,
+    betweenAttemptsMs = 1200,
     workerLabel = "",
   } = opts ?? {};
 
   const requestedVa = String(va);
-  // FightPassport is een SPA en de fighter-header kan duidelijk later verschijnen
-  // dan domcontentloaded. Geef dezelfde tab dus eerst echt de tijd om op de
-  // gevraagde vechter uit te komen voordat we hem als mismatch/niet gevonden zien.
   const verifyWindowMs = Math.max(15000, softWaitMs * 8);
   const pollMs = 250;
 
@@ -218,20 +215,23 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
     } catch {}
 
     const url = fighterUrl(va);
-    await p.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
 
-    // FightPassport is een hash-SPA: forceer de gevraagde vechter direct na openen nogmaals.
+    await p.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 25000,
+    }).catch(() => {});
+
     const forced = await forceExactFighterUrl(p, va, 30000).catch((e) => {
       if (e?.message === "LOGIN_PAGE") throw e;
       return false;
     });
+
     if (!forced) {
       await hardClosePage(p).catch(() => {});
       await sleep(betweenAttemptsMs);
       continue;
     }
 
-    // Eerste rustige wachttijd nadat de exacte VA aantoonbaar staat.
     await sleep(softWaitMs);
 
     const verifyStartedAt = Date.now();
@@ -248,16 +248,20 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
       lastInfo = await readHeaderInfo(p);
 
       const gotVa = lastInfo?.gotVa ?? null;
+
       if (gotVa && String(gotVa) === requestedVa) {
-        return p;
+        await sleep(500);
+        const confirm = await readHeaderInfo(p);
+
+        if (String(confirm?.gotVa || "") === requestedVa) {
+          return p;
+        }
       }
 
-      // Een andere of lege header kan nog de vorige/tussentijdse SPA-state zijn.
-      // Niet meteen opnieuw openen: blijf eerst in deze tab kijken waar FP uitkomt.
       await sleep(pollMs);
     }
 
-    console.log(`[bundle] ↪️ openTab niet op gevraagde VA na wachten ${workerLabel}`, {
+    console.log(`[fp-total] ↪️ openTab niet op gevraagde VA na wachten ${workerLabel}`, {
       requested: requestedVa,
       gotVa: lastInfo?.gotVa ?? null,
       attempt,
@@ -425,33 +429,35 @@ async function forceExactFighterUrl(page, va, timeoutMs = 30000) {
     }
 
     const info = await readHeaderInfo(page);
-    const currentUrl = page.url();
     const currentHash = await page.evaluate(() => location.hash).catch(() => "");
 
     if (
       String(info?.gotVa || "") === requestedVa &&
       String(currentHash || "") === wantedHash
     ) {
-      // Nog een korte bevestiging om te voorkomen dat we een oude SPA-state lezen.
       await sleep(500);
+
       const confirm = await readHeaderInfo(page);
       const confirmHash = await page.evaluate(() => location.hash).catch(() => "");
-      if (String(confirm?.gotVa || "") === requestedVa && confirmHash === wantedHash) {
+
+      if (
+        String(confirm?.gotVa || "") === requestedVa &&
+        String(confirmHash || "") === wantedHash
+      ) {
         return true;
       }
     }
 
     const now = Date.now();
+
     if (now - lastForcedAt >= 1200) {
       lastForcedAt = now;
 
       await page.evaluate((forcedUrl, forcedHash) => {
-        // Eerst de hash exact afdwingen; FightPassport routeert als SPA op de hash.
         if (location.hash !== forcedHash) {
           location.hash = forcedHash;
         }
 
-        // Daarna ook de volledige URL hard gelijkzetten.
         if (location.href !== forcedUrl) {
           history.replaceState(null, "", forcedUrl);
           window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -461,12 +467,18 @@ async function forceExactFighterUrl(page, va, timeoutMs = 30000) {
       await sleep(600);
 
       const afterForce = await readHeaderInfo(page);
-      if (String(afterForce?.gotVa || "") !== requestedVa && hardReloads < 3) {
+
+      if (
+        String(afterForce?.gotVa || "") !== requestedVa &&
+        hardReloads < 3
+      ) {
         hardReloads++;
+
         await page.goto(url, {
           waitUntil: "domcontentloaded",
           timeout: 25000,
         }).catch(() => {});
+
         await sleep(1200);
       }
     }

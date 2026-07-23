@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, Play } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
 
 
@@ -76,8 +76,32 @@ function recordStatsFromUitslagen(rows: any[]) {
 }
 
 export default function FighterDossierPage(){
- const {va}=useParams<{va:string}>(); const router=useRouter(); const [data,setData]=useState<any>(null); const [error,setError]=useState("");
- async function load(){const r=await authedFetch(`/api/admin/fightpassport-beheer/fighters/${va}`);const j=await r.json().catch(()=>({}));if(r.ok)setData(j);else setError(j.error||"Laden mislukt");}
+ const {va}=useParams<{va:string}>(); const router=useRouter(); const [data,setData]=useState<any>(null); const [error,setError]=useState(""); const [rescraping,setRescraping]=useState(false); const [message,setMessage]=useState("");
+ async function load(){const r=await authedFetch(`/api/admin/fightpassport-beheer/fighters/${va}`);const j=await r.json().catch(()=>({}));if(r.ok){setData(j);setError("");return j;}setError(j.error||"Laden mislukt");return null;}
+ async function rescrape(){
+   if(rescraping)return;
+   setRescraping(true);
+   setMessage("");
+   const previousSync=data?.fighter?.last_scraped_at||null;
+   const r=await authedFetch(`/api/admin/fightpassport-beheer/fighters/${va}/rescrape`,{method:"POST"});
+   const j=await r.json().catch(()=>({}));
+   if(!r.ok){setRescraping(false);setMessage(j.error||"Hercontrole starten mislukt.");return;}
+   setMessage(j.message||`Hercontrole voor VA ${va} gestart.`);
+   const startedAt=Date.now();
+   while(Date.now()-startedAt<10*60*1000){
+     await new Promise(resolve=>setTimeout(resolve,3000));
+     const fresh=await load();
+     const nextSync=fresh?.fighter?.last_scraped_at||null;
+     if(nextSync&&nextSync!==previousSync){
+       setMessage("Hercontrole afgerond. Dossier is bijgewerkt.");
+       setRescraping(false);
+       return;
+     }
+   }
+   await load();
+   setMessage("Hercontrole draait mogelijk nog. Het dossier is opnieuw geladen.");
+   setRescraping(false);
+ }
  useEffect(()=>{load()},[va]); if(error)return <main style={s.page}><button style={s.silver} onClick={()=>router.back()}>Terug</button><p>{error}</p></main>; if(!data)return <main style={s.page}>Dossier laden...</main>;
  const f=data.fighter;
  const results=Array.isArray(data.results)?data.results:[];
@@ -91,7 +115,7 @@ export default function FighterDossierPage(){
       <div style={s.logoWrap}>
         <img src="/branding/fightsupport/excel-logo.png" alt="FightSupport" style={s.logo}/>
       </div>
-      <button style={s.silver} onClick={load}><RefreshCw size={16}/>Hercheck</button>
+      <div style={{display:"flex",justifyContent:"flex-end"}}><button style={s.silver} disabled={rescraping} onClick={rescrape}><Play size={16}/>{rescraping?"Hercontrole bezig...":"Hercontrole"}</button></div>
     </div>
     <div style={s.heroBottom}>
       <div style={s.heroIdentity}>
@@ -109,6 +133,7 @@ export default function FighterDossierPage(){
       </div>
     </div>
   </header>
+ {message&&<div style={{marginBottom:14,padding:"10px 12px",border:"1px solid #6b747d",background:"#11161a",color:"#e9edf0",fontWeight:800}}>{message}</div>}
  <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/><Card title="Doping" value={data.doping?.status||"Geen status"}/></div>
  <Section title="Profiel & contact"><Grid rows={[["Naam",f.naam],["E-mail",f.email],["Geboortedatum",f.geboortedatum],["Geslacht",f.geslacht]]}/></Section>
  <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden",f.nulmeting_totaal],["Record hoogste klasse",record],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
