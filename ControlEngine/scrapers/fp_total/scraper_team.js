@@ -1504,6 +1504,42 @@ async function createTeamSyncRun(totalSchools, tabCount) {
   return data;
 }
 
+async function upsertTeamSyncItem(runId, sportschool, patch = {}) {
+  if (!runId) return;
+
+  const sportschoolId = Number(sportschool?.sportschool_id);
+  if (!Number.isFinite(sportschoolId)) return;
+
+  const now = new Date().toISOString();
+
+  const payload = {
+    sync_run_id: runId,
+    sportschool_id: sportschoolId,
+    sportschool_naam: sportschool?.naam ?? null,
+    plaats: sportschool?.plaats ?? null,
+    status: patch.status ?? "running",
+    error_message: patch.error_message ?? null,
+    attempts: Number(patch.attempts ?? 1),
+    fighter_links: Number(patch.fighter_links ?? 0),
+    started_at: patch.started_at ?? now,
+    finished_at: patch.finished_at ?? null,
+    updated_at: now,
+  };
+
+  const { error } = await supabase
+    .from("fightpassport_team_sync_items")
+    .upsert(payload, {
+      onConflict: "sync_run_id,sportschool_id",
+    });
+
+  if (error) {
+    console.log(
+      `⚠️ Team-run item opslaan mislukt voor sportschool ${sportschoolId}:`,
+      error.message
+    );
+  }
+}
+
 async function updateTeamSyncRun(runId, {
   totalSchools,
   processed,
@@ -1630,6 +1666,7 @@ export async function scraperFightcrewAll(options = {}) {
     attempt: 1,
     targetWorker: null,
     firstError: null,
+    startedAt: null,
   }));
 
   const teamRun = await createTeamSyncRun(schoolList.length, tabCount);
@@ -1724,6 +1761,7 @@ export async function scraperFightcrewAll(options = {}) {
 
         const { sportschool, attempt } = task;
         const key = normalizeSportschoolKey(sportschool.sportschool_id);
+        const itemStartedAt = task.startedAt ?? new Date().toISOString();
 
         if (!key) {
           results.push({
@@ -1753,6 +1791,15 @@ export async function scraperFightcrewAll(options = {}) {
         );
 
         let page = null;
+
+        await upsertTeamSyncItem(teamRun.id, sportschool, {
+          status: "running",
+          attempts: attempt,
+          fighter_links: 0,
+          error_message: attempt > 1 ? task.firstError ?? null : null,
+          started_at: itemStartedAt,
+          finished_at: null,
+        });
 
         try {
           // Schone tab, maar bewust in DEZELFDE browsercontext als de master-login.
@@ -1788,6 +1835,15 @@ export async function scraperFightcrewAll(options = {}) {
             ok: true,
             attempts: attempt,
             count: vaList.length,
+          });
+
+          await upsertTeamSyncItem(teamRun.id, sportschool, {
+            status: "success",
+            attempts: attempt,
+            fighter_links: vaList.length,
+            error_message: null,
+            started_at: itemStartedAt,
+            finished_at: new Date().toISOString(),
           });
 
           processedCount++;
@@ -1837,6 +1893,7 @@ export async function scraperFightcrewAll(options = {}) {
               attempt: 2,
               targetWorker: nextWorker,
               firstError: message,
+              startedAt: itemStartedAt,
             });
 
             await updateSportschoolSyncStatus(
@@ -1871,6 +1928,17 @@ export async function scraperFightcrewAll(options = {}) {
               attempts: 2,
               first_error: task.firstError ?? null,
               error: message,
+            });
+
+            await upsertTeamSyncItem(teamRun.id, sportschool, {
+              status: "error",
+              attempts: 2,
+              fighter_links: 0,
+              error_message: task.firstError
+                ? `Poging 1: ${task.firstError}\nPoging 2: ${message}`
+                : message,
+              started_at: itemStartedAt,
+              finished_at: new Date().toISOString(),
             });
 
             processedCount++;

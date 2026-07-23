@@ -5,10 +5,23 @@ export async function GET(req: Request) {
   try {
     await requireRole(req, ["admin", "superadmin"]);
 
+    const url = new URL(req.url);
+    const runId = String(url.searchParams.get("run_id") ?? "").trim();
+
+    if (!runId) {
+      return NextResponse.json(
+        { error: "run_id ontbreekt." },
+        { status: 400 },
+      );
+    }
+
     const { data, error } = await supabaseAdmin
-      .from("sportscholen")
-      .select("sportschool_id, naam, plaats, land, team_sync_status, team_sync_error, updated_at")
-      .in("team_sync_status", ["fout", "mislukt"])
+      .from("fightpassport_team_sync_items")
+      .select(
+        "id, sync_run_id, sportschool_id, sportschool_naam, plaats, status, error_message, attempts, fighter_links, started_at, finished_at, created_at, updated_at",
+      )
+      .eq("sync_run_id", runId)
+      .in("status", ["error", "fout", "failed", "mislukt"])
       .order("sportschool_id", { ascending: true });
 
     if (error) throw error;
@@ -19,7 +32,7 @@ export async function GET(req: Request) {
     console.error("[fightpassport-sync/team-errors] ophalen mislukt:", err);
     return NextResponse.json(
       { error: "Sportschoolfouten konden niet worden geladen." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

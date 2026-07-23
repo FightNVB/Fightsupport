@@ -74,9 +74,14 @@ export default function FightPaspoortBeheerPage() {
     if (res.ok) setItems(json.items ?? []);
   }, []);
 
-  const loadTeamErrors = useCallback(async () => {
-    const res = await authedFetch("/api/admin/fightpassport-sync/team-errors");
+  const loadTeamErrors = useCallback(async (runId: string) => {
+    if (!runId) return setTeamErrors([]);
+
+    const res = await authedFetch(
+      `/api/admin/fightpassport-sync/team-errors?run_id=${encodeURIComponent(runId)}`
+    );
     const json = await res.json().catch(() => ({}));
+
     if (res.ok) {
       setTeamErrors(json.errors ?? []);
     } else {
@@ -97,7 +102,18 @@ export default function FightPaspoortBeheerPage() {
     return () => clearInterval(t);
   }, [loadRuns]);
 
-  const allErrors = useMemo(() => items.filter((x) => x.status === "error"), [items]);
+  const allErrors = useMemo(
+    () =>
+      items.filter((x) => {
+        const status = String(x?.status ?? "").toLowerCase();
+        return (
+          ["error", "fout", "failed", "mislukt"].includes(status) ||
+          !!x?.error_message ||
+          !!x?.error_step
+        );
+      }),
+    [items]
+  );
   const selectedRunData = useMemo(
     () => runs.find((r: any) => String(r.id) === String(selectedRun)) ?? null,
     [runs, selectedRun]
@@ -263,7 +279,7 @@ export default function FightPaspoortBeheerPage() {
 
     if (isTeam) {
       setItems([]);
-      await loadTeamErrors();
+      await loadTeamErrors(run.id);
     } else {
       setTeamErrors([]);
       await loadItems(run.id);
@@ -506,12 +522,12 @@ export default function FightPaspoortBeheerPage() {
         <Table>
           <thead><tr><Th>Sportschool ID</Th><Th>Sportschool</Th><Th>Plaats</Th><Th>Status</Th><Th>Foutmelding</Th></tr></thead>
           <tbody>
-            {teamErrors.map((i:any)=><tr key={i.sportschool_id}>
+            {teamErrors.map((i:any)=><tr key={i.id ?? `${i.sync_run_id}-${i.sportschool_id}`}>
               <Td>{i.sportschool_id}</Td>
-              <Td>{i.naam||"-"}</Td>
+              <Td>{i.sportschool_naam||"-"}</Td>
               <Td>{i.plaats||"-"}</Td>
-              <Td>{i.team_sync_status||"-"}</Td>
-              <Td style={{color:"#ff7d69"}}>{i.team_sync_error||"Onbekende fout"}</Td>
+              <Td>{i.status||"-"}</Td>
+              <Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td>
             </tr>)}
             {!teamErrors.length&&<tr><Td colSpan={5}>Geen sportschoolfouten gevonden.</Td></tr>}
           </tbody>

@@ -1263,9 +1263,37 @@ async function saveFighter(all) {
 async function saveResultsSnapshot(va, results) {
   // Alleen aanroepen nadat de UITSLAGEN-stap aantoonbaar succesvol is.
   // Een tijdelijke fout of mislukte download mag bestaande uitslagen nooit wissen.
-  await supabase.from("fightpassport_results").delete().eq("va_nummer", String(va));
-  if (results.length) {
-    const { error: re } = await supabase.from("fightpassport_results").insert(results);
+  //
+  // FightPassport kan dezelfde uitslagregel dubbel in één Excelbestand bevatten.
+  // Dedupliceer daarom exact op dezelfde velden als fightpassport_results_dedupe_idx.
+  const uniqueResults = [
+    ...new Map(
+      (results || []).map((r) => {
+        const key = [
+          String(va),
+          r.datum || "1900-01-01",
+          r.evenement || "",
+          r.tegenstander || "",
+          r.discipline || "",
+          r.klasse || "",
+          r.uitslag || "",
+        ].join("||");
+
+        return [key, r];
+      })
+    ).values(),
+  ];
+
+  await supabase
+    .from("fightpassport_results")
+    .delete()
+    .eq("va_nummer", String(va));
+
+  if (uniqueResults.length) {
+    const { error: re } = await supabase
+      .from("fightpassport_results")
+      .insert(uniqueResults);
+
     if (re) throw re;
   }
 }
