@@ -3484,7 +3484,18 @@ export default function ControleMatchmakingPage() {
 
   return (
     <Shell>
-      <div style={metalFrameStyle("orange")} className="p-3 md:p-4">
+      <div
+        onClickCapture={blockReadOnlyInteraction}
+        onChangeCapture={blockReadOnlyInteraction}
+        onSubmitCapture={blockReadOnlyInteraction}
+        style={metalFrameStyle("orange")}
+        className="p-3 md:p-4"
+      >
+        {isReadOnly ? (
+          <div className="mb-3 border border-amber-400 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950">
+            🔒 {otherPresenceUsers.map((u) => safeText(u.user_name, "Een andere gebruiker")).join(", ")} heeft deze matchmaking al open. Je hebt alleen leesrechten zolang die gebruiker actief is.
+          </div>
+        ) : null}
         <div style={metalInnerStyle()} className="p-4 md:p-5">
           <div
             className="rounded-2xl px-4 py-4 md:px-6 md:py-5"

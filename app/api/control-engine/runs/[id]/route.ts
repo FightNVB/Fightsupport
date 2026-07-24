@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
-import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import {
+  assertCanAccessMatchmaking,
+  requireUserWithRole,
+} from "@/app/api/_utils/authz";
 
 export async function GET(
   req: Request,
@@ -9,7 +12,6 @@ export async function GET(
   try {
     const { id: runId } = await context.params;
 
-    // 1) Haal run op
     const { data: run, error: runErr } = await supabaseAdmin
       .from("controle_runs")
       .select("*")
@@ -23,50 +25,50 @@ export async function GET(
       );
     }
 
-// ✅ AuthZ: scope op matchmaking_id
-const { userId, role } = await requireUserWithRole(req);
-const mmId = String((run as any)?.matchmaking_id ?? "");
-if (mmId) {
-  await assertCanAccessMatchmaking({ matchmaking_id: mmId, userId, role });
-} else {
-  // zonder matchmaking_id: alleen admin/superadmin
-  if (role !== "admin" && role !== "superadmin") {
-    return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
-  }
-}
+    const { userId, role } = await requireUserWithRole(req);
+    const matchmakingId = String(run.matchmaking_id ?? "");
 
-    // 2) Haal event erbij (naam + datum)
+    if (matchmakingId) {
+      await assertCanAccessMatchmaking({
+        matchmaking_id: matchmakingId,
+        userId,
+        role,
+      });
+    } else if (role !== "admin" && role !== "superadmin") {
+      return NextResponse.json(
+        { ok: false, error: "Forbidden" },
+        { status: 403 }
+      );
+    }
+
     let event = null;
-
     if (run.event_id) {
       const { data: ev } = await supabaseAdmin
         .from("evenementen")
         .select("id, naam, datum, matchmaker, promotor, hoofdofficial")
         .eq("id", run.event_id)
         .maybeSingle();
-
       event = ev ?? null;
     }
 
-    // 3) Haal ALLE resultaten
-    const { data: resultaten, error: resErr } = await supabaseAdmin
-      .from("controle_resultaten")
+    const { data: scrapeItems, error: itemsErr } = await supabaseAdmin
+      .from("controle_scrape_items")
       .select("*")
-      .eq("run_id", runId)
-      .order("partij_index", { ascending: true });
+      .eq("controle_run_id", runId)
+      .order("va_nummer", { ascending: true });
 
-    if (resErr) throw resErr;
+    if (itemsErr) throw itemsErr;
 
     return NextResponse.json({
       ok: true,
       run,
       event,
-      resultaten: resultaten ?? [],
+      scrape_items: scrapeItems ?? [],
     });
   } catch (e: any) {
-    console.error("❌ CONTROL-RUN GET ERROR", e);
+    console.error("❌ CONTROL-RUN SCRAPE RESULTS GET ERROR", e);
     return NextResponse.json(
-      { ok: false, error: e.message ?? "Onbekende fout." },
+      { ok: false, error: e?.message ?? "Onbekende fout." },
       { status: 500 }
     );
   }

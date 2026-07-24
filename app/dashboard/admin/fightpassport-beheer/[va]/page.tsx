@@ -135,8 +135,8 @@ export default function FighterDossierPage(){
   </header>
  {message&&<div style={{marginBottom:14,padding:"10px 12px",border:"1px solid #6b747d",background:"#11161a",color:"#e9edf0",fontWeight:800}}>{message}</div>}
  <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/><Card title="Doping" value={data.doping?.status||"Geen status"}/></div>
- <Section title="Profiel & contact"><Grid rows={[["Naam",f.naam],["E-mail",f.email],["Geboortedatum",f.geboortedatum],["Geslacht",f.geslacht]]}/></Section>
- <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden",f.nulmeting_totaal],["Record hoogste klasse",record],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
+ <Section title="Profiel & contact"><Grid rows={[["Naam",f.naam],["E-mail",f.email],["Geboortedatum",formatBirthDate(f.geboortedatum)],["Geslacht",f.geslacht]]}/></Section>
+ <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden",f.nulmeting_totaal],["Record hoogste klasse",record],["Leeftijd",calculateAge(f.geboortedatum)],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
  <Section title={`Wedstrijdhistorie (${data.results.length})`}><Table headers={["Datum","Evenement","Discipline","Klasse","Tegenstander","Sportschool","Uitslag"]} rows={data.results.map((r:any)=>[r.datum,r.evenement,r.discipline,r.klasse,r.tegenstander,r.sportschool,r.uitslag])}/></Section>
   <Section title={`Sportscholen (${(data.sportscholen||[]).length})`}><Table headers={["Sportschool","Plaats","Land","Keurmerk","Keurmerk geldig tot"]} rows={(data.sportscholen||[]).map((r:any)=>{
     const land=String(r.land||"").trim().toLowerCase();
@@ -159,6 +159,21 @@ function Card({title,value,danger}:any){return <div style={s.card}><div style={s
 function Section({title,children}:any){return <section style={s.section}><h2 style={{margin:"0 0 14px",color:"#ff7440"}}>{title}</h2>{children}</section>}
 function Grid({rows}:any){return <div style={s.grid}>{rows.map((r:any,i:number)=><div key={i} style={{...s.field,...(r[2]==="wide"?s.fieldWide:{}),...(r[2]==="full"?s.fieldFull:{})}}><span style={s.muted}>{r[0]}</span><b style={{wordBreak:"break-word",lineHeight:1.5,whiteSpace:"pre-wrap"}}>{r[1]??"-"}</b></div>)}</div>}
 function Table({headers,rows}:any){return <div style={{overflowX:"auto",border:"1px solid #444b52"}}><table style={s.table}><thead><tr>{headers.map((h:any)=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{rows.map((r:any,i:number)=>{const light=i%2===1;return <tr key={i}>{r.map((v:any,j:number)=><td key={j} style={{...s.td,...(light?s.tdLight:s.tdDark)}}>{v??"-"}</td>)}</tr>})}{!rows.length&&<tr><td style={{...s.td,...s.tdDark}} colSpan={headers.length}>Geen gegevens.</td></tr>}</tbody></table></div>}
+function formatBirthDate(v:any){
+ if(!v)return "-";
+ const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+ return m?`${m[3]}-${m[2]}-${m[1]}`:String(v);
+}
+function calculateAge(v:any){
+ if(!v)return "-";
+ const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+ if(!m)return "-";
+ const birth=new Date(Number(m[1]),Number(m[2])-1,Number(m[3]));
+ const now=new Date();
+ let age=now.getFullYear()-birth.getFullYear();
+ if(now.getMonth()<birth.getMonth()||(now.getMonth()===birth.getMonth()&&now.getDate()<birth.getDate()))age--;
+ return `${age} jaar`;
+}
 function fmt(v:any){return v?new Date(v).toLocaleString("nl-NL"):"-"}
 const s:any={
 page:{minHeight:"100vh",background:"radial-gradient(circle at 50% -10%,rgba(255,77,0,.16),transparent 34%),linear-gradient(180deg,#060708 0%,#0b0f13 48%,#050607 100%)",color:"white",padding:20},
@@ -166,15 +181,15 @@ wrap:{maxWidth:1460,margin:"0 auto"},
 hero:{position:"relative",overflow:"hidden",marginBottom:16,border:"2px solid #aeb4ba",borderTop:"4px solid #dfe3e6",background:"linear-gradient(145deg,#23282d 0%,#0b0e12 48%,#171b20 100%)",boxShadow:"0 0 0 1px #4a5057,0 16px 34px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.16)"},
 heroGlow:{position:"absolute",inset:0,pointerEvents:"none",background:"radial-gradient(circle at 50% 0%,rgba(255,255,255,.10),transparent 24%),radial-gradient(circle at 50% 65%,rgba(255,77,0,.07),transparent 30%)"},
 heroTop:{position:"relative",display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",gap:14,padding:"10px 14px",borderBottom:"1px solid #727980",background:"linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.01))"},
-logoWrap:{display:"flex",justifyContent:"center",alignItems:"center",height:56,minWidth:320},
-logo:{height:50,width:"auto",maxWidth:420,objectFit:"contain",filter:"drop-shadow(0 8px 14px rgba(0,0,0,.7)) drop-shadow(0 0 12px rgba(255,77,0,.12))"},
+logoWrap:{display:"flex",justifyContent:"center",alignItems:"center",height:68,minWidth:360},
+logo:{height:64,width:"auto",maxWidth:520,objectFit:"contain",filter:"drop-shadow(0 8px 14px rgba(0,0,0,.7)) drop-shadow(0 0 12px rgba(255,77,0,.12))"},
 heroBottom:{position:"relative",display:"flex",justifyContent:"center",alignItems:"center",gap:20,padding:"18px 18px 20px"},
  heroIdentity:{display:"grid",justifyItems:"center",textAlign:"center",gap:8,width:"100%"},
  titleRow:{display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap"},
  banSign:{position:"relative",display:"inline-flex",width:34,height:34,borderRadius:"50%",background:"#d71920",border:"3px solid #fff",boxShadow:"0 0 0 2px #8b0f13,0 4px 10px rgba(0,0,0,.45)"},
  banBar:{position:"absolute",left:5,right:5,top:"50%",height:6,marginTop:-3,background:"#fff",borderRadius:3},
 eyebrow:{fontSize:10,fontWeight:900,letterSpacing:2.4,color:"#c7cdd2",marginBottom:5,textShadow:"0 1px 0 #000"},
-title:{margin:0,fontSize:34,fontWeight:950,letterSpacing:.3,color:"#ff6a2a",textAlign:"center",textShadow:"0 4px 12px #000"},
+title:{margin:0,fontFamily:"Bebas Neue, Impact, Arial Narrow, sans-serif",fontSize:46,fontWeight:900,letterSpacing:1.2,color:"#ff6a2a",textAlign:"center",lineHeight:1,textShadow:"0 4px 12px #000"},
 identityStrip:{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center"},
 identityChip:{padding:"6px 10px",border:"1px solid #7e868d",background:"linear-gradient(180deg,#2a2f34,#111519)",color:"#e8ebed",fontSize:12,fontWeight:850,boxShadow:"inset 0 1px 0 rgba(255,255,255,.10)"},
 silver:{display:"inline-flex",gap:7,alignItems:"center",justifyContent:"center",height:38,padding:"0 13px",background:"linear-gradient(#fff,#c7c7c7)",color:"#111",border:"1px solid #aaa",fontWeight:900,cursor:"pointer",boxShadow:"inset 0 1px 0 #fff,0 4px 10px rgba(0,0,0,.28)"},

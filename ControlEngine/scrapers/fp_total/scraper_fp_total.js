@@ -1520,6 +1520,100 @@ async function scrapeOne(page, va, openFreshPage) {
   };
 }
 
+
+async function loadConfirmedDeletedVaNumbers(startVa, endVa) {
+  const skipped = new Set();
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("fightpassport_missing_va")
+      .select("va_number")
+      .eq("status", "confirmed_deleted")
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      // Migratie mogelijk nog niet uitgevoerd: de scraper blijft dan veilig werken zonder skip-optimalisatie.
+      console.log(`[fp-total] ⚠️ confirmed_deleted lijst niet beschikbaar: ${error.message}`);
+      return skipped;
+    }
+
+    const rows = data ?? [];
+    for (const row of rows) {
+      const n = Number(row.va_number);
+      if (Number.isInteger(n) && n >= startVa && n <= endVa) skipped.add(String(n));
+    }
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return skipped;
+}
+
+async function registerMissingVa(va, runId, message = null) {
+  const now = new Date().toISOString();
+  const { data: existing } = await supabase
+    .from("fightpassport_missing_va")
+    .select("status,not_found_count,first_seen_at")
+    .eq("va_number", String(va))
+    .maybeSingle();
+
+  const payload = {
+    va_number: String(va),
+    status: existing?.status === "confirmed_deleted" ? "confirmed_deleted" : "pending_review",
+    first_seen_at: existing?.first_seen_at || now,
+    last_seen_at: now,
+    not_found_count: Number(existing?.not_found_count || 0) + 1,
+    last_source: "total",
+    last_run_id: runId,
+    last_error_message: message,
+    resolved_at: null,
+    updated_at: now,
+  };
+
+  const { error } = await supabase
+    .from("fightpassport_missing_va")
+    .upsert(payload, { onConflict: "va_number" });
+
+  if (error) console.log(`[fp-total] missing-va registratie fout VA ${va}: ${error.message}`);
+}
+
+async function resolveMissingVa(va, runId) {
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("fightpassport_missing_va")
+    .update({
+      status: "resolved",
+      resolved_at: now,
+      last_seen_at: now,
+      last_source: "total",
+      last_run_id: runId,
+      last_error_message: null,
+      updated_at: now,
+    })
+    .eq("va_number", String(va))
+    .neq("status", "resolved");
+
+  if (error) console.log(`[fp-total] missing-va resolve fout VA ${va}: ${error.message}`);
+}
+
+async function confirmProfileMissing(browser, context, cookies, va, label) {
+  // De eerste volledige openTab-cyclus is al mislukt. Doe nog twee onafhankelijke
+  // verificatiecycli. Alleen drie mislukte profielverificaties samen gelden als 'niet gevonden'.
+  for (let retry = 1; retry <= 2; retry++) {
+    await sleep(1000 * retry);
+    const retryPage = await openTabToFighterVerified(browser, context, cookies, va, {
+      maxAttempts: 2,
+      softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
+      betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+      workerLabel: `[${label} ontbrekend-hercontrole ${retry}/2]`,
+    });
+    if (retryPage) return retryPage;
+  }
+  return null;
+}
+
 async function upsertSyncItem(runId, va, patch) {
   const payload = {
     sync_run_id: runId,
@@ -1611,13 +1705,33 @@ async function main() {
   const terminalStatuses = new Set(["success", "not_found", "skipped", "error"]);
   const terminalByVa = new Map(existingItems.map((item) => [String(item.va_nummer), String(item.status || "").toLowerCase()]));
 
+  const confirmedDeleted = await loadConfirmedDeletedVaNumbers(effectiveStartVa, effectiveEndVa);
   const vaList = [];
+  let skippedConfirmedDeleted = 0;
   for (let va = effectiveStartVa; va <= effectiveEndVa; va++) {
-    const status = terminalByVa.get(String(va));
-    if (!terminalStatuses.has(status)) vaList.push(String(va));
+    const vaString = String(va);
+    const status = terminalByVa.get(vaString);
+    if (terminalStatuses.has(status)) continue;
+    if (confirmedDeleted.has(vaString)) {
+      skippedConfirmedDeleted++;
+      await upsertSyncItem(run.id, vaString, {
+        status: "skipped",
+        profiel_gevonden: false,
+        error_step: "confirmed_deleted",
+        error_message: "Handmatig bevestigd als verwijderd; niet opnieuw bevraagd.",
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+      });
+      continue;
+    }
+    vaList.push(vaString);
   }
 
-  let processed = existingItems.filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase())).length;
+  if (skippedConfirmedDeleted) {
+    console.log(`[fp-total] ⏭️ ${skippedConfirmedDeleted} handmatig bevestigde verwijderde VA-nummers overgeslagen`);
+  }
+
+  let processed = existingItems.filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase())).length + skippedConfirmedDeleted;
   let found = existingItems.filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase()) && x.profiel_gevonden === true).length;
   let licensed = existingItems.filter((x) => terminalStatuses.has(String(x.status || "").toLowerCase()) && x.licentie_actief === true).length;
   let errors = existingItems.filter((x) => String(x.status || "").toLowerCase() === "error").length;
@@ -1730,12 +1844,19 @@ async function main() {
         });
 
         if (!page) {
+          page = await confirmProfileMissing(browser, ctx, cookies, va, label);
+        }
+
+        if (!page) {
           processed++;
           lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
+          await registerMissingVa(va, run.id, "Na drie onafhankelijke profielverificaties geen geldige fighter-header gevonden.");
           await upsertSyncItem(run.id, va, {
-            status: "not_found", profiel_gevonden: false, finished_at: new Date().toISOString(), error_step: null, error_message: null,
+            status: "not_found", profiel_gevonden: false, finished_at: new Date().toISOString(),
+            error_step: "pending_review",
+            error_message: "Niet gevonden na drie verificatiecycli; toegevoegd aan AI Controle.",
           });
-          console.log(`[fp-total] — ${label} VA ${va}: niet gevonden / geen geldige fighter-header`);
+          console.log(`[fp-total] — ${label} VA ${va}: na 3 verificatiecycli niet gevonden; pending_review`);
           continue;
         }
 
@@ -1759,7 +1880,10 @@ async function main() {
 
         processed++;
         lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
-        if (res.exists) found++;
+        if (res.exists) {
+          found++;
+          await resolveMissingVa(va, run.id);
+        }
         if (res.licensed) licensed++;
 
         await upsertSyncItem(run.id, va, {

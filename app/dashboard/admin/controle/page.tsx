@@ -325,6 +325,7 @@ const ACTION_COLORS = {
   annuleren: "linear-gradient(180deg, #8b8b8b 0%, #4b4b4b 100%)",
   herupload: "linear-gradient(180deg, #ff8a1f 0%, #d94700 100%)",
   verwijderen: "linear-gradient(180deg, #c53636 0%, #7a1717 100%)",
+  resultaten: "linear-gradient(180deg, #fff36a 0%, #ffd400 55%, #c89b00 100%)",
 };
 
 export default function ControleOverzichtPage() {
@@ -425,7 +426,7 @@ export default function ControleOverzichtPage() {
     await new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
-  async function waitForControleRunFinished(matchmakingId: string, maxMs = 8 * 60 * 1000) {
+  async function waitForControleRunFinished(matchmakingId: string, maxMs = 8 * 60 * 1000): Promise<string | null> {
     const started = Date.now();
 
     while (Date.now() - started < maxMs) {
@@ -448,11 +449,11 @@ export default function ControleOverzichtPage() {
             status === "complete" ||
             status === "done"
           ) {
-            return true;
+            return String(run.id);
           }
 
           if (status === "failed" || status === "mislukt" || status === "error") {
-            return false;
+            return null;
           }
         }
       } catch (e) {
@@ -462,7 +463,7 @@ export default function ControleOverzichtPage() {
       await sleepMs(3500);
     }
 
-    return false;
+    return null;
   }
 
 
@@ -786,13 +787,14 @@ export default function ControleOverzichtPage() {
           "FightSupport controleert automatisch wanneer de controle klaar is."
         );
 
-        const finished = await waitForControleRunFinished(matchmakingId);
+        const finishedRunId = await waitForControleRunFinished(matchmakingId);
 
-        if (finished) {
+        if (finishedRunId) {
           setScrapeOverlayMessage("Controle is afgerond. Resultaten worden geladen...");
           setScrapeOverlaySub("Nog heel even geduld.");
           await load();
           closeScrapeOverlay();
+          window.open(`/dashboard/admin/controle/run/${finishedRunId}`, "_blank");
           return;
         }
 
@@ -806,11 +808,15 @@ export default function ControleOverzichtPage() {
         return;
       }
 
+      const startJson = await res.json().catch(() => ({}));
       setScrapeOverlayMessage("Resultaten worden geladen...");
       setScrapeOverlaySub("Nog heel even geduld.");
 
       await load();
       closeScrapeOverlay();
+      if (startJson?.controle_run_id) {
+        window.open(`/dashboard/admin/controle/run/${startJson.controle_run_id}`, "_blank");
+      }
     } catch (e) {
       console.error("Start controle request gaf een fout of timeout:", e);
 
@@ -822,13 +828,14 @@ export default function ControleOverzichtPage() {
         "FightSupport controleert automatisch wanneer de controle klaar is."
       );
 
-      const finished = await waitForControleRunFinished(matchmakingId);
+      const finishedRunId = await waitForControleRunFinished(matchmakingId);
 
-      if (finished) {
+      if (finishedRunId) {
         setScrapeOverlayMessage("Controle is afgerond. Resultaten worden geladen...");
         setScrapeOverlaySub("Nog heel even geduld.");
         await load();
         closeScrapeOverlay();
+        window.open(`/dashboard/admin/controle/run/${finishedRunId}`, "_blank");
         return;
       }
 
@@ -1659,6 +1666,18 @@ export default function ControleOverzichtPage() {
                                         >
                                           🗑
                                         </ActionSquare>
+
+
+
+                                        {r.laatste_run?.id ? (
+                                          <ActionSquare
+                                            href={`/dashboard/admin/controle/run/${r.laatste_run.id}`}
+                                            title="Resultaten en fouten van laatste controlerun"
+                                            color={ACTION_COLORS.resultaten}
+                                          >
+                                            <span style={{ color: "#111" }}>!</span>
+                                          </ActionSquare>
+                                        ) : null}
 
                                         {rowMsg ? (
                                           <span

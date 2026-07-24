@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Bug, Database, Play, RefreshCw, Search, StopCircle, Trash2, Users } from "lucide-react";
+import { ArrowLeft, BrainCircuit, Bug, CheckCircle2, Database, Play, RefreshCw, RotateCcw, Search, ShieldCheck, StopCircle, Trash2, Users } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
 
 type Fighter = any;
 type Run = any;
 type SyncItem = any;
-type Tab = "fighters" | "sync" | "errors";
+type Tab = "fighters" | "sync" | "ai" | "errors";
 
 export default function FightPaspoortBeheerPage() {
   const router = useRouter();
@@ -18,6 +18,11 @@ export default function FightPaspoortBeheerPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [items, setItems] = useState<SyncItem[]>([]);
   const [teamErrors, setTeamErrors] = useState<any[]>([]);
+  const [missingVa, setMissingVa] = useState<any[]>([]);
+  const [missingStats, setMissingStats] = useState<any>({});
+  const [missingStatus, setMissingStatus] = useState("all");
+  const [missingQuery, setMissingQuery] = useState("");
+  const [missingBusy, setMissingBusy] = useState("");
   const [selectedRun, setSelectedRun] = useState<string>("");
   const [q, setQ] = useState("");
   const [licentie, setLicentie] = useState("all");
@@ -74,6 +79,40 @@ export default function FightPaspoortBeheerPage() {
     if (res.ok) setItems(json.items ?? []);
   }, []);
 
+
+  const loadMissingVa = useCallback(async () => {
+    const sp = new URLSearchParams({ status: missingStatus, q: missingQuery });
+    const res = await authedFetch(`/api/admin/fightpassport-beheer/missing-va?${sp}`);
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setMissingVa(json.items ?? []);
+      setMissingStats(json.stats ?? {});
+    } else {
+      setMessage(json.error || "AI Controle laden mislukt.");
+    }
+  }, [missingStatus, missingQuery]);
+
+  async function updateMissingVa(vaNumber: string, action: string) {
+    const labels: Record<string,string> = {
+      confirm_deleted: "definitief als verwijderd bevestigen",
+      retry: "opnieuw laten controleren",
+      restore: "terugzetten naar beoordeling",
+      resolve: "als opgelost markeren",
+    };
+    if (action === "confirm_deleted" && !window.confirm(`VA ${vaNumber} ${labels[action]}? Alleen bevestigde nummers worden voortaan overgeslagen.`)) return;
+    setMissingBusy(`${vaNumber}:${action}`);
+    setMessage("");
+    const res = await authedFetch("/api/admin/fightpassport-beheer/missing-va", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ va_number: vaNumber, action }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setMissingBusy("");
+    setMessage(res.ok ? `VA ${vaNumber}: ${labels[action]}.` : json.error || "Actie mislukt.");
+    if (res.ok) await loadMissingVa();
+  }
+
   const loadTeamErrors = useCallback(async (runId: string) => {
     if (!runId) return setTeamErrors([]);
 
@@ -92,7 +131,8 @@ export default function FightPaspoortBeheerPage() {
 
   useEffect(() => {
     if (tab === "fighters") loadFighters();
-  }, [tab, loadFighters]);
+    if (tab === "ai") loadMissingVa();
+  }, [tab, loadFighters, loadMissingVa]);
 
   useEffect(() => {
     loadRuns();
@@ -340,6 +380,7 @@ export default function FightPaspoortBeheerPage() {
     <div style={styles.tabs}>
       <TabButton active={tab==="fighters"} onClick={()=>setTab("fighters")} icon={<Users size={16}/>} label="Vechters" />
       <TabButton active={tab==="sync"} onClick={()=>setTab("sync")} icon={<Database size={16}/>} label="Synchronisaties" />
+      <TabButton active={tab==="ai"} onClick={()=>setTab("ai")} icon={<BrainCircuit size={16}/>} label="AI Controle" />
       <TabButton active={tab==="errors"} onClick={()=>setTab("errors")} icon={<Bug size={16}/>} label="Fouten" />
     </div>
 
@@ -514,6 +555,54 @@ export default function FightPaspoortBeheerPage() {
       </div>}</section>
     </>}
 
+
+    {tab === "ai" && <>
+      <section style={styles.aiIntro}>
+        <div>
+          <h2 style={{margin:"0 0 6px"}}>AI Controle · ontbrekende VA-nummers</h2>
+          <p style={{margin:0,color:"#c8cdd2"}}>Regelgestuurde kwaliteitscontrole. Een VA wordt pas overgeslagen nadat jij hem expliciet als verwijderd bevestigt. Tijdelijke fouten blijven apart van echte ontbrekende profielen.</p>
+        </div>
+        <button style={styles.silver} onClick={loadMissingVa}><RefreshCw size={15}/>Verversen</button>
+      </section>
+
+      <section style={styles.statGrid}>
+        <StatCard label="Te beoordelen" value={missingStats.pending_review ?? 0} hint="Handmatige controle nodig" />
+        <StatCard label="Opnieuw proberen" value={missingStats.retry_requested ?? 0} hint="Volgende Total-run" />
+        <StatCard label="Bevestigd verwijderd" value={missingStats.confirmed_deleted ?? 0} hint="Veilig overgeslagen" />
+        <StatCard label="Opgelost" value={missingStats.resolved ?? 0} hint="Later weer gevonden" />
+        <StatCard label="Aandacht nodig" value={missingStats.attention ?? 0} hint="Openstaande acties" />
+      </section>
+
+      <section style={{...styles.panel,marginTop:16}}>
+        <div style={styles.filters}>
+          <label style={styles.label}>VA zoeken<input style={styles.input} value={missingQuery} onChange={e=>setMissingQuery(e.target.value.replace(/\D/g,""))} placeholder="Bijv. 875"/></label>
+          <Select label="Status" value={missingStatus} set={setMissingStatus} options={[["all","Alle"],["pending_review","Te beoordelen"],["retry_requested","Opnieuw proberen"],["confirmed_deleted","Bevestigd verwijderd"],["resolved","Opgelost"]]}/>
+          <button style={styles.orange} onClick={loadMissingVa}><Search size={15}/>Toepassen</button>
+        </div>
+      </section>
+
+      <section style={{...styles.panel,marginTop:16}}>
+        <Table><thead><tr><Th>Prioriteit</Th><Th>VA</Th><Th>Status</Th><Th>Advies</Th><Th>Keer niet gevonden</Th><Th>Eerste keer</Th><Th>Laatste keer</Th><Th>Bron</Th><Th>Acties</Th></tr></thead>
+        <tbody>{missingVa.map((item:any)=>{
+          const advice = missingAdvice(item);
+          return <tr key={item.id}>
+            <Td><span style={priorityStyle(advice.priority)}>{advice.priority}</span></Td>
+            <Td><b>{item.va_number}</b></Td>
+            <Td>{missingStatusLabel(item.status)}</Td>
+            <Td><b>{advice.text}</b>{item.last_error_message&&<><br/><small>{item.last_error_message}</small></>}</Td>
+            <Td>{item.not_found_count ?? 0}</Td><Td>{fmt(item.first_seen_at)}</Td><Td>{fmt(item.last_seen_at)}</Td><Td>{item.last_source ?? "-"}</Td>
+            <Td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {item.status!=="confirmed_deleted"&&<button style={styles.dangerMini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"confirm_deleted")}><ShieldCheck size={13}/>Verwijderd</button>}
+              {item.status!=="retry_requested"&&item.status!=="resolved"&&<button style={styles.mini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"retry")}><RotateCcw size={13}/>Retry</button>}
+              {item.status==="confirmed_deleted"&&<button style={styles.mini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"restore")}><RotateCcw size={13}/>Herstellen</button>}
+              {item.status!=="resolved"&&<button style={styles.mini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"resolve")}><CheckCircle2 size={13}/>Opgelost</button>}
+            </div></Td>
+          </tr>})}
+          {!missingVa.length&&<tr><Td colSpan={9}>Geen VA-nummers voor dit filter.</Td></tr>}
+        </tbody></Table>
+      </section>
+    </>}
+
     {tab === "errors" && <section style={styles.panel}>
       <h2 style={{marginTop:0}}>{selectedRunIsTeam ? "Sportscholen Sync-fouten" : "Total AutoCheck-fouten"}</h2>
       {!selectedRunData ? (
@@ -544,6 +633,18 @@ export default function FightPaspoortBeheerPage() {
     </section>}
   </div></main>;
 }
+
+
+function StatCard({label,value,hint}:any){return <div style={styles.statCard}><span style={{color:"#ff8c58",fontSize:12,fontWeight:900,textTransform:"uppercase"}}>{label}</span><strong style={{fontSize:30}}>{value}</strong><small style={{color:"#aeb5bc"}}>{hint}</small></div>}
+function missingStatusLabel(status:any){const labels:any={pending_review:"Te beoordelen",retry_requested:"Opnieuw proberen",confirmed_deleted:"Bevestigd verwijderd",resolved:"Opgelost"};return labels[String(status)]||status||"-"}
+function missingAdvice(item:any){
+  if(item.status==="retry_requested") return {priority:"HOOG",text:"Laat Total opnieuw controleren"};
+  if(item.status==="confirmed_deleted") return {priority:"LAAG",text:"Geen actie; wordt veilig overgeslagen"};
+  if(item.status==="resolved") return {priority:"LAAG",text:"Profiel is weer gevonden"};
+  if(Number(item.not_found_count||0)>=3) return {priority:"HOOG",text:"Direct handmatig controleren"};
+  return {priority:"MIDDEN",text:"Openstaand controlepunt"};
+}
+function priorityStyle(priority:string){const p:any={HOOG:{background:"#621f16",border:"#c94a3a",color:"#ffd1c8"},MIDDEN:{background:"#4a350b",border:"#b98822",color:"#ffe09a"},LAAG:{background:"#17351f",border:"#3d8d53",color:"#aaf0bd"}};const c=p[priority]||p.MIDDEN;return {display:"inline-flex",padding:"4px 7px",fontSize:11,fontWeight:1000,border:`1px solid ${c.border}`,background:c.background,color:c.color}}
 
 function TabButton({active,onClick,icon,label}:any){return <button onClick={onClick} style={{...styles.tab,...(active?styles.tabActive:{})}}>{icon}{label}</button>}
 function Select({label,value,set,options}:any){return <label style={styles.label}>{label}<select style={styles.input} value={value} onChange={e=>set(e.target.value)}>{options.map((o:any)=><option key={o[0]} value={o[0]}>{o[1]}</option>)}</select></label>}
@@ -599,5 +700,5 @@ function formatDuration(start:any,end?:any){
   if(minutes>0)return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
 }
-const styles:any={page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},activeRunBanner:{border:"1px solid #ff7b3b",background:"linear-gradient(180deg,#3a1707,#1a0b05)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #ff4d0033,0 12px 30px #0008"},activeRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #ff7b3b",background:"#ff4d00",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},teamRunBanner:{border:"1px solid #3b9fb7",background:"linear-gradient(180deg,#08252d,#07161b)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #2a9db733,0 12px 30px #0008"},teamRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #55bed6",background:"#167f98",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
+const styles:any={aiIntro:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,border:"1px solid #ff7438",background:"linear-gradient(135deg,#261108,#111820)",padding:18,boxShadow:"0 12px 30px #0008"},statGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginTop:16},statCard:{display:"grid",gap:6,border:"1px solid #48515b",background:"linear-gradient(180deg,#1b2229,#0c1014)",padding:16},page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},activeRunBanner:{border:"1px solid #ff7b3b",background:"linear-gradient(180deg,#3a1707,#1a0b05)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #ff4d0033,0 12px 30px #0008"},activeRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #ff7b3b",background:"#ff4d00",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},teamRunBanner:{border:"1px solid #3b9fb7",background:"linear-gradient(180deg,#08252d,#07161b)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #2a9db733,0 12px 30px #0008"},teamRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #55bed6",background:"#167f98",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
 orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},dangerMini:{display:"inline-flex",alignItems:"center",gap:5,background:"#4a1717",border:"1px solid #a94444",color:"#fff",fontWeight:800,padding:"6px 10px",cursor:"pointer"},stop:{display:"inline-flex",alignItems:"center",gap:5,background:"#6d2020",border:"1px solid #c94a4a",color:"#fff",fontWeight:900,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0},pagination:{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}};
