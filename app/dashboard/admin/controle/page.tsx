@@ -443,11 +443,12 @@ export default function ControleOverzichtPage() {
           const status = String(run?.status ?? "").trim().toLowerCase();
 
           if (
-            run?.afgerond_op ||
-            status === "klaar" ||
-            status === "completed" ||
-            status === "complete" ||
-            status === "done"
+            run &&
+            (run.afgerond_op ||
+              status === "klaar" ||
+              status === "completed" ||
+              status === "complete" ||
+              status === "done")
           ) {
             return String(run.id);
           }
