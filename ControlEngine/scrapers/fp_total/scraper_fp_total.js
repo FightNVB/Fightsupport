@@ -1756,7 +1756,9 @@ async function main() {
     return;
   }
 
-  const { browser, page: masterPage } = await loginFightPassport();
+  let { browser, page: masterPage } = await loginFightPassport();
+  let browserGeneration = 1;
+  let browserRestartPromise = null;
 
   let cookies = [];
   try {
@@ -1764,6 +1766,42 @@ async function main() {
   } catch {}
 
   console.log("[fp-total] ✅ Master logged in (cookies captured)");
+
+  function isBrowserConnectionError(message) {
+    return /Connection closed|Target closed|Session closed|Protocol error|browser has disconnected|Not connected to DevTools/i.test(
+      String(message || "")
+    );
+  }
+
+  async function restartBrowserLocked(reason = "") {
+    if (browserRestartPromise) {
+      await browserRestartPromise;
+      return browserGeneration;
+    }
+
+    browserRestartPromise = (async () => {
+      console.log(`[fp-total] 🔄 volledige browser opnieuw starten ${reason ? `(${reason})` : ""}`);
+
+      try { await masterPage?.close(); } catch {}
+      try { await browser?.close(); } catch {}
+
+      const fresh = await loginFightPassport();
+      browser = fresh.browser;
+      masterPage = fresh.page;
+
+      try { cookies = await masterPage.cookies(); } catch { cookies = []; }
+      browserGeneration++;
+
+      console.log(`[fp-total] ✅ browser hersteld; generatie ${browserGeneration}`);
+      return browserGeneration;
+    })();
+
+    try {
+      return await browserRestartPromise;
+    } finally {
+      browserRestartPromise = null;
+    }
+  }
 
   let masterRefreshPromise = null;
 
@@ -1816,11 +1854,19 @@ async function main() {
     // Zelfde robuuste worker-opzet als fp_bundle:
     // iedere worker krijgt een eigen, killbare browsercontext.
     let ctx = await createWorkerContext(browser);
+    let ctxBrowserGeneration = browserGeneration;
 
     async function resetWorkerContext(reason = "") {
       console.log(`[fp-total] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
       await closeWorkerContext(ctx).catch(() => {});
       ctx = await createWorkerContext(browser);
+      ctxBrowserGeneration = browserGeneration;
+    }
+
+    async function ensureCurrentWorkerContext() {
+      if (ctxBrowserGeneration !== browserGeneration) {
+        await resetWorkerContext("browser generation changed");
+      }
     }
 
     while (!stopRequested) {
@@ -1831,6 +1877,7 @@ async function main() {
       const label = `worker${workerIdx + 1}/${WORKERS}`;
       const itemStartedAt = new Date().toISOString();
 
+      await ensureCurrentWorkerContext();
       console.log(`[fp-total] 🤖 ${label} → VA ${va}`);
       await upsertSyncItem(run.id, va, { status: "processing", started_at: itemStartedAt, finished_at: null });
 
@@ -1901,27 +1948,60 @@ async function main() {
 
         console.log(`[fp-total] ✅ ${label} VA ${va}: FULLFIGHTER=${res.exists ? "success" : "not_found"} | UITSLAGEN=${res.resultsStatus || "skipped"}${res.resultsError ? ` (${res.resultsError})` : ""}${res.licensed ? " | licentie" : ""}`);
       } catch (e) {
-        processed++;
-        errors++;
-        lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
         const msg = e?.message ?? String(e);
 
-        await upsertSyncItem(run.id, va, {
-          status: "error", profiel_gevonden: false,
-          error_step: String(msg).startsWith("HARD TIMEOUT") ? "timeout" : "scrape_or_save",
-          error_message: msg, finished_at: new Date().toISOString(),
-        });
+        if (isBrowserConnectionError(msg)) {
+          console.log(`[fp-total] 🔌 ${label} browserverbinding weg bij VA ${va}: ${msg}`);
 
-        if (msg === "LOGIN_PAGE") {
-          console.log(`[fp-total] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
+          await upsertSyncItem(run.id, va, {
+            status: "pending",
+            profiel_gevonden: false,
+            error_step: "browser_recovery",
+            error_message: `Browserverbinding hersteld; VA opnieuw ingepland. Oorzaak: ${msg}`,
+            finished_at: null,
+          });
+
           try {
-            await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
-            await resetWorkerContext(`login refresh VA ${va}`);
-          } catch (err) {
-            console.log("[fp-total] ❌ master refresh failed:", err?.message ?? String(err));
+            await restartBrowserLocked(`${label} VA ${va}`);
+            await resetWorkerContext(`browser recovery VA ${va}`);
+            vaList.push(String(va));
+            console.log(`[fp-total] ♻️ ${label} VA ${va} opnieuw achteraan ingepland`);
+          } catch (restartError) {
+            processed++;
+            errors++;
+            lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
+            const restartMsg = restartError?.message ?? String(restartError);
+            await upsertSyncItem(run.id, va, {
+              status: "error",
+              profiel_gevonden: false,
+              error_step: "browser_restart_failed",
+              error_message: restartMsg,
+              finished_at: new Date().toISOString(),
+            });
+            console.log(`[fp-total] ❌ browserherstart mislukt bij VA ${va}:`, restartMsg);
           }
         } else {
-          console.log(`[fp-total] ❌ ${label} fout VA ${va}:`, msg);
+          processed++;
+          errors++;
+          lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
+
+          await upsertSyncItem(run.id, va, {
+            status: "error", profiel_gevonden: false,
+            error_step: String(msg).startsWith("HARD TIMEOUT") ? "timeout" : "scrape_or_save",
+            error_message: msg, finished_at: new Date().toISOString(),
+          });
+
+          if (msg === "LOGIN_PAGE") {
+            console.log(`[fp-total] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
+            try {
+              await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
+              await resetWorkerContext(`login refresh VA ${va}`);
+            } catch (err) {
+              console.log("[fp-total] ❌ master refresh failed:", err?.message ?? String(err));
+            }
+          } else {
+            console.log(`[fp-total] ❌ ${label} fout VA ${va}:`, msg);
+          }
         }
       } finally {
         try {
@@ -1949,32 +2029,46 @@ async function main() {
     const now = new Date().toISOString();
     const currentMeta = { ...(run.meta || {}), pid: null, last_stopped_at: stopRequested ? now : undefined, last_stop_signal: stopSignal || undefined };
 
+    const finalPatch = allDone ? {
+      status: "completed",
+      last_processed_va: effectiveEndVa,
+      processed_count: processed,
+      found_count: found,
+      licensed_count: licensed,
+      error_count: errors,
+      finished_at: now,
+      error_message: null,
+      meta: currentMeta,
+    } : stopRequested ? {
+      status: "paused",
+      processed_count: processed,
+      found_count: found,
+      licensed_count: licensed,
+      error_count: errors,
+      finished_at: null,
+      error_message: null,
+      meta: currentMeta,
+    } : {
+      status: "failed",
+      processed_count: processed,
+      found_count: found,
+      licensed_count: licensed,
+      error_count: errors,
+      finished_at: now,
+      error_message: "Scraper beëindigd voordat alle VA-nummers waren verwerkt, zonder stopsignaal.",
+      meta: currentMeta,
+    };
+
     await supabase
       .from("fightpassport_sync_runs")
-      .update(allDone ? {
-        status: "completed",
-        last_processed_va: effectiveEndVa,
-        processed_count: processed,
-        found_count: found,
-        licensed_count: licensed,
-        error_count: errors,
-        finished_at: now,
-        meta: currentMeta,
-      } : {
-        status: "paused",
-        processed_count: processed,
-        found_count: found,
-        licensed_count: licensed,
-        error_count: errors,
-        finished_at: null,
-        error_message: null,
-        meta: currentMeta,
-      })
+      .update(finalPatch)
       .eq("id", run.id);
 
     console.log(allDone
       ? `[fp-total] ✅ volledige ronde ${run.id} afgerond`
-      : `[fp-total] ⏸️ ronde ${run.id} gepauzeerd na ${processed} verwerkte VA's`);
+      : stopRequested
+        ? `[fp-total] ⏸️ ronde ${run.id} gepauzeerd na expliciet stopsignaal en ${processed} verwerkte VA's`
+        : `[fp-total] ❌ ronde ${run.id} onverwacht beëindigd na ${processed} verwerkte VA's`);
   } catch (e) {
     await supabase
       .from("fightpassport_sync_runs")
