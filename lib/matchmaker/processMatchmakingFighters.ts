@@ -46,8 +46,9 @@ async function buildAndSaveSingleFighter(params: {
   });
 
   const context = await enrichSingleFighterContext({ supabase, context: built });
+  const contextUitslagen = (context as AnyRow).uitslagen;
   const hits = runMatchmakerFighterRules(context, {
-    uitslagen: Array.isArray(context.uitslagen) ? context.uitslagen : uitslagen,
+    uitslagen: Array.isArray(contextUitslagen) ? contextUitslagen : uitslagen,
     includeOk: true,
   });
 
