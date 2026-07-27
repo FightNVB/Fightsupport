@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { buildControleBoutContext } from "@/lib/matchmaker/buildControleBoutContext";
+import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
+import { rulesEngine } from "@/lib/rulesEngine";
 
 export const runtime = "nodejs";
 
@@ -21,6 +24,56 @@ function n(v: unknown) {
 function va(v: unknown) {
   const x = s(v).replace(/[^\d]/g, "");
   return x || null;
+}
+
+
+function maxGewichtData(body: any) {
+  const raw = s(
+    body?.max_gewicht ??
+      body?.maxGewicht ??
+      body?.maximum_gewicht ??
+      body?.weight_limit,
+  );
+
+  const value = n(raw);
+  if (value == null) {
+    return {
+      max_gewicht: null,
+      max_gewicht_notatie: null,
+      max_gewicht_type: null,
+    };
+  }
+
+  const explicitNotation = s(
+    body?.max_gewicht_notatie ??
+      body?.maxGewichtNotatie ??
+      body?.weight_limit_notation,
+  );
+  const explicitType = s(
+    body?.max_gewicht_type ??
+      body?.maxGewichtType ??
+      body?.weight_limit_type,
+  ).toLowerCase();
+
+  const isOpenAbove = /\+/.test(raw) || explicitType === "open_above";
+  const type =
+    explicitType === "exact" ||
+    explicitType === "up_to" ||
+    explicitType === "open_above"
+      ? explicitType
+      : isOpenAbove
+        ? "open_above"
+        : "up_to";
+
+  const notation =
+    explicitNotation ||
+    (type === "open_above" ? `${value}+` : type === "exact" ? `${value}` : `-${value}`);
+
+  return {
+    max_gewicht: value,
+    max_gewicht_notatie: notation,
+    max_gewicht_type: type,
+  };
 }
 
 function fullName(row: any) {
@@ -64,6 +117,146 @@ async function getFighter(matchmakingId: string, inschrijvingId: any, fighterId:
   if (error) throw error;
 
   return data;
+}
+
+async function createControleRun(matchmakingId: string, userId: string | null) {
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabaseAdmin
+    .from("controle_runs")
+    .insert({
+      matchmaking_id: matchmakingId,
+      gestart_door_user_id: userId,
+      gestart_door_rol: null,
+      status: "running",
+      gestart_op: now,
+      run_type: "control-engine",
+      is_latest: true,
+      totaal_aantal: 0,
+      verwerkt_aantal: 0,
+      progress: 0,
+      current_step: "Controle wordt gestart...",
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  if (!data?.id) throw new Error("Controlerun aanmaken gaf geen id terug.");
+
+  const { error: latestError } = await supabaseAdmin
+    .from("controle_runs")
+    .update({ is_latest: false })
+    .eq("matchmaking_id", matchmakingId)
+    .neq("id", data.id);
+
+  if (latestError) {
+    console.warn("Andere controleruns konden niet op is_latest=false worden gezet", latestError);
+  }
+
+  return String(data.id);
+}
+
+async function getLatestControleRunId(matchmakingId: string) {
+  const { data: runRows, error: runError } = await supabaseAdmin
+    .from("controle_runs")
+    .select("id")
+    .eq("matchmaking_id", matchmakingId)
+    .order("gestart_op", { ascending: false, nullsFirst: false })
+    .order("afgerond_op", { ascending: false, nullsFirst: false })
+    .limit(1);
+
+  if (runError) throw runError;
+
+  const runId = s(runRows?.[0]?.id);
+  if (runId) return runId;
+
+  // Fallback voor oudere matchmakings waarbij de run niet meer in controle_runs staat,
+  // maar er nog wel context van die run aanwezig is.
+  const { data: contextRows, error: contextError } = await supabaseAdmin
+    .from("controle_bout_context")
+    .select("controle_run_id, created_at")
+    .eq("matchmaking_id", matchmakingId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (contextError) throw contextError;
+
+  return s(contextRows?.[0]?.controle_run_id) || null;
+}
+
+async function rebuildCompleteControle(
+  matchmakingId: string,
+  controleRunId: string,
+) {
+  await buildControleBoutContext(matchmakingId, controleRunId);
+  await enrichControleBoutContext(matchmakingId, controleRunId);
+
+  const { data: ctxRows, error: ctxError } = await supabaseAdmin
+    .from("controle_bout_context")
+    .select("*")
+    .eq("matchmaking_id", matchmakingId)
+    .eq("controle_run_id", controleRunId);
+
+  if (ctxError) throw ctxError;
+  if (!ctxRows?.length) {
+    throw new Error("Controlecontext voor deze matchmaking is niet opgebouwd.");
+  }
+
+  await rulesEngine({
+    controle_run_id: controleRunId,
+    matchmaking_id: matchmakingId,
+    ctxRows,
+  });
+
+  const now = new Date().toISOString();
+  const { error: finishError } = await supabaseAdmin
+    .from("controle_runs")
+    .update({
+      status: "klaar",
+      afgerond_op: now,
+      verwerkt_aantal: ctxRows.length,
+      totaal_aantal: ctxRows.length,
+      progress: 100,
+      current_step: "Controle klaar.",
+      foutmelding: null,
+      is_latest: true,
+    })
+    .eq("id", controleRunId);
+
+  if (finishError) throw finishError;
+}
+
+async function rebuildControleForPartij(
+  matchmakingId: string,
+  controleRunId: string,
+  partijNr: number,
+) {
+  await buildControleBoutContext(matchmakingId, controleRunId, {
+    partij_nr: partijNr,
+  });
+
+  await enrichControleBoutContext(matchmakingId, controleRunId, {
+    partij_nr: partijNr,
+  });
+
+  const { data: ctxRows, error: ctxError } = await supabaseAdmin
+    .from("controle_bout_context")
+    .select("*")
+    .eq("matchmaking_id", matchmakingId)
+    .eq("controle_run_id", controleRunId)
+    .eq("partij_nr", partijNr);
+
+  if (ctxError) throw ctxError;
+  if (!ctxRows?.length) {
+    throw new Error(`Controlecontext voor partij ${partijNr} is niet opgebouwd.`);
+  }
+
+  await rulesEngine({
+    controle_run_id: controleRunId,
+    matchmaking_id: matchmakingId,
+    ctxRows,
+    scoped_partij_nr: partijNr,
+  });
 }
 
 async function nextPartijNr(matchmakingId: string) {
@@ -166,68 +359,9 @@ async function markContextMatched(matchmakingId: string, ids: any[], partijNr: n
   }
 }
 
-async function setMatchmakingControlLock(matchmakingId: string, locked: boolean) {
-  const now = new Date().toISOString();
-
-  const payloads = locked
-    ? [
-        { locked_for_editing: true, control_engine_busy: true, control_engine_started_at: now },
-        { locked_for_editing: true, control_engine_busy: true },
-        { locked_for_editing: true },
-      ]
-    : [
-        { locked_for_editing: false, control_engine_busy: false, control_engine_finished_at: now },
-        { locked_for_editing: false, control_engine_busy: false },
-        { locked_for_editing: false },
-      ];
-
-  for (const payload of payloads) {
-    const { error } = await supabaseAdmin
-      .from("matchmakings")
-      .update(payload)
-      .eq("id", matchmakingId);
-
-    if (!error) return;
-    if (!isMissingColumnError(error)) {
-      console.warn("matchmaking lock update mislukt", error);
-      return;
-    }
-  }
-}
-
-function startControlEngineFireAndForget(req: Request, matchmakingId: string, partijNr: number) {
-  const origin =
-    req.headers.get("origin") ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    "http://localhost:3000";
-
-  fetch(`${origin}/api/control-engine/matchmaker/start`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      authorization: req.headers.get("authorization") || "",
-    },
-    body: JSON.stringify({
-      matchmaking_id: matchmakingId,
-      scope: "selected",
-      partij_nrs: [partijNr],
-    }),
-  })
-    .then(async (controlResponse) => {
-      if (!controlResponse.ok) {
-        const controlText = await controlResponse.text().catch(() => "");
-        console.error("control-engine/matchmaker/start gaf fout", controlResponse.status, controlText);
-      }
-    })
-    .catch((e) => console.error("control-engine/matchmaker/start fout", e))
-    .finally(() => {
-      void setMatchmakingControlLock(matchmakingId, false);
-    });
-}
-
 export async function POST(req: Request) {
   try {
-    await getUser(req);
+    const user = await getUser(req);
 
     const body = await req.json().catch(() => ({}));
 
@@ -270,6 +404,7 @@ export async function POST(req: Request) {
     }
 
     const partijNr = await nextPartijNr(matchmakingId);
+    const maxGewicht = maxGewichtData(body);
 
     const insertRow = {
       matchmaking_id: matchmakingId,
@@ -278,6 +413,10 @@ export async function POST(req: Request) {
       discipline: s(rood.discipline || blauw.discipline) || null,
       klasse: s(rood.klasse || blauw.klasse) || null,
       geslacht: s(rood.geslacht || blauw.geslacht) || null,
+
+      max_gewicht: maxGewicht.max_gewicht,
+      max_gewicht_notatie: maxGewicht.max_gewicht_notatie,
+      max_gewicht_type: maxGewicht.max_gewicht_type,
 
       rood_naam: fullName(rood),
       rood_gym: s(rood.sportschool || rood.gym_input || rood.fp_gym) || null,
@@ -294,6 +433,9 @@ export async function POST(req: Request) {
         source: "matchmaker_match_nieuw",
         rood_inschrijving_id: rood.inschrijving_id ?? null,
         blauw_inschrijving_id: blauw.inschrijving_id ?? null,
+        max_gewicht: maxGewicht.max_gewicht,
+        max_gewicht_notatie: maxGewicht.max_gewicht_notatie,
+        max_gewicht_type: maxGewicht.max_gewicht_type,
       },
     };
 
@@ -309,13 +451,24 @@ export async function POST(req: Request) {
     await safeUpdateAanmeldingenMatched(matchmakingId, matchedIds, partijNr);
     await markContextMatched(matchmakingId, matchedIds, partijNr);
 
-    await setMatchmakingControlLock(matchmakingId, true);
-    startControlEngineFireAndForget(req, matchmakingId, partijNr);
+    let controleRunId = await getLatestControleRunId(matchmakingId);
+    let nieuweControleRun = false;
+
+    if (!controleRunId) {
+      controleRunId = await createControleRun(matchmakingId, user.id ?? null);
+      nieuweControleRun = true;
+      await rebuildCompleteControle(matchmakingId, controleRunId);
+    } else {
+      await rebuildControleForPartij(matchmakingId, controleRunId, partijNr);
+    }
 
     return NextResponse.json({
       ok: true,
       partij_nr: partijNr,
       bout: data,
+      controle_run_id: controleRunId,
+      controle_bijgewerkt: true,
+      nieuwe_controle_run: nieuweControleRun,
     });
   } catch (e: any) {
     return NextResponse.json(

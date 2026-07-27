@@ -255,8 +255,8 @@ export default function AdminMatchmakingsPage() {
             <header className="border-b border-[#ff4d00]/55 bg-[linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.14))] px-5 py-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr] md:items-center">
                 <div className="flex flex-wrap items-center gap-2 md:justify-self-start">
-                  <Link className={silverBtn} href="/dashboard/admin/algemeen">
-                    ← Algemeen
+                  <Link className={silverBtn} href="/dashboard/admin/administratie">
+                    ← Administratie
                   </Link>
 
                   <button type="button" onClick={load} className={orangeBtn}>

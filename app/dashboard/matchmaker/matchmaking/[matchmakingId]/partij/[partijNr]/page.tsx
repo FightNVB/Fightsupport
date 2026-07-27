@@ -1660,7 +1660,7 @@ export default function PartijDetailPage() {
   }
 
   async function fetchRegelsVoorPartij(opts: {
-    runId: string;
+    runId?: string | null;
     partijNr: number;
     ctxRow?: AnyRow | null;
   }): Promise<ControleResultaatRow[]> {
@@ -1668,18 +1668,22 @@ export default function PartijDetailPage() {
     const boutId = asUuid(ctxRow?.bout_id);
     const mmId = String(matchmakingId ?? "").trim();
 
-    const queries = [
-      supabase
-        .from("controle_resultaten")
-        .select("*")
-        .eq("controle_run_id", runId)
-        .eq("partij_nr", partijNr),
-      supabase
-        .from("controle_resultaten")
-        .select("*")
-        .eq("run_id", runId)
-        .eq("partij_nr", partijNr),
-    ];
+    const queries: any[] = [];
+
+    if (runId) {
+      queries.push(
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("controle_run_id", runId)
+          .eq("partij_nr", partijNr),
+        supabase
+          .from("controle_resultaten")
+          .select("*")
+          .eq("run_id", runId)
+          .eq("partij_nr", partijNr),
+      );
+    }
 
     // Weegstation-meldingen staan ook in controle_resultaten, maar kunnen
     // vanuit een andere flow met alleen matchmaking_id/partij_nr of bout_id zijn opgeslagen.
@@ -1890,19 +1894,17 @@ export default function PartijDetailPage() {
         }
 
         try {
-          const { data: ups, error: upErr } = await supabase
-            .from("matchmaking_uploads")
-            .select("evenement_naam, evenement_datum, event_id")
-            .eq("matchmaking_id", matchmakingId)
-            .order("uploaded_at", { ascending: false })
-            .limit(1);
+          const { data: mm, error: mmErr } = await supabase
+            .from("matchmakings")
+            .select("naam, datum, event_id")
+            .eq("id", matchmakingId)
+            .maybeSingle();
 
-          if (upErr) throw upErr;
+          if (mmErr) throw mmErr;
 
-          const up = (ups ?? [])?.[0] as any;
-          let naam = String(up?.evenement_naam ?? "").trim() || null;
-          let datum = String(up?.evenement_datum ?? "").trim() || null;
-          const eventId = String(up?.event_id ?? "").trim() || null;
+          let naam = String((mm as any)?.naam ?? "").trim() || null;
+          let datum = String((mm as any)?.datum ?? "").trim() || null;
+          const eventId = String((mm as any)?.event_id ?? "").trim() || null;
 
           if (eventId && (!naam || !datum)) {
             const { data: ev, error: evErr } = await supabase
@@ -1924,34 +1926,12 @@ export default function PartijDetailPage() {
 
         await loadMyRoles();
 
-        const { data: runs, error: runErr } = await supabase
-          .from("controle_runs")
-          .select(
-            "id, matchmaking_id, status, gestart_op, afgerond_op, run_type",
-          )
-          .eq("matchmaking_id", matchmakingId)
-          .order("gestart_op", { ascending: false })
-          .limit(1);
-
-        if (runErr) throw runErr;
-
-        const latestRun = (runs?.[0] ?? null) as ControleRun | null;
-        setRun(latestRun);
-
-        if (!latestRun?.id) {
-          setCtx(null);
-          setRegels([]);
-          setUitslagenRood([]);
-          setUitslagenBlauw([]);
-          setAllPartijNrs([]);
-          setDispSent(false);
-          return;
-        }
-
+        // De partij wordt rechtstreeks gevonden op matchmaking_id + partij_nr.
+        // controle_runs is alleen metadata van de context, niet de zoekingang.
         const { data: pnRows, error: pnErr } = await supabase
           .from("controle_bout_context")
           .select("partij_nr")
-          .eq("controle_run_id", latestRun.id)
+          .eq("matchmaking_id", matchmakingId)
           .order("partij_nr", { ascending: true });
 
         if (pnErr) throw pnErr;
@@ -1969,13 +1949,92 @@ export default function PartijDetailPage() {
         const { data: ctxRows, error: ctxErr } = await supabase
           .from("controle_bout_context")
           .select("*")
-          .eq("controle_run_id", latestRun.id)
+          .eq("matchmaking_id", matchmakingId)
           .eq("partij_nr", partijNr)
           .limit(1);
 
         if (ctxErr) throw ctxErr;
 
-        const row = (ctxRows?.[0] ?? null) as AnyRow | null;
+        let row = (ctxRows?.[0] ?? null) as AnyRow | null;
+
+        if (!row) {
+          setRun(null);
+          setCtx(null);
+          setRegels([]);
+          setUitslagenRood([]);
+          setUitslagenBlauw([]);
+          setDispSent(false);
+          return;
+        }
+
+        const contextRunId = String(row?.controle_run_id ?? "").trim();
+        let contextRun: ControleRun | null = null;
+
+        if (contextRunId) {
+          const { data: runRow, error: runErr } = await supabase
+            .from("controle_runs")
+            .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type")
+            .eq("id", contextRunId)
+            .maybeSingle();
+
+          if (runErr) throw runErr;
+          contextRun = (runRow ?? null) as ControleRun | null;
+        }
+
+        setRun(contextRun);
+
+        // Ontbrekende FightPassport-velden aanvullen uit de centrale fightertabel.
+        const vaR = String(row?.rood_va_mm ?? "").trim() || null;
+        const vaB = String(row?.blauw_va_mm ?? "").trim() || null;
+        const vas = Array.from(new Set([vaR, vaB].filter(Boolean))) as string[];
+
+        if (vas.length > 0) {
+          const { data: fighters, error: fightersErr } = await supabase
+            .from("fightpassport_fighters")
+            .select("*")
+            .in("va_nummer", vas);
+
+          if (fightersErr) throw fightersErr;
+
+          const byVa = new Map(
+            (fighters ?? []).map((f: any) => [String(f?.va_nummer ?? "").trim(), f]),
+          );
+
+          const fillSide = (side: "rood" | "blauw", va: string | null) => {
+            if (!va) return;
+            const f: any = byVa.get(va);
+            if (!f) return;
+
+            const setIfEmpty = (key: string, value: any) => {
+              if (row && (row[key] == null || String(row[key]).trim() === "") && value != null) {
+                row = { ...row, [key]: value };
+              }
+            };
+
+            setIfEmpty(`${side}_naam_fp`, f?.naam);
+            setIfEmpty(`${side}_geboortedatum_fp`, f?.geboortedatum);
+            setIfEmpty(`${side}_geslacht`, f?.geslacht);
+            setIfEmpty(
+              `${side}_licentie`,
+              f?.licentie ??
+                (f?.licentie_actief === true
+                  ? "Ja"
+                  : f?.licentie_actief === false
+                    ? "Nee"
+                    : null),
+            );
+            setIfEmpty(`${side}_heeft_startverbod`, f?.heeft_startverbod ?? f?.startverbod_actief);
+            setIfEmpty(`${side}_nulmeting_totaal`, f?.nulmeting_totaal);
+            setIfEmpty(`${side}_nulmeting_opmerking`, f?.nulmeting_opmerking);
+            setIfEmpty(`${side}_nulmeting_klasse`, f?.nulmeting_klasse);
+            setIfEmpty(`${side}_totaal_wedstrijden_scrape`, f?.totaal_wedstrijden ?? f?.totaal);
+            setIfEmpty(`${side}_gewonnen_scrape`, f?.gewonnen ?? f?.wins);
+          };
+
+          fillSide("rood", vaR);
+          fillSide("blauw", vaB);
+        }
+
         setCtx(row);
 
         const boutIdForDisp = String((row as any)?.bout_id ?? "").trim();
@@ -1996,7 +2055,7 @@ export default function PartijDetailPage() {
 
         {
           const rows = await fetchRegelsVoorPartij({
-            runId: latestRun.id,
+            runId: contextRunId,
             partijNr,
             ctxRow: row,
           });
@@ -2004,45 +2063,56 @@ export default function PartijDetailPage() {
           primeNoteDrafts(rows);
         }
 
-        const vaR = row?.rood_va_mm ? String(row.rood_va_mm).trim() : null;
-        const vaB = row?.blauw_va_mm ? String(row.blauw_va_mm).trim() : null;
         const partijNrNum = Number(row?.partij_nr ?? partijNr ?? null);
 
         if (!partijNrNum) {
           setUitslagenRood([]);
           setUitslagenBlauw([]);
         } else {
-          const [roodRes, blauwRes] = await Promise.all([
-            vaR
-              ? supabase
-                  .from("controle_uitslagen")
-                  .select("datum, discipline, klasse, uitslag")
-                  .eq("matchmaking_id", matchmakingId)
-                  .eq("controle_run_id", latestRun.id)
-                  .eq("partij_nr", partijNrNum)
-                  .eq("hoek", "rood")
-                  .eq("va_nummer", vaR)
-                  .order("datum", { ascending: false })
-              : Promise.resolve({ data: [], error: null } as any),
+          const loadUitslagen = async (
+            side: "rood" | "blauw",
+            va: string | null,
+          ): Promise<UitslagRow[]> => {
+            if (!va) return [];
 
-            vaB
-              ? supabase
-                  .from("controle_uitslagen")
-                  .select("datum, discipline, klasse, uitslag")
-                  .eq("matchmaking_id", matchmakingId)
-                  .eq("controle_run_id", latestRun.id)
-                  .eq("partij_nr", partijNrNum)
-                  .eq("hoek", "blauw")
-                  .eq("va_nummer", vaB)
-                  .order("datum", { ascending: false })
-              : Promise.resolve({ data: [], error: null } as any),
+            // De build maakt een snapshot in controle_uitslagen. Die snapshot is
+            // leidend voor deze controle, zodat de gecontroleerde data stabiel blijft.
+            const { data: snapshot, error: snapshotErr } = await supabase
+              .from("controle_uitslagen")
+              .select("datum, discipline, klasse, uitslag")
+              .eq("matchmaking_id", matchmakingId)
+              .eq("partij_nr", partijNrNum)
+              .eq("hoek", side)
+              .eq("va_nummer", va)
+              .order("datum", { ascending: false });
+
+            if (snapshotErr) throw snapshotErr;
+            if ((snapshot ?? []).length > 0) {
+              return snapshot as UitslagRow[];
+            }
+
+            // Fallback voor oudere of onvolledig gebouwde controles.
+            const vaNumber = Number(va);
+            const { data: liveRows, error: liveErr } = await supabase
+              .from("fightpassport_results")
+              .select("datum, discipline, klasse, uitslag")
+              .eq(
+                "va_nummer",
+                Number.isFinite(vaNumber) ? vaNumber : va,
+              )
+              .order("datum", { ascending: false });
+
+            if (liveErr) throw liveErr;
+            return (liveRows ?? []) as UitslagRow[];
+          };
+
+          const [roodRows, blauwRows] = await Promise.all([
+            loadUitslagen("rood", vaR),
+            loadUitslagen("blauw", vaB),
           ]);
 
-          if (roodRes?.error) throw roodRes.error;
-          if (blauwRes?.error) throw blauwRes.error;
-
-          setUitslagenRood((roodRes?.data ?? []) as UitslagRow[]);
-          setUitslagenBlauw((blauwRes?.data ?? []) as UitslagRow[]);
+          setUitslagenRood(roodRows);
+          setUitslagenBlauw(blauwRows);
         }
       } catch (e: any) {
         setError(e?.message ?? String(e));
@@ -2274,10 +2344,25 @@ export default function PartijDetailPage() {
         : `Volwassen (${marge} kg verschil)`;
     }
 
+    const explicitNotatie = String(
+      ctx?.max_gewicht_notatie ??
+        ctx?.max_gewicht_notatie_mm ??
+        "",
+    ).trim();
+    const explicitType = String(ctx?.max_gewicht_type ?? "").trim().toLowerCase();
+    const maxGewichtLabel = explicitNotatie
+      ? /kg/i.test(explicitNotatie)
+        ? explicitNotatie
+        : `${explicitNotatie} kg`
+      : inferredMaxKg != null
+        ? `${explicitType === "open_above" ? `${inferredMaxKg}+` : explicitType === "exact" ? inferredMaxKg : `-${inferredMaxKg}`} kg`
+        : "-";
+
     return {
       rKg,
       bKg,
       maxGewichtKg: inferredMaxKg,
+      maxGewichtLabel,
       klasseMaxKg: inferredMaxKg,
       klasseNaam: inferredKlasseNaam,
       rKlasse: findClass(rKg)?.name ?? null,
@@ -3195,9 +3280,7 @@ export default function PartijDetailPage() {
                   <div>
                     Max gewicht:{" "}
                     <span className="text-white font-extrabold">
-                      {gewichtInfo?.klasseMaxKg != null
-                        ? `${gewichtInfo.klasseMaxKg.toFixed(1)} kg`
-                        : "-"}
+                      {gewichtInfo?.maxGewichtLabel ?? "-"}
                     </span>
                     {gewichtInfo?.klasseNaam ? (
                       <span className="text-white/60">

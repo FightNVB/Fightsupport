@@ -248,7 +248,18 @@ function normalizeKlasse(v: unknown): NormKlasse | null {
   if (!x) return null;
 
   if (x.includes("MMA") && (x.includes("PRO") || x.includes("PROF"))) return "MMA_PRO";
-  if (x.includes("MMA") && (x.includes("AMA") || x.includes("AMATEUR"))) return "MMA_AMATEUR";
+
+  // Amateur/AMA is een MMA-klasse en mag nooit als volwassen A-klasse
+  // uit kickboksen/thaiboksen worden gelezen, ook niet wanneer "MMA" ontbreekt.
+  if (
+    x === "AMA" ||
+    x === "AMATEUR" ||
+    x === "MMA AMA" ||
+    x === "MMA AMATEUR" ||
+    x.includes("AMATEUR")
+  ) {
+    return "MMA_AMATEUR";
+  }
 
   // Zelfde principe als admin-control: samengestelde FP/nulmetingtekst zoals
   // "Jeugd/Youth • Nieuweling/Newcomer" moet voor een volwassen vechter als N
@@ -293,8 +304,10 @@ function klasseIndex(k: Klasse | null): number {
 }
 
 function isKbMtDiscipline(v: unknown): boolean {
+  // Gelijk aan rulesEngine: alleen relevante staande disciplines.
+  // Een losse K1-token wordt daar niet apart als bron gebruikt.
   const x = lower(v);
-  return x.includes("kick") || x.includes("k1") || x.includes("muay") || x.includes("thai");
+  return x.includes("kick") || x.includes("muay") || x.includes("thai");
 }
 
 function parseOutcome(v: unknown): Outcome {
@@ -363,6 +376,19 @@ function getGymFp(ctx: AnyRow): string {
     s(ctx.extra?.raw_scrape?.sportschool) ||
     s(ctx.extra?.raw_scrape?.gym)
   );
+}
+
+function getWeightInput(ctx: AnyRow): number | null {
+  return num(
+    ctx.gewicht_input ??
+      ctx.gewicht_mm ??
+      ctx.gewicht_kg ??
+      ctx.gewicht,
+  );
+}
+
+function getDisciplineInput(ctx: AnyRow): string {
+  return s(ctx.discipline_input ?? ctx.discipline);
 }
 
 function getDobInput(ctx: AnyRow): dayjs.Dayjs | null {
@@ -520,14 +546,106 @@ function promoteFrom(k: Klasse, wins: number, total: number): Klasse {
   return mandatory?.to ?? k;
 }
 
-function highestAdultClassFromProgress(progress: KlasseProgress): Klasse | null {
+function highestAdultClassFromUitslagen(rows: UitslagRow[]): Klasse | null {
   let best: Klasse | null = null;
 
-  for (const k of KLASSE_VOLGORDE) {
-    if (progress[k].total > 0) best = k;
+  for (const row of rows ?? []) {
+    if (!isKbMtUitslagRow(row)) continue;
+
+    // Gelijk aan rulesEngine: jeugd mag nooit volwassen historie worden,
+    // ook niet bij samengestelde teksten met Nieuweling/Newcomer.
+    if (isJeugdKlasseText(row?.klasse)) continue;
+
+    const k = normalizeKlasse(row?.klasse);
+    if (!isAdultKlasse(k)) continue;
+
+    if (!best || klasseIndex(k) > klasseIndex(best)) best = k;
   }
 
   return best;
+}
+
+function recordInKlasseVoorPromotie(rows: UitslagRow[], k: Klasse): { wins: number; total: number } {
+  let wins = 0;
+  let total = 0;
+
+  for (const row of rows ?? []) {
+    if (!isKbMtUitslagRow(row)) continue;
+    if (isJeugdKlasseText(row?.klasse)) continue;
+
+    const rowKlasse = normalizeKlasse(row?.klasse);
+    if (rowKlasse !== k) continue;
+
+    const outcome = parseOutcome(row?.uitslag);
+
+    // Gelijk aan rulesEngine: demo telt niet voor promotie.
+    // Een overige/niet-herkende officiële uitslag telt wel als gevochten partij.
+    if (outcome === "OTHER" && lower(row?.uitslag).includes("demo")) continue;
+    if (lower(row?.uitslag).includes("demonstr")) continue;
+
+    total += 1;
+    if (outcome === "WIN") wins += 1;
+  }
+
+  return { wins, total };
+}
+
+function getJeugdExperienceStats(rows: UitslagRow[]): { total: number; wins: number } {
+  let total = 0;
+  let wins = 0;
+
+  for (const row of rows ?? []) {
+    if (!isKbMtUitslagRow(row)) continue;
+    if (!isJeugdKlasseText(row?.klasse)) continue;
+
+    const rawOutcome = lower(row?.uitslag);
+    if (rawOutcome.includes("demo") || rawOutcome.includes("demonstr")) continue;
+
+    total += 1;
+    if (parseOutcome(row?.uitslag) === "WIN") wins += 1;
+  }
+
+  return { total, wins };
+}
+
+function getRKlasseStats(rows: UitslagRow[]) {
+  let relevantTotal = 0;
+  let rTotal = 0;
+  let rWins = 0;
+  let hasJeugd = false;
+  let hasOutsideR = false;
+
+  for (const row of rows ?? []) {
+    if (!isKbMtUitslagRow(row)) continue;
+
+    const rawOutcome = lower(row?.uitslag);
+    if (rawOutcome.includes("demo") || rawOutcome.includes("demonstr")) continue;
+
+    relevantTotal += 1;
+
+    if (isJeugdKlasseText(row?.klasse)) {
+      hasJeugd = true;
+      continue;
+    }
+
+    const k = normalizeKlasse(row?.klasse);
+    if (k === "R") {
+      rTotal += 1;
+      if (parseOutcome(row?.uitslag) === "WIN") rWins += 1;
+      continue;
+    }
+
+    if (isAdultKlasse(k)) hasOutsideR = true;
+  }
+
+  return {
+    relevantTotal,
+    hasAnyExperience: relevantTotal > 0,
+    rTotal,
+    rWins,
+    hasJeugd,
+    hasOutsideR,
+  };
 }
 
 function countOtherKbMtExperience(rows: UitslagRow[]): number {
@@ -539,8 +657,6 @@ function countOtherKbMtExperience(rows: UitslagRow[]): number {
     const k = normalizeUitslagKlasse(row.klasse);
     const outcome = parseOutcome(row.uitslag);
 
-    // Jeugd, onbekende klasse, demo/no contest en overige uitslagen zijn ervaring,
-    // maar nooit volwassen promotie naar C/B/A.
     if (!isAdultKlasse(k) || outcome === "OTHER") totalOther += 1;
   }
 
@@ -554,18 +670,16 @@ function getRecordAdvice(rows: UitslagRow[], fpKlasse: NormKlasse | null): Recor
   for (const k of KLASSE_VOLGORDE) totalOfficial += progress[k].total;
 
   const totalOther = countOtherKbMtExperience(rows);
-  const historyClass = highestAdultClassFromProgress(progress);
+  const historyClass = highestAdultClassFromUitslagen(rows);
+  const jeugdStats = getJeugdExperienceStats(rows);
 
-  // Zelfde principe als rulesEngine:
-  // 1. echte volwassen KB/MT uitslagen zijn leidend;
-  // 2. nulmeting/FP is alleen fallback als er géén volwassen uitslagen zijn;
-  // 3. jeugdpartijen blijven apart en geven nooit promotie naar C/B/A.
+  // Exact dezelfde volgorde als rulesEngine:
+  // historie is leidend; alleen jeugd geeft volwassen startklasse N;
+  // nulmeting/FP wordt pas gebruikt als er geen bruikbare historie is.
   let baseClass: Klasse;
   if (historyClass) {
     baseClass = historyClass;
-  } else if (totalOther > 0) {
-    // Alleen jeugd/overige ervaring: vanaf 18 jaar start volwassen traject in N.
-    // Ook 20 jeugdpartijen maken iemand dus niet automatisch C/B/A/A.
+  } else if (jeugdStats.total > 0) {
     baseClass = "N";
   } else if (isAdultKlasse(fpKlasse)) {
     baseClass = fpKlasse;
@@ -573,9 +687,14 @@ function getRecordAdvice(rows: UitslagRow[], fpKlasse: NormKlasse | null): Recor
     baseClass = "N";
   }
 
-  const recordInBase = progress[baseClass];
-  const mandatoryPromotion = getMandatoryPromotionInfo(baseClass, recordInBase.wins, recordInBase.total);
-  const minimumClass = promoteFrom(baseClass, recordInBase.wins, recordInBase.total);
+  const promotionStats = recordInKlasseVoorPromotie(rows, baseClass);
+  const displayRecord = progress[baseClass];
+  const recordInBase: RecordStats = {
+    ...displayRecord,
+    total: promotionStats.total,
+  };
+  const mandatoryPromotion = getMandatoryPromotionInfo(baseClass, promotionStats.wins, promotionStats.total);
+  const minimumClass = promoteFrom(baseClass, promotionStats.wins, promotionStats.total);
 
   return {
     currentClass: baseClass,
@@ -596,14 +715,26 @@ function canFightRequestedClass(advice: RecordAdvice, requested: Klasse, progres
 
   // N -> C met precies 3 gewonnen N-partijen is toegestaan, maar niet verplicht.
   // Daardoor mag single-fighter dit niet als "te hoog" afkeuren/dispensatie maken.
-  if (advice.currentClass === "N" && requested === "C" && progress.N.wins >= 3 && progress.N.wins < 4 && progress.N.total < 6) return true;
+  if (
+    advice.currentClass === "N" &&
+    requested === "C" &&
+    advice.recordInCurrentClass.wins >= 3 &&
+    advice.recordInCurrentClass.wins < 4 &&
+    advice.recordInCurrentClass.total < 6
+  ) return true;
 
   return false;
 }
 
 function optionalPromotionMessage(advice: RecordAdvice, requested: Klasse, progress: KlasseProgress): string | null {
-  if (advice.minimumClass === "N" && requested === "C" && progress.N.wins >= 3 && progress.N.wins < 4 && progress.N.total < 6) {
-    return `Vechter mag naar C door ${progress.N.wins} gewonnen N-klasse partijen, maar is nog niet verplicht gepromoveerd. Verplicht naar C is vanaf 4 gewonnen of 6 totaal in N.`;
+  if (
+    advice.minimumClass === "N" &&
+    requested === "C" &&
+    advice.recordInCurrentClass.wins >= 3 &&
+    advice.recordInCurrentClass.wins < 4 &&
+    advice.recordInCurrentClass.total < 6
+  ) {
+    return `Vechter mag naar C door ${advice.recordInCurrentClass.wins} gewonnen N-klasse partijen, maar is nog niet verplicht gepromoveerd. Verplicht naar C is vanaf 4 gewonnen of 6 totaal in N.`;
   }
 
   return null;
@@ -672,10 +803,18 @@ export function runMatchmakerFighterRules(
   const eventDate = getEventDate(ctx);
 
   const klasseAanmelding = normalizeKlasse(ctx.klasse ?? ctx.klasse_input ?? ctx.klasse_mm);
-  const fpKlasse = normalizeKlasse(ctx.fp_klasse ?? ctx.klasse_fp ?? ctx.nulmeting_klasse ?? ctx.extra?.raw_scrape?.nulmeting_klasse);
+  const fpKlasse = normalizeKlasse(
+    ctx.fp_klasse ??
+      ctx.klasse_fp ??
+      ctx.berekende_klasse ??
+      ctx.nulmeting_klasse ??
+      ctx.extra?.raw_scrape?.berekende_klasse ??
+      ctx.extra?.raw_scrape?.nulmeting_klasse,
+  );
 
-  const discipline = ctx.discipline ?? ctx.discipline_input;
+  const discipline = getDisciplineInput(ctx);
   const kbMt = isKbMtDiscipline(discipline);
+  const gewichtInput = getWeightInput(ctx);
 
   const uitslagen = getUitslagen(ctx, opts?.uitslagen);
   const requested = isAdultKlasse(klasseAanmelding) ? klasseAanmelding : null;
@@ -701,6 +840,20 @@ export function runMatchmakerFighterRules(
     add("MATCHMAKER_GEBOORTEDATUM_WIJKT_AF", "ACTIE", `Geboortedatum uit aanmelding (${dobInput.format("DD-MM-YYYY")}) wijkt af van Fightpaspoort (${dobFp.format("DD-MM-YYYY")}). Fightpaspoort is leidend.`, "warning", "Geboortedatum wijkt af");
   }
 
+  if (!inputGym) {
+    add("MATCHMAKER_SPORTSCHOOL_ONTBREEKT", "ACTIE", "Sportschool ontbreekt in de aanmelding. De matchmaker moet de actuele sportschool invullen.", "warning", "Sportschool ontbreekt");
+  }
+
+  if (!discipline) {
+    add("MATCHMAKER_DISCIPLINE_ONTBREEKT", "ACTIE", "Discipline ontbreekt in de aanmelding. Daardoor kan de klasse niet betrouwbaar gecontroleerd worden.", "warning", "Discipline ontbreekt");
+  }
+
+  if (gewichtInput === null) {
+    add("MATCHMAKER_GEWICHT_ONTBREEKT", "ACTIE", "Gewicht ontbreekt of is niet leesbaar in de aanmelding. De matchmaker moet het opgegeven gewicht controleren.", "warning", "Gewicht ontbreekt");
+  } else if (gewichtInput <= 0 || gewichtInput > 300) {
+    add("MATCHMAKER_GEWICHT_ONGELDIG", "ACTIE", `Het opgegeven gewicht (${gewichtInput} kg) is ongeldig. Controleer de aanmelding.`, "warning", "Gewicht ongeldig");
+  }
+
   if (!eventDate) {
     add("MATCHMAKER_EVENTDATUM_ONTBREEKT", "ACTIE", "Eventdatum ontbreekt. Leeftijd kan niet betrouwbaar op eventdatum worden berekend.", "warning", "Eventdatum ontbreekt");
   }
@@ -713,14 +866,18 @@ export function runMatchmakerFighterRules(
     add("MATCHMAKER_SPORTSCHOOL_WIJKT_AF", "LET_OP", `Sportschool uit aanmelding ("${inputGym}") wijkt af van Fightpaspoort ("${fpGym}").`, "warning", "Sportschool wijkt af");
   }
 
-  const licentie = boolish(ctx.fp_licentie ?? ctx.licentie ?? ctx.licentie_ok ?? ctx.licentie_status ?? ctx.extra?.raw_scrape?.licentie);
+  const licentie = boolish(ctx.fp_licentie ?? ctx.licentie_actief ?? ctx.licentie ?? ctx.licentie_ok ?? ctx.licentie_status ?? ctx.extra?.raw_scrape?.licentie_actief ?? ctx.extra?.raw_scrape?.licentie);
   if (licentie === false) {
     add("MATCHMAKER_GEEN_LICENTIE", "AFKEUR", "Deze vechter heeft volgens Fightpaspoort geen geldige licentie.", "error", "Geen geldige licentie");
+  } else if (va && fpNaam && licentie === null) {
+    add("MATCHMAKER_LICENTIE_ONBEKEND", "ACTIE", "De licentiestatus kon niet uit de fighterdatabase worden bepaald. Controleer de licentie handmatig.", "warning", "Licentiestatus onbekend");
   }
 
   const startverbod = boolish(ctx.fp_startverbod ?? ctx.heeft_startverbod ?? ctx.startverbod ?? ctx.extra?.raw_scrape?.heeft_startverbod);
   if (startverbod === true) {
     add("MATCHMAKER_STARTVERBOD", "VERBOD", "Deze vechter heeft volgens Fightpaspoort een startverbod en mag niet deelnemen.", "error", "Startverbod");
+  } else if (va && fpNaam && startverbod === null) {
+    add("MATCHMAKER_STARTVERBOD_ONBEKEND", "ACTIE", "De startverbodstatus kon niet uit de fighterdatabase worden bepaald. Controleer dit handmatig.", "warning", "Startverbodstatus onbekend");
   }
 
   const keurmerk = boolish(ctx.keurmerk ?? ctx.heeft_keurmerk ?? ctx.keurmerk_geldig ?? ctx.sportschool_keurmerk);
@@ -756,6 +913,32 @@ export function runMatchmakerFighterRules(
       add("MATCHMAKER_KLASSE_ONDUIDELIJK", "ACTIE", "De opgegeven klasse kon niet duidelijk worden bepaald.", "warning", "Klasse onduidelijk");
     }
 
+    // Directe databasecheck naast de berekening uit de uitslagenhistorie.
+    // Dit vangt ook situaties af waarin weinig of geen uitslagen aanwezig zijn,
+    // maar de nulmeting/fighterdatabase al een andere volwassen klasse vermeldt.
+    if (requested && isAdultKlasse(fpKlasse) && requested !== fpKlasse) {
+      const requestedIndex = klasseIndex(requested);
+      const fpIndex = klasseIndex(fpKlasse);
+
+      if (requestedIndex < fpIndex) {
+        add(
+          "MATCHMAKER_KLASSE_WIJKT_AF_DATABASE",
+          "ACTIE",
+          `Vechter is opgegeven voor klasse ${requested}, maar de fighterdatabase/nulmeting vermeldt klasse ${fpKlasse}. Controleer of de opgegeven klasse of het VA-nummer moet worden aangepast.`,
+          "warning",
+          "Klasse wijkt af van database",
+        );
+      } else {
+        add(
+          "MATCHMAKER_KLASSE_WIJKT_AF_DATABASE",
+          "LET_OP",
+          `Vechter is opgegeven voor klasse ${requested}, terwijl de fighterdatabase/nulmeting klasse ${fpKlasse} vermeldt. Een hogere inschrijving moet door de uitslagenhistorie of een geldige promotie worden ondersteund.`,
+          "warning",
+          "Klasse wijkt af van database",
+        );
+      }
+    }
+
     const advice = getRecordAdvice(uitslagen, fpKlasse);
 
     if (!uitslagen.length && !isAdultKlasse(fpKlasse)) {
@@ -763,12 +946,15 @@ export function runMatchmakerFighterRules(
     }
 
     if (requested === "R") {
+      const rStats = getRKlasseStats(uitslagen);
       const rRec = buildKlasseProgress(uitslagen).R;
-      const hasNonRExperience = recordStats.other > 0;
 
-      if (hasNonRExperience) {
-        add("MATCHMAKER_R_KLASSE_MET_WEDSTRIJDERVARING", "AFKEUR", `R-klasse is alleen bedoeld als optionele instapklasse voor vechters zonder wedstrijdervaring. Deze vechter heeft al ${recordStats.other} partij(en) uit jeugd/vorige klasse/demo/no contest. Start daarom in N.`, "error", "R-klasse met wedstrijdervaring");
-      } else if (rRec.total >= 2) {
+      // Gelijk aan rulesEngine: demo telt niet als wedstrijdervaring voor R.
+      // Jeugd en iedere volwassen klasse buiten R maken R wel ongeldig.
+      if (rStats.hasJeugd || rStats.hasOutsideR) {
+        const ervaring = Math.max(0, rStats.relevantTotal - rStats.rTotal);
+        add("MATCHMAKER_R_KLASSE_MET_WEDSTRIJDERVARING", "AFKEUR", `R-klasse is alleen bedoeld als optionele instapklasse zonder eerdere jeugd- of volwassen wedstrijdervaring buiten R. Deze vechter heeft ${ervaring} relevante partij(en) buiten R. Start daarom in N.`, "error", "R-klasse met wedstrijdervaring");
+      } else if (rStats.rTotal >= 2) {
         add("MATCHMAKER_R_KLASSE_MAX_BEREIKT", "AFKEUR", `R-klasse maximum bereikt. Record in R: ${rRec.recordLabel}. Na maximaal 2 R-klasse wedstrijden promoveert deze vechter naar de N-klasse.`, "error", "R-klasse maximum bereikt");
       }
     }
@@ -784,7 +970,7 @@ export function runMatchmakerFighterRules(
       }
 
       const progress = buildKlasseProgress(uitslagen);
-      const highestAdultClass = highestAdultClassFromProgress(progress);
+      const highestAdultClass = highestAdultClassFromUitslagen(uitslagen);
 
       if (
         highestAdultClass &&

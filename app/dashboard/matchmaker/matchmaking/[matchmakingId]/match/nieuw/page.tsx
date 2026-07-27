@@ -26,7 +26,7 @@ const ORANGE = "#ff4d00";
 type Fighter = Record<string, any>;
 type ResultRow = Record<string, any>;
 type EngineHit = Record<string, any>;
-type Severity = "OK" | "LET OP" | "DISPENSATIE" | "AFKEUR" | "VERBOD";
+type Severity = "OK" | "INFO" | "LET OP" | "DISPENSATIE" | "AFKEUR" | "VERBOD";
 
 function s(v: unknown) {
   return String(v ?? "").trim();
@@ -775,6 +775,7 @@ function resultSeverity(row: ResultRow): Severity {
   if (x.includes("verbod")) return "VERBOD";
   if (x.includes("dispensatie")) return "DISPENSATIE";
   if (x.includes("afkeur") || x.includes("afgekeurd")) return "AFKEUR";
+  if (x.includes("info")) return "INFO";
   if (x.includes("let") || x.includes("actie") || x.includes("warn"))
     return "LET OP";
   return "OK";
@@ -793,6 +794,7 @@ function engineSeverity(hit: EngineHit): Severity {
   if (x.includes("verbod")) return "VERBOD";
   if (x.includes("dispensatie")) return "DISPENSATIE";
   if (x.includes("afkeur") || x.includes("afgekeurd") || x.includes("error")) return "AFKEUR";
+  if (x.includes("info")) return "INFO";
   if (x.includes("actie") || x.includes("warning") || x.includes("warn") || x.includes("let")) return "LET OP";
   return "OK";
 }
@@ -829,7 +831,7 @@ function extractEngineHits(json: any): EngineHit[] {
 }
 
 function severityRank(x: Severity) {
-  return { OK: 0, "LET OP": 1, DISPENSATIE: 2, AFKEUR: 3, VERBOD: 4 }[x];
+  return { OK: 0, INFO: 1, "LET OP": 2, DISPENSATIE: 3, AFKEUR: 4, VERBOD: 5 }[x];
 }
 
 function worst(items: { severity: Severity }[]) {
@@ -1222,10 +1224,10 @@ ${engineError}`);
                   .slice(0, 4)
                   .map((item, idx) => (
                     <div
-                      className={`fs-center-alert ${severityRank(item.severity) >= 3 ? "danger" : "warning"}`}
+                      className={`fs-center-alert ${item.severity === "INFO" ? "info" : severityRank(item.severity) >= 4 ? "danger" : "warning"}`}
                       key={`${item.code}-${idx}`}
                     >
-                      <div className="fs-alert-icon">!</div>
+                      <div className="fs-alert-icon">{item.severity === "INFO" ? "i" : "!"}</div>
                       <div className="fs-alert-text">
                         <div className="fs-alert-title">
                           {item.severity === "LET OP" ? "ACTIE" : item.severity}: {item.title}
@@ -1844,6 +1846,18 @@ ${engineError}`);
           box-shadow:
             inset 0 1px 0 rgba(255, 255, 255, 0.18),
             inset 0 -2px 0 rgba(255, 77, 0, 0.42),
+            0 14px 32px rgba(0, 0, 0, 0.42);
+        }
+
+        .fs-center-alert.info {
+          border-color: rgba(96, 165, 250, 0.88);
+          background:
+            radial-gradient(circle at left, rgba(59, 130, 246, 0.20), transparent 38%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.025)),
+            linear-gradient(135deg, #28292d, #111214 58%, #070708);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            inset 0 -2px 0 rgba(59, 130, 246, 0.42),
             0 14px 32px rgba(0, 0, 0, 0.42);
         }
 
@@ -2623,12 +2637,14 @@ function StatusPill({ severity }: { severity: Severity }) {
           ? "bad"
           : severity === "LET OP"
             ? "warn"
-            : "ok";
+            : severity === "INFO"
+              ? "info"
+              : "ok";
 
   return (
     <span className={`status-pill ${cls}`}>
-      {severity === "OK" ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
-      {severity}
+      {severity === "OK" || severity === "INFO" ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+      {severity === "LET OP" ? "ACTIE" : severity}
     </span>
   );
 }

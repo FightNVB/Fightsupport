@@ -382,7 +382,17 @@ function parseKbMmKlasseToLetter(mm: any): Klasse | null {
 
   const up = normalizeKlasseText(raw);
 
-  if (up.includes("MMA")) {
+  // Amateur/AMA is een MMA-klasse en nooit A-klasse in KB/MT-resultaten.
+  // FightPassport kan alleen "Amateur" of "AMA" in de kolom klasse zetten,
+  // dus sluit die waarden expliciet uit voordat losse klasseletters worden gelezen.
+  if (
+    up.includes("MMA") ||
+    up === "AMA" ||
+    up === "AMATEUR" ||
+    up === "MMA AMA" ||
+    up === "MMA AMATEUR" ||
+    up.includes("AMATEUR")
+  ) {
     return null;
   }
 
@@ -594,6 +604,34 @@ function getTalentstatusInfo(ctx: any): {
     roodHeeft,
     blauwHeeft,
   };
+}
+
+function hasDopingCertificaatInOpmerking(v: any): boolean {
+  const s = String(v ?? "").toLowerCase();
+  return (
+    s.includes("[doping_certificaat=behaald]") ||
+    s.includes("doping certificaat behaald") ||
+    s.includes("dopingcertificaat behaald")
+  );
+}
+
+function getDopingCertificaatInfo(ctx: any): {
+  roodHeeft: boolean;
+  blauwHeeft: boolean;
+} {
+  return {
+    roodHeeft: hasDopingCertificaatInOpmerking(ctx?.rood_nulmeting_opmerking),
+    blauwHeeft: hasDopingCertificaatInOpmerking(ctx?.blauw_nulmeting_opmerking),
+  };
+}
+
+function isDopingCertificaatVerplichtVoorPartij(ctx: any): boolean {
+  if (isMmaBout(ctx)) {
+    return parseMmaLevel(ctx?.klasse_mm ?? ctx?.klasse) === "PRO";
+  }
+
+  const klasse = parseKbMmKlasseToLetter(ctx?.klasse_mm ?? ctx?.klasse);
+  return klasse === "A" || klasse === "B";
 }
 
 function fallbackAdultKbMtKlasseFromNulmeting(ctx: any, hoek: "rood" | "blauw"): Klasse | null {
@@ -2287,6 +2325,47 @@ export async function rulesEngine(opts: {
           resultaat: "AFKEUR",
           severity: "error",
           boodschap: `J+ partij niet akkoord: talentstatus is niet gevonden in de nulmeting-opmerking van ${ontbreekt || "één of beide vechters"}.`,
+        });
+      }
+    }
+
+    {
+      const dopingCertificaatVerplicht = isDopingCertificaatVerplichtVoorPartij(ctx);
+      const dopingInfo = getDopingCertificaatInfo(ctx);
+
+      if (dopingCertificaatVerplicht && dopingInfo.roodHeeft && dopingInfo.blauwHeeft) {
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "Dopingcertificaat akkoord",
+          rule_code: "DOPINGCERTIFICAAT_AKKOORD",
+          resultaat: "INFO",
+          severity: "info",
+          boodschap:
+            "A-, B- of Pro-partij: dopingcertificaat behaald is bij beide vechters gevonden in de nulmeting-opmerking. Akkoord.",
+        });
+      } else if (dopingCertificaatVerplicht) {
+        const ontbreekt = [
+          !dopingInfo.roodHeeft
+            ? `${getFighterDisplayName(ctx, "rood")} (VA ${getTournamentVaNummerFromCtx(ctx, "rood") ?? ctx?.rood_va_mm ?? "onbekend"})`
+            : null,
+          !dopingInfo.blauwHeeft
+            ? `${getFighterDisplayName(ctx, "blauw")} (VA ${getTournamentVaNummerFromCtx(ctx, "blauw") ?? ctx?.blauw_va_mm ?? "onbekend"})`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" en ");
+
+        pushHit({
+          matchmaking_id,
+          partij_nr,
+          bout_id,
+          rule: "Dopingcertificaat ontbreekt",
+          rule_code: "DOPINGCERTIFICAAT_ONTBREEKT",
+          resultaat: "AFKEUR",
+          severity: "error",
+          boodschap: `A-, B- of Pro-partij niet akkoord: dopingcertificaat behaald is niet gevonden voor ${ontbreekt}.`,
         });
       }
     }

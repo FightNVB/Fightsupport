@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, Search, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
+type SchoolChange = {
+  id: string; status: "open" | "resolved" | "ignored"; matchmaking_id: string; aanmelding_id?: string | null; fighter_id?: string | null; va_nummer: string; old_sportschool_name?: string | null; new_sportschool_name: string; changed_by_email?: string | null; source: string; admin_note?: string | null; created_at: string; fighter?: { naam?: string | null } | null; matchmaking?: { naam?: string | null; event_naam?: string | null; datum?: string | null; event_datum?: string | null } | null;
+};
+
 type Melding = {
   id: string;
   status: string;
@@ -64,13 +68,16 @@ function statusClass(status: string) {
 }
 
 export default function AdminSportschoolMeldingenPage() {
+  const [activeTab, setActiveTab] = useState<"meldingen" | "wijzigingen">("meldingen");
   const [items, setItems] = useState<Melding[]>([]);
+  const [schoolChanges, setSchoolChanges] = useState<SchoolChange[]>([]);
   const [status, setStatus] = useState("open");
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
   const [opmerkingen, setOpmerkingen] = useState<Record<string, string>>({});
+  const [schoolNotes, setSchoolNotes] = useState<Record<string, string>>({});
 
   async function tokenHeaders(): Promise<Record<string, string>> {
     const { data } = await supabase.auth.getSession();
@@ -85,6 +92,7 @@ export default function AdminSportschoolMeldingenPage() {
   }
 
   async function load() {
+    if (activeTab === "wijzigingen") return loadSchoolChanges();
     setLoading(true);
     setError("");
     try {
@@ -110,6 +118,32 @@ export default function AdminSportschoolMeldingenPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+
+  async function loadSchoolChanges() {
+    setLoading(true); setError("");
+    try {
+      const headers = await tokenHeaders();
+      const mappedStatus = status === "afgehandeld" ? "resolved" : status === "afgewezen" ? "ignored" : status === "in_behandeling" ? "open" : status;
+      const res = await fetch(`/api/admin/matchmaker-school-changes?status=${encodeURIComponent(mappedStatus)}&q=${encodeURIComponent(q)}`, { headers, cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || "Sportschoolwijzigingen laden mislukt");
+      const next = Array.isArray(json.items) ? json.items : [];
+      setSchoolChanges(next);
+      setSchoolNotes(cur => { const copy={...cur}; for (const item of next) if (copy[item.id]===undefined) copy[item.id]=item.admin_note || ""; return copy; });
+    } catch (e:any) { setError(e?.message || "Sportschoolwijzigingen laden mislukt"); setSchoolChanges([]); } finally { setLoading(false); }
+  }
+
+  async function updateSchoolChange(item: SchoolChange, nextStatus: "open" | "resolved" | "ignored") {
+    setSavingId(item.id); setError("");
+    try {
+      const headers = await tokenHeaders();
+      const res = await fetch("/api/admin/matchmaker-school-changes", { method:"PATCH", headers:{...headers,"Content-Type":"application/json"}, body:JSON.stringify({ id:item.id, status:nextStatus, admin_note:schoolNotes[item.id] || "" }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || "Bijwerken mislukt");
+      await loadSchoolChanges();
+    } catch(e:any) { setError(e?.message || "Bijwerken mislukt"); } finally { setSavingId(""); }
   }
 
   async function updateStatus(item: Melding, nextStatus: string) {
@@ -142,7 +176,7 @@ export default function AdminSportschoolMeldingenPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  }, [status, activeTab]);
 
   const counts = useMemo(() => {
     return {
@@ -164,7 +198,7 @@ export default function AdminSportschoolMeldingenPage() {
               <p className="text-sm text-zinc-300">Meldingen van trainers en sportscholen over vechters, gegevens, licenties en uitslagen.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link className="sportschool-admin-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer">Terug naar beheer</Link>
+              <Link className="sportschool-admin-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/administratie">Terug naar administratie</Link>
               <button onClick={load} className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black">
                 {loading ? "Laden..." : "Vernieuwen"}
               </button>
@@ -172,20 +206,28 @@ export default function AdminSportschoolMeldingenPage() {
           </div>
         </header>
 
+        <div className="flex border-b border-zinc-700 bg-[#181818] px-4 pt-4">
+          <button onClick={() => { setActiveTab("meldingen"); setStatus("open"); }} className={`border border-b-0 px-5 py-3 text-xs font-black uppercase ${activeTab === "meldingen" ? "border-[#ff4d00] bg-[#ff4d00] !text-black" : "border-zinc-600 bg-[#242424] text-white"}`}>Sportschool meldingen</button>
+          <button onClick={() => { setActiveTab("wijzigingen"); setStatus("open"); }} className={`border border-b-0 px-5 py-3 text-xs font-black uppercase ${activeTab === "wijzigingen" ? "border-[#ff4d00] bg-[#ff4d00] !text-black" : "border-zinc-600 bg-[#242424] text-white"}`}>Matchmaker wijzigingen</button>
+        </div>
+
         <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-3">
-          <div className="border border-zinc-600 bg-[#1c1c1c] p-3"><b className="text-xl text-[#ff4d00]">{counts.totaal}</b><p className="text-xs uppercase text-zinc-400">Meldingen in selectie</p></div>
-          <div className="border border-zinc-600 bg-[#1c1c1c] p-3"><b className="text-xl text-[#ff4d00]">{counts.open}</b><p className="text-xs uppercase text-zinc-400">Open</p></div>
-          <div className="border border-zinc-600 bg-[#1c1c1c] p-3"><b className="text-xl text-[#ff4d00]">{counts.behandeling}</b><p className="text-xs uppercase text-zinc-400">In behandeling</p></div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3"><b className="text-xl text-[#ff4d00]">{activeTab === "meldingen" ? counts.totaal : schoolChanges.length}</b><p className="text-xs uppercase text-zinc-400">Meldingen in selectie</p></div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3"><b className="text-xl text-[#ff4d00]">{activeTab === "meldingen" ? counts.open : schoolChanges.filter(i => i.status === "open").length}</b><p className="text-xs uppercase text-zinc-400">Open</p></div>
+          <div className="border border-zinc-600 bg-[#1c1c1c] p-3"><b className="text-xl text-[#ff4d00]">{activeTab === "meldingen" ? counts.behandeling : schoolChanges.filter(i => i.status === "resolved").length}</b><p className="text-xs uppercase text-zinc-400">{activeTab === "meldingen" ? "In behandeling" : "Opgelost"}</p></div>
         </div>
 
         <div className="flex flex-wrap gap-2 p-4">
-          {["alles", "open", "in_behandeling", "afgehandeld", "afgewezen"].map((item) => (
+          {(activeTab === "meldingen"
+            ? ["alles", "open", "in_behandeling", "afgehandeld", "afgewezen"]
+            : ["alles", "open", "afgehandeld", "afgewezen"]
+          ).map((item) => (
             <button
               key={item}
               onClick={() => setStatus(item)}
               className={`border px-3 py-2 text-xs font-black uppercase ${status === item ? "border-[#ff4d00] bg-[#ff4d00] !text-black" : "border-zinc-500 bg-[#242424] text-white"}`}
             >
-              {item.replaceAll("_", " ")}
+              {activeTab === "wijzigingen" && item === "afgehandeld" ? "opgelost" : activeTab === "wijzigingen" && item === "afgewezen" ? "genegeerd" : item.replaceAll("_", " ")}
             </button>
           ))}
           <form onSubmit={(e) => { e.preventDefault(); load(); }} className="ml-auto flex gap-2">
@@ -206,11 +248,11 @@ export default function AdminSportschoolMeldingenPage() {
         <div className="space-y-3 p-4 pt-0">
           {loading && <div className="border border-zinc-700 bg-[#171717] p-4"><RefreshCw className="mr-2 inline animate-spin text-[#ff4d00]" /> Laden...</div>}
 
-          {!loading && !items.length && (
+          {activeTab === "meldingen" && !loading && !items.length && (
             <div className="border border-zinc-700 bg-[#171717] p-6 text-center text-zinc-300">Geen meldingen gevonden.</div>
           )}
 
-          {!loading && items.map((item) => (
+          {activeTab === "meldingen" && !loading && items.map((item) => (
             <article key={item.id} className="border border-zinc-700 bg-[#171717] shadow-xl shadow-black/30">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-800 bg-[#202020] p-4">
                 <div>
@@ -249,6 +291,39 @@ export default function AdminSportschoolMeldingenPage() {
               </div>
             </article>
           ))}
+
+          {activeTab === "wijzigingen" && !loading && !schoolChanges.length && (
+            <div className="border border-zinc-700 bg-[#171717] p-6 text-center text-zinc-300">Geen sportschoolwijzigingen gevonden.</div>
+          )}
+          {activeTab === "wijzigingen" && !loading && schoolChanges.map((item) => {
+            const eventName = item.matchmaking?.naam || item.matchmaking?.event_naam || "Onbekende matchmaking";
+            return (
+            <article key={item.id} className="border border-zinc-700 bg-[#171717] shadow-xl shadow-black/30">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-800 bg-[#202020] p-4">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-[0.22em] text-[#ff4d00]">Sportschool aangepast door matchmaker</div>
+                  <h2 className="mt-1 text-xl font-black text-white">{safe(item.fighter?.naam, "Onbekende vechter")}</h2>
+                  <p className="text-sm text-zinc-400">VA {safe(item.va_nummer)} • {eventName} • {formatDate(item.created_at)}</p>
+                </div>
+                <span className={`border px-3 py-1 text-xs font-black uppercase ${item.status === "resolved" ? "border-emerald-500 text-emerald-300" : item.status === "ignored" ? "border-red-500 text-red-300" : "border-[#ff4d00] text-[#ff4d00]"}`}>{item.status === "resolved" ? "opgelost" : item.status === "ignored" ? "genegeerd" : "open"}</span>
+              </div>
+              <div className="grid gap-3 p-4 lg:grid-cols-[1fr_340px]">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="border border-zinc-800 bg-[#101010] p-4"><div className="text-xs font-black uppercase text-zinc-500">Oude sportschool</div><div className="mt-2 text-lg font-black text-red-300">{safe(item.old_sportschool_name, "Geen koppeling gevonden")}</div></div>
+                  <div className="border border-[#ff4d00]/60 bg-[#101010] p-4"><div className="text-xs font-black uppercase text-zinc-500">Door matchmaker opgegeven</div><div className="mt-2 text-lg font-black text-[#ff4d00]">{safe(item.new_sportschool_name)}</div></div>
+                  <div className="md:col-span-2 border border-zinc-800 bg-[#101010] p-3 text-sm text-zinc-300">Aangepast door: <b>{safe(item.changed_by_email, "Onbekende gebruiker")}</b> • Bron: {item.source.replaceAll("_", " ")}</div>
+                </div>
+                <div className="space-y-3">
+                  <label className="block text-xs font-black uppercase tracking-[0.18em] text-zinc-300">Admin opmerking<textarea value={schoolNotes[item.id] ?? ""} onChange={(e) => setSchoolNotes(cur => ({...cur,[item.id]:e.target.value}))} rows={4} className="mt-2 w-full resize-none border border-zinc-700 bg-[#111] p-2 text-sm text-white outline-none focus:border-[#ff4d00]" placeholder="Wat is in FightPassport gecontroleerd of aangepast?" /></label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button disabled={savingId === item.id} onClick={() => updateSchoolChange(item,"open")} className="border border-zinc-500 bg-[#242424] px-2 py-2 text-xs font-black uppercase text-white">Open</button>
+                    <button disabled={savingId === item.id} onClick={() => updateSchoolChange(item,"resolved")} className="border border-emerald-500 bg-emerald-950 px-2 py-2 text-xs font-black uppercase text-emerald-200">Opgelost</button>
+                    <button disabled={savingId === item.id} onClick={() => updateSchoolChange(item,"ignored")} className="border border-red-500 bg-red-950 px-2 py-2 text-xs font-black uppercase text-red-200">Negeren</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          )})}
         </div>
       </section>
     </main>

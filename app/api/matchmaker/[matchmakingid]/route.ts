@@ -173,68 +173,55 @@ function markFighterMatched(fighter: AnyRow, matched: { ids: Set<string>; vas: S
   };
 }
 
-function mergeFighter(context: AnyRow | null, aanmelding: AnyRow | null, raw: AnyRow | null) {
+function mergeFighter(context: AnyRow, aanmelding: AnyRow | null) {
   const extra = parseObj(context?.extra);
-
-  const cleanVa = va(
-    context?.va_nummer ??
-      context?.va ??
-      raw?.va_nummer ??
-      raw?.fighter_id ??
-      aanmelding?.va_nummer,
+  const cleanVa = va(context?.va_nummer ?? context?.va ?? context?.fighter_id);
+  const aanmeldingStatus = s(
+    aanmelding?.status ?? aanmelding?.aanmelding_status ?? aanmelding?.inschrijving_status,
   );
 
   return {
-    ...(aanmelding ?? {}),
-    ...(context ?? {}),
+    ...context,
 
-    context_id: context?.id ?? null,
-    inschrijving_id: context?.inschrijving_id ?? aanmelding?.id ?? null,
-    source: context ? "matchmaker_fighter_context" : "aanmeldingen",
+    context_id: context.id ?? null,
+    inschrijving_id: context.inschrijving_id ?? aanmelding?.id ?? null,
+    aanmelding_id: context.inschrijving_id ?? aanmelding?.id ?? null,
+    source: "matchmaker_fighter_context",
 
     va_nummer: cleanVa,
-    fighter_id: context?.fighter_id ?? raw?.fighter_id ?? cleanVa,
+    va: cleanVa,
+    fighter_id: context.fighter_id ?? cleanVa,
 
-    naam: fullName(raw) || fullName(context) || fullName(aanmelding),
-    naam_input: context?.naam_input ?? aanmelding?.naam_input ?? fullName(aanmelding),
+    // Naam, klasse, geslacht, geboortedatum, licentie en record komen uit de
+    // reeds opgebouwde context. Sportschool en gewicht in die context zijn
+    // bewust afkomstig uit de concrete aanmelding.
+    naam: fullName(context),
+    aanmelding_naam: context.naam_input ?? fullName(aanmelding),
+    naam_input: context.naam_input ?? fullName(aanmelding),
+    naam_fp: context.fp_naam ?? context.naam_fp ?? null,
 
-    gym: context?.gym_input ?? context?.gym ?? aanmelding?.gym ?? null,
-    fp_gym: context?.fp_gym ?? raw?.sportschool ?? raw?.gym ?? null,
+    sportschool: context.gym_input ?? context.sportschool ?? context.gym ?? null,
+    gym: context.gym_input ?? context.gym ?? context.sportschool ?? null,
+    aanmelding_sportschool:
+      context.gym_input ?? aanmelding?.sportschool ?? aanmelding?.gym ?? null,
+    aanmelding_gym:
+      context.gym_input ?? aanmelding?.gym ?? aanmelding?.sportschool ?? null,
+    fp_gym: context.fp_gym ?? context.sportschool_fp ?? null,
 
-    geboortedatum: context?.geboortedatum_input ?? aanmelding?.geboortedatum ?? null,
-    fp_geboortedatum: context?.fp_geboortedatum ?? raw?.geboortedatum ?? null,
+    gewicht: context.gewicht ?? null,
+    aanmelding_gewicht: context.gewicht ?? aanmelding?.gewicht ?? null,
+    aanmelding_va_nummer: cleanVa,
 
-    geslacht: context?.geslacht ?? raw?.geslacht ?? aanmelding?.geslacht ?? null,
+    geboortedatum: context.geboortedatum ?? context.fp_geboortedatum ?? null,
+    fp_geboortedatum: context.fp_geboortedatum ?? null,
+    geslacht: context.geslacht ?? context.fp_geslacht ?? null,
+    klasse: context.klasse ?? context.berekende_klasse ?? context.nulmeting_klasse ?? null,
+    discipline: context.discipline ?? null,
 
-    klasse: context?.klasse ?? aanmelding?.klasse ?? null,
-    fp_klasse: context?.fp_klasse ?? raw?.klasse ?? raw?.nulmeting_klasse ?? null,
+    status: aanmeldingStatus || context.status || context.controle_status || null,
+    aanmelding_status: aanmeldingStatus || null,
+    __fs_aanmelding_status: aanmeldingStatus || null,
 
-    discipline: context?.discipline ?? aanmelding?.discipline ?? null,
-    gewicht: context?.gewicht ?? aanmelding?.gewicht ?? null,
-
-    licentie_status:
-      context?.licentie_status ??
-      context?.licentie ??
-      raw?.licentie ??
-      raw?.licentie_status ??
-      null,
-
-    heeft_keurmerk:
-      context?.heeft_keurmerk ??
-      extra?.heeft_keurmerk ??
-      extra?.keurmerk?.geldig ??
-      null,
-
-    keurmerk_status:
-      context?.keurmerk_status ??
-      extra?.keurmerk_status ??
-      extra?.keurmerk?.status ??
-      null,
-
-    totaal_wedstrijden: context?.totaal_wedstrijden ?? raw?.totaal_wedstrijden ?? null,
-    record: context?.record ?? raw?.record ?? null,
-
-    raw_fighter: raw,
     extra,
   };
 }
@@ -262,7 +249,7 @@ export async function GET(
       );
     }
     
-    const [mmRes, aanmeldingenRes, contextRes, rawRes, matchesRes, runsRes] =
+    const [mmRes, aanmeldingenRes, contextRes, matchesRes, runsRes] =
       await Promise.all([
         supabaseAdmin.from("matchmakings").select("*").eq("id", mmId).single(),
 
@@ -277,11 +264,6 @@ export async function GET(
           .select("*")
           .eq("matchmaking_id", mmId)
           .order("created_at", { ascending: false }),
-
-        supabaseAdmin
-          .from("matchmaker_fighters_raw")
-          .select("*")
-          .eq("matchmaking_id", mmId),
 
         supabaseAdmin
           .from("matchmaking_bouts_raw")
@@ -302,55 +284,26 @@ export async function GET(
 
     const aanmeldingen = aanmeldingenRes.data ?? [];
     const contexts = contextRes.error ? [] : contextRes.data ?? [];
-    const rawRows = rawRes.error ? [] : rawRes.data ?? [];
 
     const aanmeldingById = new Map<string, AnyRow>();
     for (const row of aanmeldingen) {
       aanmeldingById.set(String(row.id), row);
     }
 
-    const rawByVa = new Map<string, AnyRow>();
-    for (const row of rawRows) {
-      const key = va(row.va_nummer ?? row.fighter_id);
-      if (key && !rawByVa.has(key)) rawByVa.set(key, row);
-    }
-
     const seen = new Set<string>();
     const fighters: AnyRow[] = [];
 
+    // Alleen de samengestelde context wordt als vechterbron teruggegeven.
+    // Een aanmelding zonder context hoort eerst opnieuw door build-context te gaan
+    // en wordt niet stilletjes met losse databasevelden op deze pagina opgebouwd.
     for (const ctxRow of contexts) {
       const inschrijvingId = s(ctxRow.inschrijving_id);
       const cleanVa = va(ctxRow.va_nummer ?? ctxRow.va ?? ctxRow.fighter_id);
       const key = inschrijvingId || cleanVa || s(ctxRow.id);
-
       if (!key || seen.has(key)) continue;
 
       seen.add(key);
-
-      fighters.push(
-        mergeFighter(
-          ctxRow,
-          aanmeldingById.get(inschrijvingId) ?? null,
-          cleanVa ? rawByVa.get(cleanVa) ?? null : null,
-        ),
-      );
-    }
-
-    for (const row of aanmeldingen) {
-      const cleanVa = va(row.va_nummer);
-      const key = s(row.id) || cleanVa;
-
-      if (!key || seen.has(key)) continue;
-
-      seen.add(key);
-
-      fighters.push(
-        mergeFighter(
-          null,
-          row,
-          cleanVa ? rawByVa.get(cleanVa) ?? null : null,
-        ),
-      );
+      fighters.push(mergeFighter(ctxRow, aanmeldingById.get(inschrijvingId) ?? null));
     }
 
     const matches = matchesRes.error ? [] : matchesRes.data ?? [];
@@ -381,7 +334,6 @@ export async function GET(
       scrape_runs: runsRes.error ? [] : runsRes.data ?? [],
       warnings: {
         context: contextRes.error?.message ?? null,
-        raw: rawRes.error?.message ?? null,
         matches: matchesRes.error?.message ?? null,
         runs: runsRes.error?.message ?? null,
       },

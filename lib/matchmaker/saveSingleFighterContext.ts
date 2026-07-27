@@ -199,7 +199,10 @@ function toContextRow(ctx: AnyRow) {
 
     geboortedatum: dateOrNull(pick(ctx, ["geboortedatum", "fp_geboortedatum", "geboortedatum_fp"])),
 
-    licentie: pick(ctx, ["licentie", "licentie_status"]),
+    licentie: pick(ctx, ["licentie_actief", "licentie", "licentie_status"]),
+    licentie_actief: boolOrNull(pick(ctx, ["licentie_actief", "licentie_ok", "licentie"])),
+    licentie_ok: boolOrNull(pick(ctx, ["licentie_ok", "licentie_actief", "licentie"])),
+    fit_to_fight: boolOrNull(pick(ctx, ["fit_to_fight"])),
     heeft_startverbod: pick(ctx, ["heeft_startverbod", "startverbod"]),
     heeft_keurmerk: pick(ctx, ["heeft_keurmerk", "keurmerk"]),
     keurmerk_reden: pick(ctx, ["keurmerk_reden"]),
@@ -212,6 +215,9 @@ function toContextRow(ctx: AnyRow) {
 
     nulmeting_totaal: i(pick(ctx, ["nulmeting_totaal"])),
     nulmeting_klasse: pick(ctx, ["nulmeting_klasse"]),
+    berekende_klasse: pick(ctx, ["berekende_klasse", "klasse_advies"]),
+    klasse_advies: pick(ctx, ["klasse_advies"]),
+    klasse_advies_reden: pick(ctx, ["klasse_advies_reden"]),
     nulmeting_opmerking: pick(ctx, ["nulmeting_opmerking"]),
 
     naam_match: boolOrNull(pick(ctx, ["naam_match"])),
@@ -223,6 +229,8 @@ function toContextRow(ctx: AnyRow) {
 
     scraped_at: pick(ctx, ["scraped_at"]) ?? now,
     evenement_datum: dateOrNull(pick(ctx, ["evenement_datum", "eventDate", "event_date"])),
+    leeftijd: i(pick(ctx, ["leeftijd", "leeftijd_event"])),
+    leeftijd_event: i(pick(ctx, ["leeftijd_event", "leeftijd"])),
 
     extra: {
       scrape_status: pick(ctx, ["scrape_status", "controle_status"]),
@@ -320,6 +328,17 @@ export async function saveSingleFighterContexts(params: {
     rows,
   });
 
+  // De context-save is het beslissende moment in de nieuwe statusflow.
+  // Zodra de context succesvol is opgeslagen, is de vechter beschikbaar
+  // voor matchmaking. Zo is dit niet afhankelijk van een losse pipeline.
+  if (!error) {
+    await markAanmeldingenFromContexts({
+      supabase,
+      matchmakingId,
+      contexts,
+    });
+  }
+
   return { data: data ?? [], error };
 }
 
@@ -353,6 +372,35 @@ export async function saveSingleFighterRules(params: {
     { wedstrijd: 0, toernooi: 0 }
   );
 
+  let existingQ = supabase
+    .from(table)
+    .select("*")
+    .eq("matchmaking_id", matchmakingId)
+    .eq("controle_run_id", controleRunId);
+
+  if (groups.toernooi > 0 && groups.wedstrijd === 0) {
+    existingQ = existingQ.not("toernooi_code", "is", null);
+  } else if (groups.wedstrijd > 0 && groups.toernooi === 0) {
+    existingQ = existingQ.is("toernooi_code", null);
+  }
+
+  const { data: existingRows, error: existingError } = await existingQ;
+  if (existingError) return { data: [], error: existingError };
+
+  const reviewByKey = new Map<string, AnyRow>();
+  for (const row of existingRows ?? []) {
+    const key = [
+      normalizeVa(pick(row, ["va_nummer", "va", "fighter_id"])) ?? "",
+      s(pick(row, ["rule_code"])),
+      String(i(pick(row, ["inschrijving_id"])) ?? ""),
+      toernooiCodeOrNull(pick(row, ["toernooi_code"])) ?? "",
+    ].join("||");
+
+    if (row?.review_status || row?.reviewed_at || row?.original_resultaat) {
+      reviewByKey.set(key, row);
+    }
+  }
+
   let delQ = supabase
     .from(table)
     .delete()
@@ -373,31 +421,54 @@ export async function saveSingleFighterRules(params: {
   if (!hits?.length) return { data: [], error: null };
 
   const rows = hits.map((hit) => {
-  const toernooi_code = toernooiCodeOrNull(
-    pick(hit, ["toernooi_code", "toernooicode", "tournament_code"])
-  );
-  const va = normalizeVa(pick(hit, ["va_nummer", "va", "toernooi_va_nummer", "fighter_id"]));
+    const toernooi_code = toernooiCodeOrNull(
+      pick(hit, ["toernooi_code", "toernooicode", "tournament_code"])
+    );
+    const va = normalizeVa(
+      pick(hit, ["va_nummer", "va", "toernooi_va_nummer", "fighter_id"])
+    );
+    const inschrijving_id = i(hit.inschrijving_id);
+    const key = [
+      va ?? "",
+      s(hit.rule_code),
+      String(inschrijving_id ?? ""),
+      toernooi_code ?? "",
+    ].join("||");
+    const previousReview = reviewByKey.get(key);
 
-  return {
-  matchmaking_id: matchmakingId,
-  controle_run_id: controleRunId,
-  inschrijving_id: i(hit.inschrijving_id),
-  fighter_id: toernooi_code ? ((va ?? s(hit.fighter_id)) || null) : uuidOrNull(hit.fighter_id),
-  va_nummer: va,
-  toernooi_code,
-  is_toernooi: !!toernooi_code,
-  partij_nr: toernooi_code ? 0 : i(hit.partij_nr),
-  bout_id: toernooi_code ? null : uuidOrNull(hit.bout_id),
+    return {
+      matchmaking_id: matchmakingId,
+      controle_run_id: controleRunId,
+      inschrijving_id,
+      fighter_id: toernooi_code
+        ? ((va ?? s(hit.fighter_id)) || null)
+        : uuidOrNull(hit.fighter_id),
+      va_nummer: va,
+      toernooi_code,
+      is_toernooi: !!toernooi_code,
+      partij_nr: toernooi_code ? 0 : i(hit.partij_nr),
+      bout_id: toernooi_code ? null : uuidOrNull(hit.bout_id),
 
-  rule: hit.rule ?? null,
-  rule_code: hit.rule_code ?? null,
-  resultaat: hit.resultaat ?? null,
-  severity: hit.severity ?? null,
-  boodschap: hit.boodschap ?? null,
+      rule: hit.rule ?? null,
+      rule_code: hit.rule_code ?? null,
+      resultaat: previousReview?.review_status
+        ? previousReview.resultaat
+        : hit.resultaat ?? null,
+      severity: hit.severity ?? null,
+      boodschap: hit.boodschap ?? null,
 
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-};});
+      original_resultaat:
+        previousReview?.original_resultaat ??
+        (previousReview?.review_status ? previousReview?.resultaat : null),
+      review_status: previousReview?.review_status ?? null,
+      review_note: previousReview?.review_note ?? null,
+      reviewed_by: previousReview?.reviewed_by ?? null,
+      reviewed_at: previousReview?.reviewed_at ?? null,
+
+      created_at: previousReview?.created_at ?? new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  });
 
   const { data, error } = await safeInsertRows({ supabase, table, rows });
 
@@ -433,6 +504,7 @@ export async function markAanmeldingenFromContexts(params: {
     await supabase
       .from("aanmeldingen")
       .update({
+        status: "beschikbaar",
         scrape_status: "gecontroleerd",
         controle_status: "gecontroleerd",
         gegevens_status: "gecontroleerd",

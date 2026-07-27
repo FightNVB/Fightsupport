@@ -125,8 +125,8 @@ export default async function AfmeldingDetailPage({ params }: { params: Promise<
                 <Link href="/dashboard/admin/algemeen/afmeldingen" className="inline-flex items-center justify-center rounded-2xl border border-white/55 bg-[linear-gradient(135deg,#ffffff,#e9e9e9_45%,#bdbdbd)] px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
                   ← Terug naar afmeldingen
                 </Link>
-                <Link href="/dashboard/admin" className="inline-flex items-center justify-center rounded-2xl border border-[#ff4d00]/65 bg-[#ff4d00] px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-black shadow-[0_0_20px_rgba(255,77,0,0.30)]">
-                  Terug naar admin
+                <Link href="/dashboard/admin/administratie" className="inline-flex items-center justify-center rounded-2xl border border-[#ff4d00]/65 bg-[#ff4d00] px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-black shadow-[0_0_20px_rgba(255,77,0,0.30)]">
+                  Terug naar administratie
                 </Link>
               </div>
             </div>

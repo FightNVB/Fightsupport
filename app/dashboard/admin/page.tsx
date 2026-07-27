@@ -10,7 +10,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { Scale, Trophy, ArrowLeft, Building2, UsersRound, FileText, ShieldCheck, BrainCircuit, RefreshCw } from "lucide-react";
+import { Scale, Trophy, ArrowLeft, Building2, UsersRound, FileText, ShieldCheck, BrainCircuit } from "lucide-react";
 
 type MenuAction = {
   label: string;
@@ -268,9 +268,9 @@ export default function AdminDashboardPage() {
 
   const actions: MenuAction[] = [
     {
-      label: "Organisatie",
-      subtitle: "Matchmakings, archief, afmeldingen, sancties en snapshots",
-      href: "/dashboard/admin/algemeen",
+      label: "FightPaspoort Beheer",
+      subtitle: "Beheer FightPaspoort, synchronisatie en controles",
+      href: "/dashboard/admin/fightpassport-beheer",
       icon: Building2,
       rootAdminOnly: true,
     },
@@ -282,8 +282,8 @@ export default function AdminDashboardPage() {
     },
     {
       label: "Administratie",
-      subtitle: "Gebruikers, sportscholen, agenda, talentstatus en audit",
-      href: "/dashboard/admin/beheer",
+      subtitle: "Beheer en algemene administratie",
+      href: "/dashboard/admin/administratie",
       icon: UsersRound,
       rootAdminOnly: true,
     },
@@ -318,6 +318,9 @@ export default function AdminDashboardPage() {
       <TitleBand
         title="Admin Portaal"
         subtitle="Beheer, controle en systeemfuncties"
+        leftActionLabel="Slim dashboard"
+        leftActionIcon={<BrainCircuit size={15} />}
+        onLeftAction={() => router.push("/dashboard/admin/aandacht")}
         actionLabel="Dashboard"
         actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
         onAction={() => router.push("/dashboard")}
@@ -331,10 +334,6 @@ export default function AdminDashboardPage() {
           padding: "22px 24px 14px",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          <HeaderSilverButton label="Slim dashboard" icon={<BrainCircuit size={15} />} onClick={() => router.push("/dashboard/admin/aandacht")} />
-          <HeaderSilverButton label="FightPaspoort Beheer" icon={<RefreshCw size={15} />} onClick={() => router.push("/dashboard/admin/fightpassport-beheer")} />
-        </div>
         <div
           className="dashboard-grid"
           style={{
@@ -478,9 +477,11 @@ function SharedStyles() {
           padding-right: 14px !important;
         }
 
+        .title-left-actions-wrap,
         .title-actions-wrap {
           position: static !important;
           transform: none !important;
+          display: flex !important;
           justify-content: center !important;
           margin-bottom: 10px !important;
         }
@@ -555,12 +556,18 @@ function TopLogoBand() {
 function TitleBand({
   title,
   subtitle,
+  leftActionLabel,
+  leftActionIcon,
+  onLeftAction,
   actionLabel,
   actionIcon,
   onAction,
 }: {
   title: string;
   subtitle: string;
+  leftActionLabel?: string;
+  leftActionIcon?: ReactNode;
+  onLeftAction?: () => void | Promise<void>;
   actionLabel: string;
   actionIcon?: ReactNode;
   onAction: () => void | Promise<void>;
@@ -607,6 +614,25 @@ function TitleBand({
           minHeight: 92,
         }}
       >
+        {leftActionLabel && onLeftAction ? (
+          <div
+            className="title-left-actions-wrap"
+            style={{
+              position: "absolute",
+              left: 18,
+              top: "50%",
+              transform: "translateY(-50%)",
+              zIndex: 2,
+            }}
+          >
+            <HeaderSilverButton
+              label={leftActionLabel}
+              icon={leftActionIcon}
+              onClick={onLeftAction}
+            />
+          </div>
+        ) : null}
+
         <div
           className="title-actions-wrap"
           style={{

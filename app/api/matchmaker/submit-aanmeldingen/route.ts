@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { parseExcelToFighters } from "./parse_aanmeldingen";
+import { processMatchmakingFighters } from "@/lib/matchmaker/processMatchmakingFighters";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -164,6 +165,66 @@ async function insertSafe(table: string, rows: Record<string, any>[]) {
 
 async function insertAanmeldingenSafe(rows: Record<string, any>[]) {
   return insertSafe("aanmeldingen", rows);
+}
+
+
+async function createNameVaChecks(params: {
+  matchmakingId: string;
+  uploadBatchId: string;
+  insertedRows: Record<string, any>[];
+}) {
+  const { matchmakingId, uploadBatchId, insertedRows } = params;
+  const vaNummers = [...new Set(
+    insertedRows.map((row) => onlyDigits(row.va_nummer)).filter(Boolean),
+  )];
+
+  if (!vaNummers.length) return 0;
+
+  const { data: fighters, error: fighterError } = await supabaseAdmin
+    .from("fightpassport_fighters")
+    .select("va_nummer, naam")
+    .in("va_nummer", vaNummers);
+
+  if (fighterError) throw new Error(`FightPassport-namen laden mislukt: ${fighterError.message}`);
+
+  const fighterByVa = new Map<string, any>();
+  for (const fighter of fighters ?? []) {
+    const va = onlyDigits((fighter as any).va_nummer);
+    if (va) fighterByVa.set(va, fighter);
+  }
+
+  const checks = insertedRows.flatMap((row) => {
+    const va = onlyDigits(row.va_nummer);
+    const fighter = va ? fighterByVa.get(va) : null;
+    const uploadNaam = s(row.naam);
+    const fightpassportNaam = s(fighter?.naam);
+
+    if (!va || !uploadNaam || !fightpassportNaam) return [];
+    if (normName(uploadNaam) === normName(fightpassportNaam)) return [];
+
+    return [{
+      matchmaking_id: matchmakingId,
+      upload_batch_id: uploadBatchId,
+      aanmelding_id: row.id,
+      va_nummer_upload: va,
+      naam_upload: uploadNaam,
+      va_nummer_fightpassport: va,
+      naam_fightpassport: fightpassportNaam,
+      status: "open",
+      resolution: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }];
+  });
+
+  if (!checks.length) return 0;
+
+  const { error } = await supabaseAdmin
+    .from("matchmaker_name_va_checks")
+    .insert(checks);
+
+  if (error) throw new Error(`Naam/VA-controles opslaan mislukt: ${error.message}`);
+  return checks.length;
 }
 
 async function insertMatchmakerUploadSafe(row: Record<string, any>) {
@@ -387,11 +448,11 @@ async function touchMatchmaking(
     last_updated_by: userId,
   };
 
+  // Bewaar de bestaande geldige stadium/status-waarde.
+  // Alleen metadata en eigenaarschap bijwerken; de database-checkconstraint
+  // bepaalt welke stadiumwaarden zijn toegestaan.
   const stage = s(currentStage);
-
   if (stage && EARLY_EDIT_STAGES.has(stage)) {
-    patch.stadium = "bij_matchmaker_in_bewerking";
-    patch.status = "bij_matchmaker_in_bewerking";
     patch.huidige_eigenaar_type = "matchmaker";
     patch.huidige_eigenaar_user_id = userId;
     patch.huidige_eigenaar_bondteam = null;
@@ -485,6 +546,13 @@ async function deleteUploadArtifacts(uploadBatchId: string, matchmakingId: strin
   const mmId = s(matchmakingId);
 
   if (!uploadId || !mmId) return;
+
+  await bestEffortDeleteScoped({
+    table: "matchmaker_name_va_checks",
+    matchmaking_id: mmId,
+    column: "upload_batch_id",
+    value: uploadId,
+  });
 
   await bestEffortDeleteScoped({
     table: "matchmaker_fighter_context",
@@ -883,9 +951,19 @@ export async function POST(req: Request) {
       });
     }
 
+    let insertedAanmeldingen: any[] = [];
+    let nameVaChecks = 0;
+
     if (dedupedRows.length > 0) {
-      const { error: insErr } = await insertAanmeldingenSafe(dedupedRows);
+      const { data: inserted, error: insErr } = await insertAanmeldingenSafe(dedupedRows);
       if (insErr) throw new Error(insErr.message);
+      insertedAanmeldingen = inserted ?? [];
+
+      nameVaChecks = await createNameVaChecks({
+        matchmakingId: matchmaking_id,
+        uploadBatchId: uploadId,
+        insertedRows: insertedAanmeldingen,
+      });
     }
 
     const { error: uploadUpdateErr } = await supabaseAdmin
@@ -894,7 +972,6 @@ export async function POST(req: Request) {
         status: "verwerkt",
         row_count: validRows.length,
         inserted_count: dedupedRows.length,
-        duplicate_count: duplicatesExisting + duplicatesInFile,
       })
       .eq("id", uploadId);
 
@@ -907,6 +984,11 @@ export async function POST(req: Request) {
 
     await touchMatchmaking(matchmaking_id, uploaded_by, mm.stage);
 
+    const processing = await processMatchmakingFighters({
+      supabase: supabaseAdmin,
+      matchmakingId: matchmaking_id,
+    });
+
     return NextResponse.json({
       ok: true,
       matchmaking_id,
@@ -916,16 +998,22 @@ export async function POST(req: Request) {
       duplicates: duplicatesExisting + duplicatesInFile,
       duplicates_existing: duplicatesExisting,
       duplicates_in_file: duplicatesInFile,
+      name_va_checks: nameVaChecks,
       uploaded_by,
       source_type: uploadSourceType,
       skipped_existing: duplicatesExisting,
       skipped_in_file: duplicatesInFile,
+      fighter_processing: {
+        processed: processing.processed,
+        controle_run_id: processing.controleRunId,
+        rule_hits: processing.hits.length,
+      },
       scraper_started: false,
       scraper_error: null,
       scraper_response: null,
       message:
         dedupedRows.length > 0
-          ? `Upload gelukt. ${dedupedRows.length} nieuwe aanmelding(en) toegevoegd. ${duplicatesExisting + duplicatesInFile} dubbele aanmelding(en) overgeslagen.`
+          ? `Upload gelukt. ${dedupedRows.length} nieuwe aanmelding(en) toegevoegd. ${duplicatesExisting + duplicatesInFile} dubbele aanmelding(en) overgeslagen. ${nameVaChecks} naam/VA-afwijking(en) wachten op controle.`
           : `Upload gelukt, maar er zijn geen nieuwe aanmeldingen toegevoegd. ${duplicatesExisting + duplicatesInFile} dubbele aanmelding(en) overgeslagen.`,
     });
   } catch (err: any) {

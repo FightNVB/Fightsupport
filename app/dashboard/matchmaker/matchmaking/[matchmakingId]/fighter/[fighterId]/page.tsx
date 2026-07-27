@@ -1,196 +1,460 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  CalendarDays,
-  CheckCircle2,
-  Dumbbell,
-  RefreshCw,
-  ShieldAlert,
-  ShieldCheck,
-  Trophy,
-  User,
-  XCircle,
-  Save,
-  X,
-  Pencil,
-} from "lucide-react";
-import { supabase } from "@/lib/supabaseClient";
+import { ArrowLeft, Check, Pencil, RefreshCw, Save, X, XCircle } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { supabase } from "@/lib/supabaseClient";
 
-type Uitslag = {
-  id?: string;
-  datum?: string | null;
-  evenement?: string | null;
-  tegenstander?: string | null;
-  uitslag?: string | null;
-  discipline?: string | null;
-  klasse?: string | null;
-  gewicht?: string | number | null;
-  sportschool?: string | null;
-};
+export default function FighterDossierPage() {
+  const params = useParams<{ matchmakingId?: string; fighterId?: string }>();
+  const fighterId = String(params?.fighterId ?? "").trim();
+  const matchmakingId = String(params?.matchmakingId ?? "").trim();
+  const router = useRouter();
 
-type Sportschool = {
-  sportschool_id?: string | number | null;
-  naam?: string | null;
-  plaats?: string | null;
-  land?: string | null;
-  keurmerk_start?: string | null;
-  keurmerk_einde?: string | null;
-};
+  const [data, setData] = useState<any>(null);
+  const [aanmelding, setAanmelding] = useState<any>(null);
+  const [fighterRuleMeldingen, setFighterRuleMeldingen] = useState<any[]>([]);
+  const [eventDate, setEventDate] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [reviewBusyId, setReviewBusyId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    naam: "",
+    sportschool: "",
+    discipline: "",
+    klasse: "",
+    geslacht: "",
+    gewicht: "",
+    va_nummer: "",
+    email: "",
+    telefoon: "",
+  });
 
+  async function load() {
+    if (!fighterId) {
+      setError("Vechter ontbreekt.");
+      return;
+    }
 
-type FighterRuleResultRow = {
-  id?: string | number;
-  controle_run_id?: string | null;
-  inschrijving_id?: string | number | null;
-  fighter_id?: string | null;
-  va_nummer?: string | null;
-  rule?: string | null;
-  rule_code?: string | null;
-  resultaat?: string | null;
-  severity?: string | null;
-  boodschap?: string | null;
-  review_status?: string | null;
-};
+    setError("");
+    const resolvedVa = fighterId.replace(/\D/g, "");
+    if (!resolvedVa) {
+      setError("Geen geldig VA-nummer gevonden.");
+      return;
+    }
 
-type MatchmakingHeader = {
-  id?: string | null;
-  naam?: string | null;
-  datum?: string | null;
-  locatie?: string | null;
-  bondteam?: string | null;
-};
+    const response = await authedFetch(
+      `/api/admin/fightpassport-beheer/fighters/${resolvedVa}`,
+      { cache: "no-store" },
+    );
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setError(json.error || "Dossier laden mislukt");
+      return;
+    }
+    setData(json);
 
-type CorrectFighterForm = {
-  va_nummer: string;
-  naam: string;
-  gym: string;
-  discipline: string;
-  klasse: string;
-  geslacht: string;
-  geboortedatum: string;
-  gewicht: string;
-  email: string;
-  telefoon: string;
-  win: string;
-  loss: string;
-  draw: string;
-};
+    if (!matchmakingId) {
+      setAanmelding(null);
+      setFighterRuleMeldingen([]);
+      return;
+    }
 
+    const [{ data: matchRows }, { data: aanRows }, { data: ruleRows, error: ruleError }] =
+      await Promise.all([
+        supabase.from("matchmakings").select("datum").eq("id", matchmakingId).limit(1),
+        supabase
+          .from("aanmeldingen")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("va_nummer", resolvedVa)
+          .limit(1),
+        supabase
+          .from("matchmaker_fighter_resultaten")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("va_nummer", resolvedVa)
+          .order("created_at", { ascending: false }),
+      ]);
 
-function normalizeVa(v: unknown) {
-  return String(v ?? "").replace(/[^0-9]/g, "");
-}
+    setEventDate(matchRows?.[0]?.datum ?? null);
+    const currentAanmelding = aanRows?.[0] ?? null;
+    setAanmelding(currentAanmelding);
+    setEditForm({
+      naam: String(currentAanmelding?.naam ?? currentAanmelding?.fighter_naam ?? ""),
+      sportschool: String(currentAanmelding?.sportschool ?? currentAanmelding?.gym ?? ""),
+      discipline: String(currentAanmelding?.discipline ?? currentAanmelding?.sport ?? ""),
+      klasse: String(currentAanmelding?.klasse ?? currentAanmelding?.klasse_mm ?? ""),
+      geslacht: String(currentAanmelding?.geslacht ?? currentAanmelding?.gender ?? ""),
+      gewicht: String(currentAanmelding?.gewicht ?? currentAanmelding?.gewicht_kg ?? ""),
+      va_nummer: String(currentAanmelding?.va_nummer ?? currentAanmelding?.va ?? ""),
+      email: String(currentAanmelding?.email ?? currentAanmelding?.trainer_email ?? ""),
+      telefoon: String(currentAanmelding?.telefoon ?? currentAanmelding?.phone ?? ""),
+    });
 
-function isNumericId(v: unknown) {
-  return /^\d+$/.test(String(v ?? "").trim());
-}
-
-function isUuid(v: unknown) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v ?? "").trim());
-}
-
-function firstFilled(...vals: unknown[]) {
-  for (const val of vals) {
-    const out = String(val ?? "").trim();
-    if (out) return out;
+    if (ruleError) {
+      console.warn("[fighter-dossier] fighter rules laden mislukt:", ruleError.message);
+      setFighterRuleMeldingen([]);
+    } else {
+      setFighterRuleMeldingen(
+        (ruleRows ?? []).map((row: any) => ({
+          ...row,
+          soort: row?.rule ?? row?.rule_code ?? "Matchmakerregel",
+          type: row?.regel_type ?? "matchmaker_fighter",
+          melding: row?.boodschap ?? row?.melding ?? row?.omschrijving,
+          status: row?.resultaat ?? row?.status ?? "-",
+          evenement: row?.evenement ?? row?.event_naam ?? null,
+          bron_melding: "fighter_rules",
+        })),
+      );
+    }
   }
-  return "";
-}
 
-function toNum(v: unknown): number | null {
-  if (v === null || v === undefined || v === "") return null;
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  const n = Number(String(v).replace(",", ".").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(n) ? n : null;
-}
+  useEffect(() => {
+    void load();
+  }, [fighterId, matchmakingId]);
 
-function fullName(row?: any | null) {
-  return firstFilled(
-    row?.naam,
-    row?.fp_naam,
-    row?.naam_input,
-    [row?.voornaam, row?.achternaam].map((x) => String(x ?? "").trim()).filter(Boolean).join(" "),
+  async function refreshScoped() {
+    if (!aanmelding?.id || !matchmakingId) {
+      setNotice("Geen aanmelding gevonden om te vernieuwen.");
+      return;
+    }
+
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await authedFetch("/api/matchmaker/fighter-context/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          aanmelding_id: aanmelding.id,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Vernieuwen mislukt.");
+      await load();
+      setNotice("Deze vechter en de bijbehorende regels zijn opnieuw opgebouwd.");
+    } catch (e: any) {
+      setNotice(e?.message || "Vernieuwen mislukt.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveCorrection() {
+    if (!aanmelding?.id || !matchmakingId) return;
+
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await authedFetch("/api/matchmaker/aanmeldingen", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          aanmelding_id: aanmelding.id,
+          naam: editForm.naam,
+          sportschool: editForm.sportschool,
+          gym: editForm.sportschool,
+          discipline: editForm.discipline,
+          klasse: editForm.klasse,
+          geslacht: editForm.geslacht,
+          gewicht: editForm.gewicht,
+          va_nummer: editForm.va_nummer,
+          email: editForm.email,
+          telefoon: editForm.telefoon,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Correctie opslaan mislukt.");
+      setEditOpen(false);
+      await load();
+      setNotice("De opgave is gecorrigeerd en alleen deze vechter is opnieuw opgebouwd.");
+    } catch (e: any) {
+      setNotice(e?.message || "Correctie opslaan mislukt.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+
+  async function reviewRule(row: any, action: "approve" | "reject" | "dismiss") {
+    const id = String(row?.id ?? "").trim();
+    if (!id) {
+      setNotice("Deze melding heeft geen geldig ID.");
+      return;
+    }
+
+    setReviewBusyId(id);
+    setNotice("");
+    try {
+      const response = await authedFetch("/api/matchmaker/fighter-review", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          matchmaking_id: matchmakingId,
+          action,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Melding beoordelen mislukt.");
+
+      await load();
+      setNotice(
+        action === "approve"
+          ? "Melding goedgekeurd."
+          : action === "reject"
+            ? "Melding afgewezen."
+            : "Melding gesloten.",
+      );
+    } catch (e: any) {
+      setNotice(e?.message || "Melding beoordelen mislukt.");
+    } finally {
+      setReviewBusyId(null);
+    }
+  }
+
+  if (error) {
+    return (
+      <main style={s.page}>
+        <button style={s.silver} onClick={() => router.back()}>Terug</button>
+        <p>{error}</p>
+      </main>
+    );
+  }
+  if (!data) return <main style={s.page}>Dossier laden...</main>;
+
+  const f = data.fighter;
+  const resultRows = Array.isArray(data.results) ? data.results : [];
+  const meldingen = [
+    ...fighterRuleMeldingen,
+    ...(Array.isArray(data.meldingen) ? data.meldingen : []),
+    ...(Array.isArray(data.overtredingen) ? data.overtredingen : []),
+    ...(Array.isArray(data.incidents) ? data.incidents : []),
+    ...(Array.isArray(data.warnings) ? data.warnings : []),
+  ].filter((row: any, index: number, list: any[]) => {
+    const key = String(
+      row?.id ?? `${row?.datum ?? ""}|${row?.type ?? row?.soort ?? ""}|${row?.melding ?? row?.reden ?? row?.omschrijving ?? ""}`,
+    );
+    return list.findIndex((candidate: any) => String(
+      candidate?.id ?? `${candidate?.datum ?? ""}|${candidate?.type ?? candidate?.soort ?? ""}|${candidate?.melding ?? candidate?.reden ?? candidate?.omschrijving ?? ""}`,
+    ) === key) === index;
+  });
+
+  const bron = String(aanmelding?.bron ?? aanmelding?.source_type ?? aanmelding?.source ?? "").toLowerCase();
+  const isExcel = bron.includes("excel") || bron.includes("upload") || !!aanmelding?.upload_id || !!aanmelding?.upload_batch_id;
+  const currentClass = normalizeAdultClass(
+    f.berekende_klasse ?? f.klasse_advies ?? f.nulmeting_klasse,
+  );
+  const record = calculateCurrentClassRecord(resultRows, currentClass);
+  const extraResults = calculateExtraResultCounts(resultRows);
+
+  return (
+    <main style={s.page}>
+      <div style={s.wrap}>
+        <header style={s.hero}>
+          <div style={s.heroGlow} />
+          <div style={s.heroTop}>
+            <button style={s.silver} onClick={() => router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`)}>
+              <ArrowLeft size={16} /> Terug
+            </button>
+            <div style={s.logoWrap}>
+              <img src="/branding/fightsupport/excel-logo.png" alt="FightSupport" style={s.logo} />
+            </div>
+            <div style={s.heroActions}>
+              <button style={s.silver} disabled={busy || !aanmelding?.id} onClick={refreshScoped}>
+                <RefreshCw size={16} /> {busy ? "Bezig..." : "Vernieuwen"}
+              </button>
+            </div>
+          </div>
+          <div style={s.heroBottom}>
+            <div style={s.heroIdentity}>
+              <div style={s.eyebrow}>VECHTERDOSSIER</div>
+              <h1 style={s.title}>{f.naam || "Onbekende vechter"}</h1>
+              <div style={s.identityStrip}>
+                <span style={s.identityChip}><b>VA</b> {f.va_nummer}</span>
+                <span style={s.identityChip}>{f.primary_discipline || f.nulmeting_discipline || "Discipline onbekend"}</span>
+                <span style={s.identityChip}>{f.mma_level || f.berekende_klasse || f.nulmeting_klasse || "Klasse onbekend"}</span>
+                <span style={s.identityChip}>DB bijgewerkt {fmt(f.updated_at ?? f.last_scraped_at)}</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {notice && <div style={s.feedback}>{notice}</div>}
+
+        <div style={s.summary}>
+          <Card title="Licentie" value={f.licentie_actief ? "Geldig" : "Geen geldige licentie"} />
+          <Card title="Status" value={f.heeft_startverbod ? "STARTVERBOD" : "Fit to fight"} danger={f.heeft_startverbod} />
+          <Card
+            title="Wedstrijden"
+            value={`${f.totaal_wedstrijden ?? data.results.length} totaal · ${f.gewonnen ?? "?"} gewonnen${extraResults.demo ? ` · ${extraResults.demo} demo` : ""}${extraResults.noContest ? ` · ${extraResults.noContest} no contest` : ""}`}
+          />
+        </div>
+
+        <Section title="Profiel & contact">
+          <Grid rows={[["Naam", f.naam], ["E-mail", f.email], ["Geboortedatum", fmtDateOnly(f.geboortedatum)], ["Geslacht", f.geslacht]]} />
+        </Section>
+
+        <Section title="Nulmeting & klasse">
+          <Grid rows={[
+            ["Discipline", f.nulmeting_discipline], ["Nulmeting klasse", f.nulmeting_klasse],
+            ["Berekende klasse", f.berekende_klasse], ["MMA niveau", f.mma_level],
+            ["Leeftijd", calcAge(f.geboortedatum, eventDate)], ["Gewicht", f.nulmeting_gewicht],
+            ["Aantal wedstrijden", f.nulmeting_totaal], ["Winst / verlies / onbeslist huidige klasse", `${record.w} / ${record.v} / ${record.o}`],
+            ["Opmerking", f.nulmeting_opmerking, "full"],
+          ]} />
+        </Section>
+
+        <Section title="Opgave voor deze matchmaking">
+          <div style={s.notice}>
+            <div><b>{isExcel ? "Excel-opgave" : "Aanmelding uit database"}</b></div>
+            <div style={s.noticeText}>
+              Een correctie wordt alleen in de aanmelding opgeslagen. De centrale FightPassport-vechter blijft ongewijzigd.
+            </div>
+            {aanmelding && (
+              <button style={s.silver} disabled={busy} onClick={() => setEditOpen(true)}>
+                <Pencil size={15} /> Opgave corrigeren
+              </button>
+            )}
+          </div>
+          <Grid rows={[
+            ["Naam opgegeven", aanmelding?.naam ?? aanmelding?.fighter_naam],
+            ["Sportschool opgegeven", aanmelding?.sportschool ?? aanmelding?.gym ?? aanmelding?.sportschool_naam],
+            ["Discipline opgegeven", aanmelding?.discipline ?? aanmelding?.sport],
+            ["Klasse opgegeven", aanmelding?.klasse ?? aanmelding?.klasse_mm],
+            ["Geslacht opgegeven", aanmelding?.geslacht ?? aanmelding?.gender],
+            ["Gewicht opgegeven", aanmelding?.gewicht ?? aanmelding?.gewicht_kg],
+            ["VA-nummer", aanmelding?.va_nummer ?? aanmelding?.va],
+            ["Bron", isExcel ? "Excel-upload" : "Database"],
+          ]} />
+        </Section>
+
+        <Section title={`Sportscholen (${(data.sportscholen || data.gyms || []).length})`}>
+          <Table headers={["Sportschool", "Plaats", "Land", "Sportschool ID", "Laatste synchronisatie"]} rows={(data.sportscholen || data.gyms || []).map((row: any) => [row.naam || row.organisatie_naam, row.plaats, row.land, row.sportschool_id || row.organisatie_id || "-", fmt(row.last_team_sync_at || row.last_seen_at)])} />
+        </Section>
+        <Section title={`Wedstrijdhistorie (${data.results.length})`}>
+          <Table headers={["Datum", "Evenement", "Discipline", "Klasse", "Tegenstander", "Sportschool", "Uitslag"]} rows={data.results.map((row: any) => [row.datum, row.evenement, row.discipline, row.klasse, row.tegenstander, row.sportschool, row.uitslag])} />
+        </Section>
+        <Section title={`Meldingen (${meldingen.length})`}>
+          <ReviewTable
+            rows={meldingen}
+            busyId={reviewBusyId}
+            onReview={reviewRule}
+          />
+        </Section>
+        {Array.isArray(data.startbans) && data.startbans.length > 0 && (
+          <Section title={`Startverboden (${data.startbans.length})`}>
+            <Table headers={["Soort", "Ingang", "Einde", "Actief", "Reden", "Evenement"]} rows={data.startbans.map((row: any) => [row.soort, row.ingang, row.einde, row.actief ? "Ja" : "Nee", row.reden, row.evenement])} />
+          </Section>
+        )}
+      </div>
+
+      {editOpen && (
+        <div style={s.modalBackdrop} onMouseDown={() => !busy && setEditOpen(false)}>
+          <div style={s.modal} onMouseDown={(event) => event.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div>
+                <div style={s.eyebrow}>AANMELDING</div>
+                <h2 style={s.modalTitle}>Opgave corrigeren</h2>
+              </div>
+              <button style={s.iconButton} disabled={busy} onClick={() => setEditOpen(false)}><X size={18} /></button>
+            </div>
+            <div style={s.formGrid}>
+              <label style={s.label}>Naam
+                <input style={s.input} value={editForm.naam} onChange={(event) => setEditForm((current) => ({ ...current, naam: event.target.value }))} />
+              </label>
+              <label style={s.label}>VA-nummer
+                <input style={s.input} inputMode="numeric" value={editForm.va_nummer} onChange={(event) => setEditForm((current) => ({ ...current, va_nummer: event.target.value }))} />
+              </label>
+              <label style={s.label}>Sportschool
+                <input style={s.input} value={editForm.sportschool} onChange={(event) => setEditForm((current) => ({ ...current, sportschool: event.target.value }))} />
+              </label>
+              <label style={s.label}>Gewicht
+                <input style={s.input} inputMode="decimal" value={editForm.gewicht} onChange={(event) => setEditForm((current) => ({ ...current, gewicht: event.target.value }))} />
+              </label>
+              <label style={s.label}>Discipline
+                <input style={s.input} value={editForm.discipline} onChange={(event) => setEditForm((current) => ({ ...current, discipline: event.target.value }))} />
+              </label>
+              <label style={s.label}>Klasse
+                <input style={s.input} value={editForm.klasse} onChange={(event) => setEditForm((current) => ({ ...current, klasse: event.target.value }))} />
+              </label>
+              <label style={s.label}>Geslacht
+                <input style={s.input} value={editForm.geslacht} onChange={(event) => setEditForm((current) => ({ ...current, geslacht: event.target.value }))} />
+              </label>
+              <label style={s.label}>E-mail
+                <input style={s.input} value={editForm.email} onChange={(event) => setEditForm((current) => ({ ...current, email: event.target.value }))} />
+              </label>
+              <label style={{ ...s.label, gridColumn: "1 / -1" }}>Telefoon
+                <input style={s.input} value={editForm.telefoon} onChange={(event) => setEditForm((current) => ({ ...current, telefoon: event.target.value }))} />
+              </label>
+            </div>
+            <div style={s.modalActions}>
+              <button style={s.darkButton} disabled={busy} onClick={() => setEditOpen(false)}>Annuleren</button>
+              <button style={s.silver} disabled={busy} onClick={saveCorrection}><Save size={16} /> {busy ? "Opslaan..." : "Opslaan"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
 
-function mapResultLevel(severity?: string | null, resultaat?: string | null) {
-  const sev = String(severity ?? "").trim().toLowerCase();
-  const res = String(resultaat ?? "").trim().toLowerCase();
-  if (sev === "error" || res.includes("verbod") || res.includes("afkeur")) return "error";
-  if (sev === "warning" || res.includes("dispensatie") || res.includes("actie") || res.includes("let")) return "warn";
-  if (sev === "info" || res.includes("info")) return "info";
-  return "ok";
+function Card({ title, value, danger }: any) { return <div style={s.card}><div style={s.cardTitle}>{title}</div><div style={{ fontSize: 18, fontWeight: 900, color: danger ? "#ff654d" : "#eee" }}>{value}</div></div>; }
+function Section({ title, children }: any) { return <section style={s.section}><h2 style={{ margin: "0 0 14px", color: "#ff7440" }}>{title}</h2>{children}</section>; }
+function Grid({ rows }: any) { return <div style={s.grid}>{rows.map((row: any, index: number) => <div key={index} style={{ ...s.field, ...(row[2] === "wide" ? s.fieldWide : {}), ...(row[2] === "full" ? s.fieldFull : {}) }}><span style={s.muted}>{row[0]}</span><b style={{ wordBreak: "break-word", lineHeight: 1.35 }}>{row[1] ?? "-"}</b></div>)}</div>; }
+function Table({ headers, rows }: any) { return <div style={{ overflowX: "auto", border: "1px solid #444b52" }}><table style={s.table}><thead><tr>{headers.map((header: any) => <th key={header} style={s.th}>{header}</th>)}</tr></thead><tbody>{rows.map((row: any, index: number) => { const light = index % 2 === 1; return <tr key={index}>{row.map((value: any, cellIndex: number) => <td key={cellIndex} style={{ ...s.td, ...(light ? s.tdLight : s.tdDark) }}>{value ?? "-"}</td>)}</tr>; })}{!rows.length && <tr><td style={{ ...s.td, ...s.tdDark }} colSpan={headers.length}>Geen gegevens.</td></tr>}</tbody></table></div>; }
+
+function ReviewTable({ rows, busyId, onReview }: any) {
+  const headers = ["Datum", "Soort", "Melding", "Status", "Evenement", "Beoordeling"];
+  return (
+    <div style={{ overflowX: "auto", border: "1px solid #444b52" }}>
+      <table style={s.table}>
+        <thead><tr>{headers.map((header) => <th key={header} style={s.th}>{header}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((row: any, index: number) => {
+            const light = index % 2 === 1;
+            const isRule = row?.bron_melding === "fighter_rules" && !!row?.id;
+            const reviewed = !!row?.review_status;
+            const status = row?.review_status
+              ? `${row.review_status} (${row.resultaat ?? row.status ?? "-"})`
+              : row?.resultaat ?? row?.status ?? (row?.actief === true ? "Actief" : row?.actief === false ? "Afgesloten" : "-");
+            const id = String(row?.id ?? index);
+            return (
+              <tr key={id}>
+                <td style={{ ...s.td, ...(light ? s.tdLight : s.tdDark) }}>{fmt(row?.datum ?? row?.created_at ?? row?.meldingsdatum)}</td>
+                <td style={{ ...s.td, ...(light ? s.tdLight : s.tdDark) }}>{row?.soort ?? row?.type ?? row?.categorie ?? "Melding"}</td>
+                <td style={{ ...s.td, ...(light ? s.tdLight : s.tdDark) }}>{row?.melding ?? row?.omschrijving ?? row?.reden ?? row?.notitie ?? row?.description ?? "-"}</td>
+                <td style={{ ...s.td, ...(light ? s.tdLight : s.tdDark) }}>{status}</td>
+                <td style={{ ...s.td, ...(light ? s.tdLight : s.tdDark) }}>{row?.evenement ?? row?.event_naam ?? row?.event ?? "-"}</td>
+                <td style={{ ...s.td, ...(light ? s.tdLight : s.tdDark), minWidth: 260 }}>
+                  {isRule && !reviewed ? (
+                    <div style={s.reviewActions}>
+                      <button style={s.approveButton} disabled={busyId === id} onClick={() => onReview(row, "approve")}><Check size={14} /> Goedkeuren</button>
+                      <button style={s.rejectButton} disabled={busyId === id} onClick={() => onReview(row, "reject")}><XCircle size={14} /> Afwijzen</button>
+                      <button style={s.closeButton} disabled={busyId === id} onClick={() => onReview(row, "dismiss")}><X size={14} /> Wegklikken</button>
+                    </div>
+                  ) : reviewed ? (
+                    <span>{row.reviewed_at ? `Beoordeeld ${fmt(row.reviewed_at)}` : "Beoordeeld"}</span>
+                  ) : "-"}
+                </td>
+              </tr>
+            );
+          })}
+          {!rows.length && <tr><td style={{ ...s.td, ...s.tdDark }} colSpan={headers.length}>Geen gegevens.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
-function dedupeRules(rows: FighterRuleResultRow[]) {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = [row.rule, row.rule_code, row.resultaat, row.boodschap].map((x) => String(x ?? "").trim().toLowerCase()).join("|");
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-
-function calcAgeAtDate(birth?: string | null, at?: string | null) {
-  if (!birth || !at) return null;
-  const b = new Date(birth);
-  const e = new Date(at);
-  if (Number.isNaN(b.getTime()) || Number.isNaN(e.getTime())) return null;
-  let years = e.getFullYear() - b.getFullYear();
-  const beforeBirthday = e.getMonth() < b.getMonth() || (e.getMonth() === b.getMonth() && e.getDate() < b.getDate());
-  if (beforeBirthday) years -= 1;
-  return years;
-}
-
-function extractKeurmerkDate(reason?: string | null) {
-  const raw = String(reason ?? "").trim();
-  const iso = raw.match(/(\d{4}-\d{2}-\d{2})/)?.[1];
-  if (iso && !Number.isNaN(new Date(iso).getTime())) return iso;
-  const nl = raw.match(/(\d{2})-(\d{2})-(\d{4})/);
-  if (nl) return `${nl[3]}-${nl[2]}-${nl[1]}`;
-  return null;
-}
-
-function getResultKind(v?: string | null): "win" | "loss" | "draw" | "other" {
-  const x = String(v ?? "").trim().toLowerCase();
-
-  // Eerst onbeslist tellen. Daarmee komt een uitslag zoals "onbeslist / draw"
-  // nooit per ongeluk als winst of verlies in het record terecht.
-  if (x.includes("onbeslist") || x.includes("draw") || x.includes("gelijk")) return "draw";
-  if (x.includes("verlies") || x.includes("verliest") || x.includes("verloren") || x.includes("loss") || x === "l") return "loss";
-  if (x.includes("winst") || x.includes("wint") || x.includes("gewonnen") || x === "win" || x === "w") return "win";
-
-  // Demo, no contest en andere niet-record uitslagen horen wel mee te tellen
-  // als partij, maar niet als W/V/O in het huidige klasse-record.
-  return "other";
-}
-
-function normalizeClassToken(v?: string | null) {
-  const x = String(v ?? "").trim().toLowerCase();
-  if (!x) return "";
-
-  // FightSupport klassevolgorde: J -> R -> N -> C -> B -> A.
-  // Let op: discipline staat soms onder klasse in dezelfde cel, dus alleen de echte klasse-token pakken.
-  if (x.includes("jeugd") || x.includes("youth") || /^j(|\s|\/|-)/i.test(x) || x === "j") return "j";
-  if (x.includes("recreant") || /^r(|\s|\/|-)/i.test(x) || x === "r") return "r";
-  if (x.includes("nieuweling") || /^n(|\s|\/|-)/i.test(x) || x === "n") return "n";
-  if (x.includes("c-klasse") || x.includes("c klasse") || /^c(|\s|\/|-)/i.test(x) || x === "c") return "c";
-  if (x.includes("b-klasse") || x.includes("b klasse") || /^b(|\s|\/|-)/i.test(x) || x === "b") return "b";
-  if (x.includes("a-klasse") || x.includes("a klasse") || x.includes("elite") || /^a(|\s|\/|-)/i.test(x) || x === "a") return "a";
-
-  return x.replace(/[^a-z0-9+]/g, "");
-}
-
-
-function isYouthResultClass(v?: string | null) {
-  const x = String(v ?? "")
+function normalizeAdultClass(value: any): "R" | "N" | "C" | "B" | "A" | null {
+  const raw = String(value ?? "")
     .toUpperCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -198,987 +462,114 @@ function isYouthResultClass(v?: string | null) {
     .replace(/\s+/g, " ")
     .trim();
 
-  return (
-    x === "J" ||
-    x === "J+" ||
-    x.startsWith("J ") ||
-    x.startsWith("J-") ||
-    x.includes("JEUGD") ||
-    x.includes("YOUTH") ||
-    x.includes("JUNIOR") ||
-    x.includes("JUNIOREN")
-  );
+  if (!raw || raw.includes("MMA")) return null;
+  if (raw.includes("VETERAAN") || raw.includes("VETERAN") || raw.includes("NIEUWELING") || raw.includes("NEWCOMER")) return "N";
+  if (raw.includes("JEUGD") || raw.includes("YOUTH") || raw === "J" || raw === "J+") return null;
+  const match = raw.match(/\b(R|N|C|B|A)\b/);
+  return match ? match[1] as "R" | "N" | "C" | "B" | "A" : null;
 }
 
-function classRank(token?: string | null) {
-  const t = normalizeClassToken(token);
-  const order: Record<string, number> = { j: 1, r: 2, n: 3, c: 4, b: 5, a: 6 };
-  return order[t] ?? 0;
+function isRelevantStandingDiscipline(value: any): boolean {
+  const discipline = String(value ?? "").toLowerCase();
+  return discipline.includes("kick") || discipline.includes("k1") || discipline.includes("muay") || discipline.includes("thai");
 }
 
-function highestRecordClass(rows: Uitslag[]) {
-  let best = "";
-  let bestRank = 0;
-
-  for (const row of rows) {
-    // Zelfde principe als rulesEngine/fighterRules:
-    // jeugdpartijen bepalen nooit de volwassen hoogste klasse.
-    if (isYouthResultClass(row.klasse)) continue;
-
-    const token = normalizeClassToken(row.klasse);
-    const rank = classRank(token);
-    if (rank > bestRank) {
-      best = token;
-      bestRank = rank;
-    }
-  }
-
-  return best;
+function isYouthClass(value: any): boolean {
+  const klasse = String(value ?? "").toUpperCase();
+  return klasse.includes("JEUGD") || klasse.includes("YOUTH") || klasse.trim() === "J" || klasse.trim() === "J+";
 }
 
-function displayClassToken(v?: string | null) {
-  const token = normalizeClassToken(v);
-  const labels: Record<string, string> = {
-    j: "J",
-    r: "R",
-    n: "N",
-    c: "C",
-    b: "B",
-    a: "A",
-  };
-
-  return labels[token] ?? safe(v);
+function resultType(value: any): "WIN" | "LOSS" | "DRAW" | "DEMO" | "NO_CONTEST" | "OTHER" {
+  const result = String(value ?? "").trim().toLowerCase();
+  if (result.includes("no contest") || result.includes("nocontest") || result.includes("no-contest")) return "NO_CONTEST";
+  if (result.includes("demo") || result.includes("demonstr")) return "DEMO";
+  if (/onbeslist|gelijk|draw/.test(result)) return "DRAW";
+  if (/verliest|verlies|verloren|lost|loss/.test(result)) return "LOSS";
+  if (/wint|winst|gewonnen|win/.test(result)) return "WIN";
+  return "OTHER";
 }
 
-function sameRecordClass(resultClass?: string | null, currentClass?: string | null) {
-  const resultToken = normalizeClassToken(resultClass);
-  const currentToken = normalizeClassToken(currentClass);
-  if (!resultToken || !currentToken) return true;
-  return resultToken === currentToken;
+function calculateCurrentClassRecord(rows: any[], currentClass: "R" | "N" | "C" | "B" | "A" | null) {
+  return (rows ?? []).reduce((acc, row) => {
+    if (!isRelevantStandingDiscipline(row?.discipline)) return acc;
+    if (isYouthClass(row?.klasse)) return acc;
+    const rowClass = normalizeAdultClass(row?.klasse);
+    if (!currentClass || rowClass !== currentClass) return acc;
+
+    const result = resultType(row?.uitslag);
+    if (result === "WIN") acc.w += 1;
+    else if (result === "LOSS") acc.v += 1;
+    else if (result === "DRAW") acc.o += 1;
+    return acc;
+  }, { w: 0, v: 0, o: 0 });
 }
 
-function resultLabel(v?: string | null) {
-  const kind = getResultKind(v);
-  if (kind === "win") return "Winst";
-  if (kind === "loss") return "Verlies";
-  if (kind === "draw") return "Onbeslist";
-  const x = String(v ?? "").trim().toLowerCase();
-  if (x.includes("demo")) return "Demo";
-  if (x.includes("no contest") || x.includes("nocontest") || x === "nc") return "No contest";
-  return safe(v);
+function calculateExtraResultCounts(rows: any[]) {
+  return (rows ?? []).reduce((acc, row) => {
+    const result = resultType(row?.uitslag);
+    if (result === "DEMO") acc.demo += 1;
+    if (result === "NO_CONTEST") acc.noContest += 1;
+    return acc;
+  }, { demo: 0, noContest: 0 });
 }
 
-function extractKeurmerkName(reason?: string | null, fallback = "-") {
-  const match = String(reason ?? "").match(/gematcht met\s+\"([^\"]+)\"/i);
-  return match?.[1] || fallback;
+function fmtDateOnly(value: any) {
+  if (!value) return "-";
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleDateString("nl-NL");
 }
 
-const SCRAPE_START_ENDPOINT = (matchmakingId: string) => `/api/matchmaker/${matchmakingId}/fighters/herscrape`;
-const CORRECT_FIGHTER_ENDPOINT = "/api/matchmaker/correct-fighter";
-
-function safe(v: any, fallback = "-") {
-  const s = String(v ?? "").trim();
-  return s || fallback;
-}
-
-function parseRaw(raw: any) {
-  if (!raw) return {} as any;
-  if (typeof raw === "object") return raw;
-  try {
-    return JSON.parse(String(raw));
-  } catch {
-    return {} as any;
-  }
-}
-
-function formatDate(v: any) {
-  const s = String(v ?? "").trim();
-  if (!s) return "-";
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleDateString("nl-NL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
-function yes(
-  value: any,
-  positiveWords = ["ja", "yes", "true", "ok", "geldig", "actief"],
-) {
-  const s = String(value ?? "")
-    .trim()
-    .toLowerCase();
-  return value === true || positiveWords.some((w) => s === w || s.includes(w));
-}
-
-function daysUntil(v: unknown) {
-  const s = String(v ?? "").trim();
-  if (!s) return null;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return null;
-  const now = new Date();
-  d.setHours(23, 59, 59, 999);
-  return Math.ceil((d.getTime() - now.getTime()) / 86400000);
-}
-
-function fighterName(fighter: any) {
-  return safe(fighter?.fp_naam ?? fighter?.naam, "Onbekende vechter");
-}
-
-function licenseValue(fighter: any) {
-  const raw = parseRaw(fighter?.raw);
-  return (
-    fighter?.licentie ??
-    fighter?.licentie_status ??
-    fighter?.heeft_licentie ??
-    raw?.details?.licentie ??
-    null
-  );
-}
-
-function hasStartverbod(fighter: any) {
-  const raw = parseRaw(fighter?.raw);
-  return (
-    yes(fighter?.heeft_startverbod, ["ja", "yes", "true"]) ||
-    yes(fighter?.startverbod, ["ja", "yes", "true"]) ||
-    yes(raw?.details?.heeft_startverbod, ["ja", "yes", "true"])
-  );
-}
-
-export default function FighterDetailPage() {
-  const params = useParams<{ matchmakingId: string; fighterId: string }>();
-  const router = useRouter();
-
-  const matchmakingId = String(params?.matchmakingId ?? "").trim();
-  const fighterId = String(params?.fighterId ?? "").trim();
-
-  const [fighter, setFighter] = useState<any>(null);
-  const [sportschool, setSportschool] = useState<Sportschool | null>(null);
-  const [matchmaking, setMatchmaking] = useState<MatchmakingHeader | null>(null);
-  const [uitslagen, setUitslagen] = useState<Uitslag[]>([]);
-  const [meldingen, setMeldingen] = useState<FighterRuleResultRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [checking, setChecking] = useState(false);
-  const [savingCorrectie, setSavingCorrectie] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [correctForm, setCorrectForm] = useState<CorrectFighterForm>({
-    va_nummer: "",
-    naam: "",
-    gym: "",
-    discipline: "",
-    klasse: "",
-    geslacht: "",
-    geboortedatum: "",
-    gewicht: "",
-    email: "",
-    telefoon: "",
-    win: "",
-    loss: "",
-    draw: "",
-  });
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (matchmakingId && fighterId) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchmakingId, fighterId]);
-
-  async function load() {
-    try {
-      setLoading(true);
-      setError("");
-
-      const needleVa = normalizeVa(fighterId);
-      const numeric = isNumericId(fighterId);
-
-      const { data: matchRows, error: matchErr } = await supabase
-        .from("matchmakings")
-        .select("id,naam,datum,locatie,bondteam")
-        .eq("id", matchmakingId)
-        .limit(1);
-
-      if (matchErr) throw matchErr;
-      const mm = (matchRows ?? [])[0] ?? null;
-      setMatchmaking(mm);
-
-      const ctxFilters = [`va_nummer.eq.${needleVa || fighterId}`];
-      if (isUuid(fighterId)) ctxFilters.push(`fighter_id.eq.${fighterId}`);
-      if (numeric) ctxFilters.push(`inschrijving_id.eq.${fighterId}`, `id.eq.${fighterId}`);
-
-      const { data: ctxRows, error: ctxErr } = await supabase
-        .from("matchmaker_fighter_context")
-        .select("*")
-        .eq("matchmaking_id", matchmakingId)
-        .or(ctxFilters.join(","))
-        .order("updated_at", { ascending: false })
-        .limit(1);
-
-      if (ctxErr) throw ctxErr;
-      const ctx = (ctxRows ?? [])[0] ?? null;
-
-      const aanmeldingFilters = [`va_nummer.eq.${needleVa || fighterId}`];
-      if (numeric) aanmeldingFilters.push(`id.eq.${fighterId}`);
-
-      const { data: aanRows, error: aanErr } = await supabase
-        .from("aanmeldingen")
-        .select("*")
-        .eq("matchmaking_id", matchmakingId)
-        .or(aanmeldingFilters.join(","))
-        .order("updated_at", { ascending: false })
-        .limit(1);
-
-      if (aanErr) throw aanErr;
-      const aan = (aanRows ?? [])[0] ?? null;
-
-      let raw: any = null;
-      try {
-        if (needleVa) {
-          const { data } = await supabase
-            .from("matchmaker_fighters_raw")
-            .select("*")
-            .eq("matchmaking_id", matchmakingId)
-            .eq("va_nummer", needleVa)
-            .order("updated_at", { ascending: false })
-            .limit(1);
-          raw = (data ?? [])[0] ?? null;
-        } else if (isUuid(fighterId)) {
-          const { data } = await supabase
-            .from("matchmaker_fighters_raw")
-            .select("*")
-            .eq("matchmaking_id", matchmakingId)
-            .eq("fighter_id", fighterId)
-            .order("updated_at", { ascending: false })
-            .limit(1);
-          raw = (data ?? [])[0] ?? null;
-        }
-      } catch {
-        raw = null;
-      }
-
-      if (!ctx && !aan && !raw) {
-        throw new Error("Geen vechter gevonden in matchmaker_fighter_context, aanmeldingen of matchmaker_fighters_raw.");
-      }
-
-      const extra = parseRaw(ctx?.extra);
-      const extraAanmelding = extra?.raw?.aanmelding ?? extra?.aanmelding ?? {};
-      const sourceAanmelding = aan ?? extraAanmelding ?? {};
-      const rawScraped = raw ?? extra?.raw?.fighters_raw ?? {};
-      const va = normalizeVa(firstFilled(ctx?.va_nummer, rawScraped?.va_nummer, sourceAanmelding?.va_nummer, fighterId));
-      const keurmerkReason = firstFilled(ctx?.keurmerk_reden, ctx?.keurmerk_reason);
-
-      const nextFighter = {
-        id: ctx?.id ?? aan?.id ?? raw?.id ?? fighterId,
-        context_id: ctx?.id ?? null,
-        inschrijving_id: ctx?.inschrijving_id ?? sourceAanmelding?.id ?? aan?.id ?? (numeric ? fighterId : null),
-        fighter_id: firstFilled(ctx?.fighter_id, rawScraped?.fighter_id),
-        controle_run_id: firstFilled(ctx?.controle_run_id, rawScraped?.controle_run_id),
-        naam: firstFilled(ctx?.naam, ctx?.fp_naam, rawScraped?.naam, fullName(sourceAanmelding), fighterId),
-        fp_naam: firstFilled(ctx?.fp_naam, rawScraped?.naam),
-        fp_geboortedatum: firstFilled(ctx?.fp_geboortedatum, ctx?.geboortedatum, rawScraped?.geboortedatum, sourceAanmelding?.geboortedatum, ctx?.geboortedatum_input),
-        geboortedatum: firstFilled(ctx?.geboortedatum, sourceAanmelding?.geboortedatum, ctx?.geboortedatum_input),
-        geslacht: firstFilled(ctx?.geslacht, ctx?.fp_geslacht, rawScraped?.geslacht, sourceAanmelding?.geslacht),
-        gewicht: toNum(ctx?.gewicht ?? sourceAanmelding?.gewicht),
-        discipline: firstFilled(ctx?.discipline, sourceAanmelding?.discipline),
-        // Aanmelding is leidend na handmatige correctie.
-        // Context/FightPassport zijn alleen fallback, anders springt de klasse na opslaan terug naar de oude waarde.
-        klasse: firstFilled(sourceAanmelding?.klasse, ctx?.klasse, ctx?.fp_klasse),
-        gym: firstFilled(ctx?.gym_input, ctx?.fp_gym, sourceAanmelding?.gym, rawScraped?.sportschool),
-        va_nummer: va,
-        licentie: firstFilled(ctx?.licentie, rawScraped?.licentie),
-        heeft_startverbod: firstFilled(ctx?.heeft_startverbod, rawScraped?.heeft_startverbod),
-        gewonnen: toNum(ctx?.gewonnen ?? ctx?.record_w ?? rawScraped?.gewonnen ?? sourceAanmelding?.win) ?? 0,
-        verloren: toNum(ctx?.verloren ?? ctx?.record_l ?? rawScraped?.verloren ?? sourceAanmelding?.loss) ?? 0,
-        onbeslist: toNum(ctx?.draw ?? ctx?.gelijk ?? ctx?.record_d ?? rawScraped?.gelijk ?? sourceAanmelding?.draw) ?? 0,
-        totaal_wedstrijden: toNum(ctx?.totaal_wedstrijden ?? rawScraped?.totaal_wedstrijden ?? ctx?.nulmeting_totaal) ?? 0,
-        nulmeting_klasse: firstFilled(ctx?.nulmeting_klasse, rawScraped?.nulmeting_klasse),
-        nulmeting_totaal: toNum(ctx?.nulmeting_totaal ?? rawScraped?.nulmeting_totaal) ?? 0,
-        nulmeting_opmerking: firstFilled(ctx?.nulmeting_opmerking, rawScraped?.nulmeting_opmerking),
-        heeft_keurmerk: firstFilled(ctx?.heeft_keurmerk, ctx?.keurmerk_status, ctx?.keurmerk_ok),
-        keurmerk_reden: keurmerkReason,
-        scrape_status: firstFilled(ctx?.scrape_status, aan?.status, raw?.status),
-        scraped_at: firstFilled(ctx?.scraped_at, aan?.scraped_at, raw?.updated_at, raw?.created_at),
-        scrape_run_id: firstFilled(ctx?.controle_run_id, rawScraped?.controle_run_id),
-        scrape_error: firstFilled(ctx?.scrape_error, aan?.scrape_error),
-        raw: rawScraped,
-      };
-
-      setFighter(nextFighter);
-      setCorrectForm({
-        va_nummer: safe(nextFighter.va_nummer, ""),
-        naam: safe(nextFighter.naam, ""),
-        gym: safe(nextFighter.gym, ""),
-        discipline: safe(nextFighter.discipline, ""),
-        klasse: safe(sourceAanmelding?.klasse ?? nextFighter.klasse, ""),
-        geslacht: safe(nextFighter.geslacht, ""),
-        geboortedatum: safe(nextFighter.geboortedatum ?? nextFighter.fp_geboortedatum, ""),
-        gewicht: safe(nextFighter.gewicht, ""),
-        email: safe(sourceAanmelding?.email, ""),
-        telefoon: safe(sourceAanmelding?.telefoon, ""),
-        win: safe(sourceAanmelding?.win ?? nextFighter.gewonnen, "0"),
-        loss: safe(sourceAanmelding?.loss ?? nextFighter.verloren, "0"),
-        draw: safe(sourceAanmelding?.draw ?? nextFighter.onbeslist, "0"),
-      });
-      setSportschool({
-        naam: nextFighter.gym,
-        plaats: firstFilled(sourceAanmelding?.plaats, rawScraped?.plaats),
-        keurmerk_einde: extractKeurmerkDate(keurmerkReason),
-      });
-
-      let rules: FighterRuleResultRow[] = [];
-      if (va) {
-        let q = supabase
-          .from("matchmaker_fighter_resultaten")
-          .select("id,controle_run_id,inschrijving_id,fighter_id,va_nummer,rule,rule_code,resultaat,severity,boodschap,review_status")
-          .eq("matchmaking_id", matchmakingId)
-          .eq("va_nummer", va)
-          .order("created_at", { ascending: true });
-        if (nextFighter.controle_run_id) q = q.eq("controle_run_id", nextFighter.controle_run_id);
-        const res = await q;
-        if (res.error) throw res.error;
-        rules = (res.data ?? []) as FighterRuleResultRow[];
-      }
-
-      if (!rules.length && nextFighter.inschrijving_id) {
-        const res = await supabase
-          .from("matchmaker_fighter_resultaten")
-          .select("id,controle_run_id,inschrijving_id,fighter_id,va_nummer,rule,rule_code,resultaat,severity,boodschap,review_status")
-          .eq("matchmaking_id", matchmakingId)
-          .eq("inschrijving_id", String(nextFighter.inschrijving_id))
-          .order("created_at", { ascending: true });
-        if (res.error) throw res.error;
-        rules = (res.data ?? []) as FighterRuleResultRow[];
-      }
-      setMeldingen(dedupeRules(rules));
-
-      if (va) {
-        const res = await supabase
-          .from("matchmaker_uitslagen_raw")
-          .select("id,datum,evenement,tegenstander,uitslag,discipline,klasse,gewicht,sportschool,va_nummer")
-          .eq("matchmaking_id", matchmakingId)
-          .eq("va_nummer", va)
-          .order("datum", { ascending: false });
-        if (res.error) throw res.error;
-        setUitslagen((res.data ?? []) as Uitslag[]);
-      } else {
-        setUitslagen([]);
-      }
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message || "Vechter laden mislukt");
-      setFighter(null);
-      setSportschool(null);
-      setUitslagen([]);
-      setMeldingen([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function runAutocheckFightpaspoort() {
-    if (!fighter?.inschrijving_id && !fighter?.va_nummer) return;
-
-    setChecking(true);
-    try {
-      const payload = {
-        mode: "single_fighter",
-        aanmelding_ids: fighter.inschrijving_id ? [Number(fighter.inschrijving_id)] : [],
-        selected_ids: fighter.inschrijving_id ? [Number(fighter.inschrijving_id)] : [],
-        va_nummers: fighter.va_nummer ? [String(fighter.va_nummer).replace(/\D/g, "")] : [],
-        only_selected: true,
-      };
-
-      const res = await authedFetch(SCRAPE_START_ENDPOINT(matchmakingId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `Controle mislukt (${res.status})`);
-      await load();
-    } catch (err: any) {
-      alert(err?.message || "Controle mislukt.");
-    } finally {
-      setChecking(false);
-    }
-  }
-
-
-  function updateCorrectForm<K extends keyof CorrectFighterForm>(key: K, value: CorrectFighterForm[K]) {
-    setCorrectForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  async function saveCorrectFighter(runAutocheckAfter: boolean) {
-    if (!fighter?.va_nummer && !fighter?.inschrijving_id) {
-      alert("Deze vechter heeft geen VA-nummer of inschrijving-id. Opslaan kan niet.");
-      return;
-    }
-
-    setSavingCorrectie(true);
-    try {
-      const payload = {
-        matchmaking_id: matchmakingId,
-        inschrijving_id: fighter?.inschrijving_id ?? null,
-        old_va_nummer: fighter?.va_nummer ?? fighterId,
-        new_va_nummer: correctForm.va_nummer,
-        naam: correctForm.naam,
-        gym: correctForm.gym,
-        discipline: correctForm.discipline,
-        klasse: correctForm.klasse,
-        geslacht: correctForm.geslacht,
-        geboortedatum: correctForm.geboortedatum,
-        gewicht: correctForm.gewicht,
-        email: correctForm.email,
-        telefoon: correctForm.telefoon,
-        win: correctForm.win,
-        loss: correctForm.loss,
-        draw: correctForm.draw,
-      };
-
-      const res = await authedFetch(CORRECT_FIGHTER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `Opslaan mislukt (${res.status})`);
-
-      await load();
-      setEditOpen(false);
-
-      if (runAutocheckAfter) {
-        await runAutocheckFightpaspoort();
-      } else {
-        alert("Vechtergegevens opgeslagen in aanmeldingen.");
-      }
-    } catch (err: any) {
-      alert(err?.message || "Opslaan mislukt.");
-    } finally {
-      setSavingCorrectie(false);
-    }
-  }
-
-  const raw = useMemo(() => parseRaw(fighter?.raw), [fighter?.raw]);
-  const recordStats = useMemo(() => {
-    if (uitslagen.length) {
-      const hoogsteKlasse = highestRecordClass(uitslagen);
-
-      return uitslagen.reduce(
-        (acc, row) => {
-          const kind = getResultKind(row.uitslag);
-          const rowKlasse = normalizeClassToken(row.klasse);
-
-          // Record is altijd in de hoogste klasse waarin uitslagen staan.
-          // Alle eerdere/lager geplaatste klasses + demo/no contest tellen als overige.
-          if (!hoogsteKlasse || rowKlasse !== hoogsteKlasse || kind === "other") {
-            acc.other += 1;
-            return acc;
-          }
-
-          if (kind === "win") acc.w += 1;
-          else if (kind === "loss") acc.l += 1;
-          else if (kind === "draw") acc.d += 1;
-          else acc.other += 1;
-
-          return acc;
-        },
-        { w: 0, l: 0, d: 0, other: 0 },
-      );
-    }
-
-    const w = Number(fighter?.gewonnen ?? raw?.details?.gewonnen ?? 0) || 0;
-    const l = Number(fighter?.verloren ?? raw?.details?.verloren ?? 0) || 0;
-    const d = Number(fighter?.onbeslist ?? raw?.details?.onbeslist ?? raw?.details?.gelijk ?? 0) || 0;
-    const total = Number(fighter?.totaal_wedstrijden ?? raw?.details?.totaal ?? raw?.details?.totaal_wedstrijden ?? 0) || 0;
-    return { w, l, d, other: Math.max(0, total - w - l - d) };
-  }, [fighter, raw, uitslagen]);
-
-  const record = `${recordStats.w}-${recordStats.l}-${recordStats.d} (${recordStats.other})`;
-  const totaalWedstrijden = uitslagen.length || Number(fighter?.totaal_wedstrijden ?? raw?.details?.totaal ?? recordStats.w + recordStats.l + recordStats.d + recordStats.other) || 0;
-  const hoogsteUitslagenKlasse = highestRecordClass(uitslagen);
-  const klasseVolgensControle = hoogsteUitslagenKlasse
-    ? displayClassToken(hoogsteUitslagenKlasse)
-    : displayClassToken(fighter?.klasse ?? raw?.corrected_values?.klasse ?? raw?.aanmelding?.klasse ?? fighter?.nulmeting_klasse ?? raw?.nulmeting?.klasse);
-  const klasseControleBron = hoogsteUitslagenKlasse
-    ? "uitslagen"
-    : fighter?.klasse || raw?.corrected_values?.klasse || raw?.aanmelding?.klasse
-      ? "aanmelding"
-      : "nulmeting";
-
-  const hasLicense = yes(fighter?.licentie);
-  const startverbod = yes(fighter?.heeft_startverbod, ["ja", "yes", "true"]);
-  const age = calcAgeAtDate(fighter?.fp_geboortedatum ?? fighter?.geboortedatum, matchmaking?.datum);
-
-  return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(96,74,58,0.36),transparent_30rem),radial-gradient(circle_at_bottom,rgba(255,90,31,0.08),transparent_24rem),linear-gradient(180deg,#100e0c,#080808_52%,#030303)] text-white">
-      <div className="mx-auto max-w-7xl px-3 py-2 sm:px-5 lg:px-6">
-        {editOpen && (
-          <CorrectFighterModal
-            form={correctForm}
-            saving={savingCorrectie}
-            onChange={updateCorrectForm}
-            onClose={() => setEditOpen(false)}
-            onSave={() => saveCorrectFighter(false)}
-            onSaveAndAutocheck={() => saveCorrectFighter(true)}
-          />
-        )}
-        <div className="fs-chrome-panel relative mb-3 overflow-hidden rounded-[1.15rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(135deg,#251f1a,#11100f_48%,#050505)] shadow-[0_0_0_1px_#59534d,0_0_0_5px_rgba(255,255,255,0.22),0_16px_34px_rgba(0,0,0,0.86),inset_0_2px_0_rgba(255,255,255,0.78),inset_0_-2px_0_rgba(0,0,0,0.95)] before:absolute before:inset-[7px] before:rounded-[0.82rem] before:border before:border-[#8f8982] before:content-[''] after:absolute after:left-10 after:top-0 after:h-[3px] after:w-48 after:bg-[linear-gradient(90deg,transparent,#fff,transparent)] after:content-['']">
-          <div className="relative min-h-[126px] px-3 py-3">
-            <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden px-[260px]">
-              <img
-                src="/branding/fightsupport/fightsupport1.png"
-                alt="FightSupport"
-                draggable={false}
-                className="h-[86px] w-auto max-w-[920px] object-contain select-none drop-shadow-[0_0_18px_rgba(255,120,40,0.24)]"
-              />
-            </div>
-
-            <div className="relative z-10 flex min-h-[102px] items-center justify-between gap-4">
-              <div className="flex min-w-[260px] items-center gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-black uppercase tracking-[0.26em] text-[#ff8a4c]">
-                    Vechter detail
-                  </div>
-                  <div className="truncate text-sm text-[#d1c3b7]">
-                    {safe(matchmaking?.naam, "Matchmaking")}
-                  </div>
-                </div>
-              </div>
-
-              <div className="hidden min-w-[280px] text-right lg:block">
-                <div className="text-[11px] font-black uppercase tracking-[0.32em] text-[#ff6a2a]">
-                  FightSupport
-                </div>
-                <div className="text-xl font-black tracking-tight text-white sm:text-3xl">
-                  Matchmaker
-                </div>
-                <div className="text-sm text-[#d1c3b7]">
-                  Profiel, licentie, nulmeting, meldingen en uitslagen.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {loading && (
-          <div className="rounded-[2rem] border border-[#8a8178] bg-[#161311] p-10 text-center text-lg font-black text-zinc-200 shadow-xl shadow-black/50">
-            <RefreshCw className="mx-auto mb-3 animate-spin text-[#ff6a2a]" /> Laden...
-          </div>
-        )}
-
-        {!loading && error && (
-          <div className="rounded-[2rem] border border-red-500/60 bg-[#2a1111] p-6 text-red-200 shadow-xl shadow-black/50">
-            <div className="flex items-center gap-3 text-lg font-black">
-              <XCircle /> {error}
-            </div>
-          </div>
-        )}
-
-        {!loading && !error && fighter && (
-          <>
-            <div className="relative mb-3 overflow-hidden rounded-[1.05rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(180deg,#1b1714,#0b0a09)] shadow-[0_0_0_1px_#524c46,0_0_0_7px_rgba(255,255,255,0.28),0_14px_30px_rgba(0,0,0,0.82),inset_0_2px_0_rgba(255,255,255,0.58)] before:absolute before:inset-[7px] before:rounded-[0.75rem] before:border before:border-[#89847e] before:content-['']">
-              <div className="relative border-b border-[#b8afa6]/45 bg-[linear-gradient(90deg,#11100f,#211914,#3a1609)] px-4 py-2.5">
-                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-                  <div className="flex flex-1 flex-col items-center justify-center text-center">
-                    <div className="text-sm font-black uppercase tracking-[0.24em] text-[#d0c4b8]">
-                      {safe(sportschool?.naam, "Sportschool")}
-                    </div>
-
-                    <h1 className="mt-1 text-3xl font-black leading-tight tracking-tight text-[#ff6a2a] drop-shadow-[0_2px_10px_rgba(255,120,40,0.35)] sm:text-4xl">
-                      {safe(fighter.naam, "Onbekende vechter")}
-                    </h1>
-
-                    <div className="mt-2 flex flex-wrap justify-center gap-1.5 text-xs text-zinc-300">
-                      <span className="rounded-full border border-[#b8afa6] bg-[#11100f] px-2.5 py-0.5 font-black shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
-                        VA {safe(fighter.va_nummer)}
-                      </span>
-                      <span className="rounded-full border border-[#8a8178] bg-[#11100f] px-2.5 py-0.5">
-                        Geboren {formatDate(fighter.fp_geboortedatum ?? fighter.geboortedatum)}
-                      </span>
-                      <span className="rounded-full border border-[#8a8178] bg-[#11100f] px-2.5 py-0.5">
-                        {safe(fighter.geslacht)}
-                      </span>
-                      {age !== null && (
-                        <span className="rounded-full border border-[#8a8178] bg-[#11100f] px-2.5 py-0.5">
-                          {age} jaar op event
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 md:items-end">
-                    <button
-                      onClick={() => router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`)}
-                      className="inline-flex items-center justify-center gap-2 border-2 border-[#d7d4ce] bg-[linear-gradient(180deg,#ffffff,#adadad_44%,#eeeeee_52%,#6f6f6f)] px-5 py-2 text-sm font-black text-black shadow-[inset_0_1px_0_#fff,0_5px_0_#28140c,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110"
-                    >
-                      <ArrowLeft size={18} /> Terug
-                    </button>
-                    <button
-                      onClick={() => setEditOpen(true)}
-                      className="inline-flex items-center justify-center gap-2 border-2 border-[#ff7a3d] bg-[linear-gradient(180deg,#ff6a22,#b73600)] px-5 py-2 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_5px_0_#28140c,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110"
-                    >
-                      <Pencil size={17} /> Vechter bewerken
-                    </button>
-                    <button
-                      onClick={runAutocheckFightpaspoort}
-                      disabled={checking}
-                      className="inline-flex items-center justify-center gap-2 border-2 border-[#ff7a3d] bg-[linear-gradient(180deg,#ff6a22,#b73600)] px-5 py-2 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_5px_0_#28140c,0_8px_16px_rgba(0,0,0,0.55)] transition hover:brightness-110 disabled:opacity-60"
-                    >
-                      <RefreshCw size={17} className={checking ? "animate-spin" : ""} /> Autocheck opnieuw
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative grid gap-2 p-3 md:grid-cols-5">
-                <InfoCard icon={<ShieldCheck />} label="Licentie" value={hasLicense ? "Ja" : "Nee"} danger={!hasLicense} />
-                <InfoCard icon={<ShieldAlert />} label="Startverbod" value={startverbod ? "Ja" : "Nee"} danger={startverbod} />
-                <InfoCard icon={<Trophy />} label="Record" value={record} />
-                <InfoCard icon={<Dumbbell />} label="Totaal wedstrijden" value={String(totaalWedstrijden)} />
-                <InfoCard icon={<Trophy />} label="Klasse volgens controle" value={`${safe(klasseVolgensControle)} (${klasseControleBron})`} />
-              </div>
-            </div>
-
-            <div className="mb-3 grid gap-2 md:grid-cols-2">
-              <DetailBlock
-                title="Nulmeting"
-                rows={[
-                  ["Klasse volgens controle", `${safe(klasseVolgensControle)} (${klasseControleBron})`],
-                  ["Nulmeting klasse", safe(fighter.nulmeting_klasse ?? raw?.nulmeting?.klasse)],
-                  ["Totaal", safe(fighter.nulmeting_totaal ?? raw?.nulmeting?.totaal, "0")],
-                  ["Opmerking", safe(fighter.nulmeting_opmerking ?? raw?.nulmeting?.opmerking)],
-                ]}
-              />
-              <DetailBlock
-                title="Keurmerk"
-                rows={[
-                  ["Sportschool", safe(sportschool?.naam)],
-                  ["Gematcht in DB", extractKeurmerkName(fighter.keurmerk_reden, safe(sportschool?.naam))],
-                  ["Keurmerk einde", formatDate(sportschool?.keurmerk_einde)],
-                ]}
-              />
-            </div>
-
-            <div className="relative mb-3 overflow-hidden rounded-[1.05rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(180deg,#1b1714,#0d0c0b)] shadow-[0_0_0_1px_#524c46,0_0_0_7px_rgba(255,255,255,0.28),0_14px_30px_rgba(0,0,0,0.82),inset_0_2px_0_rgba(255,255,255,0.58)] before:absolute before:inset-[7px] before:rounded-[0.75rem] before:border before:border-[#89847e] before:content-['']">
-              <div className="relative flex items-center justify-between border-b border-[#b8afa6]/45 bg-[linear-gradient(90deg,#11100f,#211914,#3a1609)] px-4 py-2.5 text-white">
-                <div>
-                  <div className="flex items-center gap-2 text-lg font-black">
-                    <CalendarDays size={20} /> Uitslagen
-                  </div>
-                  <div className="mt-0.5 text-xs text-[#c8bdb3]">
-                    Gelezen uit matchmaker_uitslagen_raw op VA {safe(fighter.va_nummer)}.
-                  </div>
-                </div>
-                <div className="rounded-full bg-zinc-950 px-3 py-1 text-xs font-black text-white">
-                  {uitslagen.length}
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[860px] table-fixed text-xs">
-                  <thead>
-                    <tr className="border-b border-[#b8afa6]/45 bg-[#ff4d00] text-xs uppercase tracking-[0.14em] text-white">
-                      <th className="w-[12%] px-3 py-2 text-left">Datum</th>
-                      <th className="w-[25%] px-3 py-2 text-left">Event</th>
-                      <th className="w-[18%] px-3 py-2 text-left">Tegenstander</th>
-                      <th className="w-[16%] px-3 py-2 text-left">Sportschool</th>
-                      <th className="w-[12%] px-3 py-2 text-left">Klasse</th>
-                      <th className="w-[8%] px-3 py-2 text-left">Kg</th>
-                      <th className="w-[9%] px-3 py-2 text-left">Uitslag</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {uitslagen.map((u, i) => (
-                      <tr key={u.id || i} className="border-b border-white/10 odd:bg-[#11100f] even:bg-[#1b1714] hover:bg-[#2a1c14]/70">
-                        <td className="px-3 py-2 font-bold text-white">{formatDate(u.datum)}</td>
-                        <td className="px-3 py-2 text-zinc-200"><div className="line-clamp-2">{safe(u.evenement)}</div></td>
-                        <td className="px-3 py-2 font-black text-white">{safe(u.tegenstander)}</td>
-                        <td className="px-3 py-2 text-zinc-300">{safe(u.sportschool)}</td>
-                        <td className="px-3 py-2 text-zinc-300">{safe(u.klasse)}<div className="text-xs text-[#9f948c]">{safe(u.discipline)}</div></td>
-                        <td className="px-3 py-2 text-zinc-300">{safe(u.gewicht)}</td>
-                        <td className="px-3 py-2 font-black text-[#ff9a66]">{resultLabel(u.uitslag)}</td>
-                      </tr>
-                    ))}
-                    {!uitslagen.length && (
-                      <tr><td colSpan={7} className="p-5 text-center text-[#c8bdb3]">Geen uitslagen gevonden voor deze VA.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="relative overflow-hidden rounded-[1.05rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(180deg,#1b1714,#0d0c0b)] shadow-[0_0_0_1px_#524c46,0_0_0_7px_rgba(255,255,255,0.28),0_14px_30px_rgba(0,0,0,0.82),inset_0_2px_0_rgba(255,255,255,0.58)] before:absolute before:inset-[7px] before:rounded-[0.75rem] before:border before:border-[#89847e] before:content-['']">
-              <div className="relative flex items-center justify-between border-b border-[#b8afa6]/45 bg-[linear-gradient(90deg,#11100f,#211914,#3a1609)] px-4 py-2.5 text-white">
-                <div>
-                  <div className="flex items-center gap-2 text-lg font-black">
-                    <ShieldAlert size={20} /> Meldingen
-                  </div>
-                  <div className="mt-0.5 text-xs text-[#c8bdb3]">
-                    Gelezen uit matchmaker_fighter_resultaten voor deze vechter.
-                  </div>
-                </div>
-                <div className="rounded-full bg-zinc-950 px-3 py-1 text-xs font-black text-white">
-                  {meldingen.length}
-                </div>
-              </div>
-
-              <div className="relative flex flex-col gap-2 p-3">
-                {meldingen.length ? (
-                  meldingen.map((m, i) => {
-                    const level = mapResultLevel(m.severity, m.resultaat);
-                    const color = level === "error" ? "border-red-500/70 bg-[#2a1111] text-red-100" : level === "warn" ? "border-[#ff7a3d]/70 bg-[#24170f] text-[#ffd2bd]" : level === "info" ? "border-blue-400/60 bg-[#101827] text-blue-100" : "border-green-500/50 bg-[#102016] text-green-100";
-                    return (
-                      <div key={m.id ?? i} className={`relative w-full rounded-[0.85rem] border-2 p-3 shadow-xl shadow-black/40 ${color}`}>
-                        <div className="flex items-start gap-3">
-                          {level === "ok" ? <CheckCircle2 className="mt-0.5 shrink-0" /> : <AlertTriangle className="mt-0.5 shrink-0" />}
-                          <div>
-                            <div className="font-black uppercase tracking-[0.08em]">{safe(m.rule, safe(m.rule_code, "Melding"))}</div>
-                            <div className="mt-1 text-sm font-semibold">{safe(m.boodschap, "Geen toelichting.")}</div>
-                            <div className="mt-2 text-xs font-black opacity-80">{safe(m.resultaat)} {m.review_status ? `• review: ${m.review_status}` : ""}</div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="relative rounded-[0.85rem] border-2 border-green-500/50 bg-[#102016] p-3 text-green-100 shadow-xl shadow-black/40 md:col-span-2">
-                    <div className="flex items-center gap-3 font-black"><CheckCircle2 /> Geen meldingen gevonden.</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-function CorrectFighterModal({
-  form,
-  saving,
-  onChange,
-  onClose,
-  onSave,
-  onSaveAndAutocheck,
-}: {
-  form: CorrectFighterForm;
-  saving: boolean;
-  onChange: <K extends keyof CorrectFighterForm>(key: K, value: CorrectFighterForm[K]) => void;
-  onClose: () => void;
-  onSave: () => void;
-  onSaveAndAutocheck: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[5000] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
-      <button
-        type="button"
-        aria-label="Sluiten"
-        className="absolute inset-0 cursor-default"
-        onClick={saving ? undefined : onClose}
-      />
-
-      <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[1.15rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(180deg,#1b1714,#0d0c0b)] shadow-[0_0_0_1px_#524c46,0_0_0_7px_rgba(255,255,255,0.22),0_24px_70px_rgba(0,0,0,0.86)]">
-        <div className="flex items-center justify-between border-b border-[#b8afa6]/45 bg-[linear-gradient(90deg,#11100f,#211914,#3a1609)] px-4 py-3">
-          <div>
-            <div className="text-lg font-black uppercase tracking-[0.18em] text-[#ff8a4c]">
-              Vechter bewerken
-            </div>
-            <div className="text-xs font-semibold text-[#d1c3b7]">
-              Past de bronrij in aanmeldingen aan. Gebruik daarna eventueel Opslaan + Autocheck.
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="inline-flex h-9 w-9 items-center justify-center border-2 border-[#d7d4ce] bg-zinc-950 text-white hover:bg-[#ff4d00] disabled:opacity-60"
-          >
-            <X size={17} />
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <EditBox title="Persoonlijk">
-              <EditInput label="Naam" value={form.naam} onChange={(v) => onChange("naam", v)} />
-              <EditInput label="VA nummer" value={form.va_nummer} onChange={(v) => onChange("va_nummer", v.replace(/[^\d]/g, ""))} />
-              <EditInput label="Geboortedatum" type="date" value={form.geboortedatum} onChange={(v) => onChange("geboortedatum", v)} />
-              <EditSelect label="Geslacht" value={form.geslacht} onChange={(v) => onChange("geslacht", v)} options={["", "Man", "Vrouw"]} />
-            </EditBox>
-
-            <EditBox title="Wedstrijdgegevens">
-              <EditInput label="Discipline" value={form.discipline} onChange={(v) => onChange("discipline", v)} />
-              <EditInput label="Klasse" value={form.klasse} onChange={(v) => onChange("klasse", v)} />
-              <EditInput label="Gewicht" value={form.gewicht} onChange={(v) => onChange("gewicht", v)} />
-              <EditInput label="Sportschool" value={form.gym} onChange={(v) => onChange("gym", v)} />
-            </EditBox>
-
-            <EditBox title="Contact">
-              <EditInput label="Email" value={form.email} onChange={(v) => onChange("email", v)} />
-              <EditInput label="Telefoon" value={form.telefoon} onChange={(v) => onChange("telefoon", v)} />
-            </EditBox>
-
-            <EditBox title="Opgegeven record">
-              <EditInput label="Win" value={form.win} onChange={(v) => onChange("win", v.replace(/[^\d]/g, ""))} />
-              <EditInput label="Loss" value={form.loss} onChange={(v) => onChange("loss", v.replace(/[^\d]/g, ""))} />
-              <EditInput label="Draw" value={form.draw} onChange={(v) => onChange("draw", v.replace(/[^\d]/g, ""))} />
-            </EditBox>
-          </div>
-        </div>
-
-        <div className="sticky bottom-0 z-10 flex flex-wrap justify-end gap-2 border-t border-white/10 bg-[#100e0c] px-4 py-3 shadow-[0_-14px_28px_rgba(0,0,0,0.42)]">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="border-2 border-[#d7d4ce] bg-[linear-gradient(180deg,#ffffff,#adadad_44%,#eeeeee_52%,#6f6f6f)] px-4 py-2 text-sm font-black text-black disabled:opacity-60"
-          >
-            Annuleren
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={saving}
-            className="inline-flex items-center gap-2 border-2 border-[#ff7a3d] bg-[linear-gradient(180deg,#ff6a22,#b73600)] px-4 py-2 text-sm font-black text-white disabled:opacity-60"
-          >
-            <Save size={15} /> {saving ? "Opslaan..." : "Opslaan"}
-          </button>
-          <button
-            type="button"
-            onClick={onSaveAndAutocheck}
-            disabled={saving}
-            className="inline-flex items-center gap-2 border-2 border-[#ffb08a] bg-[linear-gradient(180deg,#ff8a3d,#d94400)] px-4 py-2 text-sm font-black text-white disabled:opacity-60"
-          >
-            <RefreshCw size={15} /> {saving ? "Bezig..." : "Opslaan + Autocheck"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EditBox({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-[0.85rem] border-2 border-[#8a8178] bg-[#15110f] p-3 shadow-xl shadow-black/35">
-      <div className="mb-2 text-xs font-black uppercase tracking-[0.20em] text-[#ff8a4c]">{title}</div>
-      <div className="space-y-2">{children}</div>
-    </div>
-  );
-}
-
-function EditInput({
-  label,
-  value,
-  onChange,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.12em] text-[#c8bdb3]">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full border border-[#8a8178] bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-[#ff4d00]"
-      />
-    </label>
-  );
-}
-
-function EditSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.12em] text-[#c8bdb3]">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full border border-[#8a8178] bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-[#ff4d00]"
-      >
-        {options.map((opt) => (
-          <option key={opt} value={opt}>{opt || "-"}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-
-function InfoCard({
-  icon,
-  label,
-  value,
-  danger = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  danger?: boolean;
-}) {
-  return (
-    <div
-      className={`relative overflow-hidden rounded-[0.85rem] border-[5px] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.16),0_10px_20px_rgba(0,0,0,0.70),inset_0_1px_0_rgba(255,255,255,0.30)] before:absolute before:inset-[5px] before:rounded-[0.6rem] before:border before:border-white/20 before:content-[''] after:absolute after:right-5 after:top-2 after:h-2 after:w-9 after:rounded-full after:bg-[#ff5a1f] after:blur-[5px] after:content-[''] ${danger ? "border-red-500/70 bg-[linear-gradient(180deg,#321111,#160707)]" : "border-[#d4d0c9] bg-[linear-gradient(180deg,#1a1714,#0f0d0c)]"}`}
-    >
-      <div
-        className={`relative mb-2 flex items-center justify-between ${danger ? "text-red-300" : "text-[#c8bdb3]"}`}
-      >
-        <span className="text-xs font-black uppercase tracking-[0.2em]">
-          {label}
-        </span>
-        <span>{icon}</span>
-      </div>
-      <div
-        className={`relative text-xl font-black ${danger ? "text-red-200" : "text-white"}`}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function DetailBlock({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: [string, string][];
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-[1rem] border-[5px] border-[#d9d6d0] bg-[linear-gradient(180deg,#1b1714,#100e0c)] p-3 shadow-[0_0_0_1px_#524c46,0_0_0_4px_rgba(255,255,255,0.18),0_12px_24px_rgba(0,0,0,0.75),inset_0_2px_0_rgba(255,255,255,0.45)] before:absolute before:inset-[6px] before:rounded-[0.7rem] before:border before:border-[#89847e] before:content-[''] after:absolute after:right-8 after:top-2 after:h-2 after:w-10 after:rounded-full after:bg-[#ff5a1f] after:blur-[5px] after:content-['']">
-      <div className="relative mb-2 flex items-center gap-2 text-base font-black text-white">
-        <User size={18} className="text-[#ff6a2a]" /> {title}
-      </div>
-      <div className="relative space-y-1.5">
-        {rows.map(([k, v]) => (
-          <div
-            key={k}
-            className="flex justify-between gap-4 border-b border-white/10 pb-1.5 text-xs last:border-b-0"
-          >
-            <span className="font-bold text-[#c8bdb3]">{k}</span>
-            <span className="text-right font-black text-white">{v}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+function fmt(value: any) { return value ? new Date(value).toLocaleString("nl-NL") : "-"; }
+function calcAge(value: any, at: any) { const birth = new Date(value); const event = new Date(at); if (!value || !at || Number.isNaN(birth.getTime()) || Number.isNaN(event.getTime())) return "-"; let age = event.getFullYear() - birth.getFullYear(); const month = event.getMonth() - birth.getMonth(); if (month < 0 || (month === 0 && event.getDate() < birth.getDate())) age--; return age; }
+
+const s: any = {
+  page: { minHeight: "100vh", background: "radial-gradient(circle at 50% -10%,rgba(255,77,0,.16),transparent 34%),linear-gradient(180deg,#060708 0%,#0b0f13 48%,#050607 100%)", color: "white", padding: 20 },
+  wrap: { maxWidth: 1460, margin: "0 auto" },
+  hero: { position: "relative", overflow: "hidden", marginBottom: 16, border: "1px solid #4a5057", borderTop: "3px solid #ff4d00", background: "linear-gradient(145deg,#1b2026 0%,#0b0e12 55%,#15191e 100%)", boxShadow: "0 16px 34px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.05)" },
+  heroGlow: { position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 50% 10%,rgba(255,77,0,.14),transparent 24%)" },
+  heroTop: { position: "relative", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 14, padding: "10px 14px", borderBottom: "1px solid #353b42" },
+  heroActions: { display: "flex", justifyContent: "flex-end" },
+  logoWrap: { display: "flex", justifyContent: "center", alignItems: "center", height: 92, minWidth: 760 },
+  logo: { height: 86, width: 760, maxWidth: "64vw", objectFit: "contain", filter: "drop-shadow(0 8px 14px rgba(0,0,0,.7)) drop-shadow(0 0 12px rgba(255,77,0,.12))" },
+  heroBottom: { position: "relative", display: "flex", justifyContent: "center", alignItems: "center", gap: 20, padding: "18px 18px 20px" },
+  heroIdentity: { display: "grid", justifyItems: "center", textAlign: "center", gap: 8, width: "100%" },
+  eyebrow: { fontSize: 10, fontWeight: 900, letterSpacing: 2.4, color: "#fff", marginBottom: 5 },
+  title: { margin: 0, fontSize: 34, fontWeight: 950, letterSpacing: .3, color: "#ff6a2a", textAlign: "center", textShadow: "0 4px 12px #000" },
+  identityStrip: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" },
+  identityChip: { padding: "6px 9px", border: "1px solid #6b3018", background: "#22120b", color: "#fff", fontSize: 12, fontWeight: 850 },
+  silver: { display: "inline-flex", gap: 7, alignItems: "center", justifyContent: "center", height: 38, padding: "0 13px", background: "linear-gradient(#fff,#c7c7c7)", color: "#111", border: "1px solid #aaa", fontWeight: 900, cursor: "pointer", boxShadow: "inset 0 1px 0 #fff,0 4px 10px rgba(0,0,0,.28)" },
+  darkButton: { height: 38, padding: "0 13px", background: "#161b20", color: "#fff", border: "1px solid #555d65", fontWeight: 800, cursor: "pointer" },
+  summary: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12, marginBottom: 16 },
+  card: { border: "1px solid #555d65", borderTop: "3px solid #ff4d00", background: "linear-gradient(180deg,#1c2228,#0d1115)", padding: "13px 15px", boxShadow: "0 8px 18px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.04)" },
+  cardTitle: { fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "#a6adb4", marginBottom: 6 },
+  section: { border: "1px solid #3f464d", borderLeft: "3px solid #ff4d00", background: "linear-gradient(180deg,#151a1f,#0a0d10)", padding: 16, marginBottom: 14, boxShadow: "0 10px 24px rgba(0,0,0,.24)" },
+  grid: { display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 9 },
+  field: { display: "grid", gap: 4, padding: "9px 10px", background: "#0d1115", border: "1px solid #30363d", minHeight: 54 },
+  fieldWide: { gridColumn: "span 2", minHeight: 72 },
+  fieldFull: { gridColumn: "1 / -1", minHeight: 72 },
+  muted: { fontSize: 10, color: "#9199a2", textTransform: "uppercase", letterSpacing: .5 },
+  notice: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", marginBottom: 12, border: "1px solid #5c6268", background: "#10151a" },
+  noticeText: { flex: "1 1 520px", color: "#c9ced3", fontSize: 12, lineHeight: 1.45 },
+  feedback: { marginBottom: 14, padding: "10px 12px", border: "1px solid #80502e", background: "#21150d", color: "#ffd2b8", fontWeight: 750 },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  th: { textAlign: "left", padding: "9px 10px", borderBottom: "2px solid #ff4d00", background: "#20262c", color: "#f3f3f3", whiteSpace: "nowrap" },
+  td: { padding: "9px 10px", borderBottom: "1px solid #31373d", verticalAlign: "top" },
+  tdDark: { background: "#11161a", color: "#f3f3f3" },
+  tdLight: { background: "#ececec", color: "#111" },
+  reviewActions: { display: "flex", gap: 6, flexWrap: "wrap" },
+  approveButton: { display: "inline-flex", alignItems: "center", gap: 5, height: 32, padding: "0 9px", background: "#d9f3dd", color: "#102b16", border: "1px solid #78aa80", fontWeight: 850, cursor: "pointer" },
+  rejectButton: { display: "inline-flex", alignItems: "center", gap: 5, height: 32, padding: "0 9px", background: "#ffd9d4", color: "#3a100b", border: "1px solid #bd756b", fontWeight: 850, cursor: "pointer" },
+  closeButton: { display: "inline-flex", alignItems: "center", gap: 5, height: 32, padding: "0 9px", background: "#e7e7e7", color: "#151515", border: "1px solid #999", fontWeight: 850, cursor: "pointer" },
+  modalBackdrop: { position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", padding: 20, background: "rgba(0,0,0,.78)" },
+  modal: { width: "min(620px,100%)", border: "1px solid #606871", borderTop: "3px solid #ff4d00", background: "linear-gradient(180deg,#1b2026,#0b0e12)", boxShadow: "0 24px 70px rgba(0,0,0,.7)" },
+  modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px", borderBottom: "1px solid #353b42" },
+  modalTitle: { margin: 0, color: "#ff6a2a" },
+  iconButton: { width: 36, height: 36, display: "grid", placeItems: "center", background: "#101419", color: "#fff", border: "1px solid #555d65", cursor: "pointer" },
+  formGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: 18 },
+  label: { display: "grid", gap: 6, color: "#bcc3ca", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: .5 },
+  input: { height: 40, padding: "0 10px", background: "#080b0e", color: "#fff", border: "1px solid #555d65", outline: "none", fontSize: 14 },
+  modalActions: { display: "flex", justifyContent: "flex-end", gap: 10, padding: "0 18px 18px" },
+};

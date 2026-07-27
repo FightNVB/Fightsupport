@@ -14,16 +14,16 @@ import React, {
 } from "react";
 import { authedFetch } from "@/lib/api/authedFetch";
 import {
+  AlertTriangle,
   ArrowLeft,
   ChevronDown,
   ChevronUp,
   Download,
   Edit3,
+  Eye,
   FileUp,
-  Loader2,
   Plus,
-  Radar,
-  RefreshCw,
+  Search,
   Save,
   Trash2,
   Users,
@@ -36,36 +36,40 @@ const EXCEL_TEMPLATE_URL =
   "/templates/fightsupport-aanmeldingen-upload.xlsx";
 
 type Aanmelding = Record<string, any>;
-type BusyMode =
-  | "idle"
-  | "upload"
-  | "manual"
-  | "controle"
-  | "delete"
-  | "save"
-  | "load";
-type ViewMode = "unchecked" | "checked" | "failed" | "all";
+type SportschoolOption = {
+  sportschool_id: number;
+  naam: string;
+  plaats?: string | null;
+};
+type FighterOption = {
+  va_nummer: string;
+  naam: string;
+  geboortedatum?: string | null;
+  geslacht?: string | null;
+  primary_discipline?: string | null;
+  nulmeting_discipline?: string | null;
+  berekende_klasse?: string | null;
+  nulmeting_klasse?: string | null;
+  nulmeting_gewicht?: string | number | null;
+  email?: string | null;
+  fit_to_fight?: boolean | null;
+  licentie_actief?: boolean | null;
+  heeft_startverbod?: boolean | null;
+  sportscholen?: SportschoolOption[];
+};
+type NameVaCheck = {
+  id: string;
+  aanmelding_id: number;
+  naam_upload: string;
+  va_nummer_upload: string;
+  naam_fightpassport?: string | null;
+  va_nummer_fightpassport?: string | null;
+  status: "open" | "resolved" | "ignored";
+  resolution?: "upload_name_approved" | "va_corrected" | null;
+  resolved_va_nummer?: string | null;
+};
 
-interface FpSessionStatus {
-  status?: string | null;
-  message?: string | null;
-  updated_at?: string | null;
-  last_error?: string | null;
-}
-
-function isFightPassportUnlockStatus(status: string | null | undefined) {
-  const value = String(status ?? "")
-    .trim()
-    .toLowerCase();
-  return (
-    value === "waiting_for_unlock" ||
-    value === "waiting_for_unlock_code" ||
-    value === "unlock_required" ||
-    value === "code_required" ||
-    value.includes("unlock") ||
-    value.includes("pincode")
-  );
-}
+type BusyMode = "idle" | "upload" | "manual" | "delete" | "save" | "load";
 
 type FighterForm = {
   discipline: string;
@@ -136,6 +140,7 @@ function name(r: Aanmelding) {
   return pickName(r);
 }
 
+
 function fmt(v: unknown) {
   return s(v) || "-";
 }
@@ -150,122 +155,6 @@ function fmtDate(v: unknown) {
     month: "2-digit",
     year: "numeric",
   });
-}
-
-function normalizeStatus(raw: string) {
-  const status = raw.toLowerCase().trim();
-  if (
-    [
-      "gescrapt",
-      "gescraped",
-      "scraped",
-      "gecontroleerd",
-      "checked",
-      "verwerkt",
-      "processed",
-      "klaar",
-      "done",
-    ].includes(status)
-  )
-    return "gescrapt";
-  if (["scrape_mislukt", "mislukt", "failed", "error", "fout"].includes(status))
-    return "scrape_mislukt";
-  if (
-    [
-      "controle_bezig",
-      "bezig",
-      "running",
-      "scraping",
-      "processing",
-      "in_progress",
-    ].includes(status)
-  )
-    return "controle_bezig";
-  if (["gematcht", "matched"].includes(status)) return "gematcht";
-  if (["afgemeld", "cancelled", "canceled"].includes(status)) return "afgemeld";
-  if (
-    [
-      "nieuw",
-      "rauw",
-      "raw",
-      "open",
-      "aangemeld",
-      "uploaded",
-      "upload",
-      "",
-    ].includes(status)
-  )
-    return "rauw";
-  return status || "rauw";
-}
-
-function hasValue(v: unknown) {
-  return s(v).length > 0;
-}
-
-function onlyDigits(v: unknown) {
-  return s(v).replace(/\D/g, "");
-}
-
-function timeValue(v: unknown) {
-  const raw = s(v);
-  if (!raw) return 0;
-  const t = Date.parse(raw);
-  return Number.isFinite(t) ? t : 0;
-}
-
-function statusOf(r: Aanmelding) {
-  const normalized = normalizeStatus(
-    pick(r, [
-      "status",
-      "aanmelding_status",
-      "controle_status",
-      "scrape_status",
-      "fightpaspoort_status",
-    ]),
-  );
-
-  const hasFailure =
-    normalized === "scrape_mislukt" ||
-    hasValue(r?.scrape_failed_at) ||
-    hasValue(r?.scrape_error) ||
-    hasValue(r?.error);
-
-  if (hasFailure) return "scrape_mislukt";
-
-  if (normalized === "gematcht" || normalized === "afgemeld") return normalized;
-
-  const isRunning =
-    normalized === "controle_bezig" ||
-    hasValue(r?.scrape_started_at) ||
-    hasValue(r?.controle_started_at);
-
-  const hasScrapeSignal =
-    normalized === "gescrapt" ||
-    hasValue(r?.scraped_at) ||
-    hasValue(r?.controle_run_id) ||
-    hasValue(r?.checked_at) ||
-    hasValue(r?.fightpaspoort_checked_at);
-
-  if (hasScrapeSignal) return "gescrapt";
-  if (isRunning) return "controle_bezig";
-
-  return normalized;
-}
-
-function isScrapedAanmelding(r: Aanmelding) {
-  return statusOf(r) === "gescrapt";
-}
-
-function isFailedAanmelding(r: Aanmelding) {
-  return statusOf(r) === "scrape_mislukt";
-}
-
-function isRawAanmelding(r: Aanmelding) {
-  const st = statusOf(r);
-  // Controle_bezig blijft in de praktijk "niet gecheckt" zolang er geen eindresultaat is.
-  // Zo verdwijnen vechters niet uit beeld na een mislukte/onderbroken autocheck-start.
-  return st === "rauw" || st === "controle_bezig";
 }
 
 function rowToForm(r: Aanmelding): FighterForm {
@@ -290,7 +179,6 @@ function rowToForm(r: Aanmelding): FighterForm {
 function busyText(mode: BusyMode) {
   if (mode === "upload") return "Aanmeldingen worden verwerkt";
   if (mode === "manual") return "Vechter wordt toegevoegd";
-  if (mode === "controle") return "Fightpaspoort check loopt";
   if (mode === "delete") return "Verwijderen wordt uitgevoerd";
   if (mode === "save") return "Wijzigingen worden opgeslagen";
   if (mode === "load") return "Gegevens worden geladen";
@@ -298,7 +186,6 @@ function busyText(mode: BusyMode) {
 }
 
 function busySubText(mode: BusyMode) {
-  if (mode === "controle") return "Fightpaspoort check loopt.";
   if (mode === "upload")
     return "Het bestand wordt opgeslagen en toegevoegd aan deze matchmaking.";
   return "Deze actie wordt uitgevoerd.";
@@ -335,7 +222,6 @@ export default function AanmeldingenPage() {
   const params = useParams<{ matchmakingId: string }>();
   const matchmakingId = String(params?.matchmakingId ?? "");
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const controlePollTokenRef = useRef(0);
 
   const [rows, setRows] = useState<Aanmelding[]>([]);
   const [uploads, setUploads] = useState<any[]>([]);
@@ -347,11 +233,25 @@ export default function AanmeldingenPage() {
   const [editForm, setEditForm] = useState<FighterForm | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("unchecked");
-  const [waitTitle, setWaitTitle] = useState("Even wachten");
-  const [waitMessage, setWaitMessage] = useState("Fightpaspoort check loopt.");
-  const [fpSession, setFpSession] = useState<FpSessionStatus | null>(null);
-  const [fpSessionLoading, setFpSessionLoading] = useState(false);
+  const [searchMode, setSearchMode] = useState<"fighter" | "school">("fighter");
+  const [sportscholen, setSportscholen] = useState<SportschoolOption[]>([]);
+  const [selectedSportschoolId, setSelectedSportschoolId] = useState("");
+  const [fighters, setFighters] = useState<FighterOption[]>([]);
+  const [selectedVa, setSelectedVa] = useState("");
+  const [fighterSearch, setFighterSearch] = useState("");
+  const [selectorLoading, setSelectorLoading] = useState(false);
+  const [nameVaChecks, setNameVaChecks] = useState<NameVaCheck[]>([]);
+  const [correctVaByCheck, setCorrectVaByCheck] = useState<Record<string, string>>({});
+  const [tableSearch, setTableSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"withVa" | "withoutVa">("withVa");
+  const [missingVaAanmeldingId, setMissingVaAanmeldingId] = useState<string | null>(null);
+  const [missingVaMode, setMissingVaMode] = useState<"name" | "school">("name");
+  const [missingVaSearch, setMissingVaSearch] = useState("");
+  const [missingVaSchoolName, setMissingVaSchoolName] = useState("");
+  const [missingVaSchoolId, setMissingVaSchoolId] = useState("");
+  const [missingVaFighters, setMissingVaFighters] = useState<FighterOption[]>([]);
+  const [missingVaSelectedVa, setMissingVaSelectedVa] = useState("");
+  const [missingVaLoading, setMissingVaLoading] = useState(false);
 
   const [form, setForm] = useState<FighterForm>({
     discipline: "KICKBOKSEN",
@@ -366,6 +266,120 @@ export default function AanmeldingenPage() {
   });
 
   const busy = busyMode !== "idle";
+
+  const selectedFighter = useMemo(
+    () => fighters.find((fighter) => String(fighter.va_nummer) === selectedVa) ?? null,
+    [fighters, selectedVa],
+  );
+
+  const filteredFighters = useMemo(() => {
+    const q = fighterSearch.trim().toLowerCase();
+    if (!q) return fighters;
+    return fighters.filter((fighter) =>
+      `${fighter.naam} ${fighter.va_nummer}`.toLowerCase().includes(q),
+    );
+  }, [fighters, fighterSearch]);
+
+  const resolvedMissingVaSchool = useMemo(() => {
+    const wanted = normalizeSchoolName(missingVaSchoolName);
+    if (!wanted) return null;
+
+    return (
+      sportscholen.find((school) => normalizeSchoolName(school.naam) === wanted) ??
+      sportscholen.find((school) => {
+        const candidate = normalizeSchoolName(school.naam);
+        return candidate.includes(wanted) || wanted.includes(candidate);
+      }) ??
+      null
+    );
+  }, [missingVaSchoolName, sportscholen]);
+
+  const loadSportscholen = useCallback(async () => {
+    setSelectorLoading(true);
+    try {
+      const res = await authedFetch("/api/matchmaker/fighter-selector", { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Sportscholen laden mislukt");
+      setSportscholen(Array.isArray(json?.sportscholen) ? json.sportscholen : []);
+    } catch (e: any) {
+      setMsg(e?.message || "Sportscholen laden mislukt");
+    } finally {
+      setSelectorLoading(false);
+    }
+  }, []);
+
+  const loadFightersForSchool = useCallback(async (sportschoolId: string) => {
+    if (!sportschoolId) {
+      setFighters([]);
+      setSelectedVa("");
+      return;
+    }
+    setSelectorLoading(true);
+    setSelectedVa("");
+    try {
+      const res = await authedFetch(
+        `/api/matchmaker/fighter-selector?sportschool_id=${encodeURIComponent(sportschoolId)}`,
+        { cache: "no-store" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Vechters laden mislukt");
+      setFighters(Array.isArray(json?.fighters) ? json.fighters : []);
+    } catch (e: any) {
+      setFighters([]);
+      setMsg(e?.message || "Vechters laden mislukt");
+    } finally {
+      setSelectorLoading(false);
+    }
+  }, []);
+
+  const searchFighters = useCallback(async (query: string) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setFighters([]);
+      setSelectedVa("");
+      return;
+    }
+    setSelectorLoading(true);
+    try {
+      const res = await authedFetch(
+        `/api/matchmaker/fighter-selector?q=${encodeURIComponent(q)}`,
+        { cache: "no-store" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Zoeken mislukt");
+      setFighters(Array.isArray(json?.fighters) ? json.fighters : []);
+    } catch (e: any) {
+      setFighters([]);
+      setMsg(e?.message || "Zoeken mislukt");
+    } finally {
+      setSelectorLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (manualOpen && sportscholen.length === 0) void loadSportscholen();
+  }, [manualOpen, sportscholen.length, loadSportscholen]);
+
+  useEffect(() => {
+    if (!manualOpen || searchMode !== "fighter") return;
+    const timer = window.setTimeout(() => void searchFighters(fighterSearch), 300);
+    return () => window.clearTimeout(timer);
+  }, [manualOpen, searchMode, fighterSearch, searchFighters]);
+
+  const loadNameVaChecks = useCallback(async () => {
+    if (!matchmakingId) return;
+    try {
+      const res = await authedFetch(
+        `/api/matchmaker/name-va-checks?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+        { cache: "no-store" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Naam/VA-controles laden mislukt");
+      setNameVaChecks(Array.isArray(json?.checks) ? json.checks : []);
+    } catch (e: any) {
+      setMsg(e?.message || "Naam/VA-controles laden mislukt");
+    }
+  }, [matchmakingId]);
 
   const load = useCallback(
     async (silent = false) => {
@@ -391,6 +405,7 @@ export default function AanmeldingenPage() {
         setMatchmaking(
           json?.matchmaking || json?.data?.matchmaking || json?.event || null,
         );
+        await loadNameVaChecks();
       } catch (e: any) {
         setMsg(e?.message || "Laden mislukt");
       } finally {
@@ -400,60 +415,12 @@ export default function AanmeldingenPage() {
         }
       }
     },
-    [matchmakingId],
+    [matchmakingId, loadNameVaChecks],
   );
 
   useEffect(() => {
     if (matchmakingId) load();
   }, [matchmakingId, load]);
-
-  async function checkFightPassportSession() {
-    try {
-      setFpSessionLoading(true);
-
-      const res = await authedFetch("/api/fightpassport/session", {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      if (!res.ok) return null;
-
-      const json = await res.json().catch(() => null);
-      const session: FpSessionStatus = {
-        status: json?.status ?? json?.session?.status ?? null,
-        message: json?.message ?? json?.session?.message ?? null,
-        updated_at: json?.updated_at ?? json?.session?.updated_at ?? null,
-        last_error: json?.last_error ?? json?.session?.last_error ?? null,
-      };
-
-      setFpSession(session);
-
-      if (isFightPassportUnlockStatus(session.status)) {
-        setWaitTitle("FightPassport unlockcode nodig");
-        setWaitMessage(
-          "FightPassport wacht op de 7-cijferige code uit je e-mail. Klik op Unlockcode invullen en laat dit scherm open.",
-        );
-      }
-
-      return session;
-    } catch (e) {
-      console.warn("FightPassport sessiestatus niet bereikbaar:", e);
-      return null;
-    } finally {
-      setFpSessionLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (busyMode !== "controle") return;
-
-    void checkFightPassportSession();
-    const timer = window.setInterval(() => {
-      void checkFightPassportSession();
-    }, 2500);
-
-    return () => window.clearInterval(timer);
-  }, [busyMode]);
 
   const uploadTabs = useMemo(() => {
     return [...uploads].sort((a, b) => {
@@ -463,35 +430,49 @@ export default function AanmeldingenPage() {
     });
   }, [uploads]);
 
-  const rawRows = useMemo(
-    () => sortAanmeldingen(rows.filter(isRawAanmelding)),
-    [rows],
-  );
-  const scrapedRows = useMemo(
-    () => sortAanmeldingen(rows.filter(isScrapedAanmelding)),
-    [rows],
-  );
-  const failedRows = useMemo(
-    () => sortAanmeldingen(rows.filter(isFailedAanmelding)),
-    [rows],
-  );
   const allRows = useMemo(() => sortAanmeldingen(rows), [rows]);
 
-  const visibleRows = useMemo(() => {
-    if (viewMode === "checked") return scrapedRows;
-    if (viewMode === "failed") return failedRows;
-    if (viewMode === "all") return allRows;
-    return rawRows;
-  }, [viewMode, scrapedRows, failedRows, allRows, rawRows]);
+  const missingVaRows = useMemo(
+    () =>
+      allRows.filter(
+        (row) => !pick(row, ["va_nummer", "va", "fightpaspoort_nummer"]),
+      ),
+    [allRows],
+  );
 
-  const rowsForCheck =
-    viewMode === "failed"
-      ? failedRows
-      : viewMode === "all"
-        ? rows.filter((r) =>
-            ["rauw", "controle_bezig", "scrape_mislukt"].includes(statusOf(r)),
-          )
-        : rawRows;
+  const rowsWithVa = useMemo(
+    () =>
+      allRows.filter((row) =>
+        Boolean(pick(row, ["va_nummer", "va", "fightpaspoort_nummer"])),
+      ),
+    [allRows],
+  );
+
+  const activeRows = activeTab === "withoutVa" ? missingVaRows : rowsWithVa;
+
+  const filteredRows = useMemo(() => {
+    const q = tableSearch.trim().toLocaleLowerCase("nl-NL");
+    if (!q) return activeRows;
+
+    return activeRows.filter((row) => {
+      const searchable = [
+        pick(row, ["discipline", "sport"]),
+        pick(row, ["klasse", "klasse_mm"]),
+        pick(row, ["geslacht", "gender"]),
+        name(row),
+        pick(row, ["gym", "sportschool", "sportschool_naam"]),
+        pick(row, ["va_nummer", "va", "fightpaspoort_nummer"]),
+        pick(row, ["gewicht", "gewicht_kg"]),
+        pick(row, ["email", "trainer_email", "contact_email"]),
+        pick(row, ["telefoon", "phone", "trainer_telefoon", "contact_telefoon"]),
+        uploadId(row),
+      ]
+        .join(" ")
+        .toLocaleLowerCase("nl-NL");
+
+      return searchable.includes(q);
+    });
+  }, [activeRows, tableSearch]);
 
   const eventName = pick(matchmaking || {}, [
     "naam",
@@ -537,7 +518,6 @@ export default function AanmeldingenPage() {
 
       if (inputRef.current) inputRef.current.value = "";
 
-      setViewMode("unchecked");
       setMsg(
         json?.message ||
           "Upload gelukt. Nieuwe aanmeldingen zijn toegevoegd aan deze matchmaking.",
@@ -551,42 +531,58 @@ export default function AanmeldingenPage() {
   }
 
   async function addManual() {
-    if (!s(form.naam)) {
-      setMsg("Vul minimaal een naam in.");
+    if (!selectedFighter) {
+      setMsg("Kies eerst een vechter.");
+      return;
+    }
+    if (!s(form.gewicht)) {
+      setMsg("Vul het actuele wedstrijdgewicht in.");
       return;
     }
 
+    const linkedSchools = selectedFighter.sportscholen ?? [];
+    const resolvedSchoolId = selectedSportschoolId ||
+      (linkedSchools.length === 1 ? String(linkedSchools[0].sportschool_id) : "");
+
+    if (!resolvedSchoolId) {
+      setMsg("Kies de sportschool waarvoor deze vechter wordt aangemeld.");
+      return;
+    }
+
+    const sportschool = sportscholen.find(
+      (row) => String(row.sportschool_id) === resolvedSchoolId,
+    ) ?? linkedSchools.find((row) => String(row.sportschool_id) === resolvedSchoolId);
+
     setBusyMode("manual");
     setMsg("");
-
     try {
       const res = await authedFetch("/api/matchmaker/add-fighter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
-          ...form,
-          sportschool: form.gym,
+          matchmaker_id: matchmaking?.matchmaker_id || matchmaking?.maker_user_id || null,
+          sportschool_id: Number(resolvedSchoolId),
+          va_nummer: selectedFighter.va_nummer,
+          gewicht: form.gewicht,
+          gym: sportschool?.naam || "",
         }),
       });
-
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Toevoegen mislukt");
 
-      setForm({
-        discipline: "KICKBOKSEN",
-        klasse: "",
-        geslacht: "",
-        naam: "",
-        gym: "",
-        va_nummer: "",
-        gewicht: "",
-        email: "",
-        telefoon: "",
-      });
-
-      setViewMode("unchecked");
-      setMsg("Vechter toegevoegd.");
+      setSelectedVa("");
+      setSelectedSportschoolId("");
+      setFighterSearch("");
+      setFighters([]);
+      setForm((current) => ({ ...current, gewicht: "" }));
+      const linkedSchoolIds = (selectedFighter.sportscholen ?? []).map((row) => String(row.sportschool_id));
+      const schoolWasChanged = !linkedSchoolIds.includes(String(resolvedSchoolId));
+      setMsg(
+        schoolWasChanged
+          ? `${selectedFighter.naam} is toegevoegd. De afwijkende sportschool is opgeslagen en voor admin geregistreerd.`
+          : `${selectedFighter.naam} is toegevoegd aan deze matchmaking.`,
+      );
       await load(true);
     } catch (e: any) {
       setMsg(e?.message || "Toevoegen mislukt");
@@ -595,241 +591,193 @@ export default function AanmeldingenPage() {
     }
   }
 
-  async function sleepMs(ms: number) {
-    await new Promise((resolve) => window.setTimeout(resolve, ms));
-  }
-
-  async function waitForControleResult(
-    checkedIds: string[],
-    checkStartedAt: number,
+  async function resolveNameVaCheck(
+    check: NameVaCheck,
+    action: "approve_name" | "correct_va",
   ) {
-    const wanted = new Set(checkedIds.map(String).filter(Boolean));
-    const startedAt = Date.now();
-    const maxMs = 10 * 60 * 1000;
-    const freshAfter = checkStartedAt - 5000;
-    let lastRows: Aanmelding[] = [];
-
-    while (Date.now() - startedAt < maxMs) {
-      const res = await authedFetch(
-        `/api/matchmaker/${matchmakingId}?t=${Date.now()}`,
-        {
-          method: "GET",
-          cache: "no-store",
-        },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok)
-        throw new Error(json?.error || "Laden na Fightpaspoort check mislukt");
-
-      const nextRows: Aanmelding[] = Array.isArray(json?.aanmeldingen)
-        ? json.aanmeldingen
-        : [];
-      lastRows = nextRows;
-      setRows(nextRows);
-      setUploads(Array.isArray(json?.uploads) ? json.uploads : []);
-      setMatchmaking(
-        json?.matchmaking || json?.data?.matchmaking || json?.event || null,
-      );
-
-      const selected = nextRows.filter((r) =>
-        wanted.has(String(aanmeldingId(r))),
-      );
-
-      const selectedOrAll = selected.length > 0 ? selected : nextRows;
-      const stillRunning = selectedOrAll.some(
-        (r) => statusOf(r) === "controle_bezig",
-      );
-      const finishedCount = selectedOrAll.filter((r) => {
-        const st = statusOf(r);
-        const startedFresh =
-          timeValue(r?.scrape_started_at) >= freshAfter ||
-          timeValue(r?.controle_started_at) >= freshAfter;
-        const finishedFresh =
-          timeValue(r?.scraped_at) >= freshAfter ||
-          timeValue(r?.scrape_failed_at) >= freshAfter ||
-          timeValue(r?.checked_at) >= freshAfter ||
-          timeValue(r?.fightpaspoort_checked_at) >= freshAfter;
-
-        return (
-          st === "gescrapt" ||
-          st === "scrape_mislukt" ||
-          st === "gematcht" ||
-          st === "afgemeld" ||
-          finishedFresh ||
-          (startedFresh && st !== "controle_bezig")
-        );
-      }).length;
-
-      setWaitMessage("Fightpaspoort check loopt.");
-
-      const allFinished =
-        selectedOrAll.length > 0 &&
-        finishedCount >= selectedOrAll.length &&
-        !stillRunning;
-
-      if (allFinished) {
-        // Zelfde idee als admin-overzicht: na klaar nog kort wachten en dan pas definitief herladen.
-        setWaitMessage("Controle is afgerond. Resultaten worden geladen...");
-        await sleepMs(1000);
-        await load(true);
-        return true;
-      }
-
-      await sleepMs(2500);
+    const va = s(correctVaByCheck[check.id]);
+    if (action === "correct_va" && !va) {
+      setMsg("Vul eerst het juiste VA-nummer in.");
+      return;
     }
 
-    // Timeout is geen harde mislukking: live kan de server al klaar zijn terwijl de browser
-    // nog geen nette eindstatus zag. Altijd laatste refresh doen.
-    await load(true);
+    setBusyMode("save");
+    setMsg("");
+    try {
+      const res = await authedFetch("/api/matchmaker/name-va-checks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          check_id: check.id,
+          action,
+          va_nummer: action === "correct_va" ? va : undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Naam/VA-controle opslaan mislukt");
 
-    const selectedAfterTimeout = lastRows.filter((r) =>
-      wanted.has(String(aanmeldingId(r))),
-    );
-    const checkRows = selectedAfterTimeout.length
-      ? selectedAfterTimeout
-      : lastRows;
-    return checkRows.some((r) => statusOf(r) === "gescrapt");
+      setCorrectVaByCheck((current) => {
+        const next = { ...current };
+        delete next[check.id];
+        return next;
+      });
+      setMsg(
+        action === "approve_name"
+          ? `Naam ${check.naam_upload} is goedgekeurd voor VA ${check.va_nummer_upload}.`
+          : `VA-nummer aangepast en FightPassport-gegevens opnieuw geladen.`,
+      );
+      await load(true);
+    } catch (e: any) {
+      setMsg(e?.message || "Naam/VA-controle opslaan mislukt");
+    } finally {
+      setBusyMode("idle");
+    }
   }
 
-  async function controleer() {
-    const ids = Array.from(
-      new Set(rowsForCheck.map(aanmeldingId).filter(Boolean)),
-    );
-    const vaNummers = Array.from(
-      new Set(
-        rowsForCheck
-          .map((r) =>
-            onlyDigits(pick(r, ["va_nummer", "va", "fightpaspoort_nummer"])),
-          )
-          .filter(Boolean),
-      ),
-    );
+  function normalizeSchoolName(value: unknown) {
+    return s(value)
+      .toLocaleLowerCase("nl-NL")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
 
-    if (!rowsForCheck.length) {
-      setMsg(
-        viewMode === "failed"
-          ? "Er zijn geen mislukte aanmeldingen om opnieuw te controleren."
-          : "Er zijn geen niet gecheckte aanmeldingen om te controleren.",
-      );
+  async function openMissingVaSearch(row: Aanmelding) {
+    const id = aanmeldingId(row);
+    if (!id) {
+      setMsg("Deze aanmelding heeft geen id en kan niet worden gekoppeld.");
       return;
     }
 
-    if (!ids.length) {
-      setMsg(
-        "Deze regels hebben geen aanmelding-id en kunnen niet veilig naar de Fightpaspoort check.",
-      );
+    const schoolName = pick(row, ["gym", "sportschool", "sportschool_naam"]);
+
+    setMissingVaAanmeldingId(id);
+    setMissingVaMode("name");
+    setMissingVaSearch(name(row) === "Onbekend" ? "" : name(row));
+    setMissingVaSchoolName(schoolName);
+    setMissingVaSchoolId("");
+    setMissingVaFighters([]);
+    setMissingVaSelectedVa("");
+
+    if (sportscholen.length === 0) {
+      await loadSportscholen();
+    }
+  }
+
+  useEffect(() => {
+    if (!missingVaAanmeldingId || missingVaMode !== "name") return;
+
+    const q = missingVaSearch.trim();
+    if (q.length < 2) {
+      setMissingVaFighters([]);
+      setMissingVaSelectedVa("");
       return;
     }
 
-    if (!vaNummers.length) {
-      setMsg(
-        "Deze regels hebben geen VA nummer. Vul eerst een VA nummer in voordat je de Fightpaspoort check start.",
-      );
-      return;
-    }
-
-    const pollToken = controlePollTokenRef.current + 1;
-    controlePollTokenRef.current = pollToken;
-
-    setBusyMode("controle");
-    setFpSession(null);
-    setWaitTitle("Even wachten");
-    setWaitMessage(
-      "Fightpaspoort check wordt gestart. Sluit deze pagina niet af.",
-    );
-    setMsg("");
-
-    try {
-      const checkStartedAt = Date.now();
-      const requestBody = {
-        matchmaking_id: matchmakingId,
-        mode: viewMode === "failed" ? "selected" : "open_only",
-        scope: viewMode === "failed" ? "failed" : "open",
-        only_open: viewMode !== "failed",
-        include_failed: viewMode === "failed",
-        force: viewMode === "failed",
-        aanmelding_ids: ids,
-        va_nummers: vaNummers,
-      };
-
-      let json: any = {};
-      let responseOk = false;
-
+    const timer = window.setTimeout(async () => {
+      setMissingVaLoading(true);
       try {
-        setWaitMessage(
-          "Robotjes zijn gestart. FightSupport wacht tot alle resultaten binnen zijn...",
+        const res = await authedFetch(
+          `/api/matchmaker/fighter-selector?q=${encodeURIComponent(q)}`,
+          { cache: "no-store" },
         );
-        const res = await authedFetch("/api/matchmaker/scrape/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        });
-
-        json = await res.json().catch(() => ({}));
-        responseOk = res.ok;
-
-        if (!res.ok) {
-          console.error(
-            "Matchmaker Fightpaspoort check response was niet ok:",
-            res.status,
-            json,
-          );
-
-          const session = await checkFightPassportSession();
-          if (isFightPassportUnlockStatus(session?.status)) {
-            setWaitTitle("FightPassport unlockcode nodig");
-            setWaitMessage(
-              "FightPassport wacht op de 7-cijferige code uit je e-mail. Klik op Unlockcode invullen en laat dit scherm open.",
-            );
-          } else {
-            setWaitTitle("Controle loopt mogelijk nog");
-            setWaitMessage(
-              "De browser kreeg geen nette eindmelding terug, maar de VPS kan nog bezig zijn met scrapen.",
-            );
-          }
-        }
-      } catch (e) {
-        console.error(
-          "Matchmaker Fightpaspoort check request gaf een fout of timeout:",
-          e,
-        );
-        setWaitTitle("Controle loopt mogelijk nog");
-        setWaitMessage(
-          "De browser verloor de response, maar de scraper kan op de VPS nog gewoon doorlopen.",
-        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || "Slim zoeken mislukt");
+        setMissingVaFighters(Array.isArray(json?.fighters) ? json.fighters : []);
+      } catch (e: any) {
+        setMissingVaFighters([]);
+        setMsg(e?.message || "Slim zoeken mislukt");
+      } finally {
+        setMissingVaLoading(false);
       }
+    }, 300);
 
-      // Belangrijk: ook bij een foute/timeout response blijven we pollen, net als in admin-overzicht.
-      // De VPS-log liet zien dat de backend klaar kan zijn terwijl de pagina nog oud lijkt.
-      const finishedOrDataSeen = await waitForControleResult(
-        ids,
-        checkStartedAt,
-      );
+    return () => window.clearTimeout(timer);
+  }, [missingVaAanmeldingId, missingVaMode, missingVaSearch]);
 
-      if (controlePollTokenRef.current !== pollToken) return;
+  useEffect(() => {
+    if (!missingVaAanmeldingId || missingVaMode !== "school") return;
 
-      await sleepMs(750);
-      await load(true);
+    const schoolId = missingVaSchoolId ||
+      (resolvedMissingVaSchool ? String(resolvedMissingVaSchool.sportschool_id) : "");
 
-      setViewMode(viewMode === "failed" ? "failed" : "checked");
+    if (!schoolId) {
+      setMissingVaFighters([]);
+      setMissingVaSelectedVa("");
+      return;
+    }
+
+    setMissingVaSchoolId(schoolId);
+    setMissingVaLoading(true);
+    setMissingVaSelectedVa("");
+
+    void authedFetch(
+      `/api/matchmaker/fighter-selector?sportschool_id=${encodeURIComponent(schoolId)}`,
+      { cache: "no-store" },
+    )
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || "Vechters van sportschool laden mislukt");
+        setMissingVaFighters(Array.isArray(json?.fighters) ? json.fighters : []);
+      })
+      .catch((e: any) => {
+        setMissingVaFighters([]);
+        setMsg(e?.message || "Vechters van sportschool laden mislukt");
+      })
+      .finally(() => setMissingVaLoading(false));
+  }, [
+    missingVaAanmeldingId,
+    missingVaMode,
+    missingVaSchoolId,
+    resolvedMissingVaSchool,
+  ]);
+
+  async function linkMissingVa() {
+    if (!missingVaAanmeldingId || !missingVaSelectedVa) {
+      setMsg("Kies eerst de juiste vechter uit de database.");
+      return;
+    }
+
+    const fighter = missingVaFighters.find(
+      (row) => String(row.va_nummer) === missingVaSelectedVa,
+    );
+
+    setBusyMode("save");
+    setMsg("");
+    try {
+      const res = await authedFetch("/api/matchmaker/aanmeldingen", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          aanmelding_id: missingVaAanmeldingId,
+          va_nummer: missingVaSelectedVa,
+          hydrate_from_fighter_database: true,
+          source: missingVaMode === "school"
+            ? "smart_search_missing_va_school"
+            : "smart_search_missing_va_name",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Vechter koppelen mislukt");
+
       setMsg(
-        responseOk
-          ? json?.message ||
-              "Fightpaspoort check afgerond. Aanmeldingen staan nu bij Gescrapt."
-          : finishedOrDataSeen
-            ? "Fightpaspoort check lijkt afgerond. Resultaten zijn opnieuw geladen."
-            : json?.error ||
-              "Controle niet bevestigd. Vernieuw de pagina of check de VPS-log.",
+        `${fighter?.naam || "De vechter"} (VA ${missingVaSelectedVa}) is aan de aanmelding gekoppeld.`,
       );
+      setMissingVaAanmeldingId(null);
+      setMissingVaSearch("");
+      setMissingVaSchoolName("");
+      setMissingVaSchoolId("");
+      setMissingVaMode("name");
+      setMissingVaFighters([]);
+      setMissingVaSelectedVa("");
+      await load(true);
     } catch (e: any) {
-      await load(true).catch(() => {});
-      setMsg(e?.message || "Fightpaspoort check mislukt");
+      setMsg(e?.message || "Vechter koppelen mislukt");
     } finally {
-      if (controlePollTokenRef.current === pollToken) {
-        setWaitTitle("Even wachten");
-        setWaitMessage("Fightpaspoort check loopt.");
-        setBusyMode("idle");
-      }
+      setBusyMode("idle");
     }
   }
 
@@ -949,7 +897,7 @@ export default function AanmeldingenPage() {
 
       setEditingId(null);
       setEditForm(null);
-      setMsg("Vechter bijgewerkt.");
+      setMsg("Aanmelding bijgewerkt en vechtercontext opnieuw opgebouwd.");
       await load(true);
     } catch (e: any) {
       setMsg(e?.message || "Opslaan mislukt");
@@ -1070,10 +1018,6 @@ export default function AanmeldingenPage() {
           background: #242424 !important;
           color: #ffffff !important;
         }
-        .fs-page315 .fs-status.gescrapt { border-color: rgba(34,197,94,.55) !important; color: #bbf7d0 !important; }
-        .fs-page315 .fs-status.scrape_mislukt { border-color: rgba(239,68,68,.65) !important; color: #fecaca !important; }
-        .fs-page315 .fs-status.controle_bezig { border-color: rgba(59,130,246,.65) !important; color: #bfdbfe !important; }
-        .fs-page315 .fs-status.rauw { border-color: rgba(255,77,0,.75) !important; color: #ff4d00 !important; }
         .fs-page315 .fs-zebra-row:nth-child(odd),
         .fs-page315 .fs-zebra-row:nth-child(even) {
           background: transparent !important;
@@ -1084,16 +1028,6 @@ export default function AanmeldingenPage() {
           .fs-page315 header { grid-template-columns: 1fr !important; text-align: center !important; }
         }
       `}</style>
-      {busyMode === "controle" && (
-        <WaitScreen
-          mode={busyMode}
-          title={waitTitle}
-          message={waitMessage}
-          fpSession={fpSession}
-          fpSessionLoading={fpSessionLoading}
-          onCheckFpSession={() => void checkFightPassportSession()}
-        />
-      )}
 
       <section style={chromeFrame}>
         <header style={heroHeader}>
@@ -1133,26 +1067,10 @@ export default function AanmeldingenPage() {
         {msg && <div style={messageBox}>{msg}</div>}
 
         <div style={statsGrid}>
-          <Stat
-            icon={<FileUp size={20} />}
-            label="Uploads"
-            value={uploads.length}
-          />
-          <Stat
-            icon={<Users size={20} />}
-            label="Niet gecheckt"
-            value={rawRows.length}
-          />
-          <Stat
-            icon={<Users size={20} />}
-            label="Gecheckt"
-            value={scrapedRows.length}
-          />
-          <Stat
-            icon={<Users size={20} />}
-            label="Mislukt"
-            value={failedRows.length}
-          />
+          <Stat icon={<FileUp size={20} />} label="Uploads" value={uploads.length} />
+          <Stat icon={<Users size={20} />} label="Aanmeldingen" value={allRows.length} />
+          <Stat icon={<AlertTriangle size={20} />} label="Naam/VA open" value={nameVaChecks.filter((check) => check.status === "open").length} />
+          <Stat icon={<Search size={20} />} label="Zonder VA" value={missingVaRows.length} />
         </div>
 
         <section style={accordionGrid}>
@@ -1190,6 +1108,74 @@ export default function AanmeldingenPage() {
                 Download template
               </a>
             </div>
+
+            <div style={uploadHistory}>
+              <div style={uploadHistoryHeader}>
+                <strong>Eerdere uploads</strong>
+                <span style={smallMuted}>
+                  Verwijder een compleet bestand inclusief de bijbehorende aanmeldingen.
+                </span>
+              </div>
+
+              {uploadTabs.length > 0 ? (
+                <div style={uploadHistoryList}>
+                  {uploadTabs.map((uploadRow, index) => {
+                    const id = uploadId(uploadRow);
+                    const filename =
+                      pick(uploadRow, [
+                        "raw_filename",
+                        "filename",
+                        "original_filename",
+                        "upload_filename",
+                      ]) || `Upload ${uploadTabs.length - index}`;
+                    const createdAt = pick(uploadRow, [
+                      "created_at",
+                      "createdAt",
+                      "uploaded_at",
+                    ]);
+                    const inserted = pick(uploadRow, [
+                      "inserted_count",
+                      "row_count",
+                      "aantal",
+                    ]);
+                    const duplicates = pick(uploadRow, [
+                      "duplicate_count",
+                      "duplicates",
+                    ]);
+
+                    return (
+                      <div key={id || `${filename}-${index}`} style={uploadHistoryRow}>
+                        <div style={uploadHistoryInfo}>
+                          <b style={uploadFilename}>{filename}</b>
+                          <span style={smallMuted}>
+                            {createdAt ? fmtDate(createdAt) : "Datum onbekend"}
+                            {inserted ? ` · ${inserted} toegevoegd` : ""}
+                            {duplicates ? ` · ${duplicates} dubbel` : ""}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="fs-red-btn compact"
+                          onClick={() => clearUpload(id)}
+                          disabled={busy || !id}
+                          title={
+                            id
+                              ? `Verwijder upload ${filename}`
+                              : "Upload-id ontbreekt"
+                          }
+                        >
+                          <Trash2 size={15} />
+                          Upload verwijderen
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={uploadHistoryEmpty}>Nog geen uploads gevonden.</div>
+              )}
+            </div>
           </AccordionPanel>
 
           <AccordionPanel
@@ -1197,266 +1183,304 @@ export default function AanmeldingenPage() {
             setOpen={setManualOpen}
             icon={<Plus size={18} />}
             title="Handmatig toevoegen"
-            subtitle="Volgorde: discipline, klasse, geslacht, naam, sportschool, VA nummer, gewicht en optioneel contact."
+            subtitle="Zoek direct op naam of VA-nummer, of kies eerst een sportschool. De vechtergegevens komen uit FightPassport."
           >
-            <div style={manualLine}>
-              <input
-                placeholder="Discipline"
-                value={form.discipline}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, discipline: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="Klasse"
-                value={form.klasse}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, klasse: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="Geslacht"
-                value={form.geslacht}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, geslacht: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="Naam"
-                value={form.naam}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, naam: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="Sportschool"
-                value={form.gym}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, gym: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="VA nummer"
-                value={form.va_nummer}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, va_nummer: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="Gewicht"
-                value={form.gewicht}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, gewicht: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="Email trainer"
-                value={form.email}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, email: e.target.value }))
-                }
-                style={input}
-              />
-              <input
-                placeholder="Telefoon trainer"
-                value={form.telefoon}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, telefoon: e.target.value }))
-                }
-                style={input}
-              />
-
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
               <button
-                className="fs-silver-btn compact-action"
-                onClick={addManual}
-                disabled={busy}
+                className={searchMode === "fighter" ? "fs-orange-btn compact" : "fs-silver-btn compact"}
+                onClick={() => {
+                  setSearchMode("fighter");
+                  setSelectedSportschoolId("");
+                  setSelectedVa("");
+                  setFighters([]);
+                }}
+                type="button"
               >
-                <Plus size={16} />
-                Toevoegen
+                Zoek vechter
               </button>
+              <button
+                className={searchMode === "school" ? "fs-orange-btn compact" : "fs-silver-btn compact"}
+                onClick={() => {
+                  setSearchMode("school");
+                  setFighterSearch("");
+                  setSelectedVa("");
+                  setFighters([]);
+                }}
+                type="button"
+              >
+                Kies sportschool
+              </button>
+            </div>
+
+            <div style={manualSmartGrid}>
+              {searchMode === "school" ? (
+                <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                  <span>Sportschool</span>
+                  <select
+                    value={selectedSportschoolId}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSelectedSportschoolId(value);
+                      void loadFightersForSchool(value);
+                    }}
+                    style={input}
+                    disabled={busy || selectorLoading}
+                  >
+                    <option value="">Kies sportschool</option>
+                    {sportscholen.map((school) => (
+                      <option key={school.sportschool_id} value={school.sportschool_id}>
+                        {school.naam}{school.plaats ? ` — ${school.plaats}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                  <span>Zoek in alle vechters</span>
+                  <input
+                    placeholder="Typ minimaal 2 tekens van naam of VA-nummer"
+                    value={fighterSearch}
+                    onChange={(e) => {
+                      setFighterSearch(e.target.value);
+                      setSelectedVa("");
+                      setSelectedSportschoolId("");
+                    }}
+                    style={input}
+                    disabled={busy}
+                    autoComplete="off"
+                  />
+                </label>
+              )}
+
+              <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                <span>Vechter</span>
+                <select
+                  value={selectedVa}
+                  onChange={(e) => {
+                    const va = e.target.value;
+                    setSelectedVa(va);
+                    const fighter = fighters.find((row) => String(row.va_nummer) === va);
+                    const schools = fighter?.sportscholen ?? [];
+                    if (searchMode === "fighter") {
+                      setSelectedSportschoolId(schools.length === 1 ? String(schools[0].sportschool_id) : "");
+                    }
+                  }}
+                  style={input}
+                  disabled={selectorLoading || fighters.length === 0}
+                >
+                  <option value="">
+                    {selectorLoading ? "Vechters laden..." : fighters.length ? "Kies vechter" : "Geen resultaten geladen"}
+                  </option>
+                  {filteredFighters.map((fighter) => (
+                    <option key={fighter.va_nummer} value={fighter.va_nummer}>
+                      {fighter.naam} — VA {fighter.va_nummer}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedFighter && (
+                <>
+                  <div style={fighterPreview}>
+                    <b>{selectedFighter.naam}</b>
+                    <span>VA {selectedFighter.va_nummer}</span>
+                    <span>{selectedFighter.geslacht || "Geslacht onbekend"}</span>
+                    <span>{selectedFighter.berekende_klasse || selectedFighter.nulmeting_klasse || "Klasse onbekend"}</span>
+                    <span>{selectedFighter.primary_discipline || selectedFighter.nulmeting_discipline || "Discipline onbekend"}</span>
+                    <span>{selectedFighter.licentie_actief ? "Licentie actief" : "Geen actieve licentie"}</span>
+                    <span>{selectedFighter.fit_to_fight ? "Fit to fight" : "Niet fit to fight"}</span>
+                    {selectedFighter.heeft_startverbod && <strong>Startverbod</strong>}
+                  </div>
+
+                  <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                    <span>Sportschool voor deze aanmelding</span>
+                    <select
+                      value={selectedSportschoolId}
+                      onChange={(e) => setSelectedSportschoolId(e.target.value)}
+                      style={input}
+                      disabled={busy || selectorLoading}
+                    >
+                      <option value="">Kies sportschool</option>
+                      {sportscholen.map((school) => {
+                        const linked = (selectedFighter.sportscholen ?? []).some(
+                          (item) => Number(item.sportschool_id) === Number(school.sportschool_id),
+                        );
+                        return (
+                          <option key={school.sportschool_id} value={school.sportschool_id}>
+                            {school.naam}{school.plaats ? ` — ${school.plaats}` : ""}{linked ? " · gekoppeld in FightPassport" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <span style={schoolHelpText}>
+                      De gekoppelde sportschool is vooraf geselecteerd. Je mag voor deze aanmelding een andere sportschool kiezen; die afwijking wordt voor admin geregistreerd.
+                    </span>
+                  </label>
+                </>
+              )}
+
+              <label style={fieldLabel}>
+                <span>Actueel wedstrijdgewicht</span>
+                <input
+                  placeholder="Bijvoorbeeld 67,5"
+                  inputMode="decimal"
+                  value={form.gewicht}
+                  onChange={(e) => setForm((f) => ({ ...f, gewicht: e.target.value }))}
+                  style={input}
+                  disabled={!selectedFighter || busy}
+                />
+              </label>
+
+              <div style={{ display: "flex", alignItems: "end" }}>
+                <button
+                  className="fs-silver-btn compact-action"
+                  onClick={addManual}
+                  disabled={busy || selectorLoading || !selectedFighter}
+                >
+                  <Plus size={16} />
+                  Toevoegen
+                </button>
+              </div>
             </div>
           </AccordionPanel>
         </section>
 
-        <section style={metalPanelNoPadding}>
-          <div style={tableHead}>
-            <h2 style={tableTitle}>Uploads</h2>
+        {nameVaChecks.some((check) => check.status === "open") && (
+          <section style={metalPanelNoPadding}>
+            <div style={tableHead}>
+              <div>
+                <h2 style={tableTitle}>Naam en VA controleren</h2>
+                <div style={smallMuted}>Alleen afwijkingen uit geüploade bestanden. Keur een roepnaam goed of koppel de aanmelding aan het juiste VA-nummer.</div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 8, padding: 12 }}>
+              {nameVaChecks.filter((check) => check.status === "open").map((check) => (
+                <div key={check.id} style={nameVaCheckRow}>
+                  <div style={{ minWidth: 220 }}>
+                    <b>{check.naam_upload}</b>
+                    <div style={smallMuted}>Upload: VA {check.va_nummer_upload}</div>
+                  </div>
+                  <div style={{ minWidth: 220 }}>
+                    <span style={smallMuted}>FightPassport</span>
+                    <div><b>{check.naam_fightpassport || "Naam niet gevonden"}</b></div>
+                    <div style={smallMuted}>VA {check.va_nummer_fightpassport || check.va_nummer_upload}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="fs-orange-btn compact"
+                    onClick={() => resolveNameVaCheck(check, "approve_name")}
+                    disabled={busy}
+                  >
+                    Naam is akkoord
+                  </button>
+                  <input
+                    style={{ ...cellInput, minWidth: 130 }}
+                    placeholder="Juiste VA"
+                    inputMode="numeric"
+                    value={correctVaByCheck[check.id] || ""}
+                    onChange={(e) =>
+                      setCorrectVaByCheck((current) => ({ ...current, [check.id]: e.target.value }))
+                    }
+                    disabled={busy}
+                  />
+                  <button
+                    type="button"
+                    className="fs-silver-btn compact"
+                    onClick={() => resolveNameVaCheck(check, "correct_va")}
+                    disabled={busy || !s(correctVaByCheck[check.id])}
+                  >
+                    VA aanpassen
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
+        <section style={metalPanelNoPadding}>
+          <div style={registrationTabs}>
             <button
-              className="fs-silver-btn compact"
-              onClick={() => load()}
-              disabled={busy}
+              type="button"
+              className={activeTab === "withVa" ? "fs-orange-btn compact" : "fs-silver-btn compact"}
+              onClick={() => {
+                setActiveTab("withVa");
+                setMissingVaAanmeldingId(null);
+                setTableSearch("");
+              }}
             >
-              <RefreshCw size={16} />
-              Vernieuwen
+              <Users size={15} />
+              Aanmeldingen met VA ({rowsWithVa.length})
+            </button>
+            <button
+              type="button"
+              className={activeTab === "withoutVa" ? "fs-orange-btn compact" : "fs-silver-btn compact"}
+              onClick={() => {
+                setActiveTab("withoutVa");
+                setEditingId(null);
+                setEditForm(null);
+                setTableSearch("");
+              }}
+            >
+              <AlertTriangle size={15} />
+              Zonder VA-nummer ({missingVaRows.length})
             </button>
           </div>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={table}>
-              <thead>
-                <tr>
-                  {[
-                    "Upload",
-                    "Bestand",
-                    "Niet gecheckt",
-                    "Gecheckt",
-                    "Mislukt",
-                    "Actie",
-                  ].map((h) => (
-                    <th style={th} key={h}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {uploadTabs.map((u, index) => {
-                  const id = s(u.upload_id || u.id || u.upload_batch_id);
-                  const countOpen = id
-                    ? rawRows.filter((r) => uploadId(r) === id).length
-                    : 0;
-                  const countScraped = id
-                    ? scrapedRows.filter((r) => uploadId(r) === id).length
-                    : 0;
-                  const countFailed = id
-                    ? failedRows.filter((r) => uploadId(r) === id).length
-                    : 0;
-                  return (
-                    <tr key={id || index} className="fs-zebra-row">
-                      <td style={td}>
-                        <b>
-                          {index === 0
-                            ? "Nieuwste upload"
-                            : `Upload ${uploadTabs.length - index}`}
-                        </b>
-                        <br />
-                        <span style={smallMuted}>{fmt(id)}</span>
-                      </td>
-                      <td style={td}>
-                        {fmt(u.filename || u.bestandsnaam || u.raw_filename)}
-                      </td>
-                      <td style={td}>{countOpen}</td>
-                      <td style={td}>{countScraped}</td>
-                      <td style={td}>{countFailed}</td>
-                      <td style={td}>
-                        {id && (
-                          <button
-                            className="fs-red-btn compact"
-                            onClick={() => clearUpload(id)}
-                            disabled={busy}
-                          >
-                            <Trash2 size={14} />
-                            Verwijder upload
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {!uploads.length && (
-                  <tr className="fs-zebra-row">
-                    <td colSpan={6} style={td}>
-                      Nog geen uploads.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section style={metalPanelNoPadding}>
-          <div style={tableHead}>
-            <h2 style={tableTitle}>
-              {viewMode === "unchecked" && `Niet gecheckt (${rawRows.length})`}
-              {viewMode === "checked" && `Gecheckt (${scrapedRows.length})`}
-              {viewMode === "failed" && `Mislukt (${failedRows.length})`}
-              {viewMode === "all" && `Alles (${allRows.length})`}
+          <div style={compactTableHead}>
+            <h2 style={compactTableTitle}>
+              {activeTab === "withoutVa"
+                ? "Aanmeldingen zonder VA-nummer"
+                : "Alle gekoppelde aanmeldingen"}{" "}
+              ({filteredRows.length}/{activeRows.length})
             </h2>
 
-            <div style={tableActions}>
-              <button
-                className={
-                  viewMode === "unchecked"
-                    ? "fs-orange-btn compact"
-                    : "fs-silver-btn compact"
-                }
-                onClick={() => setViewMode("unchecked")}
-                disabled={busy}
-              >
-                Niet gecheckt
-              </button>
-              <button
-                className={
-                  viewMode === "checked"
-                    ? "fs-orange-btn compact"
-                    : "fs-silver-btn compact"
-                }
-                onClick={() => setViewMode("checked")}
-                disabled={busy}
-              >
-                Gecheckt
-              </button>
-              <button
-                className={
-                  viewMode === "failed"
-                    ? "fs-orange-btn compact"
-                    : "fs-silver-btn compact"
-                }
-                onClick={() => setViewMode("failed")}
-                disabled={busy}
-              >
-                Mislukt
-              </button>
-              <button
-                className={
-                  viewMode === "all"
-                    ? "fs-orange-btn compact"
-                    : "fs-silver-btn compact"
-                }
-                onClick={() => setViewMode("all")}
-                disabled={busy}
-              >
-                Alles
-              </button>
+            <label style={compactTableSearchWrap}>
+              <Search size={16} />
+              <input
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+                placeholder="Slim zoeken in aanmeldingen"
+                style={tableSearchInput}
+                aria-label="Slim zoeken in alle aanmeldingen"
+              />
+              {tableSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTableSearch("")}
+                  style={clearSearchButton}
+                  aria-label="Zoekfilter wissen"
+                  title="Zoekfilter wissen"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </label>
 
-              <button
-                className="fs-green-btn compact"
-                onClick={controleer}
-                disabled={busy || !rowsForCheck.length}
-              >
-                <Radar size={15} />
-                {viewMode === "failed"
-                  ? "Check mislukt opnieuw"
-                  : "Start Autocheck"}
-              </button>
-
-              <Link
-                href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`}
-                className="fs-blue-btn compact"
-              >
-                <Users size={15} />
-                Ga naar matchen
-              </Link>
-            </div>
+            <Link
+              href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`}
+              className="fs-blue-btn compact"
+              style={compactMatchLink}
+            >
+              <Users size={15} />
+              Ga naar matchen
+            </Link>
           </div>
 
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ width: "100%", overflowX: "hidden" }}>
             <table style={table}>
+              <colgroup>
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "27%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "12%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   {[
-                    "Status",
                     "Discipline",
                     "Klasse",
                     "Geslacht",
@@ -1474,22 +1498,20 @@ export default function AanmeldingenPage() {
               </thead>
 
               <tbody>
-                {visibleRows.map((r, index) => {
+                {filteredRows.map((r, index) => {
                   const id = aanmeldingId(r);
                   const key =
                     id || `${name(r)}-${pick(r, ["va_nummer", "va"])}-${index}`;
                   const isEditing = Boolean(id && editingId === id && editForm);
+                  const vaNumber = pick(r, ["va_nummer", "va", "fightpaspoort_nummer"]);
+                  
+                  const isMissingVaSearchOpen = Boolean(
+                    id && missingVaAanmeldingId === id,
+                  );
 
                   return (
-                    <tr key={key} className="fs-zebra-row">
-                      <td style={td}>
-                        <StatusBadge
-                          status={statusOf(r)}
-                          scrapedAt={pick(r, ["scraped_at"])}
-                          failedAt={pick(r, ["scrape_failed_at"])}
-                        />
-                      </td>
-
+                    <React.Fragment key={key}>
+                    <tr className="fs-zebra-row">
                       {isEditing && editForm ? (
                         <>
                           <td style={td}>
@@ -1617,12 +1639,23 @@ export default function AanmeldingenPage() {
                             )}
                           </td>
                           <td style={td}>
-                            {fmt(
-                              pick(r, [
-                                "va_nummer",
-                                "va",
-                                "fightpaspoort_nummer",
-                              ]),
+                            {vaNumber ? (
+                              fmt(vaNumber)
+                            ) : (
+                              <div style={missingVaCell}>
+                                <span style={missingVaBadge}>
+                                  <AlertTriangle size={13} /> Geen VA-nummer
+                                </span>
+                                <button
+                                  type="button"
+                                  className="fs-orange-btn compact"
+                                  style={smartSearchButton}
+                                  onClick={() => openMissingVaSearch(r)}
+                                  disabled={busy || !id}
+                                >
+                                  <Search size={14} /> Slim zoeken
+                                </button>
+                              </div>
                             )}
                           </td>
                           <td style={td}>
@@ -1630,39 +1663,180 @@ export default function AanmeldingenPage() {
                           </td>
                           <td style={td}>
                             <div style={actionCell}>
-                              {viewMode !== "checked" && (
-                                <>
+                              <>
+                                  {vaNumber && (
+                                    <Link
+                                      href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/fighter/${encodeURIComponent(vaNumber)}`}
+                                      className="fs-silver-btn"
+                                      style={actionIconButton}
+                                      aria-label={`Open fighterpagina van ${name(r)}`}
+                                      title="Fighter bekijken"
+                                    >
+                                      <Eye size={16} />
+                                    </Link>
+                                  )}
+
                                   <button
-                                    className="fs-silver-btn compact"
+                                    className="fs-silver-btn"
+                                    style={actionIconButton}
                                     onClick={() => startEdit(r)}
                                     disabled={busy || !id}
+                                    aria-label={`Bewerk ${name(r)}`}
+                                    title="Bewerken"
                                   >
-                                    <Edit3 size={14} />
-                                    Bewerk
+                                    <Edit3 size={16} />
                                   </button>
 
                                   <button
-                                    className="fs-red-btn compact"
+                                    className="fs-red-btn"
+                                    style={actionIconButton}
                                     onClick={() => deleteFighter(r)}
                                     disabled={busy || !id}
+                                    aria-label={`Verwijder ${name(r)}`}
+                                    title="Verwijderen"
                                   >
-                                    <Trash2 size={14} />
-                                    Verwijder
+                                    <Trash2 size={16} />
                                   </button>
                                 </>
-                              )}
                             </div>
                           </td>
                         </>
                       )}
                     </tr>
+                    {isMissingVaSearchOpen && (
+                      <tr style={missingVaSearchRow}>
+                        <td colSpan={8} style={missingVaSearchCell}>
+                          <div style={missingVaSearchPanel}>
+                            <div style={missingVaSearchIntro}>
+                              <AlertTriangle size={18} />
+                              <div>
+                                <b>{name(r)} heeft geen VA-nummer in de upload.</b>
+                                <div style={smallMuted}>
+                                  Zoek de juiste vechter in de database en koppel het VA-nummer aan deze aanmelding.
+                                </div>
+                              </div>
+                            </div>
+                            <div style={missingVaModeButtons}>
+                              <button
+                                type="button"
+                                className={missingVaMode === "name" ? "fs-orange-btn compact" : "fs-silver-btn compact"}
+                                onClick={() => {
+                                  setMissingVaMode("name");
+                                  setMissingVaSelectedVa("");
+                                  setMissingVaFighters([]);
+                                }}
+                              >
+                                <Search size={14} /> Zoek op naam
+                              </button>
+                              <button
+                                type="button"
+                                className={missingVaMode === "school" ? "fs-orange-btn compact" : "fs-silver-btn compact"}
+                                onClick={() => {
+                                  setMissingVaMode("school");
+                                  setMissingVaSelectedVa("");
+                                  setMissingVaFighters([]);
+                                }}
+                                disabled={!missingVaSchoolName}
+                              >
+                                <Users size={14} /> Vechters van sportschool
+                              </button>
+                            </div>
+                            <div style={missingVaSearchControls}>
+                              {missingVaMode === "name" ? (
+                                <input
+                                  value={missingVaSearch}
+                                  onChange={(e) => {
+                                    setMissingVaSearch(e.target.value);
+                                    setMissingVaSelectedVa("");
+                                  }}
+                                  placeholder="Zoek op naam of VA-nummer"
+                                  style={input}
+                                  autoFocus
+                                />
+                              ) : (
+                                <select
+                                  value={missingVaSchoolId || (resolvedMissingVaSchool ? String(resolvedMissingVaSchool.sportschool_id) : "")}
+                                  onChange={(e) => {
+                                    setMissingVaSchoolId(e.target.value);
+                                    setMissingVaSelectedVa("");
+                                  }}
+                                  style={input}
+                                  disabled={missingVaLoading || sportscholen.length === 0}
+                                >
+                                  <option value="">
+                                    {missingVaSchoolName
+                                      ? `Sportschool uit aanmelding: ${missingVaSchoolName}`
+                                      : "Geen sportschool ingevuld"}
+                                  </option>
+                                  {sportscholen.map((school) => (
+                                    <option key={school.sportschool_id} value={school.sportschool_id}>
+                                      {school.naam}{school.plaats ? ` — ${school.plaats}` : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              <select
+                                value={missingVaSelectedVa}
+                                onChange={(e) => setMissingVaSelectedVa(e.target.value)}
+                                style={input}
+                                disabled={missingVaLoading || missingVaFighters.length === 0}
+                              >
+                                <option value="">
+                                  {missingVaLoading
+                                    ? "Database doorzoeken..."
+                                    : missingVaFighters.length
+                                      ? missingVaMode === "school"
+                                        ? `Kies een vechter van ${resolvedMissingVaSchool?.naam || missingVaSchoolName}`
+                                        : "Kies de juiste vechter"
+                                      : missingVaMode === "school"
+                                        ? "Geen vechters bij deze sportschool gevonden"
+                                        : "Geen resultaten"}
+                                </option>
+                                {missingVaFighters.map((fighter) => (
+                                  <option key={fighter.va_nummer} value={fighter.va_nummer}>
+                                    {fighter.naam} — VA {fighter.va_nummer}
+                                    {fighter.geboortedatum ? ` — ${fmtDate(fighter.geboortedatum)}` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="fs-orange-btn compact"
+                                onClick={linkMissingVa}
+                                disabled={busy || missingVaLoading || !missingVaSelectedVa}
+                              >
+                                <Save size={14} /> Koppelen
+                              </button>
+                              <button
+                                type="button"
+                                className="fs-silver-btn compact"
+                                onClick={() => {
+                                  setMissingVaAanmeldingId(null);
+                                  setMissingVaSearch("");
+                                  setMissingVaFighters([]);
+                                  setMissingVaSelectedVa("");
+                                }}
+                                disabled={busy}
+                              >
+                                <X size={14} /> Sluiten
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
 
-                {!loading && !visibleRows.length && (
+                {!loading && !filteredRows.length && (
                   <tr className="fs-zebra-row">
-                    <td colSpan={9} style={td}>
-                      Geen aanmeldingen in deze weergave.
+                    <td colSpan={8} style={td}>
+                      {activeRows.length
+                        ? "Geen aanmeldingen gevonden met dit zoekfilter."
+                        : activeTab === "withoutVa"
+                          ? "Er zijn geen aanmeldingen zonder VA-nummer."
+                          : "Er zijn nog geen gekoppelde aanmeldingen voor deze matchmaking."}
                     </td>
                   </tr>
                 )}
@@ -1679,42 +1853,6 @@ export default function AanmeldingenPage() {
   );
 }
 
-function StatusBadge({
-  status,
-  scrapedAt,
-  failedAt,
-}: {
-  status: string;
-  scrapedAt?: string;
-  failedAt?: string;
-}) {
-  const normalized = normalizeStatus(status);
-  const label =
-    normalized === "gescrapt"
-      ? "Gecheckt"
-      : normalized === "scrape_mislukt"
-        ? "Mislukt"
-        : normalized === "controle_bezig"
-          ? "Bezig"
-          : normalized === "gematcht"
-            ? "Gematcht"
-            : normalized === "afgemeld"
-              ? "Afgemeld"
-              : "Niet gecheckt";
-
-  const title =
-    normalized === "gescrapt" && scrapedAt
-      ? `Gecheckt op ${scrapedAt}`
-      : normalized === "scrape_mislukt" && failedAt
-        ? `Mislukt op ${failedAt}`
-        : label;
-
-  return (
-    <span className={`fs-status ${normalized}`} title={title}>
-      {label}
-    </span>
-  );
-}
 
 function Stat({
   icon,
@@ -1723,7 +1861,7 @@ function Stat({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: number;
+  value: number | string;
 }) {
   return (
     <div style={statCard}>
@@ -1769,82 +1907,6 @@ function AccordionPanel({
       </button>
 
       {open && <div style={accordionBody}>{children}</div>}
-    </div>
-  );
-}
-
-function WaitScreen({
-  mode,
-  title,
-  message,
-  fpSession,
-  fpSessionLoading,
-  onCheckFpSession,
-}: {
-  mode: BusyMode;
-  title?: string;
-  message?: string;
-  fpSession?: FpSessionStatus | null;
-  fpSessionLoading?: boolean;
-  onCheckFpSession?: () => void;
-}) {
-  const needsUnlock = isFightPassportUnlockStatus(fpSession?.status);
-  return (
-    <div style={waitOverlay}>
-      <div style={waitCard}>
-        <div style={waitLogoBox}>
-          <Image
-            src={LOGO_SRC}
-            alt="FightSupport"
-            width={330}
-            height={85}
-            style={waitLogoImg}
-          />
-        </div>
-
-        <Loader2 size={46} style={spinner} />
-        <h2 style={waitTitle}>{title || busyText(mode)}</h2>
-        <p style={waitText}>{message || busySubText(mode)}</p>
-
-        {needsUnlock ? (
-          <div style={unlockActions}>
-            <button
-              type="button"
-              onClick={() =>
-                window.open(
-                  "/dashboard/admin/fightpassport-sessie",
-                  "_blank",
-                  "noopener,noreferrer",
-                )
-              }
-              style={unlockPrimaryButton}
-            >
-              Unlockcode invullen
-            </button>
-
-            <button
-              type="button"
-              onClick={onCheckFpSession}
-              disabled={fpSessionLoading}
-              style={{
-                ...unlockSecondaryButton,
-                opacity: fpSessionLoading ? 0.65 : 1,
-              }}
-            >
-              Status opnieuw checken
-            </button>
-          </div>
-        ) : null}
-
-        <div style={waitStatusPill}>
-          <span style={waitStatusDot} />
-          {needsUnlock ? "Wacht op unlockcode" : "Controle bezig"}
-        </div>
-
-        <div style={progressTrack}>
-          <div style={progressFill} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -2074,6 +2136,100 @@ const uploadLine: CSSProperties = {
   alignItems: "center",
 };
 
+const uploadHistory: CSSProperties = {
+  marginTop: 16,
+  borderTop: "1px solid rgba(255,255,255,.16)",
+  paddingTop: 14,
+};
+
+const uploadHistoryHeader: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 3,
+  marginBottom: 10,
+};
+
+const uploadHistoryList: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const uploadHistoryRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  padding: 10,
+  border: "1px solid rgba(255,255,255,.18)",
+  background: "#15161a",
+};
+
+const uploadHistoryInfo: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 3,
+};
+
+const uploadFilename: CSSProperties = {
+  color: "#fff",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const uploadHistoryEmpty: CSSProperties = {
+  padding: 10,
+  border: "1px dashed rgba(255,255,255,.22)",
+  color: "#b9bec5",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const nameVaCheckRow: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.2fr 1.2fr auto 140px auto",
+  gap: 10,
+  alignItems: "center",
+  padding: 10,
+  border: "1px solid rgba(255,255,255,.18)",
+  background: "#15161a",
+};
+
+const manualSmartGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
+  alignItems: "end",
+};
+
+const fieldLabel: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  fontSize: 12,
+  fontWeight: 900,
+  color: "#d7dadd",
+};
+
+const schoolHelpText: CSSProperties = {
+  color: "#fbbf24",
+  fontSize: 11,
+  fontWeight: 800,
+  lineHeight: 1.35,
+};
+
+const fighterPreview: CSSProperties = {
+  gridColumn: "1 / -1",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+  padding: 12,
+  border: "1px solid #555d64",
+  background: "#11161a",
+  color: "#dfe3e6",
+  fontSize: 12,
+};
+
 const manualLine: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(5,minmax(130px,1fr))",
@@ -2105,14 +2261,164 @@ const input: CSSProperties = {
 const cellInput: CSSProperties = {
   ...input,
   width: "100%",
-  minWidth: 110,
-  padding: "7px 9px",
+  minWidth: 0,
+  padding: "5px 6px",
+  minHeight: 30,
+  fontSize: 12,
 };
 
 const actionCell: CSSProperties = {
   display: "flex",
+  gap: 4,
+  flexWrap: "nowrap",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const actionIconButton: CSSProperties = {
+  width: 30,
+  height: 30,
+  minWidth: 30,
+  padding: 0,
+  display: "inline-grid",
+  placeItems: "center",
+  cursor: "pointer",
+};
+
+const tableSearchWrap: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  minWidth: 310,
+  minHeight: 34,
+  padding: "0 8px",
+  border: "1px solid rgba(255,255,255,.28)",
+  background: "#111",
+  color: "#d4d4d8",
+};
+
+const tableSearchInput: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  border: 0,
+  padding: "7px 2px",
+  background: "transparent",
+  color: "#fff",
+  outline: "none",
+  fontWeight: 800,
+};
+
+const clearSearchButton: CSSProperties = {
+  width: 24,
+  height: 24,
+  minWidth: 24,
+  padding: 0,
+  display: "grid",
+  placeItems: "center",
+  border: 0,
+  background: "transparent",
+  color: "#fff",
+  cursor: "pointer",
+};
+
+const missingVaCell: CSSProperties = {
+  display: "grid",
+  gap: 5,
+  justifyItems: "start",
+};
+
+const missingVaBadge: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  padding: "4px 6px",
+  border: "1px solid #f59e0b",
+  background: "rgba(245,158,11,.15)",
+  color: "#fbbf24",
+  fontSize: 11,
+  fontWeight: 950,
+  textTransform: "uppercase",
+};
+
+const smartSearchButton: CSSProperties = {
+  minHeight: 27,
+  padding: "4px 7px",
+  fontSize: 11,
+};
+
+const missingVaSearchRow: CSSProperties = {
+  background: "#0f1012",
+};
+
+const missingVaSearchCell: CSSProperties = {
+  padding: 0,
+  borderBottom: `2px solid ${ORANGE}`,
+};
+
+const missingVaSearchPanel: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  padding: 12,
+  background: "linear-gradient(180deg,rgba(245,158,11,.12),#111216)",
+};
+
+const missingVaSearchIntro: CSSProperties = {
+  display: "flex",
+  gap: 9,
+  alignItems: "center",
+  color: "#fbbf24",
+};
+
+const missingVaModeButtons: CSSProperties = {
+  display: "flex",
   gap: 8,
   flexWrap: "wrap",
+};
+
+const missingVaSearchControls: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(220px,1fr) minmax(300px,1.4fr) auto auto",
+  gap: 8,
+  alignItems: "center",
+};
+
+const registrationTabs: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  padding: "12px 12px 0",
+  borderBottom: "1px solid rgba(255,255,255,.12)",
+};
+
+const compactTableHead: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(max-content, 1fr) minmax(360px, 520px) max-content",
+  alignItems: "center",
+  gap: 18,
+  padding: 14,
+  background: "linear-gradient(180deg,#24262c,#101114)",
+  color: "white",
+  borderBottom: `3px solid ${ORANGE}`,
+};
+
+const compactTableTitle: CSSProperties = {
+  margin: 0,
+  fontSize: 19,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+  lineHeight: 1.1,
+};
+
+const compactTableSearchWrap: CSSProperties = {
+  ...tableSearchWrap,
+  width: "100%",
+  minWidth: 0,
+  margin: 0,
+};
+
+const compactMatchLink: CSSProperties = {
+  whiteSpace: "nowrap",
+  justifySelf: "end",
 };
 
 const tableHead: CSSProperties = {
@@ -2142,15 +2448,15 @@ const tableTitle: CSSProperties = {
 const table: CSSProperties = {
   width: "100%",
   borderCollapse: "collapse",
-  minWidth: 1180,
+  tableLayout: "fixed",
   background: "#111216",
 };
 
 const th: CSSProperties = {
   textAlign: "left",
-  padding: "12px 15px",
+  padding: "8px 8px",
   color: "#fff",
-  fontSize: 13,
+  fontSize: 11,
   textTransform: "uppercase",
   background: ORANGE,
   borderRight: "1px solid rgba(255,255,255,.35)",
@@ -2158,9 +2464,12 @@ const th: CSSProperties = {
 };
 
 const td: CSSProperties = {
-  padding: "12px 15px",
-  verticalAlign: "top",
+  padding: "8px 8px",
+  verticalAlign: "middle",
   borderRight: "1px solid rgba(255,255,255,.12)",
+  fontSize: 13,
+  lineHeight: 1.25,
+  overflowWrap: "anywhere",
 };
 
 const unlockActions: CSSProperties = {
@@ -2370,26 +2679,6 @@ const globalCss = `
   font-weight:950;
   text-transform:uppercase;
   letter-spacing:.7px;
-}
-.fs-status.rauw{
-  color:#111;
-  border:1px solid #ffd37a;
-  background:linear-gradient(180deg,#fff2bd,#f6b942);
-}
-.fs-status.gescrapt{
-  color:#fff;
-  border:1px solid #4dff91;
-  background:linear-gradient(180deg,#145b2a,#098134);
-}
-.fs-status.scrape_mislukt{
-  color:#fff;
-  border:1px solid #ff8a8a;
-  background:linear-gradient(180deg,#7a1d1d,#c92323);
-}
-.fs-status.controle_bezig{
-  color:#fff;
-  border:1px solid #54a2ff;
-  background:linear-gradient(180deg,#142948,#0b58b8);
 }
 .fs-status.gematcht{
   color:#fff;

@@ -28,6 +28,16 @@ function firstFilled(...values: unknown[]): string | null {
   return null;
 }
 
+function normalizeNameForComparison(v: unknown): string {
+  return cleanNamePart(v)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function aanmeldingFullName(row: AnyRow): string {
   const voornaam = cleanNamePart(row?.voornaam);
   const achternaam = cleanNamePart(row?.achternaam);
@@ -143,14 +153,14 @@ export function buildSingleFighterContext(params: {
     pick(source, ["geboortedatum", "geboortedatum_input"]) ??
     pick(aanmelding, ["geboortedatum", "geboortedatum_input"]);
 
-  const gymFp = pick(raw, ["sportschool", "gym", "sportschool_naam"]);
+  const gymFp = pick(raw, ["sportschool", "gym", "sportschool_naam", "sportschool_fp"]);
   const gymInput =
     pick(source, ["gym", "sportschool", "sportschool_naam", "gym_input"]) ??
     pick(aanmelding, ["gym", "sportschool", "sportschool_naam", "gym_input"]);
 
-  const klasseFp = pick(raw, ["klasse", "nulmeting_klasse", "klasse_fp"]);
+  const klasseFp = pick(raw, ["berekende_klasse", "nulmeting_klasse", "klasse", "klasse_fp"]);
   const klasseInput = pick(source, ["klasse", "klasse_mm"]);
-  const licentieRaw = pick(raw, ["licentie", "licentie_status", "licentie_ok", "heeft_licentie"]);
+  const licentieRaw = pick(raw, ["licentie_actief", "licentie", "licentie_status", "licentie_ok", "heeft_licentie"]);
   const startverbodRaw = pick(raw, ["heeft_startverbod", "startverbod"]);
   const keurmerkRaw = pick(raw, ["heeft_keurmerk", "keurmerk", "gym_keurmerk"]);
   const now = new Date().toISOString();
@@ -158,6 +168,11 @@ export function buildSingleFighterContext(params: {
   return {
     matchmaking_id: matchmakingId,
     controle_run_id: controleRunId,
+
+    status: raw ? "beschikbaar" : "controle_mislukt",
+    beschikbaar: !!raw,
+    gematcht: false,
+    afgemeld: false,
 
     // Normale aanmelding-id blijft behouden. Toernooi heeft daarnaast zijn eigen rij-id.
     inschrijving_id: aanmelding.id ?? source?.aanmelding_id ?? null,
@@ -176,7 +191,7 @@ export function buildSingleFighterContext(params: {
     va_nummer: va ?? raw?.va_nummer ?? raw?.fighter_id ?? null,
     va: va ?? raw?.va_nummer ?? raw?.fighter_id ?? null,
 
-    naam: naamFp || naamInput || null,
+    naam: naamInput || naamFp || null,
     naam_input: naamInput || null,
     naam_mm: naamInput || null,
     naam_fp: naamFp || null,
@@ -184,7 +199,10 @@ export function buildSingleFighterContext(params: {
     voornaam: source?.voornaam ?? aanmelding.voornaam ?? null,
     achternaam: source?.achternaam ?? aanmelding.achternaam ?? null,
 
-    discipline: pick(source, ["discipline"]) ?? pick(aanmelding, ["discipline"]) ?? pick(raw, ["discipline"]),
+    discipline:
+      pick(source, ["discipline"]) ??
+      pick(aanmelding, ["discipline"]) ??
+      pick(raw, ["primary_discipline", "nulmeting_discipline", "discipline"]),
     klasse: klasseInput ?? klasseFp ?? null,
     klasse_mm: klasseInput ?? null,
     klasse_fp: klasseFp ?? null,
@@ -203,8 +221,8 @@ export function buildSingleFighterContext(params: {
     leeftijd_event: calcAge(geboortedatum, eventDate),
     evenement_datum: eventDate,
 
-    sportschool: gymFp ?? gymInput ?? null,
-    gym: gymFp ?? gymInput ?? null,
+    sportschool: gymInput ?? gymFp ?? null,
+    gym: gymInput ?? gymFp ?? null,
     sportschool_mm: gymInput ?? null,
     gym_input: gymInput ?? null,
     sportschool_fp: gymFp ?? null,
@@ -216,8 +234,10 @@ export function buildSingleFighterContext(params: {
       pick(aanmelding, ["gewicht", "gewicht_kg"]),
 
     licentie: licentieRaw ?? null,
+    licentie_actief: boolish(licentieRaw),
     licentie_status: licentieRaw ?? null,
     licentie_ok: boolish(licentieRaw),
+    fit_to_fight: boolish(pick(raw, ["fit_to_fight"])),
     heeft_startverbod: startverbodRaw ?? null,
     startverbod: startverbodRaw ?? null,
     heeft_keurmerk: keurmerkRaw ?? null,
@@ -235,7 +255,10 @@ export function buildSingleFighterContext(params: {
     uitslagen_count: record.hasUitslagen ? record.totaal_wedstrijden : toNumberOrNull(pick(raw, ["uitslagen_count", "totaal_wedstrijden", "record_totaal"])),
     laatste_partij_datum: pick(raw, ["laatste_partij_datum", "laatste_datum"]),
 
-    naam_match: naamFp && naamInput ? naamFp.toLowerCase() === naamInput.toLowerCase() : null,
+    naam_match:
+      naamFp && naamInput
+        ? normalizeNameForComparison(naamFp) === normalizeNameForComparison(naamInput)
+        : null,
     geboortedatum_match:
       pick(raw, ["geboortedatum", "birth_date"]) && (pick(source, ["geboortedatum", "geboortedatum_input"]) ?? pick(aanmelding, ["geboortedatum", "geboortedatum_input"]))
         ? String(pick(raw, ["geboortedatum", "birth_date"])).slice(0, 10) ===
@@ -249,16 +272,19 @@ export function buildSingleFighterContext(params: {
     checked_at: now,
     scraped_at: raw ? now : null,
     bron: isToernooi ? "matchmaker_toernooi_fighters" : "aanmeldingen",
+    uitslagen,
+    uitslagen_raw: uitslagen,
+    matchmaker_uitslagen_raw: uitslagen,
     raw_json: {
       aanmelding,
       matchmaker_toernooi_fighter: toernooiFighter,
-      fighters_raw: raw,
+      fightpassport_fighter: raw,
       matchmaker_uitslagen_raw: uitslagen,
     },
     raw: {
       aanmelding,
       matchmaker_toernooi_fighter: toernooiFighter,
-      fighters_raw: raw,
+      fightpassport_fighter: raw,
       matchmaker_uitslagen_raw: uitslagen,
     },
     created_at: now,

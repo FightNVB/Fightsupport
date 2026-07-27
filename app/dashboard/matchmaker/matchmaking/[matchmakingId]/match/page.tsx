@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Swords,
   Trophy,
+  Unlink,
   Users,
 } from "lucide-react";
 
@@ -31,7 +32,7 @@ const LOGO = "/branding/fightsupport/excel-logo.png";
 
 type Fighter = Record<string, any>;
 type ResultRow = Record<string, any>;
-type FilterKey = "all" | "no_license" | "no_keurmerk" | "gematcht" | "afgemeld";
+type FilterKey = "all" | "no_license" | "no_keurmerk" | "afgemeld";
 
 function s(v: unknown) {
   return String(v ?? "").trim();
@@ -55,11 +56,8 @@ function onlyDigits(v: any) {
 }
 function name(f: Fighter) {
   return (
+    s(f.aanmelding_naam) ||
     s(f.naam) ||
-    s(f.fp_naam) ||
-    s(f.naam_fp) ||
-    s(f.naam_input) ||
-    [f.voornaam, f.achternaam].map(s).filter(Boolean).join(" ") ||
     "Onbekend"
   );
 }
@@ -79,53 +77,87 @@ function inschrijvingIdOf(f: Fighter) {
   return s(pickFirst(f.inschrijving_id, f.id));
 }
 function detailIdOf(f: Fighter) {
-  return s(pickFirst(f.inschrijving_id, f.id));
+  // Het dossier is het centrale FightPassport-dossier van de vechter.
+  // De matchmaking in de URL is alleen context voor de terugknop.
+  return vaOf(f) || onlyDigits(f.fighter_id);
 }
 function vaOf(f: Fighter) {
-  return onlyDigits(pickFirst(f.va_nummer, f.va));
+  return onlyDigits(
+    pickFirst(
+      f.aanmelding_va_nummer,
+      f.va_nummer,
+      f.va,
+    ),
+  );
 }
 function gymOf(f: Fighter) {
   return val(
     pickFirst(
-      f.fp_gym,
-      f.gym,
+      f.aanmelding_sportschool,
+      f.aanmelding_gym,
       f.sportschool,
-      f.sportschool_fp,
-      f.sportschool_input,
-      f.gym_input,
-      f.extra?.raw?.aanmelding?.gym,
+      f.gym,
     ),
   );
 }
+function normalizeClassLabel(v: unknown) {
+  const raw = s(v);
+  if (!raw || raw === "-") return "-";
+
+  const token = normalizeClassToken(raw);
+  const labels: Record<string, string> = {
+    j: "J",
+    r: "R",
+    n: "N",
+    c: "C",
+    b: "B",
+    a: "A",
+    amateur: "Amateur",
+    pro: "Pro",
+  };
+
+  return labels[token] || raw;
+}
+
 function klasseOf(f: Fighter) {
-  return val(
+  return normalizeClassLabel(
     pickFirst(
-      f.klasse,
-      f.fp_klasse,
-      f.klasse_fp,
-      f.klasse_input,
+      f.berekende_klasse,
+      f.mma_level,
       f.nulmeting_klasse,
     ),
   );
 }
 function disciplineOf(f: Fighter) {
   return val(
-    pickFirst(f.discipline, f.discipline_input, f.sport, f.vechtsport),
+    pickFirst(
+      f.nulmeting_discipline,
+      f.primary_discipline,
+    ),
   );
 }
 function geslachtOf(f: Fighter) {
-  const g = lower(pickFirst(f.geslacht, f.gender, f.sexe));
-  if (["m", "man", "male", "heer", "heren", "jongen", "jongens"].includes(g))
-    return "Man";
+  const g = lower(f.geslacht);
+
   if (
-    ["v", "vrouw", "female", "dame", "dames", "meisje", "meisjes"].includes(g)
+    ["m", "man", "male", "heer", "heren", "jongen", "jongens", "mannelijk"].includes(g)
+  )
+    return "Man";
+
+  if (
+    ["v", "vrouw", "female", "dame", "dames", "meisje", "meisjes", "vrouwelijk"].includes(g)
   )
     return "Vrouw";
-  return val(pickFirst(f.geslacht, f.gender, f.sexe));
+
+  return "Onbekend";
 }
 function klasseTabOf(f: Fighter) {
   const k = lower(klasseOf(f));
-  if (k.includes("jeugd") || k === "j" || k.includes("youth")) return "Jeugd";
+  const discipline = lower(disciplineOf(f));
+  const isMma = discipline.includes("mma") || discipline.includes("mixed martial");
+
+  if (k.includes("jeugd") || k === "j" || k.includes("youth"))
+    return isMma ? "MMA Youth" : "Jeugd";
   if (
     k.includes("nieuweling") ||
     k === "n" ||
@@ -137,8 +169,8 @@ function klasseTabOf(f: Fighter) {
   if (k.includes("c-klasse") || k.includes("c klasse") || k === "c") return "C";
   if (k.includes("b-klasse") || k.includes("b klasse") || k === "b") return "B";
   if (k.includes("a-klasse") || k.includes("a klasse") || k === "a") return "A";
-  if (k.includes("amateur") || k.includes("ama")) return "MMA AMA";
-  if (k.includes("pro")) return "MMA PRO";
+  if (k.includes("amateur") || k.includes("ama")) return "MMA Amateur";
+  if (k.includes("pro")) return "MMA Pro";
   return "Onbekend";
 }
 function geslachtTabOf(f: Fighter) {
@@ -152,15 +184,40 @@ function geslachtTabOf(f: Fighter) {
 function tabKeyOf(f: Fighter) {
   const k = klasseTabOf(f);
   const g = geslachtTabOf(f);
-  const gender = g === "Vrouw" ? "dame" : g === "Man" ? "heer" : "?";
+  const female = g === "Vrouw";
 
-  if (k === "Jeugd") return g === "Vrouw" ? "Jeugd/V" : "Jeugd/M";
-  if (k === "MMA AMA") return `Amateur/${gender}`;
-  if (k === "MMA PRO") return `Pro/${gender}`;
+  if (k === "Jeugd") return female ? "jeugd-meisje" : "jeugd-jongen";
+  if (k === "MMA Youth") return female ? "mma-youth-meisje" : "mma-youth-jongen";
+  if (k === "MMA Amateur") return female ? "mma-amateur-dame" : "mma-amateur-heer";
+  if (k === "MMA Pro") return female ? "mma-pro-dame" : "mma-pro-heer";
   if (["R", "N", "C", "B", "A"].includes(k))
-    return `${k}/${gender === "heer" ? "man" : gender}`;
+    return `${k.toLowerCase()}-${female ? "dame" : "heer"}`;
 
-  return `${k}/${gender}`;
+  return `onbekend-${female ? "vrouw" : g === "Man" ? "man" : "onbekend"}`;
+}
+
+function classSelectLabel(key: string) {
+  const labels: Record<string, string> = {
+    "jeugd-jongen": "J - Jongen",
+    "jeugd-meisje": "J - Meisje",
+    "mma-youth-jongen": "MMA Youth - Jongen",
+    "mma-youth-meisje": "MMA Youth - Meisje",
+    "r-heer": "R - Heer",
+    "r-dame": "R - Dame",
+    "n-heer": "N - Heer",
+    "n-dame": "N - Dame",
+    "c-heer": "C - Heer",
+    "c-dame": "C - Dame",
+    "b-heer": "B - Heer",
+    "b-dame": "B - Dame",
+    "a-heer": "A - Heer",
+    "a-dame": "A - Dame",
+    "mma-amateur-heer": "MMA Amateur - Heer",
+    "mma-amateur-dame": "MMA Amateur - Dame",
+    "mma-pro-heer": "MMA Pro - Heer",
+    "mma-pro-dame": "MMA Pro - Dame",
+  };
+  return labels[key] || "Onbekende klasse";
 }
 function parseWeightClassValue(raw: any): { value: number | null; isMaxClass: boolean; isOpenAbove: boolean } {
   const txt = s(raw);
@@ -192,7 +249,11 @@ function parseWeightClassValue(raw: any): { value: number | null; isMaxClass: bo
 }
 
 function gewichtOf(f: Fighter) {
-  const raw = pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht, f.gewicht_fp);
+  // Voor matchmaking is het opgegeven gewicht leidend.
+  const raw = pickFirst(
+    f.aanmelding_gewicht,
+    f.gewicht,
+  );
   const txt = s(raw);
   if (!txt) return "-";
 
@@ -208,7 +269,10 @@ function gewichtOf(f: Fighter) {
   return `${formatted} kg`;
 }
 function gewichtSortValue(f: Fighter) {
-  const raw = pickFirst(f.gewicht, f.gewicht_input, f.fp_gewicht, f.gewicht_fp);
+  const raw = pickFirst(
+    f.aanmelding_gewicht,
+    f.gewicht,
+  );
   const parsed = parseWeightClassValue(raw);
   return parsed.value !== null ? parsed.value : Number.POSITIVE_INFINITY;
 }
@@ -241,23 +305,17 @@ function calcAge(dob: any, ref: any) {
   return age >= 0 ? `${age}` : "";
 }
 function leeftijdOf(f: Fighter) {
-  const direct = pickFirst(f.leeftijd, f.age, f.fp_leeftijd);
-  const n = Number(String(direct ?? "").replace(/[^\d.-]/g, ""));
-  if (Number.isFinite(n) && n > 0) return `${Math.round(n)}`;
   return (
     calcAge(
-      pickFirst(f.geboortedatum, f.fp_geboortedatum, f.geboortedatum_fp, f.dob),
+      f.geboortedatum,
       pickFirst(f.event_datum, f.event_date, f.datum, f.matchmaking_datum),
     ) || "-"
   );
 }
 function leeftijdSortValue(f: Fighter) {
-  const direct = pickFirst(f.leeftijd, f.age, f.fp_leeftijd);
-  const directNumber = Number(String(direct ?? "").replace(/[^\d.-]/g, ""));
-  if (Number.isFinite(directNumber) && directNumber > 0) return directNumber;
   const age = Number(
     calcAge(
-      pickFirst(f.geboortedatum, f.fp_geboortedatum, f.geboortedatum_fp, f.dob),
+      f.geboortedatum,
       pickFirst(f.event_datum, f.event_date, f.datum, f.matchmaking_datum),
     ),
   );
@@ -270,13 +328,8 @@ function normVa(v: unknown) {
 
 function rowMatchesFighter(row: ResultRow, f?: Fighter | null) {
   if (!f) return false;
-  const va = normVa(pickFirst(f.va_nummer, f.va, f.fighter_id));
-  const inschrijvingId = s(pickFirst(f.inschrijving_id, f.aanmelding_id, f.id));
-  return (
-    (!!va && normVa(row.va_nummer) === va) ||
-    (!!inschrijvingId && s(pickFirst(row.inschrijving_id, row.aanmelding_id)) === inschrijvingId) ||
-    (!!s(row.naam) && lower(row.naam) === lower(name(f)))
-  );
+  const va = vaOf(f);
+  return !!va && onlyDigits(row.va_nummer) === va;
 }
 
 function getResultKind(v: unknown): "win" | "loss" | "draw" | "other" {
@@ -301,22 +354,93 @@ function getResultKind(v: unknown): "win" | "loss" | "draw" | "other" {
 
 function normalizeClassToken(v: unknown) {
   const x = lower(v)
-    .replace(/klasse/g, "")
+    .replace(/\b(?:klasse|class|clas)\b/g, "")
     .replace(/-/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  const compact = x.replace(/[^a-z0-9+]/g, "");
 
-  if (!x || x === "-") return "";
-  if (x === "j" || x.includes("jeugd") || x.includes("youth")) return "j";
-  if (x === "r" || x.includes("recreant")) return "r";
-  if (x === "n" || x.includes("nieuweling")) return "n";
-  if (x === "c") return "c";
-  if (x === "b") return "b";
-  if (x === "a" || x.includes("elite")) return "a";
-  if (x.includes("amateur") || x.includes("ama")) return "amateur";
-  if (x.includes("pro")) return "pro";
+  if (!compact || compact === "-") return "";
 
-  return x.replace(/[^a-z0-9+]/g, "");
+  // Bronnen kunnen dezelfde klasse tweetalig teruggeven, bijvoorbeeld:
+  // "C-klasse/C-class", "B-klasse/B-class" of "A-klasse/A-class".
+  // Na opschonen wordt dat respectievelijk "cc", "bb" of "aa".
+  // Normaliseer dit altijd terug naar exact één klasseletter.
+  const repeatedClass = compact.match(/^([jrncba])\1$/i);
+  if (repeatedClass) return repeatedClass[1].toLowerCase();
+
+  if (compact === "j" || compact.startsWith("jeugd") || compact.includes("youth")) return "j";
+  if (compact === "r" || compact.startsWith("rclas") || compact.startsWith("rclass") || compact.includes("recreant")) return "r";
+  if (compact === "n" || compact.startsWith("nclas") || compact.startsWith("nclass") || compact.includes("nieuweling")) return "n";
+  if (compact === "c" || compact.startsWith("cclas") || compact.startsWith("cclass")) return "c";
+  if (compact === "b" || compact.startsWith("bclas") || compact.startsWith("bclass")) return "b";
+  if (compact === "a" || compact.startsWith("aclas") || compact.startsWith("aclass") || compact.includes("elite")) return "a";
+  if (compact.includes("amateur") || compact.includes("ama")) return "amateur";
+  if (compact.includes("pro")) return "pro";
+
+  return compact;
+}
+
+function recordClassLabelOf(f: Fighter) {
+  const candidates = [
+    klasseTabOf(f),
+    klasseOf(f),
+    f.berekende_klasse,
+    f.nulmeting_klasse,
+    f.klasse,
+    f.class,
+  ];
+
+  for (const candidate of candidates) {
+    const raw = s(candidate);
+    const token = normalizeClassToken(raw);
+
+    if (token === "j") return "J";
+    if (token === "r") return "R";
+    if (token === "n") return "N";
+    if (token === "c") return "C";
+    if (token === "b") return "B";
+    if (token === "a") return "A";
+    if (token === "amateur") return "Amateur";
+    if (token === "pro") return "Pro";
+
+    // Extra harde opvang voor bronwaarden zoals C-klasse/C-class.
+    const explicit = raw.match(/(?:^|[^A-Z])([JRN CBA])(?:\s*[-/]?\s*(?:klasse|class|clas)|\b)/i);
+    if (explicit) return explicit[1].toUpperCase();
+  }
+
+  return "-";
+}
+
+function normalizeRecordLabel(v: unknown) {
+  const label = s(v)
+    .trim()
+    // Records uit de bron kunnen verschillende Unicode-streepjes bevatten.
+    // Maak die eerst allemaal gelijk aan het normale minteken.
+    .replace(/[‐‑‒–—−]/g, "-");
+
+  // fighterRules kan bijvoorbeeld teruggeven:
+  // "C-klasse/C-class 1-2-0 (1)", "AA 46-0-0 (10)" of "BClas 12-3-0".
+  // Zoek daarom niet naar een specifieke klasseprefix, maar haal uitsluitend
+  // het eerste echte W-L-D-record uit de tekst. De pagina plaatst daarna zelf
+  // exact één genormaliseerde klasse vóór het record.
+  const score = label.match(
+    /(\d+)\s*-\s*(\d+)\s*-\s*(\d+)(?:\s*\((\d+)\))?/,
+  );
+
+  if (score) {
+    const [, wins, losses, draws, overige] = score;
+    return `${wins}-${losses}-${draws}${overige !== undefined ? ` (${overige})` : ""}`;
+  }
+
+  // Alleen als er helemaal geen numeriek record aanwezig is, verwijderen we
+  // eventuele losse klasse-opmaak als veilige terugval.
+  return label
+    .replace(
+      /^(?:(?:jeugd|nieuweling|[jrncb a])(?:\s*[-/]?\s*(?:klasse|class|clas))?\s*[/\s]*)+/i,
+      "",
+    )
+    .trim();
 }
 
 function classRank(token: string) {
@@ -408,37 +532,6 @@ function getUitslagenRows(f?: Fighter | null, allRows: ResultRow[] = []) {
   });
 }
 
-function recordStatsFromUitslagen(rows: ResultRow[]) {
-  let w = 0;
-  let l = 0;
-  let d = 0;
-  let other = 0;
-  const highestClass = highestRecordClassFromRows(rows);
-
-  for (const row of rows) {
-    const kind = getResultKind(pickFirst(row?.uitslag, row?.resultaat, row?.outcome));
-
-    // Demo, no contest en onbekende uitslagen vallen altijd onder overige.
-    if (kind === "other") {
-      other += 1;
-      continue;
-    }
-
-    // Alleen de hoogste klasse telt in W-L-D. Alle lagere/vorige klassen zijn overige.
-    const rowClass = getRowClass(row);
-    if (highestClass && rowClass && rowClass !== highestClass) {
-      other += 1;
-      continue;
-    }
-
-    if (kind === "win") w += 1;
-    else if (kind === "loss") l += 1;
-    else if (kind === "draw") d += 1;
-  }
-
-  return { w, l, d, other, highestClass, hasRows: rows.length > 0 };
-}
-
 function demoToPartijEquivalent(demo: number) {
   return Math.floor(Math.max(0, demo) / 3);
 }
@@ -498,60 +591,92 @@ function sortFightersInTab(a: Fighter, b: Fighter) {
   if (partijenDiff !== 0) return partijenDiff;
   return name(a).localeCompare(name(b), "nl");
 }
-function recordOf(f: Fighter, allRows: ResultRow[] = []) {
-  const rows = getUitslagenRows(f, allRows);
-  const fromRows = recordStatsFromUitslagen(rows);
+function recordOf(f: Fighter, _allRows: ResultRow[] = []) {
+  // fighterRules heeft het record al berekend. Gebruik die uitkomst rechtstreeks
+  // en reken hem op deze pagina niet nogmaals uit fightpassport_results uit.
+  const ruleRecord = pickFirst(
+    f.record_label,
+    f.recordLabel,
+    f.berekend_record,
+    f.berekende_record,
+    f.record_berekend,
+    f.record,
+    getPath(f, "fighterRules.recordLabel"),
+    getPath(f, "fighterRules.record_label"),
+    getPath(f, "fighter_rules.recordLabel"),
+    getPath(f, "fighter_rules.record_label"),
+    getPath(f, "rules.recordLabel"),
+    getPath(f, "rules.record_label"),
+    getPath(f, "rule_result.recordLabel"),
+    getPath(f, "rule_result.record_label"),
+    getPath(f, "rules_result.recordLabel"),
+    getPath(f, "rules_result.record_label"),
+    getPath(f, "extra.fighterRules.recordLabel"),
+    getPath(f, "extra.fighter_rules.record_label"),
+    getPath(f, "raw.fighterRules.recordLabel"),
+    getPath(f, "raw.fighter_rules.record_label"),
+  );
 
-  if (fromRows.hasRows) {
-    const cls = (fromRows.highestClass || normalizeClassToken(klasseOf(f)) || "?").toUpperCase();
-    return `${cls} ${fromRows.w}-${fromRows.l}-${fromRows.d} (${fromRows.other})`;
+  if (s(ruleRecord)) {
+    const raw = s(ruleRecord).replace(/[‐‑‒–—−]/g, "-");
+    // Voor de zichtbare recordprefix gebruiken we altijd één vaste klasseletter.
+    const cls = recordClassLabelOf(f);
+    const classToken = normalizeClassToken(cls);
+
+    // Toon onder Matchen altijd exact: "C 0-0-0 (0)".
+    // Wanneer fighterRules meerdere klasserecords in één tekst teruggeeft,
+    // pakken we eerst het record dat bij de actuele klasse van de vechter hoort.
+    const escapedClass = classToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const classScore = escapedClass
+      ? raw.match(
+          new RegExp(
+            `(?:record\\s+in\\s+klasse\\s+)?${escapedClass}(?:\\s*[-/]?\\s*(?:klasse|class|clas))?[^0-9]{0,30}(\\d+)\\s*-\\s*(\\d+)\\s*-\\s*(\\d+)(?:\\s*\\((\\d+)\\))?`,
+            "i",
+          ),
+        )
+      : null;
+    const score = classScore || raw.match(
+      /(\d+)\s*-\s*(\d+)\s*-\s*(\d+)(?:\s*\((\d+)\))?/,
+    );
+
+    if (score) {
+      const [, wins, losses, draws, overige] = score;
+      return `${cls} ${wins}-${losses}-${draws} (${overige ?? "0"})`;
+    }
   }
 
+  // Veilige terugval voor oudere context-rijen zonder recordLabel.
   const w = Number(
-    String(pickFirst(f.win, f.wins, f.winst, f.record_w) || 0).replace(/[^\d.-]/g, ""),
+    String(pickFirst(f.record_w, f.win, f.wins, f.winst) || 0).replace(/[^\d.-]/g, ""),
   );
   const l = Number(
-    String(pickFirst(f.loss, f.losses, f.verlies, f.record_l) || 0).replace(/[^\d.-]/g, ""),
+    String(pickFirst(f.record_l, f.loss, f.losses, f.verlies) || 0).replace(/[^\d.-]/g, ""),
   );
   const d = Number(
-    String(pickFirst(f.draw, f.draws, f.onbeslist, f.record_d) || 0).replace(/[^\d.-]/g, ""),
+    String(pickFirst(f.record_d, f.draw, f.draws, f.onbeslist) || 0).replace(/[^\d.-]/g, ""),
   );
-  const total = Number(
+  const other = Number(
     String(
       pickFirst(
-        f.totaal_wedstrijden,
-        f.totaal_partijen,
-        f.aantal_partijen,
-        f.total_fights,
-        f.fights_total,
-        f.uitslagen_count,
-      ) || 0,
-    ).replace(/[^\d.-]/g, ""),
-  );
-  const explicitOther = Number(
-    String(
-      pickFirst(
+        f.record_overige,
         f.overige,
         f.overige_partijen,
         f.demo,
         f.demo_totaal,
-        f.nulmeting_demo,
-        f.demo_partijen,
         f.no_contest,
-        f.no_contest_totaal,
       ) || 0,
     ).replace(/[^\d.-]/g, ""),
   );
 
+  const cls = recordClassLabelOf(f);
   const safeW = Number.isFinite(w) ? w : 0;
   const safeL = Number.isFinite(l) ? l : 0;
   const safeD = Number.isFinite(d) ? d : 0;
-  const fromTotal = Number.isFinite(total) ? Math.max(0, total - safeW - safeL - safeD) : 0;
-  const other = Math.max(Number.isFinite(explicitOther) ? explicitOther : 0, fromTotal);
+  const safeOther = Number.isFinite(other) ? other : 0;
 
-  const cls = normalizeClassToken(klasseOf(f)).toUpperCase() || "?";
-  return `${cls} ${safeW}-${safeL}-${safeD} (${other})`;
+  return `${cls} ${safeW}-${safeL}-${safeD} (${safeOther})`;
 }
+
 function statusLic(f: Fighter) {
   const x = lower(
     pickFirst(f.licentie_status, f.licentie, f.licentie_ok, f.raw?.licentie),
@@ -753,15 +878,13 @@ function isGematcht(f: Fighter) {
 function displayStatusOf(f: Fighter) {
   if (isGematcht(f)) return "Gematcht";
   if (isAfgemeld(f)) return "Afgemeld";
-  if (statusOf(f) === "gescrapt") return "Gecontroleerd";
-  return "Niet gecontroleerd";
+  return "Beschikbaar";
 }
 
 function displayStatusIconOf(f: Fighter) {
   if (isGematcht(f)) return "⚔️";
   if (isAfgemeld(f)) return "🚫";
-  if (statusOf(f) === "gescrapt") return "✅";
-  return "⏳";
+  return "●";
 }
 
 function isBlockedFromMatching(f: Fighter) {
@@ -910,18 +1033,82 @@ function markMatchedFromBouts(fighters: Fighter[], json: any) {
       : f;
   });
 }
-function scraperBusyOf(f: Fighter) {
-  const status = lower(pickFirst(f.status, f.scrape_status, f.controle_status));
-  const started = !!pickFirst(f.scrape_started_at, f.controle_started_at);
-  const done = !!pickFirst(
-    f.scraped_at,
-    f.scrape_failed_at,
-    f.controle_finished_at,
-  );
-  return (
-    (status.includes("bezig") || status.includes("running") || started) && !done
-  );
+
+function getActiveMatchRows(json: any) {
+  const sources = [
+    json?.bouts,
+    json?.partijen,
+    json?.matches,
+    json?.matchmaking_bouts_raw,
+    json?.raw_bouts,
+  ].filter(Array.isArray);
+
+  const rows: any[] = [];
+  const seen = new Set<string>();
+
+  for (const source of sources) {
+    for (const row of source || []) {
+      const status = lower(pickFirst(row?.status, row?.partij_status, row?.bout_status));
+      const removed =
+        row?.verwijderd === true ||
+        String(row?.verwijderd ?? '').trim() === '1' ||
+        lower(row?.verwijderd) === 'true' ||
+        status.includes('verwijderd') ||
+        status.includes('deleted');
+      if (removed) continue;
+
+      const partijNr = Number(pickFirst(row?.partij_nr, row?.partijNr, row?.bout_nr, row?.match_nr));
+      const raw = obj(row?.raw_json) || {};
+      const roodNaam = s(pickFirst(row?.rood_naam, row?.red_name, raw?.rood_naam, raw?.rood?.naam));
+      const blauwNaam = s(pickFirst(row?.blauw_naam, row?.blue_name, raw?.blauw_naam, raw?.blauw?.naam));
+      if (!Number.isFinite(partijNr) && !roodNaam && !blauwNaam) continue;
+
+      const key = Number.isFinite(partijNr)
+        ? `partij-${partijNr}`
+        : s(row?.id) || `${roodNaam}|${blauwNaam}|${s(row?.toernooi_code)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+  }
+
+  return rows.sort((a, b) => {
+    const an = Number(pickFirst(a?.partij_nr, a?.partijNr, a?.bout_nr, a?.match_nr));
+    const bn = Number(pickFirst(b?.partij_nr, b?.partijNr, b?.bout_nr, b?.match_nr));
+    if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+    if (Number.isFinite(an)) return -1;
+    if (Number.isFinite(bn)) return 1;
+    return s(pickFirst(a?.toernooi_code, a?.toernooicode)).localeCompare(
+      s(pickFirst(b?.toernooi_code, b?.toernooicode)),
+      'nl',
+      { numeric: true },
+    );
+  });
 }
+
+function boutRaw(row: any) {
+  return obj(row?.raw_json) || {};
+}
+
+function boutField(row: any, ...keys: string[]) {
+  const raw = boutRaw(row);
+  for (const key of keys) {
+    const value = pickFirst(row?.[key], raw?.[key]);
+    if (s(value)) return value;
+  }
+  return '';
+}
+
+function boutPartyNr(row: any) {
+  const nr = Number(pickFirst(row?.partij_nr, row?.partijNr, row?.bout_nr, row?.match_nr));
+  return Number.isFinite(nr) ? nr : null;
+}
+
+function boutStatus(row: any) {
+  const value = s(pickFirst(row?.status, row?.partij_status, row?.bout_status));
+  return value || 'Concept';
+}
+
 function nextTournamentCode(existing: any[]) {
   let max = 0;
   for (const t of existing || []) {
@@ -975,6 +1162,24 @@ async function fetchMatchmakingTournamentBouts(matchmakingId: string) {
   });
 }
 
+async function fetchFightPassportResults(vaNumbers: string[]) {
+  if (!vaNumbers.length) return [] as ResultRow[];
+
+  const { data, error } = await supabase
+    .from("fightpassport_results")
+    .select(
+      "id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,last_seen_at,created_at",
+    )
+    .in("va_nummer", vaNumbers)
+    .order("datum", { ascending: false });
+
+  if (error) {
+    throw new Error(`fightpassport_results laden mislukt: ${error.message}`);
+  }
+
+  return (data || []) as ResultRow[];
+}
+
 export default function FightersPage() {
   const params = useParams<{
     matchmakingId?: string;
@@ -987,8 +1192,6 @@ export default function FightersPage() {
 
   const [fighters, setFighters] = useState<Fighter[]>([]);
   const [uitslagenRows, setUitslagenRows] = useState<ResultRow[]>([]);
-  const [allScraperBusyCount, setAllScraperBusyCount] = useState(0);
-  const [matchmakingLocked, setMatchmakingLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [busyText, setBusyText] = useState("");
@@ -1005,6 +1208,8 @@ export default function FightersPage() {
   const [tournamentClass, setTournamentClass] = useState("");
   const [tournamentWeight, setTournamentWeight] = useState("");
   const [existingTournaments, setExistingTournaments] = useState<any[]>([]);
+  const [matchRows, setMatchRows] = useState<any[]>([]);
+  const [mainView, setMainView] = useState<"fighters" | "matches">("fighters");
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -1013,17 +1218,6 @@ export default function FightersPage() {
       const res = await authedFetch(`/api/matchmaker/${matchmakingId}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Laden mislukt");
-
-      const mmFromApi = json?.matchmaking ?? json?.matchmaking_row ?? json?.matchmakingData ?? json?.mm ?? json?.data?.matchmaking ?? null;
-      const lockedFromApi =
-        json?.locked_for_editing === true ||
-        json?.control_engine_busy === true ||
-        json?.controle_bezig === true ||
-        mmFromApi?.locked_for_editing === true ||
-        mmFromApi?.control_engine_busy === true ||
-        mmFromApi?.controle_bezig === true;
-      const lockedFromDb = await fetchMatchmakingLock(matchmakingId);
-      setMatchmakingLocked(lockedFromApi || lockedFromDb);
 
       const toernooiBoutsFromDb = await fetchMatchmakingTournamentBouts(matchmakingId);
       const jsonWithDbBouts = {
@@ -1040,19 +1234,14 @@ export default function FightersPage() {
         ],
       };
 
-      const rawFighters = Array.isArray(json?.fighters) ? json.fighters : [];
-      const aanmeldingen = Array.isArray(json?.aanmeldingen)
-        ? json.aanmeldingen
-        : [];
-      const fightersWithAanmeldingStatus = mergeAanmeldingStatusIntoFighters(
-        rawFighters,
-        aanmeldingen,
-      );
+      // matchmaker_fighter_context is de enige samengestelde waarheid voor deze pagina.
+      // De API koppelt alleen de actuele aanmelding-status eraan; deze client haalt
+      // niet opnieuw losse FightPassport- of aanmeldingvelden op en mengt die niet.
+      const contextFighters = Array.isArray(json?.fighters) ? json.fighters : [];
       const loadedFighters = markMatchedFromBouts(
-        fightersWithAanmeldingStatus,
+        contextFighters,
         jsonWithDbBouts,
       );
-      const controlledFighters = loadedFighters.filter(isControlledFighter);
       const loadedTournaments = Array.isArray(jsonWithDbBouts?.toernooien)
         ? jsonWithDbBouts.toernooien
         : Array.isArray(jsonWithDbBouts?.tournaments)
@@ -1066,59 +1255,25 @@ export default function FightersPage() {
                 )
               : [];
 
-      setAllScraperBusyCount(loadedFighters.filter(scraperBusyOf).length);
-      setFighters(controlledFighters);
-      const inlineUitslagen =
-        json?.uitslagen ??
-        json?.matchmaker_uitslagen_raw ??
-        json?.uitslagen_raw ??
-        json?.fighter_uitslagen ??
-        [];
-
-      if (Array.isArray(inlineUitslagen) && inlineUitslagen.length) {
-        setUitslagenRows(inlineUitslagen);
-      } else {
-        let loadedUitslagen: ResultRow[] = [];
-        try {
-          const ur = await authedFetch(`/api/matchmaker/${matchmakingId}/uitslagen`);
-          const uj = await ur.json().catch(() => ({}));
-          loadedUitslagen = ur.ok
-            ? uj?.uitslagen ??
-                uj?.matchmaker_uitslagen_raw ??
-                uj?.uitslagen_raw ??
-                uj?.results ??
-                []
-            : [];
-        } catch {
-          loadedUitslagen = [];
-        }
-
-        // Fallback: page55 moet dezelfde bron kunnen lezen als de detailpagina.
-        // Dit voorkomt een leeg/verkeerd record als de /uitslagen API niets teruggeeft.
-        if (!loadedUitslagen.length) {
-          const { data, error } = await supabase
-            .from("matchmaker_uitslagen_raw")
-            .select("id,matchmaking_id,controle_run_id,fighter_id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,partij_nr")
-            .eq("matchmaking_id", matchmakingId)
-            .order("datum", { ascending: false });
-
-          if (!error) loadedUitslagen = (data ?? []) as ResultRow[];
-        }
-
-        setUitslagenRows(loadedUitslagen);
-      }
+      setMatchRows(getActiveMatchRows(jsonWithDbBouts));
+      setFighters(loadedFighters);
+      const vaNumbers = Array.from(
+        new Set(loadedFighters.map(vaOf).filter(Boolean)),
+      );
+      const fightPassportResults = await fetchFightPassportResults(vaNumbers);
+      setUitslagenRows(fightPassportResults);
       setExistingTournaments(loadedTournaments);
       setTournamentCode(nextTournamentCode(loadedTournaments));
       setSelected((cur) =>
         cur.filter((id) =>
-          controlledFighters.some(
+          loadedFighters.some(
             (f: Fighter) => rowKeyOf(f) === id && !isBlockedFromMatching(f),
           ),
         ),
       );
       setTournamentIds((cur) =>
         cur.filter((id) =>
-          controlledFighters.some(
+          loadedFighters.some(
             (f: Fighter) =>
               inschrijvingIdOf(f) === id && !isBlockedFromMatching(f),
           ),
@@ -1126,7 +1281,7 @@ export default function FightersPage() {
       );
       setMatchRed((cur) =>
         cur &&
-        controlledFighters.some(
+        loadedFighters.some(
           (f: Fighter) =>
             inschrijvingIdOf(f) === cur && !isBlockedFromMatching(f),
         )
@@ -1134,7 +1289,6 @@ export default function FightersPage() {
           : "",
       );
     } catch (e: any) {
-      setAllScraperBusyCount(0);
       setMsg(e?.message || "Laden mislukt");
     } finally {
       if (!silent) setLoading(false);
@@ -1145,63 +1299,51 @@ export default function FightersPage() {
     if (matchmakingId) load();
   }, [matchmakingId, load]);
 
-  useEffect(() => {
-    if (!matchmakingId || (!matchmakingLocked && allScraperBusyCount <= 0)) return undefined;
-
-    const timer = window.setInterval(() => {
-      load(true);
-    }, 5000);
-
-    return () => window.clearInterval(timer);
-  }, [matchmakingId, matchmakingLocked, allScraperBusyCount, load]);
-
-  const tabs = useMemo(() => {
+  const classOptions = useMemo(() => {
     const map = new Map<string, number>();
     for (const f of fighters) {
       if (isBlockedFromMatching(f)) continue;
       const key = tabKeyOf(f);
       map.set(key, (map.get(key) ?? 0) + 1);
     }
-    const orderKlasse = [
-      "Jeugd/M",
-      "Jeugd/V",
-      "R/man",
-      "R/dame",
-      "N/man",
-      "N/dame",
-      "C/man",
-      "C/dame",
-      "B/man",
-      "B/dame",
-      "A/man",
-      "A/dame",
-      "Amateur/heer",
-      "Amateur/dame",
-      "Pro/heer",
-      "Pro/dame",
+
+    const order = [
+      "jeugd-jongen",
+      "jeugd-meisje",
+      "mma-youth-jongen",
+      "mma-youth-meisje",
+      "r-heer",
+      "r-dame",
+      "n-heer",
+      "n-dame",
+      "c-heer",
+      "c-dame",
+      "b-heer",
+      "b-dame",
+      "a-heer",
+      "a-dame",
+      "mma-amateur-heer",
+      "mma-amateur-dame",
+      "mma-pro-heer",
+      "mma-pro-dame",
     ];
-    const classTabs = Array.from(map.entries())
+
+    return Array.from(map.entries())
       .sort(([a], [b]) => {
-        const ai = orderKlasse.indexOf(a);
-        const bi = orderKlasse.indexOf(b);
+        const ai = order.indexOf(a);
+        const bi = order.indexOf(b);
         if (ai !== -1 && bi !== -1) return ai - bi;
         if (ai !== -1) return -1;
         if (bi !== -1) return 1;
-        return a.localeCompare(b, "nl");
+        return classSelectLabel(a).localeCompare(classSelectLabel(b), "nl");
       })
-      .map(([key, count]) => ({ key, count }));
-
-return classTabs;
+      .map(([key, count]) => ({ key, count, label: classSelectLabel(key) }));
   }, [fighters]);
 
   useEffect(() => {
-    if (!tabs.length) {
-      if (activeTab) setActiveTab("");
-      return;
-    }
-    if (!activeTab || !tabs.some((t) => t.key === activeTab))
-      setActiveTab(tabs[0].key);
-  }, [activeTab, tabs]);
+    if (activeTab && !classOptions.some((option) => option.key === activeTab))
+      setActiveTab("");
+  }, [activeTab, classOptions]);
 
   const stats = useMemo(() => {
     const active = fighters.filter((f) => !isBlockedFromMatching(f));
@@ -1213,11 +1355,8 @@ return classTabs;
       keurmerk: active.filter((f) => statusKeur(f) === "bad").length,
       afgemeld,
       gematcht,
-      bezig: allScraperBusyCount,
     };
-  }, [fighters, allScraperBusyCount]);
-
-  const scraperRunning = matchmakingLocked || allScraperBusyCount > 0;
+  }, [fighters]);
 
   const visible = useMemo(() => {
     const needle = q.toLowerCase().trim();
@@ -1237,7 +1376,6 @@ return classTabs;
           .toLowerCase();
         if (needle && !text.includes(needle)) return false;
 
-        if (filter === "gematcht") return isGematcht(f);
         if (filter === "afgemeld") return isAfgemeld(f);
 
         if (isBlockedFromMatching(f)) return false;
@@ -1367,37 +1505,8 @@ return classTabs;
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Toernooi aanmaken mislukt");
 
-      const va_nummers = Array.from(new Set(deelnemers.map((d) => s(d.va_nummer)).filter(Boolean)));
-      const aanmelding_ids = Array.from(new Set(deelnemers.map((d) => s(d.inschrijving_id)).filter(Boolean)));
-
-      if (va_nummers.length || aanmelding_ids.length) {
-        setBusyText(`${tournamentCode} deelnemers controleren...`);
-        const scrapeRes = await authedFetch(
-          `/api/matchmaker/${matchmakingId}/fighters/herscrape`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode: "selected",
-              scope: "toernooi",
-              toernooi_code: tournamentCode,
-              toernooicode: tournamentCode,
-              herscrape: true,
-              force: true,
-              va_nummers,
-              vaNummers: va_nummers,
-              aanmelding_ids,
-              aanmeldingIds: aanmelding_ids,
-            }),
-          },
-        );
-        const scrapeJson = await scrapeRes.json().catch(() => ({}));
-        if (!scrapeRes.ok)
-          throw new Error(scrapeJson?.error || "Toernooi aangemaakt, maar Fightpaspoort controle starten mislukt");
-      }
-
       setMsg(
-        `${tournamentCode} is aangemaakt met ${tournamentIds.length} deelnemer(s) en alleen deze toernooi-deelnemers zijn naar de Fightpaspoort controle gestuurd.`,
+        `${tournamentCode} is aangemaakt met ${tournamentIds.length} deelnemer(s).`,
       );
       setTournamentMode(false);
       setTournamentIds([]);
@@ -1453,7 +1562,7 @@ return classTabs;
       const filename = decodeURIComponent(
         filenameMatch?.[1] ||
           filenameMatch?.[2] ||
-          `gecontroleerde-aanmeldingen-${matchmakingId}.xlsx`,
+          `aanmeldingen-${matchmakingId}.xlsx`,
       );
 
       const a = document.createElement("a");
@@ -1472,60 +1581,43 @@ return classTabs;
     }
   }
 
-  async function herscrapeSelected() {
-    const selectedFighters = fighters.filter(
-      (f) => selected.includes(rowKeyOf(f)) && !isBlockedFromMatching(f),
-    );
-    const va_nummers = Array.from(
-      new Set(selectedFighters.map(vaOf).filter(Boolean)),
-    );
-    const aanmelding_ids = Array.from(
-      new Set(selectedFighters.map(inschrijvingIdOf).filter(Boolean)),
-    );
-    if (!va_nummers.length && !aanmelding_ids.length) {
-      setMsg("Selecteer eerst vechters voor opnieuw controleren.");
-      return;
-    }
 
-    setBusyId("herscrape");
-    setBusyText("Geselecteerde vechters opnieuw controleren...");
+  async function ontbindMatch(row: any) {
+    const partijNr = boutPartyNr(row);
+    const boutId = s(pickFirst(row?.bout_uid, row?.bout_id));
+
+    if (partijNr == null || busyId) return;
+
+    const rood = val(boutField(row, "rood_naam", "red_name"));
+    const blauw = val(boutField(row, "blauw_naam", "blue_name"));
+    const akkoord = confirm(
+      `Match ${partijNr} ontbinden?\n\n${rood} - ${blauw}\n\nBeide vechters komen terug bij Vechters.`,
+    );
+
+    if (!akkoord) return;
+
+    setBusyId(`delete-match-${partijNr}`);
+    setBusyText(`Match ${partijNr} ontbinden...`);
     setMsg("");
+
     try {
-      const res = await authedFetch(
-        `/api/matchmaker/${matchmakingId}/fighters/herscrape`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: "selected",
-            scope: "selected",
-            herscrape: true,
-            force: true,
-            va_nummers,
-            vaNummers: va_nummers,
-            aanmelding_ids,
-            aanmeldingIds: aanmelding_ids,
-          }),
-        },
-      );
+      const res = await authedFetch("/api/matchmaker/delete-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          partij_nr: partijNr,
+          bout_id: boutId || null,
+        }),
+      });
+
       const json = await res.json().catch(() => ({}));
-      if (!res.ok)
-        throw new Error(json?.error || "Opnieuw controleren mislukt");
-      const okCount = Array.isArray(json?.gescrapt)
-        ? json.gescrapt.length
-        : va_nummers.length;
-      const failCount = Array.isArray(json?.scrape_mislukt)
-        ? json.scrape_mislukt.length
-        : 0;
-      setMsg(
-        failCount
-          ? `${okCount} vechter(s) opnieuw gecontroleerd. ${failCount} vechter(s) niet gelukt.`
-          : "Geselecteerde vechters zijn opnieuw gecontroleerd.",
-      );
-      setSelected([]);
+      if (!res.ok) throw new Error(json?.error || "Match ontbinden mislukt");
+
+      setMsg(`Match ${partijNr} is ontbonden. Beide vechters zijn weer beschikbaar.`);
       await load();
     } catch (e: any) {
-      setMsg(e?.message || "Opnieuw controleren mislukt");
+      setMsg(e?.message || "Match ontbinden mislukt");
     } finally {
       setBusyId(null);
       setBusyText("");
@@ -1582,261 +1674,179 @@ return classTabs;
       <style>{`
         .fs-page315, .fs-page315 * { box-sizing: border-box; }
         .fs-page315 {
-          min-height: 100vh !important;
-          background: #2b2b2b !important;
-          color: #ffffff !important;
-          padding: 24px !important;
+          min-height: 100vh;
+          background: #252525;
+          color: #fff;
+          padding: 16px;
         }
         .fs-page315 > div {
-          max-width: 1380px !important;
-          width: min(1380px, calc(100vw - 48px)) !important;
-          margin: 0 auto !important;
-          border: 1px solid #71717a !important;
-          border-radius: 0 !important;
-          overflow: hidden !important;
-          background: #121212 !important;
-          box-shadow: 0 24px 70px rgba(0,0,0,.62) !important;
+          width: min(1480px, 100%);
+          margin: 0 auto;
+          background: #111;
+          border: 1px solid #454545;
+          box-shadow: 0 18px 48px rgba(0,0,0,.42);
         }
-        .fs-page315 header {
-          border-bottom: 1px solid #52525b !important;
-          border-radius: 0 !important;
-          background: linear-gradient(90deg,#1d1d1d,#303030,#151515) !important;
-          min-height: 104px !important;
-          padding: 20px 24px !important;
+        .fs-compact-header {
+          min-height: 72px;
+          padding: 12px 16px;
+          display: grid;
+          grid-template-columns: 1fr auto 1fr;
+          align-items: center;
+          gap: 16px;
+          border-bottom: 1px solid #3f3f46;
+          background: linear-gradient(90deg,#171717,#262626,#171717);
         }
-        .fs-page315 h1,
-        .fs-page315 h2,
-        .fs-page315 h3 {
-          text-transform: uppercase !important;
-          font-weight: 950 !important;
-          letter-spacing: .02em !important;
+        .fs-header-left { display:flex; align-items:center; gap:12px; min-width:0; }
+        .fs-back-icon {
+          width: 36px; height: 36px; display:inline-flex; align-items:center; justify-content:center;
+          border:1px solid #5b5b5f; background:#202020; color:#fff; text-decoration:none;
         }
-        .fs-page315 h1,
-        .fs-page315 b,
-        .fs-page315 strong,
-        .fs-page315 .fs-name-select,
-        .fs-page315 [style*="color: rgb(255, 77, 0)"],
-        .fs-page315 [style*="color:#ff4d00"],
-        .fs-page315 [style*="color: #ff4d00"] {
-          color: #ff4d00 !important;
+        .fs-kicker { color:#ff4d00; font-size:10px; font-weight:950; letter-spacing:1.8px; }
+        .fs-compact-header h1 { margin:2px 0 0; font-size:23px; line-height:1; text-transform:uppercase; }
+        .fs-header-logo { height:48px; max-width:190px; object-fit:contain; }
+        .fs-header-actions { display:flex; justify-content:flex-end; gap:8px; }
+        .fs-action-btn {
+          min-height:36px; padding:0 11px; display:inline-flex; align-items:center; justify-content:center; gap:7px;
+          border:1px solid #5a5a60; background:#242424; color:#fff; font-weight:900; cursor:pointer;
         }
-        .fs-page315 a,
-        .fs-page315 button {
-          border-radius: 0 !important;
-          font-weight: 950 !important;
-          text-transform: uppercase !important;
+        .fs-action-btn:hover:not(:disabled) { border-color:#ff4d00; background:#2e2e2e; }
+        .fs-action-primary { background:#ff4d00; border-color:#ff4d00; color:#111; }
+        .fs-main-tabs {
+          display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:10px 16px;
+          border-bottom:1px solid #3f3f46; background:#111;
         }
-        .fs-page315 input,
-        .fs-page315 select,
-        .fs-page315 textarea {
-          border-radius: 0 !important;
-          border: 1px solid #52525b !important;
-          background: #111111 !important;
-          color: #ffffff !important;
-          box-shadow: none !important;
+        .fs-main-tab {
+          min-height:48px; padding:0 18px; display:inline-flex; align-items:center; justify-content:center; gap:10px;
+          border:1px solid #52525b; border-left:4px solid #71717a; background:#242424; color:#f4f4f5;
+          font-size:15px; font-weight:950; text-transform:uppercase; letter-spacing:.4px; cursor:pointer;
         }
-        .fs-page315 input::placeholder,
-        .fs-page315 textarea::placeholder { color: #a1a1aa !important; }
-        .fs-page315 table {
-          border-collapse: collapse !important;
-          background: #121212 !important;
+        .fs-main-tab:hover { border-color:#ff4d00; }
+        .fs-main-tab span { min-width:28px; padding:3px 8px; background:#111; color:#fff; font-size:11px; }
+        .fs-main-tab.active { color:#111; border-color:#ff4d00; border-left-color:#ff4d00; background:#ff4d00; }
+        .fs-main-tab.active span { background:#111; color:#fff; }
+        .fs-page315 section { border-radius:0 !important; }
+        .fs-page315 input, .fs-page315 select, .fs-page315 textarea {
+          border-radius:0 !important; border:1px solid #4b4b50 !important; background:#111 !important; color:#fff !important;
         }
-        .fs-page315 thead,
-        .fs-page315 thead tr,
-        .fs-page315 th {
-          background: #252525 !important;
-          color: #d4d4d8 !important;
-          border: 1px solid #3f3f46 !important;
-          text-transform: uppercase !important;
+        .fs-page315 table { border-collapse:collapse !important; background:#151515 !important; }
+        .fs-page315 th { background:#282828 !important; color:#d4d4d8 !important; border:1px solid #3f3f46 !important; }
+        .fs-page315 td { border:1px solid #29292d !important; color:#fff !important; }
+        .fs-page315 tbody tr:nth-child(odd) { background:#151515 !important; }
+        .fs-page315 tbody tr:nth-child(even) { background:#1c1c1c !important; }
+        .fs-page315 tbody tr:hover { background:#242424 !important; }
+        .fs-class-select-row {
+          min-width:0; display:grid; grid-template-columns:68px minmax(150px, 1fr); align-items:center;
+          gap:8px; margin:0; padding:9px 10px;
+          border:1px solid #4b4b50; border-left:4px solid #ff4d00; background:#191919;
         }
-        .fs-page315 td {
-          border: 1px solid #27272a !important;
-          color: #ffffff !important;
+        .fs-class-select-label {
+          color:#d4d4d8; font-size:12px; font-weight:950; letter-spacing:.8px; text-transform:uppercase;
         }
-        .fs-page315 tbody tr,
-        .fs-page315 tbody tr:nth-child(odd),
-        .fs-page315 tbody tr:nth-child(even) {
-          background: #171717 !important;
-          color: #ffffff !important;
+        .fs-class-select-wrap { position:relative; }
+        .fs-class-select-wrap::after {
+          content:""; position:absolute; right:14px; top:50%; width:8px; height:8px;
+          border-right:2px solid #ff4d00; border-bottom:2px solid #ff4d00;
+          transform:translateY(-70%) rotate(45deg); pointer-events:none;
         }
-        .fs-page315 tbody tr:hover {
-          background: #1f1f1f !important;
-          outline: 1px solid rgba(255,77,0,.35) !important;
-          outline-offset: -1px !important;
+        .fs-page315 .fs-class-select {
+          width:100%; min-height:40px; padding:0 42px 0 12px !important;
+          appearance:none; border:1px solid #626269 !important; background:#0f0f0f !important;
+          color:#fff !important; font-size:13px; font-weight:900; cursor:pointer;
         }
-        .fs-page315 tbody td:nth-child(2),
-        .fs-page315 tbody td:nth-child(2) button,
-        .fs-page315 .fs-name-select {
-          color: #ff4d00 !important;
+        .fs-page315 .fs-class-select:focus {
+          outline:none; border-color:#ff4d00 !important; box-shadow:0 0 0 1px #ff4d00;
         }
-        .fs-page315 tbody td:not(:nth-child(2)),
-        .fs-page315 tbody td:not(:nth-child(2)) *:not(button):not(svg):not(path) {
-          color: #ffffff !important;
+        .fs-page315 .fs-class-select:disabled { opacity:.55; cursor:not-allowed; }
+        .fs-page315 .fs-filter {
+          border-radius:0 !important; border:1px solid #4b4b50 !important; background:#242424 !important; color:#e4e4e7 !important;
+          box-shadow:none !important; padding:8px 12px !important;
         }
-        .fs-page315 section,
-        .fs-page315 [style*="border-radius: 18px"],
-        .fs-page315 [style*="border-radius: 22px"],
-        .fs-page315 [style*="border-radius: 24px"],
-        .fs-page315 [style*="border-radius: 26px"] {
-          border-radius: 0 !important;
+        .fs-page315 .fs-filter.active { border-color:#ff4d00 !important; background:#ff4d00 !important; color:#111 !important; }
+        .fs-page315 .fs-icon-btn { border-radius:0 !important; box-shadow:none !important; }
+        .fs-page315 .fs-party-detail {
+          border-radius:0 !important; min-height:30px; padding:0 10px; background:#e5e7eb; color:#111;
+          border:1px solid #fff; text-decoration:none;
         }
-        .fs-page315 .fs-back-btn,
-        .fs-page315 .fs-dark-btn,
-        .fs-page315 .fs-filter,
-        .fs-page315 .fs-clear-btn,
-        .fs-page315 .fs-icon-btn,
-        .fs-page315 .fs-tournament-btn {
-          border: 1px solid #d4d4d8 !important;
-          background: linear-gradient(to bottom,#ffffff,#e4e4e7,#71717a) !important;
-          color: #000000 !important;
-          box-shadow: 0 10px 22px rgba(0,0,0,.30) !important;
+        .fs-page315 .fs-party-detail:hover { background:#ff4d00; border-color:#ff4d00; }
+        @media (max-width: 900px) {
+          .fs-page315 { padding:8px; }
+          .fs-compact-header { grid-template-columns:1fr auto; }
+          .fs-header-logo { display:none; }
+          .fs-header-actions { grid-column:1 / -1; justify-content:flex-start; flex-wrap:wrap; }
+          .fs-action-btn span { display:none; }
+          .fs-main-tabs { padding:0; }
+          .fs-main-tab { flex:1; justify-content:center; padding:0 8px; }
+          .fs-class-select-row { grid-template-columns:60px minmax(150px,1fr); gap:7px; padding:8px; }
+          .fs-class-select-wrap { width:100%; }
         }
-        .fs-page315 .fs-orange-btn,
-        .fs-page315 .fs-filter.active,
-        .fs-page315 .fs-tab,
-        .fs-page315 .fs-icon-btn.orange {
-          border: 1px solid #ff4d00 !important;
-          background: #ff4d00 !important;
-          color: #000000 !important;
-          box-shadow: 0 10px 22px rgba(0,0,0,.30) !important;
-        }
-        .fs-page315 .fs-icon-btn.red {
-          border: 1px solid #ef4444 !important;
-          background: #991b1b !important;
-          color: #ffffff !important;
-        }
-        .fs-page315 .fs-icon-btn.blue {
-          border: 1px solid #d4d4d8 !important;
-          background: linear-gradient(to bottom,#ffffff,#e4e4e7,#71717a) !important;
-          color: #000000 !important;
-        }
-        .fs-page315 .fs-badge,
-        .fs-page315 .fs-tab span {
-          border-radius: 0 !important;
-          border: 1px solid #52525b !important;
-          background: #242424 !important;
-          color: #ffffff !important;
-        }
-        .fs-page315 img[alt="FightSupport"] {
-          max-height: 92px !important;
-          object-fit: contain !important;
-        }
-        .fs-page315 [style*="linear-gradient(135deg,#f7f8fa"],
-        .fs-page315 [style*="linear-gradient(135deg, #f7f8fa"] {
-          background: #181818 !important;
-          color: #ffffff !important;
-          border: 1px solid #3f3f46 !important;
-          box-shadow: none !important;
+        @media (max-width: 1150px) {
+          .fs-page315 .fs-class-select-row { grid-column:1 / -1; }
         }
       `}</style>
 
       {showWait && (
         <WaitOverlay
-          text={busyText || "FightSupport controlegegevens laden..."}
+          text={busyText || "FightPassport-gegevens laden..."}
         />
       )}
 
       <div style={shell}>
-        <header style={topBar}>
-          <div style={{ minWidth: 250 }}>
-            <div style={eyebrow}>MATCHMAKER</div>
-            <h1 style={title}>Gecontroleerde vechters</h1>
-            <p style={subtitle}>
-              Klik Match bij de eerste vechter voor rood en daarna bij de tweede
-              vechter voor blauw.
-            </p>
-          </div>
-
-          <div style={logoWrap}>
-            <img src={LOGO} alt="FightSupport" style={logoImg} />
-          </div>
-
-          <Link
-            href={`/dashboard/matchmaker/matchmaking/${matchmakingId}`}
-            className="fs-back-btn" style={{ color: "#000" }}
-          >
-            <ArrowLeft size={17} />
-            Terug
-          </Link>
-        </header>
-
-        <section style={navRail}>
-          <div style={railGroup}>
-            <span style={railLabel}>Overzicht</span>
-            {scraperRunning ? (
-              <button
-                className="fs-dark-btn fs-locked"
-                disabled
-                title="Deze matchmaking kan open zodra de Fightpaspoort check klaar is"
-              >
-                <span className="fs-mini-spinner" />
-                Matchmaking controle bezig
-              </button>
-            ) : (
-              <Link
-                href={`/dashboard/matchmaker/matchmaking/${matchmakingId}`}
-                className="fs-dark-btn fs-strong-btn"
-              >
-                Matchmaking
-              </Link>
-            )}
-            <Link
-              href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/aanmeldingen`}
-              className="fs-dark-btn fs-strong-btn"
-            >
-              <Users size={16} />
-              Aanmeldingen
+        <header className="fs-compact-header">
+          <div className="fs-header-left">
+            <Link href="/dashboard/matchmaker/matchmaking" className="fs-back-icon" title="Terug naar matchmakings">
+              <ArrowLeft size={18} />
             </Link>
+            <div>
+              <div className="fs-kicker">MATCHMAKER</div>
+              <h1>Vechters matchen</h1>
+            </div>
           </div>
 
-          <div style={railGroup}>
-            <span style={railLabel}>Acties</span>
+          <img src={LOGO} alt="FightSupport" className="fs-header-logo" />
+
+          <div className="fs-header-actions">
             <button
-              className="fs-orange-btn"
-              onClick={() => herscrapeSelected()}
-              disabled={!selected.length || !!busyId}
-            >
-              <RefreshCw size={16} />
-              Herscrape geselecteerden{" "}
-              {selected.length ? `(${selected.length})` : ""}
-            </button>
-            <button
-              className="fs-dark-btn fs-strong-btn"
+              className="fs-action-btn"
               onClick={downloadCheckedExcel}
               disabled={!!busyId || loading || !fighters.length}
-              title="Download gecontroleerde aanmeldingen als Excel"
+              title="Download aanmeldingen als Excel"
             >
               <Download size={16} />
-              Download Excel
+              <span>Excel</span>
             </button>
-            <button className="fs-dark-btn" onClick={() => load()} disabled={loading}>
+            <button className="fs-action-btn" onClick={() => load()} disabled={loading} title="Vernieuwen">
               <RefreshCw size={16} />
-              Vernieuwen
+              <span>Vernieuwen</span>
             </button>
-            <button
-              className="fs-tournament-btn"
-              onClick={openTournamentMode}
-              disabled={!!busyId}
-            >
+            <button className="fs-action-btn fs-action-primary" onClick={openTournamentMode} disabled={!!busyId}>
               <Trophy size={16} />
-              Start toernooi
+              <span>Toernooi</span>
             </button>
           </div>
-        </section>
+        </header>
 
-        <section style={legendBar}>
-          <span style={legendItem}>
-            <Eye size={14} /> Detail
-          </span>
-          <span style={legendItem}>
-            <Ban size={14} /> Afmelden
-          </span>
-          <span style={legendItem}>
-            <Swords size={14} /> Match: eerste klik rood, tweede klik blauw
-          </span>
-        </section>
+        <nav className="fs-main-tabs" aria-label="Matchmaking onderdelen">
+          <button
+            type="button"
+            className={mainView === "fighters" ? "fs-main-tab active" : "fs-main-tab"}
+            onClick={() => setMainView("fighters")}
+          >
+            <Users size={18} />
+            Matchen
+            <span>{stats.total}</span>
+          </button>
+          <button
+            type="button"
+            className={mainView === "matches" ? "fs-main-tab active" : "fs-main-tab"}
+            onClick={() => setMainView("matches")}
+          >
+            <Swords size={18} />
+            Matchmaking
+            <span>{matchRows.length}</span>
+          </button>
+        </nav>
 
-        {matchRed && (
+        {mainView === "fighters" && matchRed && (
           <div style={matchNotice}>
             <b>Rood geselecteerd:</b>{" "}
             {name(fighters.find((f) => inschrijvingIdOf(f) === matchRed) || {})}
@@ -1849,7 +1859,7 @@ return classTabs;
 
         {msg && <div style={notice}>{msg}</div>}
 
-        {tournamentMode && (
+        {mainView === "fighters" && tournamentMode && (
           <section style={tournamentPanel}>
             <div style={tournamentHead}>
               <div>
@@ -1884,7 +1894,7 @@ return classTabs;
                   style={fieldInput}
                   value={tournamentClass}
                   onChange={(e) => setTournamentClass(e.target.value)}
-                  placeholder="Jeugd / N / C / Amateur / Pro"
+                  placeholder="J / N / C / B / A / Amateur / Pro"
                 />
               </label>
               <label style={fieldLabel}>
@@ -1913,6 +1923,7 @@ return classTabs;
           </section>
         )}
 
+        {mainView === "fighters" && (
         <section style={metalPanel}>
           <div style={statGrid}>
             <Stat label="Matchbaar" value={stats.total} />
@@ -1920,22 +1931,28 @@ return classTabs;
             <Stat label="Geen licentie" value={stats.licentie} warning />
             <Stat label="Geen keurmerk" value={stats.keurmerk} warning />
             <Stat label="Afgemeld" value={stats.afgemeld} />
-            <Stat label="Check bezig" value={stats.bezig} warning />
-          </div>
 
-          <div style={tabPanel}>
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                className={activeTab === tab.key ? "fs-tab active" : "fs-tab"}
-                onClick={() => setActiveTab(tab.key)}
-                disabled={filter === "afgemeld" || filter === "gematcht"}
-              >
-                {tab.key}
-                <span>{tab.count}</span>
-              </button>
-            ))}
+            <div className="fs-class-select-row">
+              <label htmlFor="class-filter" className="fs-class-select-label">
+                Klasse
+              </label>
+              <div className="fs-class-select-wrap">
+                <select
+                  id="class-filter"
+                  className="fs-class-select"
+                  value={activeTab}
+                  onChange={(e) => setActiveTab(e.target.value)}
+                  disabled={filter === "afgemeld"}
+                >
+                  <option value="">Alle klassen ({stats.total})</option>
+                  {classOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label} ({option.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
 
           <div style={filterBar}>
@@ -1967,15 +1984,6 @@ return classTabs;
               Geen keurmerk
             </FilterButton>
             <FilterButton
-              active={filter === "gematcht"}
-              onClick={() => {
-                setFilter("gematcht");
-                setActiveTab("");
-              }}
-            >
-              Gematcht
-            </FilterButton>
-            <FilterButton
               active={filter === "afgemeld"}
               onClick={() => {
                 setFilter("afgemeld");
@@ -1989,7 +1997,7 @@ return classTabs;
           <div style={tableCard}>
             <div style={tableHeader}>
               <b>{visible.length}</b> zichtbaar <span style={muted}> · </span>{" "}
-              <b>{selected.length}</b> geselecteerd voor Fightpaspoort controle
+              <b>{selected.length}</b> geselecteerd
             </div>
 
             <div style={{ overflowX: "auto" }}>
@@ -2154,6 +2162,134 @@ return classTabs;
             </div>
           </div>
         </section>
+
+        )}
+
+        {mainView === "matches" && (
+        <section style={matchmakingSection}>
+          <div style={matchmakingHeader}>
+            <div>
+              <div style={eyebrowSmall}>MATCHMAKING</div>
+              <h2 style={matchmakingTitle}>Opgebouwde partijen</h2>
+              <p style={matchmakingText}>
+                Iedere opgeslagen match verschijnt direct hieronder. Open de partij via Detail.
+              </p>
+            </div>
+            <span style={matchmakingCount}>{matchRows.length} partijen</span>
+          </div>
+
+          <div style={matchmakingTableWrap}>
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={matchThNr}>Partij</th>
+                  <th style={th}>Rode hoek</th>
+                  <th style={th}>Sportschool</th>
+                  <th style={th}>Blauwe hoek</th>
+                  <th style={th}>Sportschool</th>
+                  <th style={matchThCompact}>Klasse</th>
+                  <th style={matchThCompact}>Gewicht</th>
+                  <th style={matchThCompact}>Status</th>
+                  <th style={matchThAction}>Actie</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matchRows.map((row, index) => {
+                  const raw = boutRaw(row);
+                  const partijNr = boutPartyNr(row);
+                  const roodNaam = val(
+                    pickFirst(
+                      boutField(row, 'rood_naam', 'red_name'),
+                      raw?.rood?.naam,
+                    ),
+                  );
+                  const blauwNaam = val(
+                    pickFirst(
+                      boutField(row, 'blauw_naam', 'blue_name'),
+                      raw?.blauw?.naam,
+                    ),
+                  );
+                  const roodGym = val(
+                    pickFirst(
+                      boutField(row, 'rood_gym', 'red_gym'),
+                      raw?.rood?.sportschool,
+                      raw?.rood?.gym,
+                    ),
+                  );
+                  const blauwGym = val(
+                    pickFirst(
+                      boutField(row, 'blauw_gym', 'blue_gym'),
+                      raw?.blauw?.sportschool,
+                      raw?.blauw?.gym,
+                    ),
+                  );
+                  const klasse = normalizeClassLabel(boutField(row, 'klasse', 'klasse_mm', 'class'));
+                  const maxGewicht = s(
+                    boutField(row, 'max_gewicht_notatie', 'max_gewicht', 'gewicht'),
+                  );
+                  const code = s(pickFirst(row?.toernooi_code, row?.toernooicode));
+
+                  return (
+                    <tr
+                      key={s(row?.id) || `${partijNr ?? 'toernooi'}-${index}`}
+                      style={index % 2 === 0 ? matchTrEven : matchTrOdd}
+                    >
+                      <td style={matchTdNr}>{partijNr ?? (code || '-')}</td>
+                      <td style={matchTdName}>{roodNaam}</td>
+                      <td style={matchTd}>{roodGym}</td>
+                      <td style={matchTdName}>{blauwNaam}</td>
+                      <td style={matchTd}>{blauwGym}</td>
+                      <td style={matchTdCompact}>{klasse}</td>
+                      <td style={matchTdCompact}>
+                        {maxGewicht
+                          ? /kg|\+|-/i.test(maxGewicht)
+                            ? maxGewicht
+                            : `-${maxGewicht} kg`
+                          : '-'}
+                      </td>
+                      <td style={matchTdCompact}>
+                        <span style={matchStatusBadge}>{boutStatus(row)}</span>
+                      </td>
+                      <td style={matchTdAction}>
+                        {partijNr != null ? (
+                          <div style={matchActions}>
+                            <Link
+                              href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/partij/${partijNr}`}
+                              className="fs-party-detail"
+                            >
+                              Detail
+                            </Link>
+                            <button
+                              type="button"
+                              className="fs-icon-btn red"
+                              title={`Match ${partijNr} ontbinden`}
+                              aria-label={`Match ${partijNr} ontbinden`}
+                              disabled={busyId === `delete-match-${partijNr}`}
+                              onClick={() => ontbindMatch(row)}
+                            >
+                              <Unlink size={15} />
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={matchNoDetail}>Geen partijNr</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!loading && matchRows.length === 0 && (
+                  <tr>
+                    <td style={emptyTd} colSpan={9}>
+                      Nog geen partijen aangemaakt.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        )}
       </div>
 
       <style jsx global>
@@ -2177,15 +2313,15 @@ function Stat({
       <div
         style={{
           color: warning && value > 0 ? ORANGE : "#a8adb6",
-          fontSize: 11,
-          letterSpacing: 1.8,
+          fontSize: 10,
+          letterSpacing: 1.35,
           textTransform: "uppercase",
           fontWeight: 900,
         }}
       >
         {label}
       </div>
-      <div style={{ fontSize: 30, fontWeight: 950, marginTop: 4 }}>{value}</div>
+      <div style={{ fontSize: 24, lineHeight: 1, fontWeight: 950, marginTop: 7 }}>{value}</div>
     </div>
   );
 }
@@ -2420,8 +2556,8 @@ const tournamentHint: CSSProperties = {
   fontWeight: 850,
 };
 const metalPanel: CSSProperties = {
-  margin: 34,
-  padding: 28,
+  margin: 16,
+  padding: 16,
   borderRadius: 26,
   background: "linear-gradient(135deg,#f7f8fa 0%,#cdd0d4 45%,#f5f6f8 100%)",
   border: "2px solid rgba(80,82,88,.55)",
@@ -2430,13 +2566,14 @@ const metalPanel: CSSProperties = {
 };
 const statGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(6, minmax(120px, 1fr))",
-  gap: 12,
-  marginBottom: 16,
+  gridTemplateColumns: "repeat(5, minmax(105px, .72fr)) minmax(260px, 1.6fr)",
+  gap: 8,
+  marginBottom: 12,
 };
 const statCard: CSSProperties = {
-  padding: 16,
-  borderRadius: 18,
+  minHeight: 70,
+  padding: "10px 12px",
+  borderRadius: 0,
   color: "#f7f7f7",
   background: "linear-gradient(180deg,#2b2d34,#0b0c10)",
   border: "1px solid rgba(255,255,255,.18)",
@@ -2455,7 +2592,7 @@ const tabPanel: CSSProperties = {
 };
 const filterBar: CSSProperties = {
   display: "flex",
-  gap: 10,
+  gap: 6,
   flexWrap: "wrap",
   alignItems: "center",
   marginBottom: 16,
@@ -2616,11 +2753,65 @@ const spinner: CSSProperties = {
   animation: "fs-spin .9s linear infinite",
 };
 
+
+const matchmakingSection: CSSProperties = {
+  margin: "14px 16px 18px",
+  border: "1px solid #4b4b4f",
+  background: "#101010",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.05)",
+};
+const matchmakingHeader: CSSProperties = {
+  minHeight: 70,
+  padding: "12px 14px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 16,
+  borderBottom: "1px solid #3f3f46",
+  background: "linear-gradient(180deg,#2a2a2d,#171719)",
+};
+const matchmakingTitle: CSSProperties = { margin: "2px 0 0", fontSize: 20, fontWeight: 950, color: "#fff" };
+const matchmakingText: CSSProperties = { margin: "3px 0 0", color: "#a1a1aa", fontSize: 12, fontWeight: 700 };
+const matchmakingCount: CSSProperties = {
+  padding: "7px 10px",
+  border: "1px solid rgba(255,77,0,.75)",
+  background: "#21130d",
+  color: "#ff7a3d",
+  fontSize: 12,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+const matchmakingTableWrap: CSSProperties = { width: "100%", overflowX: "auto" };
+const matchThNr: CSSProperties = { ...th, width: 62, textAlign: "center" };
+const matchThCompact: CSSProperties = { ...th, width: 72, textAlign: "center" };
+const matchThAction: CSSProperties = { ...th, width: 126, textAlign: "center" };
+const matchTd: CSSProperties = { ...td, padding: "8px 7px", fontSize: 12 };
+const matchTdName: CSSProperties = { ...matchTd, color: "#fff", fontWeight: 950, minWidth: 150 };
+const matchTdNr: CSSProperties = { ...matchTd, textAlign: "center", color: ORANGE, fontSize: 15, fontWeight: 950 };
+const matchTdCompact: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap" };
+const matchTdAction: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap", padding: "5px 7px" };
+const matchActions: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
+const matchTrEven: CSSProperties = { background: "#171717" };
+const matchTrOdd: CSSProperties = { background: "#202020" };
+const matchStatusBadge: CSSProperties = {
+  display: "inline-flex",
+  minHeight: 24,
+  alignItems: "center",
+  padding: "3px 7px",
+  border: "1px solid #52525b",
+  background: "#29292d",
+  color: "#e4e4e7",
+  fontSize: 10,
+  fontWeight: 950,
+  textTransform: "uppercase",
+};
+const matchNoDetail: CSSProperties = { color: "#71717a", fontSize: 10, fontWeight: 800 };
+
 const globalCss = `
 @keyframes fs-spin { to { transform: rotate(360deg); } }
 .fs-mini-spinner{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#ff4d00;animation:fs-spin .75s linear infinite;display:inline-block;flex:0 0 auto}
-.fs-back-btn,.fs-dark-btn,.fs-orange-btn,.fs-filter,.fs-tab,.fs-icon-btn,.fs-clear-btn,.fs-tournament-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;text-decoration:none;font-weight:950;cursor:pointer;transition:.15s ease;border:1px solid rgba(255,255,255,.22);white-space:nowrap}.fs-back-btn {
-  color: #000 !important;justify-self:end;color:#101114;padding:9px 13px;max-width:max-content;background:linear-gradient(180deg,#ffffff,#c5c8ce 55%,#f2f3f5);border-color:rgba(255,255,255,.85);box-shadow:inset 0 1px 0 #fff,0 7px 18px rgba(0,0,0,.35)}.fs-dark-btn{color:#fff;padding:10px 14px;background:linear-gradient(180deg,#2c2e35,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 8px 16px rgba(0,0,0,.24)}.fs-strong-btn{border-color:rgba(255,77,0,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 0 0 1px rgba(255,77,0,.22),0 10px 22px rgba(255,77,0,.18)}.fs-locked{color:#f9c7b7;border-color:rgba(255,77,0,.55);background:linear-gradient(180deg,#3a1d14,#151515)}.fs-orange-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.85);background:linear-gradient(180deg,#ff5c15,#a22b00);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 22px rgba(255,77,0,.28)}.fs-tournament-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff6a21,#822100);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 24px rgba(255,77,0,.32)}.fs-icon-btn{width:34px;height:34px;padding:0;color:#fff;border-radius:9px;background:linear-gradient(180deg,#2b2d34,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.16);margin-right:5px}.fs-icon-btn.orange{background:linear-gradient(180deg,#ff5c15,#a22b00);border-color:rgba(255,77,0,.8)}.fs-icon-btn.red{background:linear-gradient(180deg,#ef4444,#991b1b);border-color:rgba(220,38,38,.9)}.fs-icon-btn.blue{background:linear-gradient(180deg,#3b82f6,#1d4ed8);border-color:rgba(37,99,235,.9)}.fs-clear-btn{margin-left:12px;padding:6px 10px;color:#111;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter{color:#111;padding:10px 13px;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter.active{color:#fff;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff5c15,#b32f00)}.fs-tab{color:#fff;padding:9px 12px;background:linear-gradient(180deg,#ff6a21,#b43300);border-color:rgba(255,77,0,.95);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 18px rgba(255,77,0,.16)}.fs-tab span{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;padding:0 7px;border-radius:999px;color:#111;background:linear-gradient(180deg,#ffffff,#d8dbe0);font-size:12px}.fs-tab.active{color:#fff;background:linear-gradient(180deg,#ff4d00,#7f2200);border-color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 2px rgba(255,77,0,.38),0 0 26px rgba(255,77,0,.34)}.fs-tab:disabled{opacity:.45;cursor:not-allowed}.fs-name-select{border:0;padding:0;margin:0;background:transparent;color:#ff4d00;font-size:15px;font-weight:950;cursor:default;text-align:left}.fs-name-select:not(:disabled){cursor:pointer;text-decoration:underline;text-underline-offset:3px}.fs-name-select.active{display:inline-flex;padding:6px 9px;border-radius:999px;color:#fff;background:linear-gradient(180deg,#ff5c15,#9a2800);box-shadow:0 0 0 1px rgba(255,77,0,.75),0 0 18px rgba(255,77,0,.24)}.fs-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 8px;background:#eef0f3;border:1px solid #c9ccd1;color:#111;font-weight:950;font-size:11px}.fs-badge.ok{background:#dcfce7;border-color:#16a34a;color:#166534}.fs-badge.bad{background:#fee2e2;border-color:#dc2626;color:#991b1b}button:disabled{opacity:.55;cursor:not-allowed}@media (max-width: 900px){.fs-back-btn{justify-self:start}}
+.fs-back-btn,.fs-dark-btn,.fs-orange-btn,.fs-filter,.fs-tab,.fs-icon-btn,.fs-clear-btn,.fs-tournament-btn,.fs-party-detail{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;text-decoration:none;font-weight:950;cursor:pointer;transition:.15s ease;border:1px solid rgba(255,255,255,.22);white-space:nowrap}.fs-back-btn {
+  color: #000 !important;justify-self:end;color:#101114;padding:9px 13px;max-width:max-content;background:linear-gradient(180deg,#ffffff,#c5c8ce 55%,#f2f3f5);border-color:rgba(255,255,255,.85);box-shadow:inset 0 1px 0 #fff,0 7px 18px rgba(0,0,0,.35)}.fs-dark-btn{color:#fff;padding:10px 14px;background:linear-gradient(180deg,#2c2e35,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 8px 16px rgba(0,0,0,.24)}.fs-strong-btn{border-color:rgba(255,77,0,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 0 0 1px rgba(255,77,0,.22),0 10px 22px rgba(255,77,0,.18)}.fs-locked{color:#f9c7b7;border-color:rgba(255,77,0,.55);background:linear-gradient(180deg,#3a1d14,#151515)}.fs-orange-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.85);background:linear-gradient(180deg,#ff5c15,#a22b00);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 22px rgba(255,77,0,.28)}.fs-tournament-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff6a21,#822100);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 24px rgba(255,77,0,.32)}.fs-icon-btn{width:34px;height:34px;padding:0;color:#fff;border-radius:9px;background:linear-gradient(180deg,#2b2d34,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.16);margin-right:5px}.fs-icon-btn.orange{background:linear-gradient(180deg,#ff5c15,#a22b00);border-color:rgba(255,77,0,.8)}.fs-icon-btn.red{background:linear-gradient(180deg,#ef4444,#991b1b);border-color:rgba(220,38,38,.9)}.fs-icon-btn.blue{background:linear-gradient(180deg,#3b82f6,#1d4ed8);border-color:rgba(37,99,235,.9)}.fs-clear-btn{margin-left:12px;padding:6px 10px;color:#111;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter{color:#111;padding:10px 13px;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter.active{color:#fff;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff5c15,#b32f00)}.fs-tab{color:#fff;padding:9px 12px;background:linear-gradient(180deg,#ff6a21,#b43300);border-color:rgba(255,77,0,.95);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 18px rgba(255,77,0,.16)}.fs-tab span{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;padding:0 7px;border-radius:999px;color:#111;background:linear-gradient(180deg,#ffffff,#d8dbe0);font-size:12px}.fs-tab.active{color:#fff;background:linear-gradient(180deg,#ff4d00,#7f2200);border-color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 2px rgba(255,77,0,.38),0 0 26px rgba(255,77,0,.34)}.fs-tab:disabled{opacity:.45;cursor:not-allowed}.fs-name-select{border:0;padding:0;margin:0;background:transparent;color:#ff4d00;font-size:15px;font-weight:950;cursor:default;text-align:left}.fs-name-select:not(:disabled){cursor:pointer;text-decoration:underline;text-underline-offset:3px}.fs-name-select.active{display:inline-flex;padding:6px 9px;border-radius:999px;color:#fff;background:linear-gradient(180deg,#ff5c15,#9a2800);box-shadow:0 0 0 1px rgba(255,77,0,.75),0 0 18px rgba(255,77,0,.24)}.fs-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 8px;background:#eef0f3;border:1px solid #c9ccd1;color:#111;font-weight:950;font-size:11px}.fs-badge.ok{background:#dcfce7;border-color:#16a34a;color:#166534}.fs-badge.bad{background:#fee2e2;border-color:#dc2626;color:#991b1b}.fs-party-detail{height:28px;padding:0 9px;color:#fff;border-radius:4px;border:1px solid rgba(0,0,0,.45);background:linear-gradient(180deg,#3d434d 0%,#22262d 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.10);font-size:11px;font-weight:950}.fs-party-detail:hover{border-color:#ff4d00;color:#fff}button:disabled{opacity:.55;cursor:not-allowed}@media (max-width: 900px){.fs-back-btn{justify-self:start}}
 `;
 
 

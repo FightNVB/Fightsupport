@@ -47,7 +47,7 @@ export default function TalentstatusPage() {
             <p className="text-sm text-zinc-300">Nederlandse J+ vechters moeten talentstatus hebben. Buitenlandse Europese vechters kunnen handmatig op partij worden ingevoerd.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer">Terug naar beheer</Link>
+            <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/administratie">Terug naar administratie</Link>
             <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/vechters">Talentstatus vechters</Link>
             <Link className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/vechters/nieuw">Vechter toevoegen</Link>
             <Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/beheer/talentstatus/partijen">J+ partijen</Link>
