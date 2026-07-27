@@ -888,6 +888,7 @@ export default function NieuweMatchPage() {
   const [msg, setMsg] = useState("");
   const [dispensatieOpen, setDispensatieOpen] = useState(false);
   const [weightConfirmOpen, setWeightConfirmOpen] = useState(false);
+  const [weightWarningOpen, setWeightWarningOpen] = useState(false);
   const [maxWeightInput, setMaxWeightInput] = useState("");
 
   const load = useCallback(async () => {
@@ -1042,6 +1043,37 @@ export default function NieuweMatchPage() {
     };
   }, [rood, blauw, eventDate, maxWeightInput, engineHits, engineError, engineLoading]);
 
+  const comparison = useMemo(() => {
+    const rw = weight(rood);
+    const bw = weight(blauw);
+    const weightDiff = rw != null && bw != null ? Math.abs(rw - bw) : null;
+    const ageDiff =
+      analysis.roodAge != null && analysis.blauwAge != null
+        ? Math.abs(analysis.roodAge - analysis.blauwAge)
+        : null;
+    const roodRecord = recordLabel(rood);
+    const blauwRecord = recordLabel(blauw);
+    const sameDiscipline =
+      !!discipline(rood) &&
+      !!discipline(blauw) &&
+      lower(discipline(rood)) === lower(discipline(blauw));
+    const sameClass =
+      !!klass(rood) &&
+      !!klass(blauw) &&
+      normalizeClassToken(klass(rood)) === normalizeClassToken(klass(blauw));
+
+    return {
+      rw,
+      bw,
+      weightDiff,
+      ageDiff,
+      roodRecord,
+      blauwRecord,
+      sameDiscipline,
+      sameClass,
+    };
+  }, [rood, blauw, analysis.roodAge, analysis.blauwAge]);
+
   useEffect(() => {
     if (!rood || !blauw || maxWeightInput) return;
     const suggestion = suggestedMaxWeight(rood, blauw, analysis.youth);
@@ -1123,9 +1155,29 @@ ${engineError}`);
     setWeightConfirmOpen(true);
   }
 
-  function confirmWeightAndSave() {
+  function getWeightUnderLimitInfo() {
     const rw = weight(rood);
     const bw = weight(blauw);
+    const entered = n(maxWeightInput);
+
+    if (entered == null) return null;
+
+    const weights = [rw, bw].filter(
+      (value): value is number => value != null && Number.isFinite(value),
+    );
+    if (!weights.length) return null;
+
+    const heavier = Math.max(...weights);
+    if (entered >= heavier) return null;
+
+    return {
+      entered,
+      heavier,
+      message: `Max gewicht -${fmtKg(entered)} kg ligt onder het opgegeven gewicht van een vechter (${fmtKg(heavier)} kg).`,
+    };
+  }
+
+  function confirmWeightAndSave() {
     const entered = n(maxWeightInput);
 
     if (entered == null) {
@@ -1133,14 +1185,16 @@ ${engineError}`);
       return;
     }
 
-    if (rw != null && bw != null) {
-      const heavier = Math.max(rw, bw);
-      if (entered < heavier) {
-        setMsg(
-          `Max gewicht -${fmtKg(entered)} kg ligt onder het opgegeven gewicht van een vechter (${fmtKg(heavier)} kg).`,
-        );
-        return;
-      }
+    const underLimit = getWeightUnderLimitInfo();
+    if (underLimit && analysis.youth) {
+      // De jeugdblokkade blijft zichtbaar in de gewichtspopup.
+      return;
+    }
+
+    if (underLimit) {
+      setWeightConfirmOpen(false);
+      setWeightWarningOpen(true);
+      return;
     }
 
     setWeightConfirmOpen(false);
@@ -1184,37 +1238,63 @@ ${engineError}`);
           />
 
           <div className="fs-center">
-            <div className="fs-details">
-              <div className="fs-details-head">
-                <Swords size={15} />
-                MATCHENGINE CONTROLE
+            <div className={`fs-verdict severity-${analysis.worst.toLowerCase().replace(" ", "-")}`}>
+              <div className="fs-verdict-icon">
+                {analysis.worst === "OK" ? <CheckCircle2 size={26} /> : <ShieldAlert size={26} />}
               </div>
-              <InfoLine
-                label="Discipline"
-                value={val(discipline(rood) || discipline(blauw))}
-                dark
+              <div>
+                <span>MATCHENGINE OORDEEL</span>
+                <b>{engineLoading ? "Controle wordt uitgevoerd" : analysis.worst === "OK" ? "Deze combinatie voldoet" : analysis.worst === "LET OP" ? "Actie of overleg nodig" : analysis.worst}</b>
+              </div>
+              <strong>{engineLoading ? "…" : analysis.items.filter((item) => item.severity !== "OK").length}</strong>
+            </div>
+
+            <div className="fs-comparison">
+              <div className="fs-comparison-head">
+                <BarChart3 size={16} />
+                VERSCHILLEN IN ÉÉN OOGOPSLAG
+              </div>
+              <ComparisonRow
+                label="Leeftijd"
+                red={analysis.roodAge == null ? "-" : `${analysis.roodAge} jaar`}
+                blue={analysis.blauwAge == null ? "-" : `${analysis.blauwAge} jaar`}
+                difference={comparison.ageDiff == null ? "-" : `${comparison.ageDiff} jaar verschil`}
+                state={comparison.ageDiff == null ? "neutral" : analysis.youth && comparison.ageDiff >= 2 ? "warn" : "ok"}
               />
-              <InfoLine
+              <ComparisonRow
+                label="Gewicht"
+                red={comparison.rw == null ? "-" : `${fmtKg(comparison.rw)} kg`}
+                blue={comparison.bw == null ? "-" : `${fmtKg(comparison.bw)} kg`}
+                difference={comparison.weightDiff == null ? "-" : `${fmtKg(comparison.weightDiff)} kg verschil`}
+                state={comparison.weightDiff == null ? "neutral" : comparison.weightDiff > (analysis.youth ? 2 : isMmaMatch(rood, blauw) ? 4 : 3) ? "warn" : "ok"}
+              />
+              <ComparisonRow
+                label="Ervaring"
+                red={comparison.roodRecord}
+                blue={comparison.blauwRecord}
+                difference="Record"
+                state="neutral"
+              />
+              <ComparisonRow
                 label="Klasse"
-                value={val(klass(rood) || klass(blauw))}
-                dark
+                red={val(klass(rood))}
+                blue={val(klass(blauw))}
+                difference={comparison.sameClass ? "Gelijk" : "Verschillend"}
+                state={comparison.sameClass ? "ok" : "warn"}
               />
-              <InfoLine
-                label="Max gewicht"
-                value={
-                  maxWeightInput
-                    ? `-${maxWeightInput} kg`
-                    : analysis.maxWeightSuggestion == null
-                      ? "Nog niet ingevuld"
-                      : `Voorstel -${fmtKg(analysis.maxWeightSuggestion)} kg`
-                }
-                dark
+              <ComparisonRow
+                label="Discipline"
+                red={val(discipline(rood))}
+                blue={val(discipline(blauw))}
+                difference={comparison.sameDiscipline ? "Gelijk" : "Verschillend"}
+                state={comparison.sameDiscipline ? "ok" : "warn"}
               />
-              <InfoLine
-                label="Meldingen"
-                value={engineLoading ? "Controleren..." : `${analysis.items.filter((item) => item.severity !== "OK").length}`}
-                dark
-              />
+            </div>
+
+            <div className="fs-agreement">
+              <span>Afgesproken maximum</span>
+              <b>{maxWeightInput ? `-${maxWeightInput} kg` : analysis.maxWeightSuggestion == null ? "Nog niet ingevuld" : `Voorstel -${fmtKg(analysis.maxWeightSuggestion)} kg`}</b>
+              <small>{weightLimitText(rood, blauw, analysis.youth)}</small>
             </div>
 
             <div className="fs-center-alerts">
@@ -1333,6 +1413,19 @@ ${engineError}`);
                 </small>
               </div>
 
+              {getWeightUnderLimitInfo() && analysis.youth && (
+                <div className="fs-weight-warning is-blocking">
+                  <ShieldAlert size={18} />
+                  <div>
+                    <b>Opslaan geblokkeerd bij jeugd</b>
+                    <span>{getWeightUnderLimitInfo()?.message}</span>
+                    <small>
+                      Overleg met de trainer en pas het opgegeven gewicht aan.
+                    </small>
+                  </div>
+                </div>
+              )}
+
               <div className="fs-modal-actions">
                 <button
                   type="button"
@@ -1347,6 +1440,58 @@ ${engineError}`);
                   onClick={confirmWeightAndSave}
                 >
                   Bevestigen en opslaan
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {weightWarningOpen && getWeightUnderLimitInfo() && !analysis.youth && (
+        <div className="fs-modal-overlay">
+          <div className="fs-modal-card">
+            <div className="fs-modal-head">
+              <div>
+                <div className="fs-modal-kicker">FightSupport waarschuwing</div>
+                <div className="fs-modal-title">Gewicht ligt onder de opgave</div>
+              </div>
+              <div className="fs-modal-badge">!</div>
+            </div>
+
+            <div className="fs-modal-body">
+              <div className="fs-weight-warning">
+                <ShieldAlert size={18} />
+                <div>
+                  <b>Controleer deze gewichtsafspraak</b>
+                  <span>{getWeightUnderLimitInfo()?.message}</span>
+                  <small>
+                    Bij een volwassen partij blokkeert dit het opslaan niet.
+                    Bevestig alleen wanneer dit gewicht bewust met de trainers is afgesproken.
+                  </small>
+                </div>
+              </div>
+
+              <div className="fs-modal-actions">
+                <button
+                  type="button"
+                  className="fs-modal-cancel"
+                  onClick={() => {
+                    setWeightWarningOpen(false);
+                    setWeightConfirmOpen(true);
+                  }}
+                >
+                  Gewicht aanpassen
+                </button>
+                <button
+                  type="button"
+                  className="fs-modal-confirm"
+                  onClick={() => {
+                    setWeightWarningOpen(false);
+                    doSave();
+                  }}
+                >
+                  Toch opslaan
                 </button>
               </div>
             </div>
@@ -2301,6 +2446,43 @@ ${engineError}`);
           background: rgba(255, 255, 255, 0.06);
         }
 
+        .fs-weight-warning {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+          margin-top: 14px;
+          padding: 12px 14px;
+          border: 1px solid rgba(255, 184, 0, 0.75);
+          border-radius: 10px;
+          background: rgba(255, 184, 0, 0.12);
+          color: #fff3c4;
+        }
+
+        .fs-weight-warning.is-blocking {
+          border-color: rgba(255, 77, 0, 0.9);
+          background: rgba(255, 77, 0, 0.16);
+          color: #ffe2d6;
+        }
+
+        .fs-weight-warning > div {
+          display: grid;
+          gap: 4px;
+        }
+
+        .fs-weight-warning b,
+        .fs-weight-warning span,
+        .fs-weight-warning small {
+          display: block;
+        }
+
+        .fs-weight-warning span {
+          line-height: 1.45;
+        }
+
+        .fs-weight-warning small {
+          color: rgba(255, 255, 255, 0.72);
+        }
+
         .fs-modal-actions {
           display: flex;
           justify-content: flex-end;
@@ -2506,6 +2688,80 @@ ${engineError}`);
             grid-template-columns: 1fr;
           }
         }
+
+        /* 2026 match cockpit makeover */
+        .fs-shell { max-width: 1480px; }
+        .fs-page-head {
+          min-height: 64px; border-radius: 14px; padding: 8px 14px;
+          grid-template-columns: 130px 1fr 170px;
+          background: linear-gradient(180deg,#303238 0%,#17181c 55%,#0d0e10 100%);
+          border: 1px solid rgba(255,255,255,.18);
+          box-shadow: inset 0 -2px 0 ${ORANGE}, 0 12px 34px rgba(0,0,0,.38);
+        }
+        .fs-back, .fs-header-detail { border-radius: 8px; }
+        .fs-matchplate {
+          grid-template-columns: minmax(300px,.9fr) minmax(470px,1.25fr) minmax(300px,.9fr);
+          gap: 8px; padding: 8px; border-radius: 16px;
+          background: #0b0c0f;
+          border: 1px solid rgba(255,255,255,.16);
+          box-shadow: 0 18px 50px rgba(0,0,0,.42);
+        }
+        .fs-fighter { border-radius: 12px; background: linear-gradient(180deg,#17191d,#0d0e11); }
+        .fs-fighter-title { height: 46px; padding: 0 16px; }
+        .fs-fighter.red .fs-fighter-title { background: linear-gradient(90deg,#8f1018,#d62832 55%,#5e0910); }
+        .fs-fighter.blue .fs-fighter-title { background: linear-gradient(90deg,#123d9b,#2864e8 55%,#102b69); }
+        .fs-fighter-body { padding: 14px; }
+        .fs-fighter-name { font-size: 25px; color: #fff; letter-spacing: -.02em; }
+        .fs-fighter.red .fs-fighter-name { color: #ff676d; }
+        .fs-fighter.blue .fs-fighter-name { color: #6f9dff; }
+        .fs-gym { color: #f4f4f5; opacity: .82; }
+        .fs-fighter-highlights { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin:12px 0 8px; }
+        .fs-fighter-highlights div { padding:9px 8px; border-radius:9px; background:#22242a; border:1px solid rgba(255,255,255,.08); text-align:center; }
+        .fs-fighter-highlights span { display:block; color:#9ca3af; font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; }
+        .fs-fighter-highlights b { display:block; margin-top:3px; color:#fff; font-size:14px; }
+        .mini-badge { border-radius:6px; padding:5px 8px; }
+        .fs-info-grid { gap:0 12px; margin-top:4px; }
+        .fs-info-line { padding:6px 0; }
+        .fs-keur { margin-top:10px; border-radius:10px; }
+        .fs-whitebox { background:#f4f4f5; padding:10px; line-height:1.4; }
+        .fs-center { gap:8px; }
+        .fs-verdict { display:grid; grid-template-columns:42px 1fr 42px; gap:10px; align-items:center; padding:10px 12px; border-radius:12px; background:#1c1e23; border:1px solid rgba(255,255,255,.12); }
+        .fs-verdict-icon { width:38px; height:38px; display:grid; place-items:center; border-radius:9px; background:rgba(255,255,255,.08); }
+        .fs-verdict span { display:block; font-size:10px; letter-spacing:.12em; color:#a1a1aa; font-weight:950; }
+        .fs-verdict b { display:block; color:#fff; font-size:17px; margin-top:2px; }
+        .fs-verdict strong { width:36px; height:36px; display:grid; place-items:center; border-radius:50%; background:rgba(255,255,255,.08); font-size:18px; }
+        .fs-verdict.severity-ok { border-color:rgba(34,197,94,.5); box-shadow:inset 3px 0 0 #22c55e; }
+        .fs-verdict.severity-let-op, .fs-verdict.severity-dispensatie { border-color:rgba(255,77,0,.55); box-shadow:inset 3px 0 0 ${ORANGE}; }
+        .fs-verdict.severity-afkeur, .fs-verdict.severity-verbod { border-color:rgba(239,68,68,.55); box-shadow:inset 3px 0 0 #ef4444; }
+        .fs-comparison { overflow:hidden; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:#121317; }
+        .fs-comparison-head { display:flex; align-items:center; gap:8px; padding:9px 12px; background:#23252b; color:#fff; font-size:12px; font-weight:1000; letter-spacing:.08em; border-bottom:2px solid ${ORANGE}; }
+        .fs-compare-row { display:grid; grid-template-columns:1fr 150px 1fr; align-items:center; min-height:48px; border-bottom:1px solid rgba(255,255,255,.07); }
+        .fs-compare-row:last-child { border-bottom:0; }
+        .fs-compare-row > b { padding:0 12px; font-size:15px; }
+        .fs-compare-row .red-value { text-align:right; color:#ff777c; }
+        .fs-compare-row .blue-value { text-align:left; color:#78a3ff; }
+        .fs-compare-label { align-self:stretch; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 8px; background:rgba(255,255,255,.035); border-left:1px solid rgba(255,255,255,.06); border-right:1px solid rgba(255,255,255,.06); text-align:center; }
+        .fs-compare-label span { color:#fff; font-size:11px; font-weight:1000; text-transform:uppercase; letter-spacing:.06em; }
+        .fs-compare-label small { margin-top:2px; color:#9ca3af; font-size:10px; font-weight:800; }
+        .fs-compare-row.ok .fs-compare-label small { color:#4ade80; }
+        .fs-compare-row.warn .fs-compare-label small { color:#fb923c; }
+        .fs-agreement { display:grid; grid-template-columns:1fr auto; align-items:center; gap:2px 12px; padding:10px 12px; border-radius:12px; background:linear-gradient(135deg,rgba(255,77,0,.18),#191b20 55%); border:1px solid rgba(255,77,0,.35); }
+        .fs-agreement span { color:#cbd5e1; font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; }
+        .fs-agreement b { grid-row:1/3; grid-column:2; color:#fff; font-size:22px; }
+        .fs-agreement small { color:#9ca3af; font-size:10px; font-weight:800; }
+        .fs-center-alerts { gap:6px; }
+        .fs-center-alert { border-radius:10px; }
+        .fs-save { border-radius:10px !important; min-height:58px; font-size:17px !important; background:linear-gradient(180deg,#ff6526,#d63d00) !important; border-color:#ff7a45 !important; box-shadow:0 10px 24px rgba(255,77,0,.22), inset 0 1px 0 rgba(255,255,255,.25) !important; }
+        .fs-save:hover { filter:brightness(1.08); transform:translateY(-1px); }
+        @media (max-width: 1220px) {
+          .fs-matchplate { grid-template-columns:1fr; }
+          .fs-center { order:-1; }
+        }
+        @media (max-width: 680px) {
+          .fs-compare-row { grid-template-columns:1fr 104px 1fr; }
+          .fs-compare-row > b { font-size:12px; padding:0 7px; }
+          .fs-fighter-highlights { grid-template-columns:1fr; }
+        }
       `}</style>
     </main>
   );
@@ -2546,6 +2802,12 @@ function FighterPanel({
         <h2 className="fs-fighter-name">{name(f)}</h2>
         <div className="fs-gym">{val(gym(f))}</div>
 
+        <div className="fs-fighter-highlights">
+          <div><span>Leeftijd</span><b>{age == null ? "-" : `${age} jaar`}</b></div>
+          <div><span>Gewicht</span><b>{weight(f) == null ? "-" : `${fmtKg(weight(f))} kg`}</b></div>
+          <div><span>Record</span><b>{recordLabel(f)}</b></div>
+        </div>
+
         <div className="fs-badges">
           <MiniBadge
             label={`Licentie: ${licentie}`}
@@ -2569,17 +2831,9 @@ function FighterPanel({
             value={val(f?.va_nummer || f?.va || f?.fighter_id)}
           />
           <InfoLine label="Geboren" value={formatDate(birthDate(f))} />
-          <InfoLine
-            label="Leeftijd"
-            value={age == null ? "-" : `${age} jaar`}
-          />
           <InfoLine label="Geslacht" value={val(gender(f))} />
           <InfoLine label="Discipline" value={val(discipline(f))} />
           <InfoLine label="Klasse" value={val(klass(f))} />
-          <InfoLine
-            label="Gewicht"
-            value={weight(f) == null ? "-" : `${weight(f)?.toFixed(1)} kg`}
-          />
         </div>
 
         <div className="fs-keur">
@@ -2597,6 +2851,31 @@ function FighterPanel({
         </div>
       </div>
     </article>
+  );
+}
+
+function ComparisonRow({
+  label,
+  red,
+  blue,
+  difference,
+  state,
+}: {
+  label: string;
+  red: string;
+  blue: string;
+  difference: string;
+  state: "ok" | "warn" | "neutral";
+}) {
+  return (
+    <div className={`fs-compare-row ${state}`}>
+      <b className="red-value">{red}</b>
+      <div className="fs-compare-label">
+        <span>{label}</span>
+        <small>{difference}</small>
+      </div>
+      <b className="blue-value">{blue}</b>
+    </div>
   );
 }
 

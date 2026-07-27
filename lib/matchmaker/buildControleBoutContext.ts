@@ -556,6 +556,38 @@ if (scopedPartijNr != null) {
     });
   }
 
+  // De scraperloze matchmaker-build heeft de aanmelding en de toen bekende
+  // FightPassport-gegevens al samengebracht in matchmaker_fighter_context.
+  // Deze laag is leidend voor de MM/input-velden en vergelijkingssignalen.
+  // De actuele persoonswaarheid blijft fightpassport_fighters.
+  const matchmakerContextByVa = new Map<string, any>();
+  if (vaList.length > 0) {
+    const { data: mmContexts, error: mmCtxErr } = await supabaseAdmin
+      .from("matchmaker_fighter_context")
+      .select("*")
+      .eq("matchmaking_id", matchmaking_id)
+      .in(
+        "va_nummer",
+        vaList.map((v) => Number(v)).filter((n) => Number.isFinite(n))
+      )
+      .order("updated_at", { ascending: false });
+
+    if (mmCtxErr) throw mmCtxErr;
+
+    for (const row of mmContexts ?? []) {
+      const va = firstValidVa(row?.va_nummer, row?.fighter_id, row?.va);
+      if (va && !matchmakerContextByVa.has(va)) {
+        matchmakerContextByVa.set(va, row);
+      }
+    }
+
+    console.log("[buildControleBoutContext] matchmaker contexts loaded", {
+      matchmaking_id,
+      rows: mmContexts?.length ?? 0,
+      unique_vas: matchmakerContextByVa.size,
+    });
+  }
+
   const uitslagenByVa = new Map<string, any[]>();
   if (vaList.length > 0) {
     const { data: uitslagen, error: uErr } = await supabaseAdmin
@@ -771,15 +803,18 @@ if (scopedPartijNr != null) {
 
     const fr = vaR ? fighterByVa.get(vaR) : null;
     const fb = vaB ? fighterByVa.get(vaB) : null;
+    const mr = vaR ? matchmakerContextByVa.get(vaR) : null;
+    const mb = vaB ? matchmakerContextByVa.get(vaB) : null;
 
-    const currentClass = partij?.klasse ?? partij?.klasse_mm ?? null;
+    const currentClass =
+      partij?.klasse ?? partij?.klasse_mm ?? mr?.klasse ?? mb?.klasse ?? null;
     const recRClass = buildClassAwareRecord(uitslagenR, currentClass);
     const recBClass = buildClassAwareRecord(uitslagenB, currentClass);
 
     const roodGeboortedatum =
-      fr?.geboortedatum ?? partij?.rood_geboortedatum ?? null;
+      fr?.geboortedatum ?? mr?.fp_geboortedatum ?? mr?.geboortedatum ?? null;
     const blauwGeboortedatum =
-      fb?.geboortedatum ?? partij?.blauw_geboortedatum ?? null;
+      fb?.geboortedatum ?? mb?.fp_geboortedatum ?? mb?.geboortedatum ?? null;
 
     const rood_leeftijd_event =
       roodGeboortedatum && evenement_datum
@@ -813,8 +848,14 @@ if (scopedPartijNr != null) {
       matchmaking_id: partij?.matchmaking_id ?? matchmaking_id,
       bout_id,
 
-      discipline: partij?.discipline ?? null,
-      klasse_mm: partij?.klasse ?? null,
+      discipline:
+        toNullableStr(partij?.discipline) ??
+        toNullableStr(mr?.discipline) ??
+        toNullableStr(mb?.discipline),
+      klasse_mm:
+        toNullableStr(partij?.klasse) ??
+        toNullableStr(mr?.klasse) ??
+        toNullableStr(mb?.klasse),
       is_toernooi: resolveIsToernooi(partij),
       toernooi_code,
 
@@ -822,15 +863,29 @@ if (scopedPartijNr != null) {
       max_gewicht_notatie,
       max_gewicht_type,
 
-      rood_naam_mm: toNullableStr(partij?.rood_naam),
-      rood_gym_mm: toNullableStr(partij?.rood_gym),
-      rood_gewicht_mm: toNullableNumber(partij?.rood_gewicht),
+      rood_naam_mm:
+        toNullableStr(partij?.rood_naam) ??
+        toNullableStr(mr?.naam_input) ??
+        toNullableStr(mr?.voornaam && mr?.achternaam ? `${mr.voornaam} ${mr.achternaam}` : null),
+      rood_gym_mm:
+        toNullableStr(partij?.rood_gym) ??
+        toNullableStr(mr?.gym_input),
+      rood_gewicht_mm:
+        toNullableNumber(partij?.rood_gewicht) ??
+        toNullableNumber(mr?.gewicht),
       rood_va_mm: vaR,
       rood_va_mm_prev: vaRPrev,
 
-      blauw_naam_mm: toNullableStr(partij?.blauw_naam),
-      blauw_gym_mm: toNullableStr(partij?.blauw_gym),
-      blauw_gewicht_mm: toNullableNumber(partij?.blauw_gewicht),
+      blauw_naam_mm:
+        toNullableStr(partij?.blauw_naam) ??
+        toNullableStr(mb?.naam_input) ??
+        toNullableStr(mb?.voornaam && mb?.achternaam ? `${mb.voornaam} ${mb.achternaam}` : null),
+      blauw_gym_mm:
+        toNullableStr(partij?.blauw_gym) ??
+        toNullableStr(mb?.gym_input),
+      blauw_gewicht_mm:
+        toNullableNumber(partij?.blauw_gewicht) ??
+        toNullableNumber(mb?.gewicht),
       blauw_va_mm: vaB,
       blauw_va_mm_prev: vaBPrev,
 
@@ -838,19 +893,35 @@ if (scopedPartijNr != null) {
       evenement_datum: evenement_datum ?? null,
 
       // fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
-      rood_naam_fp: toNullableStr(fr?.naam),
+      rood_naam_fp:
+        toNullableStr(fr?.naam) ??
+        toNullableStr(mr?.fp_naam) ??
+        toNullableStr(mr?.naam),
       rood_geboortedatum_fp: fr?.geboortedatum
         ? toIsoDateOnly(fr.geboortedatum)
         : null,
-      rood_geslacht: normGender(fr?.geslacht) ?? normGender(partij?.rood_geslacht),
+      rood_geslacht:
+        normGender(fr?.geslacht) ??
+        normGender(mr?.fp_geslacht) ??
+        normGender(mr?.geslacht) ??
+        normGender(partij?.rood_geslacht),
+      rood_geboortedatum_mm: toIsoDateOnly(mr?.geboortedatum_input),
       rood_leeftijd_event,
 
       // fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
-      blauw_naam_fp: toNullableStr(fb?.naam),
+      blauw_naam_fp:
+        toNullableStr(fb?.naam) ??
+        toNullableStr(mb?.fp_naam) ??
+        toNullableStr(mb?.naam),
       blauw_geboortedatum_fp: fb?.geboortedatum
         ? toIsoDateOnly(fb.geboortedatum)
         : null,
-      blauw_geslacht: normGender(fb?.geslacht) ?? normGender(partij?.blauw_geslacht),
+      blauw_geslacht:
+        normGender(fb?.geslacht) ??
+        normGender(mb?.fp_geslacht) ??
+        normGender(mb?.geslacht) ??
+        normGender(partij?.blauw_geslacht),
+      blauw_geboortedatum_mm: toIsoDateOnly(mb?.geboortedatum_input),
       blauw_leeftijd_event,
 
       rood_mma_current_klasse,
@@ -872,25 +943,37 @@ if (scopedPartijNr != null) {
       blauw_gewonnen_scrape:
         fb?.gewonnen ?? fb?.wins ?? fb?.gewonnen_scrape ?? null,
 
-      rood_licentie: resolveLicentieValue(fr),
+      rood_licentie: resolveLicentieValue(fr) ?? resolveLicentieValue(mr),
+      keurmerk_rood: toNullableBool(mr?.heeft_keurmerk),
+      keurmerk_reden_rood: toNullableStr(mr?.keurmerk_reden),
       rood_heeft_startverbod:
         toNullableBool(fr?.heeft_startverbod) ??
         toNullableBool(fr?.startverbod_actief) ??
+        toBoolJaNeeLoose(mr?.heeft_startverbod) ??
         null,
 
-      blauw_licentie: resolveLicentieValue(fb),
+      blauw_licentie: resolveLicentieValue(fb) ?? resolveLicentieValue(mb),
+      keurmerk_blauw: toNullableBool(mb?.heeft_keurmerk),
+      keurmerk_reden_blauw: toNullableStr(mb?.keurmerk_reden),
       blauw_heeft_startverbod:
         toNullableBool(fb?.heeft_startverbod) ??
         toNullableBool(fb?.startverbod_actief) ??
+        toBoolJaNeeLoose(mb?.heeft_startverbod) ??
         null,
 
-      rood_nulmeting_totaal: fr?.nulmeting_totaal ?? null,
-      rood_nulmeting_opmerking: fr?.nulmeting_opmerking ?? null,
-      rood_nulmeting_klasse: fr?.nulmeting_klasse ?? null,
+      rood_nulmeting_totaal:
+        fr?.nulmeting_totaal ?? mr?.nulmeting_totaal ?? null,
+      rood_nulmeting_opmerking:
+        fr?.nulmeting_opmerking ?? mr?.nulmeting_opmerking ?? null,
+      rood_nulmeting_klasse:
+        fr?.nulmeting_klasse ?? mr?.nulmeting_klasse ?? null,
 
-      blauw_nulmeting_totaal: fb?.nulmeting_totaal ?? null,
-      blauw_nulmeting_opmerking: fb?.nulmeting_opmerking ?? null,
-      blauw_nulmeting_klasse: fb?.nulmeting_klasse ?? null,
+      blauw_nulmeting_totaal:
+        fb?.nulmeting_totaal ?? mb?.nulmeting_totaal ?? null,
+      blauw_nulmeting_opmerking:
+        fb?.nulmeting_opmerking ?? mb?.nulmeting_opmerking ?? null,
+      blauw_nulmeting_klasse:
+        fb?.nulmeting_klasse ?? mb?.nulmeting_klasse ?? null,
 
       rood_uitslagen_per_discipline: recRClass,
       blauw_uitslagen_per_discipline: recBClass,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { parseExcelToFighters } from "./parse_aanmeldingen";
-import { processMatchmakingFighters } from "@/lib/matchmaker/processMatchmakingFighters";
+import { processSingleFighter } from "@/lib/matchmaker/processMatchmakingFighters";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -984,10 +984,24 @@ export async function POST(req: Request) {
 
     await touchMatchmaking(matchmaking_id, uploaded_by, mm.stage);
 
-    const processing = await processMatchmakingFighters({
-      supabase: supabaseAdmin,
-      matchmakingId: matchmaking_id,
-    });
+    const processedContexts: any[] = [];
+    const processedHits: any[] = [];
+    let processingControleRunId: string | null = null;
+
+    // Verwerk uitsluitend de zojuist ingevoegde aanmeldingen. Iedere aanmelding
+    // krijgt direct zijn context, verrijking en regels; bestaande vechters worden
+    // bij een nieuwe upload niet onnodig opnieuw opgebouwd.
+    for (const insertedRow of insertedAanmeldingen) {
+      const processing = await processSingleFighter({
+        supabase: supabaseAdmin,
+        matchmakingId: matchmaking_id,
+        aanmeldingId: insertedRow.id,
+      });
+
+      processingControleRunId = processing.controleRunId;
+      processedContexts.push(...processing.contexts);
+      processedHits.push(...processing.hits);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -1004,9 +1018,9 @@ export async function POST(req: Request) {
       skipped_existing: duplicatesExisting,
       skipped_in_file: duplicatesInFile,
       fighter_processing: {
-        processed: processing.processed,
-        controle_run_id: processing.controleRunId,
-        rule_hits: processing.hits.length,
+        processed: processedContexts.length,
+        controle_run_id: processingControleRunId ?? matchmaking_id,
+        rule_hits: processedHits.length,
       },
       scraper_started: false,
       scraper_error: null,

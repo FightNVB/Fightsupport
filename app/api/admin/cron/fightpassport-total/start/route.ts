@@ -11,7 +11,6 @@ export const dynamic = "force-dynamic";
 const START_VA = Number(process.env.FP_TOTAL_START_VA || 775);
 const FALLBACK_END_VA = Number(process.env.FP_TOTAL_END_VA || 33108);
 const END_BUFFER = Number(process.env.FP_TOTAL_END_BUFFER || 100);
-const START_WEEKDAYS = new Set(["Tue", "Fri"]);
 
 function isCronAllowed(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -113,23 +112,14 @@ export async function POST(req: Request) {
     run = run ?? (openRuns ?? []).find((item: any) => String(item.status).toLowerCase() === "paused") ?? null;
 
     const weekday = amsterdamWeekday();
-    if (!run && !START_WEEKDAYS.has(weekday)) {
-      return NextResponse.json({
-        ok: true,
-        started: false,
-        scheduled_start_day: false,
-        weekday,
-        message: "Geen onafgeronde ronde en vandaag start geen nieuwe ronde. Nieuwe rondes starten dinsdag en vrijdag.",
-      });
-    }
 
     const scraperPath = resolveScraperPath();
     if (!fs.existsSync(scraperPath)) {
       return NextResponse.json({ error: `Total scraper niet gevonden: ${scraperPath}` }, { status: 500 });
     }
 
-    // Een hervatte ronde houdt bewust hetzelfde eindpunt. Alleen bij een nieuwe
-    // dinsdag-/vrijdagronde wordt het bereik opnieuw dynamisch bepaald.
+    // Een hervatte ronde houdt bewust hetzelfde eindpunt.
+    // Bij een nieuwe ronde wordt het bereik opnieuw dynamisch bepaald.
     const dynamicEndVa = run ? Number(run.end_va) : await resolveDynamicEndVa();
     const args = run ? [String(run.start_va), String(run.end_va)] : [String(START_VA), String(dynamicEndVa)];
     const child = spawn(process.execPath, [scraperPath, ...args], {

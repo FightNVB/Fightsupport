@@ -997,6 +997,15 @@ function toNumKg(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function firstFilled(...values: any[]): any {
+  for (const value of values) {
+    if (value == null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    return value;
+  }
+  return null;
+}
+
 function parseJaNee(v: any): "ja" | "nee" | null {
   if (v === true) return "ja";
   if (v === false) return "nee";
@@ -1004,9 +1013,19 @@ function parseJaNee(v: any): "ja" | "nee" | null {
     .trim()
     .toLowerCase();
   if (!s) return null;
-  if (["ja", "yes", "true", "1"].includes(s)) return "ja";
-  if (["nee", "no", "false", "0"].includes(s)) return "nee";
+  if (["ja", "yes", "true", "1", "actief", "geldig", "aanwezig"].includes(s)) return "ja";
+  if (["nee", "no", "false", "0", "inactief", "ongeldig", "verlopen", "ontbreekt", "geen"].includes(s)) return "nee";
   return null;
+}
+
+// Een vechter heeft óf een geldige licentie óf niet. Ontbrekende/onleesbare
+// licentiedata mag daarom nooit als derde status "onbekend" worden getoond.
+function parseLicentie(...values: any[]): "ja" | "nee" {
+  for (const value of values) {
+    const parsed = parseJaNee(value);
+    if (parsed) return parsed;
+  }
+  return "nee";
 }
 
 function normResultaat(v: any): string {
@@ -1984,15 +2003,20 @@ export default function PartijDetailPage() {
         setRun(contextRun);
 
         // Ontbrekende FightPassport-velden aanvullen uit de centrale fightertabel.
-        const vaR = String(row?.rood_va_mm ?? "").trim() || null;
-        const vaB = String(row?.blauw_va_mm ?? "").trim() || null;
+        const vaR =
+          String(row?.rood_va_mm ?? row?.va_rood ?? row?.rood_va ?? "").trim() || null;
+        const vaB =
+          String(row?.blauw_va_mm ?? row?.va_blauw ?? row?.blauw_va ?? "").trim() || null;
         const vas = Array.from(new Set([vaR, vaB].filter(Boolean))) as string[];
 
         if (vas.length > 0) {
           const { data: fighters, error: fightersErr } = await supabase
             .from("fightpassport_fighters")
             .select("*")
-            .in("va_nummer", vas);
+            .in(
+              "va_nummer",
+              vas.map((v) => Number(v)).filter((v) => Number.isFinite(v)),
+            );
 
           if (fightersErr) throw fightersErr;
 
@@ -2011,24 +2035,50 @@ export default function PartijDetailPage() {
               }
             };
 
-            setIfEmpty(`${side}_naam_fp`, f?.naam);
-            setIfEmpty(`${side}_geboortedatum_fp`, f?.geboortedatum);
-            setIfEmpty(`${side}_geslacht`, f?.geslacht);
+            setIfEmpty(`${side}_naam_fp`, firstFilled(f?.naam, f?.fp_naam, f?.volledige_naam));
             setIfEmpty(
-              `${side}_licentie`,
-              f?.licentie ??
-                (f?.licentie_actief === true
-                  ? "Ja"
-                  : f?.licentie_actief === false
-                    ? "Nee"
-                    : null),
+              `${side}_geboortedatum_fp`,
+              firstFilled(f?.geboortedatum, f?.geboorte_datum, f?.date_of_birth),
             );
-            setIfEmpty(`${side}_heeft_startverbod`, f?.heeft_startverbod ?? f?.startverbod_actief);
-            setIfEmpty(`${side}_nulmeting_totaal`, f?.nulmeting_totaal);
-            setIfEmpty(`${side}_nulmeting_opmerking`, f?.nulmeting_opmerking);
-            setIfEmpty(`${side}_nulmeting_klasse`, f?.nulmeting_klasse);
-            setIfEmpty(`${side}_totaal_wedstrijden_scrape`, f?.totaal_wedstrijden ?? f?.totaal);
-            setIfEmpty(`${side}_gewonnen_scrape`, f?.gewonnen ?? f?.wins);
+            setIfEmpty(`${side}_geslacht`, firstFilled(f?.geslacht, f?.gender));
+
+            const licentie = parseLicentie(
+              f?.licentie,
+              f?.licentie_actief,
+              f?.heeft_licentie,
+              f?.license_active,
+              f?.licentie_geldig,
+              f?.licentiestatus,
+              f?.licentie_status,
+            );
+            setIfEmpty(`${side}_licentie`, licentie);
+
+            setIfEmpty(
+              `${side}_heeft_startverbod`,
+              firstFilled(
+                f?.heeft_startverbod,
+                f?.startverbod_actief,
+                f?.startverbod,
+                f?.heeft_start_verbod,
+              ),
+            );
+            setIfEmpty(
+              `${side}_nulmeting_totaal`,
+              firstFilled(f?.nulmeting_totaal, f?.totaal_nulmeting, f?.nul_totaal),
+            );
+            setIfEmpty(
+              `${side}_nulmeting_opmerking`,
+              firstFilled(f?.nulmeting_opmerking, f?.opmerking_nulmeting, f?.nul_opmerking),
+            );
+            setIfEmpty(
+              `${side}_nulmeting_klasse`,
+              firstFilled(f?.nulmeting_klasse, f?.klasse_nulmeting, f?.nul_klasse),
+            );
+            setIfEmpty(
+              `${side}_totaal_wedstrijden_scrape`,
+              firstFilled(f?.totaal_wedstrijden, f?.totaal, f?.partijen_totaal),
+            );
+            setIfEmpty(`${side}_gewonnen_scrape`, firstFilled(f?.gewonnen, f?.wins));
           };
 
           fillSide("rood", vaR);
@@ -2127,22 +2177,44 @@ export default function PartijDetailPage() {
   const header = useMemo(() => {
     const evDatum = ctx?.evenement_datum ?? evenementDatum ?? null;
     const evNaam = ctx?.evenement_naam ?? evenementNaam ?? null;
-    const roodNaam = ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? "-";
-    const blauwNaam = ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? "-";
-    const roodGym = ctx?.rood_gym_mm ?? "-";
-    const blauwGym = ctx?.blauw_gym_mm ?? "-";
-    const discipline = ctx?.discipline ?? "-";
-    const klasseMM = ctx?.klasse_mm ?? "-";
+    const roodNaam = firstFilled(ctx?.rood_naam_fp, ctx?.rood_naam_mm, ctx?.rood_naam, "-");
+    const blauwNaam = firstFilled(ctx?.blauw_naam_fp, ctx?.blauw_naam_mm, ctx?.blauw_naam, "-");
+    const roodGym = firstFilled(ctx?.rood_gym_mm, ctx?.rood_gym_fp, ctx?.rood_gym, "-");
+    const blauwGym = firstFilled(ctx?.blauw_gym_mm, ctx?.blauw_gym_fp, ctx?.blauw_gym, "-");
+    const discipline = firstFilled(ctx?.discipline, ctx?.discipline_mm, "-");
+    const klasseMM = firstFilled(ctx?.klasse_mm, ctx?.klasse, "-");
 
-    const roodDob =
-      ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm ?? null;
-    const blauwDob =
-      ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm ?? null;
+    const roodDob = firstFilled(
+      ctx?.rood_geboortedatum_fp,
+      ctx?.rood_geboortedatum_mm,
+      ctx?.rood_geboortedatum,
+    );
+    const blauwDob = firstFilled(
+      ctx?.blauw_geboortedatum_fp,
+      ctx?.blauw_geboortedatum_mm,
+      ctx?.blauw_geboortedatum,
+    );
 
-    const roodLic = parseJaNee(ctx?.rood_licentie);
-    const blauwLic = parseJaNee(ctx?.blauw_licentie);
-    const roodSv = parseJaNee(ctx?.rood_heeft_startverbod);
-    const blauwSv = parseJaNee(ctx?.blauw_heeft_startverbod);
+    const roodLic = parseLicentie(
+      ctx?.rood_licentie,
+      ctx?.rood_licentie_actief,
+      ctx?.rood_heeft_licentie,
+      ctx?.rood_licentie_geldig,
+      ctx?.rood_licentie_status,
+    );
+    const blauwLic = parseLicentie(
+      ctx?.blauw_licentie,
+      ctx?.blauw_licentie_actief,
+      ctx?.blauw_heeft_licentie,
+      ctx?.blauw_licentie_geldig,
+      ctx?.blauw_licentie_status,
+    );
+    const roodSv = parseJaNee(
+      firstFilled(ctx?.rood_heeft_startverbod, ctx?.rood_startverbod_actief, ctx?.rood_startverbod),
+    ) ?? "nee";
+    const blauwSv = parseJaNee(
+      firstFilled(ctx?.blauw_heeft_startverbod, ctx?.blauw_startverbod_actief, ctx?.blauw_startverbod),
+    ) ?? "nee";
 
     return {
       evDatum,
@@ -2375,29 +2447,19 @@ export default function PartijDetailPage() {
   const keurmerkInfo = useMemo(() => {
     if (!ctx) return null;
 
+    const parseBool = (value: any): boolean | null => {
+      if (value === true || value === false) return value;
+      const s = String(value ?? "").trim().toLowerCase();
+      if (["ja", "true", "1", "yes"].includes(s)) return true;
+      if (["nee", "false", "0", "no"].includes(s)) return false;
+      return null;
+    };
+
     const roodOk =
-      ctx?.keurmerk_rood ??
-      (String(ctx?.heeft_keurmerk_rood ?? "")
-        .trim()
-        .toLowerCase() === "ja"
-        ? true
-        : String(ctx?.heeft_keurmerk_rood ?? "")
-              .trim()
-              .toLowerCase() === "nee"
-          ? false
-          : null);
+      parseBool(ctx?.keurmerk_rood) ?? parseBool(ctx?.heeft_keurmerk_rood);
 
     const blauwOk =
-      ctx?.keurmerk_blauw ??
-      (String(ctx?.heeft_keurmerk_blauw ?? "")
-        .trim()
-        .toLowerCase() === "ja"
-        ? true
-        : String(ctx?.heeft_keurmerk_blauw ?? "")
-              .trim()
-              .toLowerCase() === "nee"
-          ? false
-          : null);
+      parseBool(ctx?.keurmerk_blauw) ?? parseBool(ctx?.heeft_keurmerk_blauw);
 
     return {
       rood: {
@@ -2928,16 +2990,16 @@ export default function PartijDetailPage() {
                 side="rood"
                 naam={header.roodNaam}
                 gym={header.roodGym}
-                va={String(ctx?.rood_va_mm ?? "-")}
+                va={String(firstFilled(ctx?.rood_va_mm, ctx?.va_rood, ctx?.rood_va, "-"))}
                 lic={header.roodLic}
                 sv={header.roodSv}
                 dob={header.roodDob}
                 leeftijdEvent={ageYearsAtEvent(ctx, "rood")}
-                geslacht={String(ctx?.rood_geslacht ?? "-")}
+                geslacht={String(firstFilled(ctx?.rood_geslacht, ctx?.rood_geslacht_mm, ctx?.geslacht, "-"))}
                 klasseMM={String(header.klasseMM ?? "-")}
-                nulKlasse={String(ctx?.rood_nulmeting_klasse ?? "-")}
+                nulKlasse={String(firstFilled(ctx?.rood_nulmeting_klasse, ctx?.rood_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.roodNulmetingTotaal ?? "-"}
-                nulOpmerking={String(ctx?.rood_nulmeting_opmerking ?? "")}
+                nulOpmerking={String(firstFilled(ctx?.rood_nulmeting_opmerking, ctx?.rood_opmerking_nulmeting, ""))}
                 onEdit={() => openEdit("rood")}
               />
             </div>
@@ -3045,16 +3107,16 @@ export default function PartijDetailPage() {
                 side="blauw"
                 naam={header.blauwNaam}
                 gym={header.blauwGym}
-                va={String(ctx?.blauw_va_mm ?? "-")}
+                va={String(firstFilled(ctx?.blauw_va_mm, ctx?.va_blauw, ctx?.blauw_va, "-"))}
                 lic={header.blauwLic}
                 sv={header.blauwSv}
                 dob={header.blauwDob}
                 leeftijdEvent={ageYearsAtEvent(ctx, "blauw")}
-                geslacht={String(ctx?.blauw_geslacht ?? "-")}
+                geslacht={String(firstFilled(ctx?.blauw_geslacht, ctx?.blauw_geslacht_mm, ctx?.geslacht, "-"))}
                 klasseMM={String(header.klasseMM ?? "-")}
-                nulKlasse={String(ctx?.blauw_nulmeting_klasse ?? "-")}
+                nulKlasse={String(firstFilled(ctx?.blauw_nulmeting_klasse, ctx?.blauw_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.blauwNulmetingTotaal ?? "-"}
-                nulOpmerking={String(ctx?.blauw_nulmeting_opmerking ?? "")}
+                nulOpmerking={String(firstFilled(ctx?.blauw_nulmeting_opmerking, ctx?.blauw_opmerking_nulmeting, ""))}
                 onEdit={() => openEdit("blauw")}
               />
             </div>

@@ -38,7 +38,9 @@ export async function POST(req: Request) {
     const matchmakingId = s(body?.matchmaking_id);
     const requestedMatchmakerId = s(body?.matchmaker_id);
     const vaNummer = s(body?.va_nummer);
-    const sportschoolId = Number(body?.sportschool_id);
+    const sportschoolIdRaw = s(body?.sportschool_id);
+    const sportschoolId = sportschoolIdRaw ? Number(sportschoolIdRaw) : null;
+    const manualSchoolName = s(body?.gym);
     const gewicht = n(body?.gewicht);
 
     if (!matchmakingId) {
@@ -47,8 +49,11 @@ export async function POST(req: Request) {
     if (!vaNummer) {
       return NextResponse.json({ error: "Kies een vechter uit FightPassport." }, { status: 400 });
     }
-    if (!Number.isFinite(sportschoolId)) {
-      return NextResponse.json({ error: "Kies de sportschool voor deze aanmelding." }, { status: 400 });
+    if (sportschoolId !== null && !Number.isFinite(sportschoolId)) {
+      return NextResponse.json({ error: "Ongeldige sportschool gekozen." }, { status: 400 });
+    }
+    if (sportschoolId === null && !manualSchoolName) {
+      return NextResponse.json({ error: "Vul de sportschool voor deze aanmelding in." }, { status: 400 });
     }
     if (gewicht === null) {
       return NextResponse.json({ error: "Vul een geldig wedstrijdgewicht in." }, { status: 400 });
@@ -90,7 +95,7 @@ export async function POST(req: Request) {
         supabaseAdmin
           .from("fightpassport_fighters")
           .select(
-            "id, va_nummer, naam, voornaam, achternaam, geslacht, email, primary_discipline, nulmeting_discipline, berekende_klasse, nulmeting_klasse, totaal_wedstrijden, gewonnen, kos, fit_to_fight, licentie_actief, heeft_startverbod",
+            "va_nummer, naam, voornaam, achternaam, geslacht, email, primary_discipline, nulmeting_discipline, berekende_klasse, nulmeting_klasse, totaal_wedstrijden, gewonnen, kos, fit_to_fight, licentie_actief, heeft_startverbod",
           )
           .eq("va_nummer", vaNummer)
           .maybeSingle(),
@@ -111,24 +116,48 @@ export async function POST(req: Request) {
       .map((row: any) => Number(row.sportschool_id))
       .filter(Number.isFinite);
 
-    const allRelevantSchoolIds = [...new Set([...activeSchoolIds, sportschoolId])];
-    const { data: relevantSchools, error: schoolError } = await supabaseAdmin
-      .from("sportscholen")
-      .select("sportschool_id, naam")
-      .in("sportschool_id", allRelevantSchoolIds);
-    if (schoolError) throw schoolError;
+    const allRelevantSchoolIds = [
+      ...new Set([
+        ...activeSchoolIds,
+        ...(sportschoolId !== null ? [sportschoolId] : []),
+      ]),
+    ];
+
+    let relevantSchools: any[] = [];
+    if (allRelevantSchoolIds.length > 0) {
+      const { data, error: schoolError } = await supabaseAdmin
+        .from("sportscholen")
+        .select("sportschool_id, naam")
+        .in("sportschool_id", allRelevantSchoolIds);
+      if (schoolError) throw schoolError;
+      relevantSchools = data ?? [];
+    }
+
     const schoolById = new Map(
-      (relevantSchools ?? []).map((row: any) => [Number(row.sportschool_id), row]),
+      relevantSchools.map((row: any) => [Number(row.sportschool_id), row]),
     );
-    const school = schoolById.get(sportschoolId);
-    if (!school) {
+    const selectedSchool = sportschoolId !== null ? schoolById.get(sportschoolId) : null;
+    if (sportschoolId !== null && !selectedSchool) {
       return NextResponse.json({ error: "Sportschool niet gevonden." }, { status: 404 });
     }
 
+    const schoolName = s(selectedSchool?.naam) || manualSchoolName;
     const oldSchool = activeSchoolIds.length === 1
       ? schoolById.get(activeSchoolIds[0]) ?? null
       : null;
-    const differsFromFightPassport = !activeSchoolIds.includes(sportschoolId);
+    const normalizeSchool = (value: unknown) =>
+      s(value)
+        .toLocaleLowerCase("nl-NL")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+    const activeSchoolNames = activeSchoolIds
+      .map((id) => normalizeSchool(schoolById.get(id)?.naam))
+      .filter(Boolean);
+    const differsFromFightPassport = sportschoolId !== null
+      ? !activeSchoolIds.includes(sportschoolId)
+      : !activeSchoolNames.includes(normalizeSchool(schoolName));
 
     const { data: existing, error: duplicateError } = await supabaseAdmin
       .from("aanmeldingen")
@@ -158,7 +187,7 @@ export async function POST(req: Request) {
       naam: s(fighter.naam) || null,
       email: s(fighter.email) || null,
       telefoon: null,
-      gym: s(school.naam) || null,
+      gym: schoolName || null,
       va_nummer: vaNummer,
       gewicht,
       win: wins,
@@ -193,21 +222,22 @@ export async function POST(req: Request) {
         .from("matchmaker_fighter_school_changes")
         .insert({
           matchmaking_id: matchmakingId,
-          aanmelding_id: data.id,
-          fighter_id: fighter.id ?? null,
+          fighter_id: null,
           va_nummer: vaNummer,
           old_sportschool_id: oldSchool?.sportschool_id ?? null,
           old_sportschool_name: oldSchool?.naam ?? null,
           new_sportschool_id: sportschoolId,
-          new_sportschool_name: school.naam,
+          new_sportschool_name: schoolName,
           changed_by_user_id: user.id,
           changed_by_email: user.email ?? null,
           source: "manual_add",
           status: "open",
         });
       if (changeError) {
-        await supabaseAdmin.from("aanmeldingen").delete().eq("id", data.id);
-        throw new Error(`Sportschoolwijziging registreren mislukt: ${changeError.message}`);
+        console.error(
+          "[matchmaker/add-fighter] sportschoolwijziging niet geregistreerd:",
+          changeError,
+        );
       }
     }
 

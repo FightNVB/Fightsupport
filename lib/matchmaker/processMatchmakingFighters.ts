@@ -2,7 +2,6 @@ import { buildSingleFighterContext } from "./buildSingleFighterContext";
 import { enrichSingleFighterContext } from "./enrichSingleFighterContext";
 import { runMatchmakerFighterRules } from "./fighterRules";
 import {
-  markAanmeldingenFromContexts,
   saveSingleFighterContexts,
   saveSingleFighterRules,
 } from "./saveSingleFighterContext";
@@ -16,15 +15,162 @@ function requireNoError(label: string, error: any) {
   if (error) throw new Error(`${label}: ${error.message ?? String(error)}`);
 }
 
+type MatchmakingRow = {
+  id: string;
+  datum?: string | null;
+};
+
+type SingleFighterSources = {
+  matchmaking: MatchmakingRow;
+  aanmelding: AnyRow;
+  fighterRaw?: AnyRow | null;
+  uitslagen?: AnyRow[];
+};
+
+async function buildAndSaveSingleFighter(params: {
+  supabase: SupabaseLike;
+  matchmakingId: string;
+  controleRunId: string;
+  sources: SingleFighterSources;
+}) {
+  const { supabase, matchmakingId, controleRunId, sources } = params;
+  const { matchmaking, aanmelding, fighterRaw = null, uitslagen = [] } = sources;
+
+  const built = buildSingleFighterContext({
+    matchmakingId,
+    controleRunId,
+    aanmelding,
+    fightersRaw: fighterRaw,
+    uitslagen,
+    eventDate: matchmaking.datum ?? null,
+  });
+
+  const context = await enrichSingleFighterContext({ supabase, context: built });
+  const hits = runMatchmakerFighterRules(context, {
+    uitslagen: Array.isArray(context.uitslagen) ? context.uitslagen : uitslagen,
+    includeOk: true,
+  });
+
+  const contextSave = await saveSingleFighterContexts({
+    supabase,
+    matchmakingId,
+    contexts: [context],
+  });
+  requireNoError("Fighter-context opslaan mislukt", contextSave.error);
+
+  const rulesSave = await saveSingleFighterRules({
+    supabase,
+    matchmakingId,
+    controleRunId,
+    hits,
+    scopeRows: [context],
+  });
+  requireNoError("Fighterregels opslaan mislukt", rulesSave.error);
+
+  return { context, hits };
+}
+
 /**
- * Bouwt de matchmaker-context opnieuw voor alle aanmeldingen binnen een
- * matchmaking, of alleen voor één aanmelding wanneer aanmeldingId is opgegeven.
+ * Bouwt, verrijkt, controleert en bewaart exact één aanmelding.
+ * Dit is de enige publieke write-pipeline voor een losse matchmaker-vechter.
  *
- * Bronnen:
- * - aanmeldingen: opgegeven naam, VA, sportschool, gewicht en matchmaker-invoer;
- * - fightpassport_fighters: profiel, geboortedatum, geslacht, licentie, startverbod en nulmeting;
- * - fightpassport_results: volledige uitslagenhistorie;
- * - matchmakings.datum: leeftijd en keurmerk op evenementdatum.
+ * Gebruik deze functie direct na:
+ * - upload/insert van een aanmelding;
+ * - handmatig toevoegen;
+ * - aanpassen van VA-nummer, naam, sportschool, gewicht of klasse;
+ * - een gerichte refresh/hercontrole.
+ */
+export async function processSingleFighter(params: {
+  supabase: SupabaseLike;
+  matchmakingId: string;
+  aanmeldingId: string | number;
+  controleRunId?: string;
+}) {
+  const { supabase, matchmakingId } = params;
+  const aanmeldingId = String(params.aanmeldingId ?? "").trim();
+  if (!aanmeldingId) throw new Error("aanmeldingId is verplicht voor processSingleFighter.");
+
+  // Voor de pre-matchmakerfase gebruiken we een stabiele UUID per matchmaking.
+  // Daardoor worden regels bij herverwerking vervangen in plaats van opgestapeld.
+  const controleRunId = params.controleRunId ?? matchmakingId;
+
+  const [
+    { data: matchmaking, error: mmError },
+    { data: aanmelding, error: aanmeldingError },
+  ] = await Promise.all([
+    supabase
+      .from("matchmakings")
+      .select("id, datum")
+      .eq("id", matchmakingId)
+      .maybeSingle(),
+    supabase
+      .from("aanmeldingen")
+      .select("*")
+      .eq("matchmaking_id", matchmakingId)
+      .eq("id", aanmeldingId)
+      .maybeSingle(),
+  ]);
+
+  requireNoError("Matchmaking laden mislukt", mmError);
+  requireNoError("Aanmelding laden mislukt", aanmeldingError);
+  if (!matchmaking) throw new Error("Matchmaking niet gevonden.");
+  if (!aanmelding) {
+    throw new Error(`Aanmelding ${aanmeldingId} niet gevonden binnen deze matchmaking.`);
+  }
+
+  const va = normalizeVa(aanmelding?.va_nummer ?? aanmelding?.va ?? aanmelding?.fighter_id);
+  let fighterRaw: AnyRow | null = null;
+  let uitslagen: AnyRow[] = [];
+
+  if (va) {
+    const [
+      { data: fighter, error: fighterError },
+      { data: resultRows, error: resultsError },
+    ] = await Promise.all([
+      supabase
+        .from("fightpassport_fighters")
+        .select("*")
+        .eq("va_nummer", va)
+        .maybeSingle(),
+      supabase
+        .from("fightpassport_results")
+        .select("*")
+        .eq("va_nummer", va),
+    ]);
+
+    requireNoError("FightPassport-vechter laden mislukt", fighterError);
+    requireNoError("FightPassport-uitslagen laden mislukt", resultsError);
+    fighterRaw = (fighter ?? null) as AnyRow | null;
+    uitslagen = (resultRows ?? []) as AnyRow[];
+  }
+
+  const result = await buildAndSaveSingleFighter({
+    supabase,
+    matchmakingId,
+    controleRunId,
+    sources: {
+      matchmaking: matchmaking as MatchmakingRow,
+      aanmelding: aanmelding as AnyRow,
+      fighterRaw,
+      uitslagen,
+    },
+  });
+
+  return {
+    ok: true,
+    controleRunId,
+    processed: 1,
+    scoped: true,
+    aanmeldingId,
+    contexts: [result.context],
+    hits: result.hits,
+  };
+}
+
+/**
+ * Batch-wrapper. De inhoudelijke verwerking blijft per vechter via exact
+ * dezelfde single-fighter pipeline lopen. Bronnen worden vooraf in bulk geladen
+ * zodat grote uploads geen onnodige N+1 database-queries veroorzaken.
  */
 export async function processMatchmakingFighters(params: {
   supabase: SupabaseLike;
@@ -33,20 +179,20 @@ export async function processMatchmakingFighters(params: {
   aanmeldingId?: string | number;
 }) {
   const { supabase, matchmakingId } = params;
-  const aanmeldingId = String(params.aanmeldingId ?? "").trim();
+  const scopedAanmeldingId = String(params.aanmeldingId ?? "").trim();
 
-  // Voor de pre-matchmakerfase gebruiken we een stabiele UUID per matchmaking.
-  // Daardoor worden regels bij herverwerking vervangen in plaats van opgestapeld.
-  const controleRunId = params.controleRunId ?? matchmakingId;
-
-  let aanmeldingenQuery = supabase
-    .from("aanmeldingen")
-    .select("*")
-    .eq("matchmaking_id", matchmakingId);
-
-  if (aanmeldingId) {
-    aanmeldingenQuery = aanmeldingenQuery.eq("id", aanmeldingId);
+  // Achterwaartse compatibiliteit: bestaande callers met aanmeldingId gaan
+  // automatisch door de nieuwe single-fighter pipeline.
+  if (scopedAanmeldingId) {
+    return processSingleFighter({
+      supabase,
+      matchmakingId,
+      controleRunId: params.controleRunId,
+      aanmeldingId: scopedAanmeldingId,
+    });
   }
+
+  const controleRunId = params.controleRunId ?? matchmakingId;
 
   const [
     { data: matchmaking, error: mmError },
@@ -57,7 +203,10 @@ export async function processMatchmakingFighters(params: {
       .select("id, datum")
       .eq("id", matchmakingId)
       .maybeSingle(),
-    aanmeldingenQuery,
+    supabase
+      .from("aanmeldingen")
+      .select("*")
+      .eq("matchmaking_id", matchmakingId),
   ]);
 
   requireNoError("Matchmaking laden mislukt", mmError);
@@ -66,10 +215,7 @@ export async function processMatchmakingFighters(params: {
 
   const registrations = (aanmeldingen ?? []) as AnyRow[];
   if (!registrations.length) {
-    if (aanmeldingId) {
-      throw new Error(`Aanmelding ${aanmeldingId} niet gevonden binnen deze matchmaking.`);
-    }
-    return { ok: true, controleRunId, processed: 0, contexts: [], hits: [] };
+    return { ok: true, controleRunId, processed: 0, scoped: false, aanmeldingId: null, contexts: [], hits: [] };
   }
 
   const vaNummers = unique(
@@ -111,56 +257,35 @@ export async function processMatchmakingFighters(params: {
     resultsByVa.set(va, list);
   }
 
-  const built = registrations.map((aanmelding) => {
+  const contexts: AnyRow[] = [];
+  const hits: AnyRow[] = [];
+
+  // Bewust per aanmelding opslaan: dezelfde pipeline kan daardoor ook veilig
+  // direct na iedere losse insert worden aangeroepen.
+  for (const aanmelding of registrations) {
     const va = normalizeVa(aanmelding?.va_nummer ?? aanmelding?.va ?? aanmelding?.fighter_id);
-    return buildSingleFighterContext({
+    const result = await buildAndSaveSingleFighter({
+      supabase,
       matchmakingId,
       controleRunId,
-      aanmelding,
-      fightersRaw: va ? fighterByVa.get(va) ?? null : null,
-      uitslagen: va ? resultsByVa.get(va) ?? [] : [],
-      eventDate: matchmaking.datum ?? null,
+      sources: {
+        matchmaking: matchmaking as MatchmakingRow,
+        aanmelding,
+        fighterRaw: va ? fighterByVa.get(va) ?? null : null,
+        uitslagen: va ? resultsByVa.get(va) ?? [] : [],
+      },
     });
-  });
 
-  const contexts: AnyRow[] = [];
-  for (const context of built) {
-    contexts.push(await enrichSingleFighterContext({ supabase, context }));
+    contexts.push(result.context);
+    hits.push(...result.hits);
   }
-
-  const hits = contexts.flatMap((context) =>
-    runMatchmakerFighterRules(context, {
-      uitslagen: Array.isArray(context.uitslagen) ? context.uitslagen : undefined,
-      includeOk: true,
-    }),
-  );
-
-  // De save-functies krijgen alleen de geselecteerde context(en). Bij een scoped
-  // aanroep worden daardoor uitsluitend de context en regels van die aanmelding vervangen.
-  const contextSave = await saveSingleFighterContexts({
-    supabase,
-    matchmakingId,
-    contexts,
-  });
-  requireNoError("Fighter-context opslaan mislukt", contextSave.error);
-
-  const rulesSave = await saveSingleFighterRules({
-    supabase,
-    matchmakingId,
-    controleRunId,
-    hits,
-    scopeRows: contexts,
-  });
-  requireNoError("Fighterregels opslaan mislukt", rulesSave.error);
-
-  await markAanmeldingenFromContexts({ supabase, matchmakingId, contexts });
 
   return {
     ok: true,
     controleRunId,
     processed: contexts.length,
-    scoped: Boolean(aanmeldingId),
-    aanmeldingId: aanmeldingId || null,
+    scoped: false,
+    aanmeldingId: null,
     contexts,
     hits,
   };

@@ -119,7 +119,28 @@ function normalizeClassLabel(v: unknown) {
   return labels[token] || raw;
 }
 
+function opgegevenKlasseOf(f: Fighter) {
+  return normalizeClassLabel(
+    pickFirst(
+      f.aanmelding_klasse,
+      f.klasse_input,
+      f.klasse_mm,
+      f.klasse,
+      getPath(f, "aanmelding.klasse"),
+      getPath(f, "extra.aanmelding.klasse"),
+      getPath(f, "extra.raw.aanmelding.klasse"),
+      getPath(f, "raw.aanmelding.klasse"),
+    ),
+  );
+}
+
 function klasseOf(f: Fighter) {
+  // Voor de indeling op de matchpagina is de klasse van opgave leidend.
+  // FighterRules controleert afzonderlijk of die klasse overeenkomt met de
+  // berekende klasse en de uitslagenhistorie.
+  const opgegeven = opgegevenKlasseOf(f);
+  if (opgegeven !== "-") return opgegeven;
+
   return normalizeClassLabel(
     pickFirst(
       f.berekende_klasse,
@@ -155,9 +176,32 @@ function klasseTabOf(f: Fighter) {
   const k = lower(klasseOf(f));
   const discipline = lower(disciplineOf(f));
   const isMma = discipline.includes("mma") || discipline.includes("mixed martial");
+  const leeftijd = leeftijdSortValue(f);
+  const isVolwassen = Number.isFinite(leeftijd) && leeftijd >= 18;
 
-  if (k.includes("jeugd") || k === "j" || k.includes("youth"))
+  // Vanaf 18 jaar mag iemand nooit meer in een jeugdtab worden geplaatst.
+  // Bij een ongeldige jeugd-opgave gebruiken we alleen voor de zichtbare tab
+  // de berekende volwassen klasse als veilige terugval; fighterRules meldt de fout.
+  if (k.includes("jeugd") || k === "j" || k.includes("youth")) {
+    if (isVolwassen) {
+      const volwassenFallback = lower(
+        normalizeClassLabel(
+          pickFirst(f.berekende_klasse, f.mma_level, f.nulmeting_klasse),
+        ),
+      );
+      if (volwassenFallback && volwassenFallback !== k) {
+        if (volwassenFallback.includes("nieuweling") || volwassenFallback === "n") return "N";
+        if (volwassenFallback === "r" || volwassenFallback.includes("r-klasse") || volwassenFallback.includes("r klasse")) return "R";
+        if (volwassenFallback === "c" || volwassenFallback.includes("c-klasse") || volwassenFallback.includes("c klasse")) return "C";
+        if (volwassenFallback === "b" || volwassenFallback.includes("b-klasse") || volwassenFallback.includes("b klasse")) return "B";
+        if (volwassenFallback === "a" || volwassenFallback.includes("a-klasse") || volwassenFallback.includes("a klasse")) return "A";
+        if (volwassenFallback.includes("amateur") || volwassenFallback.includes("ama")) return "MMA Amateur";
+        if (volwassenFallback.includes("pro")) return "MMA Pro";
+      }
+      return "Onbekend";
+    }
     return isMma ? "MMA Youth" : "Jeugd";
+  }
   if (
     k.includes("nieuweling") ||
     k === "n" ||
@@ -379,6 +423,26 @@ function normalizeClassToken(v: unknown) {
   if (compact.includes("pro")) return "pro";
 
   return compact;
+}
+
+function cleanRecordClassLabel(value: unknown) {
+  const raw = s(value)
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\/_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!raw || raw === "-") return "-";
+  if (raw.includes("AMATEUR")) return "Amateur";
+  if (raw.includes("PRO")) return "Pro";
+  if (raw.includes("JEUGD") || raw.includes("YOUTH") || raw === "J" || raw === "J+") return "J";
+  if (raw.includes("NIEUWELING") || raw.includes("NEWCOMER")) return "N";
+
+  // Ook waarden als "C-klasse/C-class" worden hierdoor exact "C".
+  const match = raw.match(/\b(R|N|C|B|A)\b/);
+  return match ? match[1] : "-";
 }
 
 function recordClassLabelOf(f: Fighter) {
@@ -620,7 +684,16 @@ function recordOf(f: Fighter, _allRows: ResultRow[] = []) {
   if (s(ruleRecord)) {
     const raw = s(ruleRecord).replace(/[‐‑‒–—−]/g, "-");
     // Voor de zichtbare recordprefix gebruiken we altijd één vaste klasseletter.
-    const cls = recordClassLabelOf(f);
+    const cls = cleanRecordClassLabel(
+      pickFirst(
+        f.berekende_klasse,
+        f.mma_level,
+        f.nulmeting_klasse,
+        f.klasse,
+        f.class,
+        recordClassLabelOf(f),
+      ),
+    );
     const classToken = normalizeClassToken(cls);
 
     // Toon onder Matchen altijd exact: "C 0-0-0 (0)".
@@ -668,7 +741,16 @@ function recordOf(f: Fighter, _allRows: ResultRow[] = []) {
     ).replace(/[^\d.-]/g, ""),
   );
 
-  const cls = recordClassLabelOf(f);
+  const cls = cleanRecordClassLabel(
+    pickFirst(
+      f.berekende_klasse,
+      f.mma_level,
+      f.nulmeting_klasse,
+      f.klasse,
+      f.class,
+      recordClassLabelOf(f),
+    ),
+  );
   const safeW = Number.isFinite(w) ? w : 0;
   const safeL = Number.isFinite(l) ? l : 0;
   const safeD = Number.isFinite(d) ? d : 0;
@@ -1539,6 +1621,38 @@ export default function FightersPage() {
     );
   }
 
+  async function refreshAllFighterData() {
+    if (!matchmakingId || busyId || loading) return;
+
+    setBusyId("refresh-data");
+    setBusyText("Vechterdata opnieuw berekenen...");
+    setMsg("");
+
+    try {
+      const res = await authedFetch(
+        "/api/matchmaker/fighter-context/refresh-all",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ matchmaking_id: matchmakingId }),
+        },
+      );
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || "Vechterdata vernieuwen mislukt");
+      }
+
+      await load(true);
+      setMsg(`${Number(json?.processed ?? 0)} vechters opnieuw verwerkt.`);
+    } catch (e: any) {
+      setMsg(e?.message || "Vechterdata vernieuwen mislukt");
+    } finally {
+      setBusyId(null);
+      setBusyText("");
+    }
+  }
+
   async function downloadCheckedExcel() {
     if (!matchmakingId || busyId) return;
 
@@ -1666,7 +1780,7 @@ export default function FightersPage() {
     }
   }
 
-  const showWait = loading;
+  const showWait = loading || busyId === "refresh-data";
 
   return (
     <main style={pageBg} className="fs-page315">
@@ -1814,9 +1928,14 @@ export default function FightersPage() {
               <Download size={16} />
               <span>Excel</span>
             </button>
-            <button className="fs-action-btn" onClick={() => load()} disabled={loading} title="Vernieuwen">
+            <button
+              className="fs-action-btn"
+              onClick={refreshAllFighterData}
+              disabled={!!busyId || loading}
+              title="Vechterdata opnieuw verwerken"
+            >
               <RefreshCw size={16} />
-              <span>Vernieuwen</span>
+              <span>Refresh data</span>
             </button>
             <button className="fs-action-btn fs-action-primary" onClick={openTournamentMode} disabled={!!busyId}>
               <Trophy size={16} />
@@ -1956,15 +2075,6 @@ export default function FightersPage() {
           </div>
 
           <div style={filterBar}>
-            <div style={searchWrap}>
-              <Search size={17} style={searchIcon} />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Zoek naam, VA, sportschool, klasse..."
-                style={input}
-              />
-            </div>
             <FilterButton
               active={filter === "all"}
               onClick={() => setFilter("all")}
@@ -1994,10 +2104,46 @@ export default function FightersPage() {
             </FilterButton>
           </div>
 
+          <div style={activeClassBanner}>
+            <div style={activeClassEyebrow}>Je matcht nu in</div>
+            <div style={activeClassMain}>
+              <strong style={activeClassName}>
+                {activeTab ? classSelectLabel(activeTab) : "Alle klassen"}
+              </strong>
+              <span style={activeClassCount}>
+                {visible.length} {visible.length === 1 ? "vechter" : "vechters"} zichtbaar
+              </span>
+            </div>
+          </div>
+
           <div style={tableCard}>
             <div style={tableHeader}>
-              <b>{visible.length}</b> zichtbaar <span style={muted}> · </span>{" "}
-              <b>{selected.length}</b> geselecteerd
+              <div style={selectionCount}>
+                <b>{selected.length}</b>
+                <span>geselecteerd</span>
+              </div>
+
+              <div style={tableSearchWrap}>
+                <Search size={18} style={tableSearchIcon} />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Zoek op naam, VA-nummer of sportschool..."
+                  style={tableSearchInput}
+                  aria-label="Zoek vechter op naam, VA-nummer of sportschool"
+                />
+                {q && (
+                  <button
+                    type="button"
+                    onClick={() => setQ("")}
+                    style={clearSearchButton}
+                    title="Zoekopdracht wissen"
+                    aria-label="Zoekopdracht wissen"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
 
             <div style={{ overflowX: "auto" }}>
@@ -2066,30 +2212,35 @@ export default function FightersPage() {
                           />
                         </td>
                         <td style={tdName}>
-                          <button
-                            type="button"
-                            className={
-                              tournamentIds.includes(matchId)
-                                ? "fs-name-select active"
-                                : "fs-name-select"
-                            }
-                            onClick={() =>
-                              tournamentMode ? toggleTournament(f) : undefined
-                            }
-                            disabled={
-                              !!busyId ||
-                              !tournamentMode ||
-                              !matchId ||
-                              isBlockedFromMatching(f)
-                            }
-                            title={
-                              tournamentMode
-                                ? `Toevoegen/verwijderen aan ${tournamentCode}`
-                                : "Naam"
-                            }
-                          >
-                            {name(f)}
-                          </button>
+                          {tournamentMode ? (
+                            <button
+                              type="button"
+                              className={
+                                tournamentIds.includes(matchId)
+                                  ? "fs-name-select active"
+                                  : "fs-name-select"
+                              }
+                              onClick={() => toggleTournament(f)}
+                              disabled={
+                                !!busyId ||
+                                !matchId ||
+                                isBlockedFromMatching(f)
+                              }
+                              title={`Toevoegen/verwijderen aan ${tournamentCode}`}
+                            >
+                              {name(f)}
+                            </button>
+                          ) : detailId ? (
+                            <Link
+                              href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/fighter/${detailId}`}
+                              className="fs-name-select"
+                              title="Open vechterdossier"
+                            >
+                              {name(f)}
+                            </Link>
+                          ) : (
+                            <span>{name(f)}</span>
+                          )}
                         </td>
                         <td style={td}>{gymOf(f)}</td>
                         <td style={tdVa}>{va || "-"}</td>
@@ -2209,6 +2360,36 @@ export default function FightersPage() {
                       raw?.blauw?.naam,
                     ),
                   );
+                  const roodVa = onlyDigits(
+                    pickFirst(
+                      row?.va_rood,
+                      row?.rood_va,
+                      row?.red_va,
+                      row?.rood_fighter_id,
+                      row?.red_fighter_id,
+                      raw?.va_rood,
+                      raw?.rood_va,
+                      raw?.red_va,
+                      raw?.rood?.va_nummer,
+                      raw?.rood?.va,
+                      raw?.rood?.fighter_id,
+                    ),
+                  );
+                  const blauwVa = onlyDigits(
+                    pickFirst(
+                      row?.va_blauw,
+                      row?.blauw_va,
+                      row?.blue_va,
+                      row?.blauw_fighter_id,
+                      row?.blue_fighter_id,
+                      raw?.va_blauw,
+                      raw?.blauw_va,
+                      raw?.blue_va,
+                      raw?.blauw?.va_nummer,
+                      raw?.blauw?.va,
+                      raw?.blauw?.fighter_id,
+                    ),
+                  );
                   const roodGym = val(
                     pickFirst(
                       boutField(row, 'rood_gym', 'red_gym'),
@@ -2235,9 +2416,31 @@ export default function FightersPage() {
                       style={index % 2 === 0 ? matchTrEven : matchTrOdd}
                     >
                       <td style={matchTdNr}>{partijNr ?? (code || '-')}</td>
-                      <td style={matchTdName}>{roodNaam}</td>
+                      <td style={matchTdName}>
+                        {roodVa ? (
+                          <Link
+                            href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/fighter/${encodeURIComponent(roodVa)}`}
+                            style={matchFighterLink}
+                          >
+                            {roodNaam}
+                          </Link>
+                        ) : (
+                          <span style={matchFighterName}>{roodNaam}</span>
+                        )}
+                      </td>
                       <td style={matchTd}>{roodGym}</td>
-                      <td style={matchTdName}>{blauwNaam}</td>
+                      <td style={matchTdName}>
+                        {blauwVa ? (
+                          <Link
+                            href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/fighter/${encodeURIComponent(blauwVa)}`}
+                            style={matchFighterLink}
+                          >
+                            {blauwNaam}
+                          </Link>
+                        ) : (
+                          <span style={matchFighterName}>{blauwNaam}</span>
+                        )}
+                      </td>
                       <td style={matchTd}>{blauwGym}</td>
                       <td style={matchTdCompact}>{klasse}</td>
                       <td style={matchTdCompact}>
@@ -2614,6 +2817,48 @@ const input: CSSProperties = {
   outline: "none",
   fontWeight: 750,
 };
+const activeClassBanner: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 16,
+  marginBottom: 12,
+  padding: "13px 16px",
+  background: "linear-gradient(180deg,#24262d,#0c0d11)",
+  border: "2px solid #ff4d00",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.16), 0 8px 20px rgba(0,0,0,.18)",
+  color: "#fff",
+};
+const activeClassEyebrow: CSSProperties = {
+  flex: "0 0 auto",
+  color: "#c9cbd0",
+  fontSize: 12,
+  fontWeight: 900,
+  letterSpacing: ".08em",
+  textTransform: "uppercase",
+};
+const activeClassMain: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 18,
+  flex: 1,
+  minWidth: 0,
+};
+const activeClassName: CSSProperties = {
+  color: "#fff",
+  fontSize: 22,
+  lineHeight: 1.1,
+  fontWeight: 950,
+};
+const activeClassCount: CSSProperties = {
+  flex: "0 0 auto",
+  padding: "7px 10px",
+  background: "#ff4d00",
+  color: "#fff",
+  fontSize: 13,
+  fontWeight: 950,
+};
 const tableCard: CSSProperties = {
   borderRadius: 18,
   overflow: "hidden",
@@ -2621,10 +2866,67 @@ const tableCard: CSSProperties = {
   background: "white",
 };
 const tableHeader: CSSProperties = {
-  padding: 14,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 14,
+  padding: "11px 14px",
   color: "#111",
-  borderBottom: "1px solid rgba(0,0,0,.1)",
+  borderBottom: "1px solid rgba(0,0,0,.12)",
   background: "linear-gradient(180deg,#fff,#e6e8eb)",
+};
+
+const selectionCount: CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 6,
+  flex: "0 0 auto",
+  minWidth: 128,
+};
+
+const tableSearchWrap: CSSProperties = {
+  position: "relative",
+  flex: "1 1 560px",
+  maxWidth: 720,
+};
+
+const tableSearchIcon: CSSProperties = {
+  position: "absolute",
+  left: 14,
+  top: "50%",
+  transform: "translateY(-50%)",
+  color: "#5d626b",
+  pointerEvents: "none",
+};
+
+const tableSearchInput: CSSProperties = {
+  width: "100%",
+  height: 42,
+  borderRadius: 10,
+  border: "1px solid rgba(20,20,20,.24)",
+  background: "#fff",
+  color: "#111",
+  padding: "0 42px 0 42px",
+  outline: "none",
+  fontWeight: 800,
+  boxShadow: "inset 0 1px 2px rgba(0,0,0,.08)",
+};
+
+const clearSearchButton: CSSProperties = {
+  position: "absolute",
+  right: 7,
+  top: "50%",
+  transform: "translateY(-50%)",
+  width: 28,
+  height: 28,
+  border: 0,
+  borderRadius: 7,
+  background: "#202226",
+  color: "#fff",
+  cursor: "pointer",
+  fontSize: 20,
+  lineHeight: 1,
+  fontWeight: 900,
 };
 const table: CSSProperties = {
   width: "100%",
@@ -2782,6 +3084,15 @@ const matchmakingCount: CSSProperties = {
   whiteSpace: "nowrap",
 };
 const matchmakingTableWrap: CSSProperties = { width: "100%", overflowX: "auto" };
+const matchFighterLink: CSSProperties = {
+  color: ORANGE,
+  fontWeight: 900,
+  textDecoration: "none",
+};
+const matchFighterName: CSSProperties = {
+  color: ORANGE,
+  fontWeight: 900,
+};
 const matchThNr: CSSProperties = { ...th, width: 62, textAlign: "center" };
 const matchThCompact: CSSProperties = { ...th, width: 72, textAlign: "center" };
 const matchThAction: CSSProperties = { ...th, width: 126, textAlign: "center" };

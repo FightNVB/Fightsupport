@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { buildControleBoutContext } from "@/lib/matchmaker/buildControleBoutContext";
-import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
-import { rulesEngine } from "@/lib/rulesEngine";
+import { enrichControleBoutContext } from "@/lib/matchmaker/enrichControleBoutContext";
+import { rulesEngine } from "@/lib/matchmaker/rulesEngine";
 
 export const runtime = "nodejs";
 

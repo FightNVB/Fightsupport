@@ -802,14 +802,26 @@ export function runMatchmakerFighterRules(
   const leeftijd = getAgeOnEvent(ctx);
   const eventDate = getEventDate(ctx);
 
-  const klasseAanmelding = normalizeKlasse(ctx.klasse ?? ctx.klasse_input ?? ctx.klasse_mm);
+  const klasseAanmelding = normalizeKlasse(
+    ctx.aanmelding_klasse ??
+      ctx.klasse_input ??
+      ctx.klasse_mm ??
+      ctx.klasse ??
+      ctx.aanmelding?.klasse ??
+      ctx.extra?.aanmelding?.klasse ??
+      ctx.extra?.raw?.aanmelding?.klasse,
+  );
+  const berekendeKlasse = normalizeKlasse(
+    ctx.berekende_klasse ??
+      ctx.extra?.raw_scrape?.berekende_klasse ??
+      ctx.extra?.raw?.fighters_raw?.berekende_klasse,
+  );
   const fpKlasse = normalizeKlasse(
     ctx.fp_klasse ??
       ctx.klasse_fp ??
-      ctx.berekende_klasse ??
       ctx.nulmeting_klasse ??
-      ctx.extra?.raw_scrape?.berekende_klasse ??
-      ctx.extra?.raw_scrape?.nulmeting_klasse,
+      ctx.extra?.raw_scrape?.nulmeting_klasse ??
+      ctx.extra?.raw?.fighters_raw?.nulmeting_klasse,
   );
 
   const discipline = getDisciplineInput(ctx);
@@ -909,6 +921,16 @@ export function runMatchmakerFighterRules(
   }
 
   if (leeftijd != null && leeftijd >= 18 && kbMt) {
+    if (requested && isAdultKlasse(berekendeKlasse) && requested !== berekendeKlasse) {
+      add(
+        "MATCHMAKER_KLASSE_WIJKT_AF_BEREKEND",
+        klasseIndex(requested) < klasseIndex(berekendeKlasse) ? "ACTIE" : "LET_OP",
+        `Vechter is opgegeven voor klasse ${requested}, maar de berekende klasse is ${berekendeKlasse}. Controleer de opgave aan de hand van de uitslagenhistorie.`,
+        "warning",
+        "Opgave wijkt af van berekende klasse",
+      );
+    }
+
     if (!requested) {
       add("MATCHMAKER_KLASSE_ONDUIDELIJK", "ACTIE", "De opgegeven klasse kon niet duidelijk worden bepaald.", "warning", "Klasse onduidelijk");
     }
@@ -939,7 +961,7 @@ export function runMatchmakerFighterRules(
       }
     }
 
-    const advice = getRecordAdvice(uitslagen, fpKlasse);
+    const advice = getRecordAdvice(uitslagen, berekendeKlasse ?? fpKlasse);
 
     if (!uitslagen.length && !isAdultKlasse(fpKlasse)) {
       add("MATCHMAKER_GEEN_UITSLAGEN_VOOR_KLASSECHECK", "LET_OP", "Geen uitslagenhistorie of volwassen nulmetingklasse gevonden. Klasse moet handmatig gecontroleerd worden.", "warning", "Geen uitslagenhistorie");

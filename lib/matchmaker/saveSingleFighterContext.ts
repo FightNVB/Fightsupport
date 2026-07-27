@@ -347,48 +347,68 @@ export async function saveSingleFighterRules(params: {
   matchmakingId: string;
   controleRunId: string;
   hits: AnyRow[];
-  // Belangrijk wanneer een hercontrole géén meldingen meer oplevert:
-  // zonder scopeRows zouden oude regels blijven staan, omdat hits leeg is.
   scopeRows?: AnyRow[];
 }) {
   const { supabase, matchmakingId, controleRunId, hits, scopeRows = [] } = params;
-
   const table = "matchmaker_fighter_resultaten";
 
-  // Deze functie kan meerdere keren binnen dezelfde run worden aangeroepen:
-  // gewone wedstrijden en toernooi-vechters. Verwijder daarom alleen de groep
-  // die nu opnieuw opgeslagen wordt, anders gooit de laatste save de eerdere
-  // wedstrijd- of toernooiresultaten weg.
-  const scopeForDelete = hits?.length ? hits : scopeRows;
-  const groups = (scopeForDelete ?? []).reduce(
-    (acc, row) => {
-      const toernooiCode = toernooiCodeOrNull(
-        pick(row, ["toernooi_code", "toernooicode", "tournament_code"])
-      );
-      if (toernooiCode || isToernooiContext(row)) acc.toernooi += 1;
-      else acc.wedstrijd += 1;
-      return acc;
-    },
-    { wedstrijd: 0, toernooi: 0 }
+  // Verwijder alleen regels van de concrete vechter(s) die nu opnieuw worden verwerkt.
+  // Dit maakt losse verwerking na upload, correctie of refresh veilig.
+  const scope = (scopeRows?.length ? scopeRows : hits) ?? [];
+
+  const normalIds = Array.from(
+    new Set(
+      scope
+        .filter((row) => !toernooiCodeOrNull(pick(row, ["toernooi_code", "toernooicode", "tournament_code"])))
+        .map((row) => i(pick(row, ["inschrijving_id", "aanmelding_id", "id_aanmelding"])))
+        .filter((id): id is number => id !== null),
+    ),
   );
 
-  let existingQ = supabase
-    .from(table)
-    .select("*")
-    .eq("matchmaking_id", matchmakingId)
-    .eq("controle_run_id", controleRunId);
+  const tournamentScopes = new Map<string, Set<string>>();
+  for (const row of scope) {
+    const code = toernooiCodeOrNull(pick(row, ["toernooi_code", "toernooicode", "tournament_code"]));
+    if (!code && !isToernooiContext(row)) continue;
 
-  if (groups.toernooi > 0 && groups.wedstrijd === 0) {
-    existingQ = existingQ.not("toernooi_code", "is", null);
-  } else if (groups.wedstrijd > 0 && groups.toernooi === 0) {
-    existingQ = existingQ.is("toernooi_code", null);
+    const va = normalizeVa(pick(row, ["va_nummer", "va", "toernooi_va_nummer", "fighter_id"]));
+    if (!code || !va) continue;
+
+    if (!tournamentScopes.has(code)) tournamentScopes.set(code, new Set());
+    tournamentScopes.get(code)!.add(va);
   }
 
-  const { data: existingRows, error: existingError } = await existingQ;
-  if (existingError) return { data: [], error: existingError };
+  const existingRows: AnyRow[] = [];
+
+  if (normalIds.length) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .in("inschrijving_id", normalIds);
+
+    if (error) return { data: [], error };
+    existingRows.push(...((data ?? []) as AnyRow[]));
+  }
+
+  for (const [toernooiCode, vas] of tournamentScopes.entries()) {
+    const vaNummers = Array.from(vas);
+    if (!vaNummers.length) continue;
+
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .eq("toernooi_code", toernooiCode)
+      .in("va_nummer", vaNummers);
+
+    if (error) return { data: [], error };
+    existingRows.push(...((data ?? []) as AnyRow[]));
+  }
 
   const reviewByKey = new Map<string, AnyRow>();
-  for (const row of existingRows ?? []) {
+  for (const row of existingRows) {
     const key = [
       normalizeVa(pick(row, ["va_nummer", "va", "fighter_id"])) ?? "",
       s(pick(row, ["rule_code"])),
@@ -401,32 +421,38 @@ export async function saveSingleFighterRules(params: {
     }
   }
 
-  let delQ = supabase
-    .from(table)
-    .delete()
-    .eq("matchmaking_id", matchmakingId)
-    .eq("controle_run_id", controleRunId);
+  if (normalIds.length) {
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .in("inschrijving_id", normalIds);
 
-  if (groups.toernooi > 0 && groups.wedstrijd === 0) {
-    delQ = delQ.not("toernooi_code", "is", null);
-  } else if (groups.wedstrijd > 0 && groups.toernooi === 0) {
-    delQ = delQ.is("toernooi_code", null);
+    if (error) return { data: [], error };
   }
 
-  const { error: delErr } = await delQ;
-  if (delErr) return { data: [], error: delErr };
+  for (const [toernooiCode, vas] of tournamentScopes.entries()) {
+    const vaNummers = Array.from(vas);
+    if (!vaNummers.length) continue;
 
-  // Als er nu géén hits zijn, is dat juist het signaal dat de oude meldingen
-  // voor deze scope weg moeten blijven. Dus na de delete klaar.
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
+      .eq("toernooi_code", toernooiCode)
+      .in("va_nummer", vaNummers);
+
+    if (error) return { data: [], error };
+  }
+
+  // Geen hits betekent dat alleen de oude regels binnen deze scope verwijderd blijven.
   if (!hits?.length) return { data: [], error: null };
 
   const rows = hits.map((hit) => {
-    const toernooi_code = toernooiCodeOrNull(
-      pick(hit, ["toernooi_code", "toernooicode", "tournament_code"])
-    );
-    const va = normalizeVa(
-      pick(hit, ["va_nummer", "va", "toernooi_va_nummer", "fighter_id"])
-    );
+    const toernooi_code = toernooiCodeOrNull(pick(hit, ["toernooi_code", "toernooicode", "tournament_code"]));
+    const va = normalizeVa(pick(hit, ["va_nummer", "va", "toernooi_va_nummer", "fighter_id"]));
     const inschrijving_id = i(hit.inschrijving_id);
     const key = [
       va ?? "",
@@ -448,15 +474,11 @@ export async function saveSingleFighterRules(params: {
       is_toernooi: !!toernooi_code,
       partij_nr: toernooi_code ? 0 : i(hit.partij_nr),
       bout_id: toernooi_code ? null : uuidOrNull(hit.bout_id),
-
       rule: hit.rule ?? null,
       rule_code: hit.rule_code ?? null,
-      resultaat: previousReview?.review_status
-        ? previousReview.resultaat
-        : hit.resultaat ?? null,
+      resultaat: previousReview?.review_status ? previousReview.resultaat : hit.resultaat ?? null,
       severity: hit.severity ?? null,
       boodschap: hit.boodschap ?? null,
-
       original_resultaat:
         previousReview?.original_resultaat ??
         (previousReview?.review_status ? previousReview?.resultaat : null),
@@ -464,14 +486,12 @@ export async function saveSingleFighterRules(params: {
       review_note: previousReview?.review_note ?? null,
       reviewed_by: previousReview?.reviewed_by ?? null,
       reviewed_at: previousReview?.reviewed_at ?? null,
-
       created_at: previousReview?.created_at ?? new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
   });
 
   const { data, error } = await safeInsertRows({ supabase, table, rows });
-
   return { data: data ?? [], error };
 }
 

@@ -1,8 +1,8 @@
-// lib/rulesEngine.ts
+// lib/matchmaker/rulesEngine.ts
 
 import dayjs from "dayjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { saveControleResultaten } from "@/lib/control/saveControleResultaten";
+import { saveControleResultaten } from "@/lib/matchmaker/saveControleResultaten";
 
 type RuleResultaat = "OK" | "INFO" | "ACTIE" | "DISPENSATIE" | "AFKEUR" | "VERBOD";
 type Severity = "info" | "ok" | "warning" | "error";

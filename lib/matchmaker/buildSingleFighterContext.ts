@@ -51,43 +51,113 @@ function aanmeldingFullName(row: AnyRow): string {
   return cleanNamePart(row?.naam ?? row?.naam_input ?? row?.fighter_name);
 }
 
-function classifyUitslag(raw: unknown): "win" | "loss" | "draw" | "demo" | null {
+type AdultKlasse = "R" | "N" | "C" | "B" | "A";
+
+const ADULT_KLASSE_VOLGORDE: AdultKlasse[] = ["R", "N", "C", "B", "A"];
+
+function normalizeKlasseText(v: unknown): string {
+  return String(v ?? "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\/_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isJeugdKlasse(v: unknown): boolean {
+  const x = normalizeKlasseText(v);
+  return (
+    x === "J" ||
+    x === "J+" ||
+    x.startsWith("J ") ||
+    x.startsWith("J-") ||
+    x.includes("JEUGD") ||
+    x.includes("YOUTH") ||
+    x.includes("JUNIOR") ||
+    x.includes("JONGEN") ||
+    x.includes("MEISJE")
+  );
+}
+
+function normalizeAdultKlasse(v: unknown): AdultKlasse | null {
+  const x = normalizeKlasseText(v);
+  if (!x || isJeugdKlasse(v)) return null;
+  if (x.includes("MMA") || x === "AMA" || x.includes("AMATEUR") || x.includes("PRO")) return null;
+  if (x.includes("VETERAAN") || x.includes("VETERAN")) return "N";
+  if (x.includes("NIEUWELING") || x.includes("NEWCOMER")) return "N";
+  if (x.includes("R KLASSE") || x.includes("R CLASS")) return "R";
+  if (x.includes("N KLASSE") || x.includes("N CLASS")) return "N";
+  if (x.includes("C KLASSE") || x.includes("C CLASS")) return "C";
+  if (x.includes("B KLASSE") || x.includes("B CLASS")) return "B";
+  if (x.includes("A KLASSE") || x.includes("A CLASS")) return "A";
+  const match = x.match(/\b(R|N|C|B|A)\b/);
+  return match ? (match[1] as AdultKlasse) : null;
+}
+
+function isKbMtDiscipline(v: unknown): boolean {
+  const x = String(v ?? "").toLowerCase();
+  return x.includes("kick") || x.includes("muay") || x.includes("thai");
+}
+
+function classifyUitslag(raw: unknown): "win" | "loss" | "draw" | "other" {
   const txt = String(raw ?? "").trim().toLowerCase();
-  if (!txt) return null;
-  if (txt.includes("demo") || txt.includes("demonstr") || txt.includes("no contest") || txt.includes("nocontest")) return "demo";
+  if (!txt) return "other";
+  if (txt.includes("demo") || txt.includes("demonstr") || txt.includes("no contest") || txt.includes("nocontest")) return "other";
   if (txt.includes("gelijk") || txt.includes("draw") || txt.includes("onbeslist")) return "draw";
   if (txt.includes("verlies") || txt.includes("verliest") || txt.includes("lost") || txt.includes("loss")) return "loss";
   if (txt.includes("winst") || txt.includes("gewonnen") || txt.includes("wint") || txt.includes("win")) return "win";
-  return null;
+  return "other";
 }
 
 function buildRecordFromUitslagen(rows: AnyRow[] = []) {
+  const relevantRows = rows.filter((row) => isKbMtDiscipline(row?.discipline));
+
+  let hoogsteKlasse: AdultKlasse | null = null;
+  for (const row of relevantRows) {
+    const klasse = normalizeAdultKlasse(row?.klasse);
+    if (!klasse) continue;
+    if (
+      !hoogsteKlasse ||
+      ADULT_KLASSE_VOLGORDE.indexOf(klasse) > ADULT_KLASSE_VOLGORDE.indexOf(hoogsteKlasse)
+    ) {
+      hoogsteKlasse = klasse;
+    }
+  }
+
   let record_w = 0;
   let record_l = 0;
   let record_d = 0;
-  let demo = 0;
+  let overig = 0;
 
-  for (const row of rows) {
+  for (const row of relevantRows) {
+    const klasse = normalizeAdultKlasse(row?.klasse);
     const kind = classifyUitslag(row?.uitslag ?? row?.resultaat ?? row?.outcome);
-    if (kind === "win") record_w += 1;
-    else if (kind === "loss") record_l += 1;
-    else if (kind === "draw") record_d += 1;
-    else if (kind === "demo") demo += 1;
+
+    // Alleen officiële resultaten in de hoogste volwassen klasse vormen het record.
+    // Jeugd, lagere klassen, demo/no contest en onbekende uitslagen zijn overige ervaring.
+    if (hoogsteKlasse && klasse === hoogsteKlasse && kind !== "other") {
+      if (kind === "win") record_w += 1;
+      else if (kind === "loss") record_l += 1;
+      else if (kind === "draw") record_d += 1;
+    } else {
+      overig += 1;
+    }
   }
 
-  const totaalZonderDemo = record_w + record_l + record_d;
-  const totaalInclusiefDemo = totaalZonderDemo + demo;
-  const totaalVoorJeugd = Math.max(0, totaalZonderDemo + Math.floor(demo / 3));
+  const totaalZonderOverig = record_w + record_l + record_d;
+  const totaalInclusiefOverig = totaalZonderOverig + overig;
 
   return {
     record_w,
     record_l,
     record_d,
-    demo,
-    totaal_wedstrijden: totaalZonderDemo,
-    totaal_uitslagen_inclusief_demo: totaalInclusiefDemo,
-    totaal_partijen_voor_regels: totaalVoorJeugd,
-    hasUitslagen: rows.length > 0,
+    demo: overig,
+    hoogsteKlasse,
+    totaal_wedstrijden: totaalZonderOverig,
+    totaal_uitslagen_inclusief_demo: totaalInclusiefOverig,
+    totaal_partijen_voor_regels: totaalZonderOverig,
+    hasUitslagen: relevantRows.length > 0,
   };
 }
 

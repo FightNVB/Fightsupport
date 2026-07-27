@@ -177,7 +177,8 @@ export async function PATCH(req: Request) {
         .from("matchmaker_fighter_school_changes")
         .insert({
           matchmaking_id: matchmakingId,
-          aanmelding_id: aanmeldingId,
+          // aanmeldingen.id is numeriek, terwijl deze logkolom in de database UUID is.
+          // Daarom niet invullen; de wijziging blijft gekoppeld via matchmaking_id + va_nummer.
           fighter_id: null,
           va_nummer: s(data?.va_nummer ?? existing.va_nummer),
           old_sportschool_name: oldSchoolName || null,
@@ -258,23 +259,128 @@ export async function DELETE(req: Request) {
 
     await assertAccess(user.id, matchmakingId);
 
-    const { error } = await supabaseAdmin
+    const { data: existing, error: readError } = await supabaseAdmin
+      .from(TABLE)
+      .select("*")
+      .eq("matchmaking_id", matchmakingId)
+      .eq("id", aanmeldingId)
+      .maybeSingle();
+
+    if (readError) throw new Error(`Aanmelding laden mislukt: ${readError.message}`);
+    if (!existing) throw new Error("Aanmelding niet gevonden of al verwijderd.");
+
+    // Een aanmelding die al in een partij zit niet los verwijderen. Daarmee zouden
+    // rood/blauw-verwijzingen en de matchmaking ongeldig worden. Verwijder dan eerst
+    // de partij via de bestaande partij-verwijderfunctie.
+    const [{ data: redBouts, error: redBoutError }, { data: blueBouts, error: blueBoutError }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("matchmaking_bouts_raw")
+          .select("id, partij_nr")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("rood_inschrijving_id", aanmeldingId)
+          .limit(1),
+        supabaseAdmin
+          .from("matchmaking_bouts_raw")
+          .select("id, partij_nr")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("blauw_inschrijving_id", aanmeldingId)
+          .limit(1),
+      ]);
+
+    if (redBoutError && !["PGRST204", "42703"].includes(redBoutError.code || "")) {
+      throw new Error(`Partijkoppeling controleren mislukt: ${redBoutError.message}`);
+    }
+    if (blueBoutError && !["PGRST204", "42703"].includes(blueBoutError.code || "")) {
+      throw new Error(`Partijkoppeling controleren mislukt: ${blueBoutError.message}`);
+    }
+
+    const linkedBout = redBouts?.[0] ?? blueBouts?.[0] ?? null;
+    if (linkedBout) {
+      const partijNr = s(linkedBout.partij_nr);
+      throw new Error(
+        partijNr
+          ? `Deze aanmelding zit al in partij ${partijNr}. Verwijder eerst die partij.`
+          : "Deze aanmelding zit al in een partij. Verwijder eerst die partij."
+      );
+    }
+
+    const deleted: Record<string, number> = {};
+
+    async function deleteScoped(
+      table: string,
+      column: string,
+      value: string,
+      required = false,
+    ) {
+      const { data, error } = await supabaseAdmin
+        .from(table)
+        .delete()
+        .eq("matchmaking_id", matchmakingId)
+        .eq(column, value)
+        .select("id");
+
+      if (error) {
+        // Niet iedere installatie heeft alle historische hulptabellen of kolommen.
+        // Alleen de context en aanmelding zijn verplicht; overige cleanup is best effort.
+        if (!required && ["PGRST204", "42P01", "42703"].includes(error.code || "")) {
+          return;
+        }
+        throw new Error(`${table} verwijderen mislukt: ${error.message}`);
+      }
+
+      deleted[table] = (deleted[table] ?? 0) + (data?.length ?? 0);
+    }
+
+    // Eerst alle gegevens verwijderen die van deze ene aanmelding zijn afgeleid.
+    // Dit voorkomt verweesde contexten en oude rule-hits nadat de aanmelding weg is.
+    await deleteScoped("matchmaker_fighter_resultaten", "inschrijving_id", aanmeldingId);
+    await deleteScoped("matchmaker_fighter_resultaten", "aanmelding_id", aanmeldingId);
+    await deleteScoped("matchmaker_name_va_checks", "aanmelding_id", aanmeldingId);
+
+    // matchmaker_fighter_school_changes.aanmelding_id is in deze database een UUID
+    // en kan daarom niet worden vergeleken met het numerieke aanmeldingen.id.
+    // Deze logregels zijn ook aan matchmaking + VA gekoppeld, dus ruim ze daarop op.
+    const existingVa = s(
+      existing.va_nummer ?? existing.va ?? existing.fightpaspoort_nummer
+    ).replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+
+    if (existingVa) {
+      await deleteScoped(
+        "matchmaker_fighter_school_changes",
+        "va_nummer",
+        existingVa,
+      );
+    }
+
+    await deleteScoped("matchmaker_fighters_raw", "aanmelding_id", aanmeldingId);
+    await deleteScoped("matchmaker_uitslagen_raw", "aanmelding_id", aanmeldingId);
+    await deleteScoped("matchmaker_fighter_context", "inschrijving_id", aanmeldingId, true);
+
+    const { data: removed, error: deleteError } = await supabaseAdmin
       .from(TABLE)
       .delete()
       .eq("matchmaking_id", matchmakingId)
-      .eq("id", aanmeldingId);
+      .eq("id", aanmeldingId)
+      .select("id");
 
-    if (error) throw new Error(`Verwijderen mislukt: ${error.message}`);
+    if (deleteError) throw new Error(`Aanmelding verwijderen mislukt: ${deleteError.message}`);
+    if (!removed?.length) throw new Error("Aanmelding is niet verwijderd.");
 
-    const processing = await processMatchmakingFighters({
-      supabase: supabaseAdmin,
-      matchmakingId,
-    });
+    deleted[TABLE] = removed.length;
+
+    await supabaseAdmin
+      .from("matchmakings")
+      .update({
+        last_updated_at: new Date().toISOString(),
+        last_updated_by: user.id,
+      })
+      .eq("id", matchmakingId);
 
     return NextResponse.json({
       ok: true,
-      message: "Aanmelding verwijderd.",
-      fighter_processing: { processed: processing.processed },
+      message: "Aanmelding en bijbehorende vechtercontext verwijderd.",
+      deleted,
     });
   } catch (e: any) {
     console.error("[DELETE /api/matchmaker/aanmeldingen]", e);

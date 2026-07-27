@@ -22,6 +22,7 @@ import {
   Edit3,
   Eye,
   FileUp,
+  Inbox,
   Plus,
   Search,
   Save,
@@ -541,17 +542,26 @@ export default function AanmeldingenPage() {
     }
 
     const linkedSchools = selectedFighter.sportscholen ?? [];
-    const resolvedSchoolId = selectedSportschoolId ||
-      (linkedSchools.length === 1 ? String(linkedSchools[0].sportschool_id) : "");
+    const resolvedSchoolId = searchMode === "school"
+      ? selectedSportschoolId
+      : "";
+    const manualSchoolName = s(form.gym);
 
-    if (!resolvedSchoolId) {
+    if (searchMode === "school" && !resolvedSchoolId) {
       setMsg("Kies de sportschool waarvoor deze vechter wordt aangemeld.");
       return;
     }
 
-    const sportschool = sportscholen.find(
-      (row) => String(row.sportschool_id) === resolvedSchoolId,
-    ) ?? linkedSchools.find((row) => String(row.sportschool_id) === resolvedSchoolId);
+    if (searchMode === "fighter" && !manualSchoolName) {
+      setMsg("Vul de sportschool voor deze aanmelding in.");
+      return;
+    }
+
+    const sportschool = searchMode === "school"
+      ? sportscholen.find(
+          (row) => String(row.sportschool_id) === resolvedSchoolId,
+        ) ?? linkedSchools.find((row) => String(row.sportschool_id) === resolvedSchoolId)
+      : null;
 
     setBusyMode("manual");
     setMsg("");
@@ -562,10 +572,10 @@ export default function AanmeldingenPage() {
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
           matchmaker_id: matchmaking?.matchmaker_id || matchmaking?.maker_user_id || null,
-          sportschool_id: Number(resolvedSchoolId),
+          sportschool_id: resolvedSchoolId ? Number(resolvedSchoolId) : null,
           va_nummer: selectedFighter.va_nummer,
           gewicht: form.gewicht,
-          gym: sportschool?.naam || "",
+          gym: searchMode === "fighter" ? manualSchoolName : sportschool?.naam || "",
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -575,12 +585,15 @@ export default function AanmeldingenPage() {
       setSelectedSportschoolId("");
       setFighterSearch("");
       setFighters([]);
-      setForm((current) => ({ ...current, gewicht: "" }));
+      setForm((current) => ({ ...current, gewicht: "", gym: "" }));
       const linkedSchoolIds = (selectedFighter.sportscholen ?? []).map((row) => String(row.sportschool_id));
-      const schoolWasChanged = !linkedSchoolIds.includes(String(resolvedSchoolId));
+      const linkedSchoolNames = (selectedFighter.sportscholen ?? []).map((row) => normalizeSchoolName(row.naam));
+      const schoolWasChanged = searchMode === "fighter"
+        ? !linkedSchoolNames.includes(normalizeSchoolName(manualSchoolName))
+        : !linkedSchoolIds.includes(String(resolvedSchoolId));
       setMsg(
         schoolWasChanged
-          ? `${selectedFighter.naam} is toegevoegd. De afwijkende sportschool is opgeslagen en voor admin geregistreerd.`
+          ? `${selectedFighter.naam} is toegevoegd. De opgegeven sportschool is opgeslagen en voor admin geregistreerd.`
           : `${selectedFighter.naam} is toegevoegd aan deze matchmaking.`,
       );
       await load(true);
@@ -830,6 +843,11 @@ export default function AanmeldingenPage() {
       return;
     }
 
+    const ok = window.confirm(
+      `Weet je zeker dat je ${name(r)} uit deze matchmaking wilt verwijderen? De bijbehorende vechtercontext en controles worden ook verwijderd.`,
+    );
+    if (!ok) return;
+
     setBusyMode("delete");
     setMsg("");
 
@@ -843,7 +861,7 @@ export default function AanmeldingenPage() {
       if (!res.ok)
         throw new Error(json?.error || "Vechter verwijderen mislukt");
 
-      setMsg("Vechter verwijderd.");
+      setMsg(json?.message || "Aanmelding en bijbehorende context verwijderd.");
       await load(true);
     } catch (e: any) {
       setMsg(e?.message || "Vechter verwijderen mislukt");
@@ -1053,6 +1071,13 @@ export default function AanmeldingenPage() {
 
           <div style={heroRight}>
             <Link
+              href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/importbox`}
+              className="fs-orange-btn compact-action"
+            >
+              <Inbox size={17} />
+              Importbox
+            </Link>
+            <Link
               href="/dashboard/matchmaker/matchmaking"
               className="fs-back-button"
             >
@@ -1193,6 +1218,7 @@ export default function AanmeldingenPage() {
                   setSelectedSportschoolId("");
                   setSelectedVa("");
                   setFighters([]);
+                  setForm((current) => ({ ...current, gym: "" }));
                 }}
                 type="button"
               >
@@ -1205,6 +1231,7 @@ export default function AanmeldingenPage() {
                   setFighterSearch("");
                   setSelectedVa("");
                   setFighters([]);
+                  setForm((current) => ({ ...current, gym: "" }));
                 }}
                 type="button"
               >
@@ -1244,6 +1271,7 @@ export default function AanmeldingenPage() {
                       setFighterSearch(e.target.value);
                       setSelectedVa("");
                       setSelectedSportschoolId("");
+                      setForm((current) => ({ ...current, gym: "" }));
                     }}
                     style={input}
                     disabled={busy}
@@ -1294,26 +1322,41 @@ export default function AanmeldingenPage() {
 
                   <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
                     <span>Sportschool voor deze aanmelding</span>
-                    <select
-                      value={selectedSportschoolId}
-                      onChange={(e) => setSelectedSportschoolId(e.target.value)}
-                      style={input}
-                      disabled={busy || selectorLoading}
-                    >
-                      <option value="">Kies sportschool</option>
-                      {sportscholen.map((school) => {
-                        const linked = (selectedFighter.sportscholen ?? []).some(
-                          (item) => Number(item.sportschool_id) === Number(school.sportschool_id),
-                        );
-                        return (
-                          <option key={school.sportschool_id} value={school.sportschool_id}>
-                            {school.naam}{school.plaats ? ` — ${school.plaats}` : ""}{linked ? " · gekoppeld in FightPassport" : ""}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    {searchMode === "fighter" ? (
+                      <input
+                        value={form.gym}
+                        onChange={(e) =>
+                          setForm((current) => ({ ...current, gym: e.target.value }))
+                        }
+                        placeholder="Vul de sportschool in"
+                        style={input}
+                        disabled={busy}
+                        autoComplete="off"
+                      />
+                    ) : (
+                      <select
+                        value={selectedSportschoolId}
+                        onChange={(e) => setSelectedSportschoolId(e.target.value)}
+                        style={input}
+                        disabled={busy || selectorLoading}
+                      >
+                        <option value="">Kies sportschool</option>
+                        {sportscholen.map((school) => {
+                          const linked = (selectedFighter.sportscholen ?? []).some(
+                            (item) => Number(item.sportschool_id) === Number(school.sportschool_id),
+                          );
+                          return (
+                            <option key={school.sportschool_id} value={school.sportschool_id}>
+                              {school.naam}{school.plaats ? ` — ${school.plaats}` : ""}{linked ? " · gekoppeld in FightPassport" : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
                     <span style={schoolHelpText}>
-                      De gekoppelde sportschool is vooraf geselecteerd. Je mag voor deze aanmelding een andere sportschool kiezen; die afwijking wordt voor admin geregistreerd.
+                      {searchMode === "fighter"
+                        ? "Vul hier zelf de sportschool in waarvoor de vechter wordt aangemeld."
+                        : "Kies de sportschool waarvoor deze vechter wordt aangemeld."}
                     </span>
                   </label>
                 </>
