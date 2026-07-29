@@ -655,9 +655,50 @@ function sortFightersInTab(a: Fighter, b: Fighter) {
   if (partijenDiff !== 0) return partijenDiff;
   return name(a).localeCompare(name(b), "nl");
 }
-function recordOf(f: Fighter, _allRows: ResultRow[] = []) {
-  // fighterRules heeft het record al berekend. Gebruik die uitkomst rechtstreeks
-  // en reken hem op deze pagina niet nogmaals uit fightpassport_results uit.
+function recordClassDisplay(token: string) {
+  const labels: Record<string, string> = {
+    j: "J",
+    r: "R",
+    n: "N",
+    c: "C",
+    b: "B",
+    a: "A",
+    amateur: "Amateur",
+    pro: "Pro",
+  };
+  return labels[token] || "-";
+}
+
+function recordOf(f: Fighter, allRows: ResultRow[] = []) {
+  // Het zichtbare record wordt rechtstreeks uit de uitslagen opgebouwd:
+  // hoogste klasse met een echte W/L/D-uitslag, W-L-D binnen die klasse,
+  // en alle overige partijen samen tussen haakjes.
+  const rows = getUitslagenRows(f, allRows);
+  const highestClass = highestRecordClassFromRows(rows);
+
+  if (highestClass) {
+    let wins = 0;
+    let losses = 0;
+    let draws = 0;
+    let overige = 0;
+
+    for (const row of rows) {
+      const kind = getResultKind(
+        pickFirst(row?.uitslag, row?.resultaat, row?.outcome),
+      );
+      const rowClass = getRowClass(row);
+
+      if (rowClass === highestClass && kind === "win") wins += 1;
+      else if (rowClass === highestClass && kind === "loss") losses += 1;
+      else if (rowClass === highestClass && kind === "draw") draws += 1;
+      else overige += 1;
+    }
+
+    return `${recordClassDisplay(highestClass)} ${wins}-${losses}-${draws} (${overige})`;
+  }
+
+  // Alleen voor oude contextregels zonder uitslagen blijft het door fighterRules
+  // opgeslagen record beschikbaar als terugval.
   const ruleRecord = pickFirst(
     f.record_label,
     f.recordLabel,
@@ -682,83 +723,13 @@ function recordOf(f: Fighter, _allRows: ResultRow[] = []) {
   );
 
   if (s(ruleRecord)) {
-    const raw = s(ruleRecord).replace(/[‐‑‒–—−]/g, "-");
-    // Voor de zichtbare recordprefix gebruiken we altijd één vaste klasseletter.
-    const cls = cleanRecordClassLabel(
-      pickFirst(
-        f.berekende_klasse,
-        f.mma_level,
-        f.nulmeting_klasse,
-        f.klasse,
-        f.class,
-        recordClassLabelOf(f),
-      ),
-    );
-    const classToken = normalizeClassToken(cls);
-
-    // Toon onder Matchen altijd exact: "C 0-0-0 (0)".
-    // Wanneer fighterRules meerdere klasserecords in één tekst teruggeeft,
-    // pakken we eerst het record dat bij de actuele klasse van de vechter hoort.
-    const escapedClass = classToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const classScore = escapedClass
-      ? raw.match(
-          new RegExp(
-            `(?:record\\s+in\\s+klasse\\s+)?${escapedClass}(?:\\s*[-/]?\\s*(?:klasse|class|clas))?[^0-9]{0,30}(\\d+)\\s*-\\s*(\\d+)\\s*-\\s*(\\d+)(?:\\s*\\((\\d+)\\))?`,
-            "i",
-          ),
-        )
-      : null;
-    const score = classScore || raw.match(
-      /(\d+)\s*-\s*(\d+)\s*-\s*(\d+)(?:\s*\((\d+)\))?/,
-    );
-
-    if (score) {
-      const [, wins, losses, draws, overige] = score;
-      return `${cls} ${wins}-${losses}-${draws} (${overige ?? "0"})`;
-    }
+    const cls = cleanRecordClassLabel(recordClassLabelOf(f));
+    const normalized = normalizeRecordLabel(ruleRecord);
+    if (normalized) return `${cls} ${normalized}`;
   }
 
-  // Veilige terugval voor oudere context-rijen zonder recordLabel.
-  const w = Number(
-    String(pickFirst(f.record_w, f.win, f.wins, f.winst) || 0).replace(/[^\d.-]/g, ""),
-  );
-  const l = Number(
-    String(pickFirst(f.record_l, f.loss, f.losses, f.verlies) || 0).replace(/[^\d.-]/g, ""),
-  );
-  const d = Number(
-    String(pickFirst(f.record_d, f.draw, f.draws, f.onbeslist) || 0).replace(/[^\d.-]/g, ""),
-  );
-  const other = Number(
-    String(
-      pickFirst(
-        f.record_overige,
-        f.overige,
-        f.overige_partijen,
-        f.demo,
-        f.demo_totaal,
-        f.no_contest,
-      ) || 0,
-    ).replace(/[^\d.-]/g, ""),
-  );
-
-  const cls = cleanRecordClassLabel(
-    pickFirst(
-      f.berekende_klasse,
-      f.mma_level,
-      f.nulmeting_klasse,
-      f.klasse,
-      f.class,
-      recordClassLabelOf(f),
-    ),
-  );
-  const safeW = Number.isFinite(w) ? w : 0;
-  const safeL = Number.isFinite(l) ? l : 0;
-  const safeD = Number.isFinite(d) ? d : 0;
-  const safeOther = Number.isFinite(other) ? other : 0;
-
-  return `${cls} ${safeW}-${safeL}-${safeD} (${safeOther})`;
+  return `${cleanRecordClassLabel(recordClassLabelOf(f))} 0-0-0 (0)`;
 }
-
 function statusLic(f: Fighter) {
   const x = lower(
     pickFirst(f.licentie_status, f.licentie, f.licentie_ok, f.raw?.licentie),
@@ -2230,14 +2201,6 @@ export default function FightersPage() {
                             >
                               {name(f)}
                             </button>
-                          ) : detailId ? (
-                            <Link
-                              href={`/dashboard/matchmaker/matchmaking/${matchmakingId}/fighter/${detailId}`}
-                              className="fs-name-select"
-                              title="Open vechterdossier"
-                            >
-                              {name(f)}
-                            </Link>
                           ) : (
                             <span>{name(f)}</span>
                           )}
@@ -2334,11 +2297,14 @@ export default function FightersPage() {
               <thead>
                 <tr>
                   <th style={matchThNr}>Partij</th>
-                  <th style={th}>Rode hoek</th>
-                  <th style={th}>Sportschool</th>
-                  <th style={th}>Blauwe hoek</th>
-                  <th style={th}>Sportschool</th>
                   <th style={matchThCompact}>Klasse</th>
+                  <th style={matchThGender}>Geslacht</th>
+                  <th style={matchThName}>Rode hoek</th>
+                  <th style={matchThGym}>Sportschool</th>
+                  <th style={matchThRecord}>Record</th>
+                  <th style={matchThName}>Blauwe hoek</th>
+                  <th style={matchThGym}>Sportschool</th>
+                  <th style={matchThRecord}>Record</th>
                   <th style={matchThCompact}>Gewicht</th>
                   <th style={matchThCompact}>Status</th>
                   <th style={matchThAction}>Actie</th>
@@ -2409,6 +2375,19 @@ export default function FightersPage() {
                     boutField(row, 'max_gewicht_notatie', 'max_gewicht', 'gewicht'),
                   );
                   const code = s(pickFirst(row?.toernooi_code, row?.toernooicode));
+                  const roodFighter = fighters.find((f) => vaOf(f) === roodVa);
+                  const blauwFighter = fighters.find((f) => vaOf(f) === blauwVa);
+                  const geslacht = roodFighter
+                    ? geslachtOf(roodFighter)
+                    : blauwFighter
+                      ? geslachtOf(blauwFighter)
+                      : "Onbekend";
+                  const roodRecord = roodFighter
+                    ? recordOf(roodFighter, uitslagenRows)
+                    : "-";
+                  const blauwRecord = blauwFighter
+                    ? recordOf(blauwFighter, uitslagenRows)
+                    : "-";
 
                   return (
                     <tr
@@ -2416,6 +2395,8 @@ export default function FightersPage() {
                       style={index % 2 === 0 ? matchTrEven : matchTrOdd}
                     >
                       <td style={matchTdNr}>{partijNr ?? (code || '-')}</td>
+                      <td style={matchTdCompact}>{klasse}</td>
+                      <td style={matchTdGender}>{geslacht}</td>
                       <td style={matchTdName}>
                         {roodVa ? (
                           <Link
@@ -2428,7 +2409,8 @@ export default function FightersPage() {
                           <span style={matchFighterName}>{roodNaam}</span>
                         )}
                       </td>
-                      <td style={matchTd}>{roodGym}</td>
+                      <td style={matchTdGym}>{roodGym}</td>
+                      <td style={matchTdRecord}>{roodRecord}</td>
                       <td style={matchTdName}>
                         {blauwVa ? (
                           <Link
@@ -2441,8 +2423,8 @@ export default function FightersPage() {
                           <span style={matchFighterName}>{blauwNaam}</span>
                         )}
                       </td>
-                      <td style={matchTd}>{blauwGym}</td>
-                      <td style={matchTdCompact}>{klasse}</td>
+                      <td style={matchTdGym}>{blauwGym}</td>
+                      <td style={matchTdRecord}>{blauwRecord}</td>
                       <td style={matchTdCompact}>
                         {maxGewicht
                           ? /kg|\+|-/i.test(maxGewicht)
@@ -2483,7 +2465,7 @@ export default function FightersPage() {
 
                 {!loading && matchRows.length === 0 && (
                   <tr>
-                    <td style={emptyTd} colSpan={9}>
+                    <td style={emptyTd} colSpan={12}>
                       Nog geen partijen aangemaakt.
                     </td>
                   </tr>
@@ -3093,14 +3075,21 @@ const matchFighterName: CSSProperties = {
   color: ORANGE,
   fontWeight: 900,
 };
-const matchThNr: CSSProperties = { ...th, width: 62, textAlign: "center" };
-const matchThCompact: CSSProperties = { ...th, width: 72, textAlign: "center" };
-const matchThAction: CSSProperties = { ...th, width: 126, textAlign: "center" };
-const matchTd: CSSProperties = { ...td, padding: "8px 7px", fontSize: 12 };
-const matchTdName: CSSProperties = { ...matchTd, color: "#fff", fontWeight: 950, minWidth: 150 };
-const matchTdNr: CSSProperties = { ...matchTd, textAlign: "center", color: ORANGE, fontSize: 15, fontWeight: 950 };
+const matchThNr: CSSProperties = { ...th, width: 50, textAlign: "center" };
+const matchThCompact: CSSProperties = { ...th, width: 62, textAlign: "center" };
+const matchThGender: CSSProperties = { ...th, width: 72, textAlign: "center" };
+const matchThName: CSSProperties = { ...th, width: 126 };
+const matchThGym: CSSProperties = { ...th, width: 112 };
+const matchThRecord: CSSProperties = { ...th, width: 104 };
+const matchThAction: CSSProperties = { ...th, width: 116, textAlign: "center" };
+const matchTd: CSSProperties = { ...td, padding: "7px 6px", fontSize: 11.5 };
+const matchTdName: CSSProperties = { ...matchTd, color: "#fff", fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const matchTdGym: CSSProperties = { ...matchTd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const matchTdRecord: CSSProperties = { ...matchTd, whiteSpace: "nowrap", fontWeight: 900 };
+const matchTdGender: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap" };
+const matchTdNr: CSSProperties = { ...matchTd, textAlign: "center", color: ORANGE, fontSize: 14, fontWeight: 950 };
 const matchTdCompact: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap" };
-const matchTdAction: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap", padding: "5px 7px" };
+const matchTdAction: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap", padding: "5px" };
 const matchActions: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
 const matchTrEven: CSSProperties = { background: "#171717" };
 const matchTrOdd: CSSProperties = { background: "#202020" };

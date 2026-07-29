@@ -693,7 +693,7 @@ async function fetchUitslagenByVa(opts: {
   controle_run_id?: string | null;
   vaList: string[];
 }): Promise<Map<string, UitslagRow[]>> {
-  const { matchmaking_id, controle_run_id, vaList } = opts;
+  const { matchmaking_id, vaList } = opts;
   const map = new Map<string, UitslagRow[]>();
   if (!vaList.length) return map;
 
@@ -702,19 +702,65 @@ async function fetchUitslagenByVa(opts: {
   for (let i = 0; i < vaList.length; i += chunkSize) {
     const chunk = vaList.slice(i, i + chunkSize);
 
-    const { data, error } = await supabaseAdmin
+    // De huidige matchmaking blijft de bron voor record- en promotietellingen.
+    // Daardoor tellen herhaalde snapshots uit oudere matchmakings niet dubbel mee.
+    const { data: currentData, error: currentError } = await supabaseAdmin
       .from("matchmaker_uitslagen_raw")
       .select("va_nummer, discipline, klasse, uitslag")
       .eq("matchmaking_id", matchmaking_id)
       .in("va_nummer", chunk);
 
-    if (error) throw error;
+    if (currentError) throw currentError;
 
-    for (const r of (data ?? []) as any[]) {
+    for (const r of (currentData ?? []) as any[]) {
       const va = String(r?.va_nummer ?? "").trim();
       if (!va) continue;
       if (!map.has(va)) map.set(va, []);
       map.get(va)!.push(r as UitslagRow);
+    }
+
+    // Los van de huidige page/matchmaking moet een eerder gevochten hogere
+    // volwassen klasse altijd zichtbaar blijven. We halen daarom ook de
+    // historische snapshots op, maar voegen alleen één bewijsregel toe wanneer
+    // daarin een hogere klasse staat dan in de huidige dataset. Zo voorkomt een
+    // eerdere C/B/A-partij terugplaatsing naar N zonder records dubbel te tellen.
+    const { data: historyData, error: historyError } = await supabaseAdmin
+      .from("matchmaker_uitslagen_raw")
+      .select("va_nummer, discipline, klasse, uitslag")
+      .in("va_nummer", chunk);
+
+    if (historyError) throw historyError;
+
+    const historyByVa = new Map<string, UitslagRow[]>();
+    for (const r of (historyData ?? []) as any[]) {
+      const va = String(r?.va_nummer ?? "").trim();
+      if (!va) continue;
+      if (!historyByVa.has(va)) historyByVa.set(va, []);
+      historyByVa.get(va)!.push(r as UitslagRow);
+    }
+
+    for (const va of chunk.map((v) => String(v ?? "").trim()).filter(Boolean)) {
+      const currentRows = map.get(va) ?? [];
+      const historicalRows = historyByVa.get(va) ?? [];
+      const currentHighest = hoogsteKlasseUitUitslagen(currentRows);
+      const historicalHighest = hoogsteKlasseUitUitslagen(historicalRows);
+
+      if (
+        historicalHighest &&
+        idxKlasse(historicalHighest) > idxKlasse(currentHighest)
+      ) {
+        const evidence = historicalRows.find(
+          (row) =>
+            isRelevantStandingDiscipline(row?.discipline) &&
+            !isJeugdKlasseText(row?.klasse) &&
+            asKlasseLetter(row?.klasse) === historicalHighest
+        );
+
+        if (evidence) {
+          if (!map.has(va)) map.set(va, []);
+          map.get(va)!.push(evidence);
+        }
+      }
     }
   }
 

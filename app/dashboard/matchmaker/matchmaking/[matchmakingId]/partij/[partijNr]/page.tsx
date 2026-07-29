@@ -2004,9 +2004,27 @@ export default function PartijDetailPage() {
 
         // Ontbrekende FightPassport-velden aanvullen uit de centrale fightertabel.
         const vaR =
-          String(row?.rood_va_mm ?? row?.va_rood ?? row?.rood_va ?? "").trim() || null;
+          String(
+            firstFilled(
+              row?.rood_va_fp,
+              row?.rood_va_nummer,
+              row?.va_nummer_rood,
+              row?.rood_va_mm,
+              row?.va_rood,
+              row?.rood_va,
+            ) ?? "",
+          ).trim() || null;
         const vaB =
-          String(row?.blauw_va_mm ?? row?.va_blauw ?? row?.blauw_va ?? "").trim() || null;
+          String(
+            firstFilled(
+              row?.blauw_va_fp,
+              row?.blauw_va_nummer,
+              row?.va_nummer_blauw,
+              row?.blauw_va_mm,
+              row?.va_blauw,
+              row?.blauw_va,
+            ) ?? "",
+          ).trim() || null;
         const vas = Array.from(new Set([vaR, vaB].filter(Boolean))) as string[];
 
         if (vas.length > 0) {
@@ -2706,7 +2724,7 @@ export default function PartijDetailPage() {
       setRescraping(true);
       setShowLoader(true);
 
-      const r = await authedFetch("/api/control-engine/bout-rescrape", {
+      const r = await authedFetch("/api/matchmaker/rebuild-bout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2717,7 +2735,7 @@ export default function PartijDetailPage() {
       });
 
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error ?? "Automatische check mislukt");
+      if (!r.ok) throw new Error(j?.error ?? "Partij opnieuw opbouwen mislukt");
 
       window.location.reload();
     } catch (e: any) {
@@ -2782,7 +2800,7 @@ export default function PartijDetailPage() {
         payload.new_blauw_gewicht = gewicht;
       }
 
-      const r1 = await authedFetch("/api/control-engine/correct-bout", {
+      const r1 = await authedFetch("/api/matchmaker/correct-bout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2859,7 +2877,7 @@ export default function PartijDetailPage() {
         payload.new_blauw_gewicht = gewicht;
       }
 
-      const r1 = await authedFetch("/api/control-engine/correct-bout", {
+      const r1 = await authedFetch("/api/matchmaker/correct-bout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2872,31 +2890,9 @@ export default function PartijDetailPage() {
       if (!r1.ok)
         throw new Error(j1?.error ?? "Opslaan mislukt (admin-correct-bout)");
 
-      const va_rood =
-        editOpen === "rood"
-          ? String(va ?? "").trim()
-          : String(ctx?.rood_va_mm ?? "").trim();
-      const va_blauw =
-        editOpen === "blauw"
-          ? String(va ?? "").trim()
-          : String(ctx?.blauw_va_mm ?? "").trim();
+      // correct-bout slaat de aanmelding op en bouwt de partij direct opnieuw op.
 
-      const r2 = await authedFetch("/api/control-engine/bout-rescrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchmaking_id: String(matchmakingId),
-          partij_nr: partijNr,
-          controle_run_id: run?.id ?? null,
-          va_rood: va_rood || null,
-          va_blauw: va_blauw || null,
-        }),
-      });
-
-      const j2 = await r2.json().catch(() => ({}));
-      if (!r2.ok) throw new Error(j2?.error ?? "Automatische check mislukt");
-
-      setMsg("✅ Opgeslagen + Automatische check gestart.");
+      setMsg("✅ Opgeslagen + partij opnieuw opgebouwd.");
       closeEdit();
       window.location.reload();
     } catch (e: any) {

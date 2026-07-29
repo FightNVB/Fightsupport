@@ -718,7 +718,8 @@ function getMandatoryPromotionInfo(
   total: number
 ): { from: Klasse; to: Klasse; reason: string } | null {
   if (k === "R") {
-    if (total >= 2) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
+    if (wins >= 2) return { from: "R", to: "N", reason: `${wins} gewonnen R-klasse partijen` };
+    if (total >= 3) return { from: "R", to: "N", reason: `${total} gevochten R-klasse partijen` };
     return null;
   }
 
@@ -3033,18 +3034,23 @@ export async function rulesEngine(opts: {
             ctx
           );
         }
-        if (statsR.rTotal >= 2) {
+        if (statsR.rWins >= 2 || statsR.rTotal >= 3) {
+          const redenR =
+            statsR.rWins >= 2
+              ? `${statsR.rWins} gewonnen R-klasse partijen`
+              : `${statsR.rTotal} gevochten R-klasse partijen`;
+
           pushHitTournamentAware(
             {
               matchmaking_id,
               partij_nr,
               bout_id,
               hoek: "rood",
-              rule: "R-klasse maximum partijen bereikt",
-              rule_code: "R_KLASSE_MAX_TOTAL",
+              rule: "R-klasse maximum bereikt",
+              rule_code: "R_KLASSE_PROMOTIE_N",
               resultaat: "AFKEUR",
               severity: "error",
-              boodschap: `${naamR} heeft al ${statsR.rTotal} R-klasse partijen gedaan. Na maximaal 2 R-klasse wedstrijden promoveert een vechter naar de N-klasse.`,
+              boodschap: `${naamR} heeft al ${redenR} en moet daarom in de N-klasse uitkomen.`,
             },
             ctx
           );
@@ -3087,18 +3093,23 @@ export async function rulesEngine(opts: {
             ctx
           );
         }
-        if (statsB.rTotal >= 2) {
+        if (statsB.rWins >= 2 || statsB.rTotal >= 3) {
+          const redenB =
+            statsB.rWins >= 2
+              ? `${statsB.rWins} gewonnen R-klasse partijen`
+              : `${statsB.rTotal} gevochten R-klasse partijen`;
+
           pushHitTournamentAware(
             {
               matchmaking_id,
               partij_nr,
               bout_id,
               hoek: "blauw",
-              rule: "R-klasse maximum partijen bereikt",
-              rule_code: "R_KLASSE_MAX_TOTAL",
+              rule: "R-klasse maximum bereikt",
+              rule_code: "R_KLASSE_PROMOTIE_N",
               resultaat: "AFKEUR",
               severity: "error",
-              boodschap: `${naamB} heeft al ${statsB.rTotal} R-klasse partijen gedaan. Na maximaal 2 R-klasse wedstrijden promoveert een vechter naar de N-klasse.`,
+              boodschap: `${naamB} heeft al ${redenB} en moet daarom in de N-klasse uitkomen.`,
             },
             ctx
           );
