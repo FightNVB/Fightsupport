@@ -19,9 +19,33 @@ const WORKERS = Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
 const FULL_DETAILS_ONLY_LICENSED = String(process.env.FP_TOTAL_ONLY_LICENSED || "false").toLowerCase() === "true";
 const SCRAPE_RESULTS = String(process.env.FP_TOTAL_RESULTS || "true").toLowerCase() !== "false";
 const RESUME_RUN_ID = String(process.env.FP_TOTAL_RUN_ID || "").trim();
+const EXPLICIT_VA_LIST = String(process.env.FP_TOTAL_VA_LIST || "")
+  .split(",")
+  .map((value) => String(value).trim())
+  .filter((value) => /^\d{3,6}$/.test(value));
+const HAS_EXPLICIT_VA_LIST = EXPLICIT_VA_LIST.length > 0;
+const RUN_KIND = String(process.env.FP_TOTAL_RUN_KIND || (HAS_EXPLICIT_VA_LIST ? "retry" : "full"))
+  .trim()
+  .toLowerCase();
+const IS_RETRY_RUN = RUN_KIND === "retry";
+const BATCH_ID = String(process.env.FP_TOTAL_BATCH_ID || "").trim();
+const BATCH_PART = Number(process.env.FP_TOTAL_BATCH_PART || "1");
+const BATCH_PARTS = Number(process.env.FP_TOTAL_BATCH_PARTS || "1");
+const BATCH_START_VA = Number(process.env.FP_TOTAL_BATCH_START_VA || START_VA);
+const BATCH_END_VA = Number(process.env.FP_TOTAL_BATCH_END_VA || END_VA);
+const BATCH_META = BATCH_ID ? {
+  batch_id: BATCH_ID,
+  batch_part: Number.isFinite(BATCH_PART) ? BATCH_PART : 1,
+  batch_parts: Number.isFinite(BATCH_PARTS) ? BATCH_PARTS : 1,
+  batch_start_va: Number.isFinite(BATCH_START_VA) ? BATCH_START_VA : START_VA,
+  batch_end_va: Number.isFinite(BATCH_END_VA) ? BATCH_END_VA : END_VA,
+  workers_per_process: WORKERS,
+} : {};
 
 let stopRequested = false;
 let stopSignal = null;
+let activeRun = null;
+let recoverRunPromise = null;
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => {
     if (!stopRequested) {
@@ -1614,15 +1638,83 @@ async function confirmProfileMissing(browser, context, cookies, va, label) {
   return null;
 }
 
+async function recoverDeletedRun(missingRunId) {
+  if (activeRun?.id && String(activeRun.id) !== String(missingRunId)) {
+    return activeRun.id;
+  }
+
+  if (recoverRunPromise) return recoverRunPromise;
+
+  recoverRunPromise = (async () => {
+    const now = new Date().toISOString();
+    const previousRun = activeRun || {};
+    const previousMeta = previousRun.meta || {};
+
+    const { data, error } = await supabase
+      .from("fightpassport_sync_runs")
+      .insert({
+        start_va: Number(previousRun.start_va ?? START_VA),
+        end_va: Number(previousRun.end_va ?? END_VA),
+        run_type: "full",
+        status: "running",
+        last_processed_va: previousRun.last_processed_va ?? null,
+        processed_count: Number(previousRun.processed_count ?? 0),
+        found_count: Number(previousRun.found_count ?? 0),
+        licensed_count: Number(previousRun.licensed_count ?? 0),
+        error_count: Number(previousRun.error_count ?? 0),
+        meta: {
+          ...previousMeta,
+          ...BATCH_META,
+          workers: WORKERS,
+          pid: process.pid,
+          recovered_at: now,
+          recovered_from_deleted_run_id: String(missingRunId),
+        },
+      })
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      throw error || new Error(`Vervangende run voor ${missingRunId} kon niet worden aangemaakt`);
+    }
+
+    activeRun = data;
+    console.log(`[fp-total] ♻️ verwijderde run ${missingRunId} hersteld als ${data.id}`);
+    return data.id;
+  })();
+
+  try {
+    return await recoverRunPromise;
+  } finally {
+    recoverRunPromise = null;
+  }
+}
+
 async function upsertSyncItem(runId, va, patch) {
-  const payload = {
-    sync_run_id: runId,
-    va_nummer: String(va),
-    ...patch,
+  const write = async (syncRunId) => {
+    const payload = {
+      sync_run_id: syncRunId,
+      va_nummer: String(va),
+      ...patch,
+    };
+    return supabase
+      .from("fightpassport_sync_items")
+      .upsert(payload, { onConflict: "sync_run_id,va_nummer" });
   };
-  const { error } = await supabase
-    .from("fightpassport_sync_items")
-    .upsert(payload, { onConflict: "sync_run_id,va_nummer" });
+
+  let effectiveRunId = activeRun?.id || runId;
+  let { error } = await write(effectiveRunId);
+
+  const isMissingRunForeignKey = error && (
+    String(error.code || "") === "23503" ||
+    String(error.message || "").includes("fightpassport_sync_items_sync_run_id_fkey")
+  );
+
+  if (isMissingRunForeignKey) {
+    effectiveRunId = await recoverDeletedRun(effectiveRunId);
+    ({ error } = await write(effectiveRunId));
+  }
+
   if (error) console.log(`[fp-total] sync item log fout VA ${va}: ${error.message}`);
 }
 async function loadExistingRunItems(runId) {
@@ -1649,13 +1741,14 @@ async function loadExistingRunItems(runId) {
 }
 
 async function main() {
-  if (!Number.isInteger(START_VA) || !Number.isInteger(END_VA) || END_VA < START_VA) {
+  if (!HAS_EXPLICIT_VA_LIST && (!Number.isInteger(START_VA) || !Number.isInteger(END_VA) || END_VA < START_VA)) {
     throw new Error("Ongeldig VA-bereik");
   }
 
   let run;
-  let effectiveStartVa = START_VA;
-  let effectiveEndVa = END_VA;
+  const explicitVaNumbers = [...new Set(EXPLICIT_VA_LIST.map((value) => Number(value)))].sort((a, b) => a - b);
+  let effectiveStartVa = HAS_EXPLICIT_VA_LIST ? explicitVaNumbers[0] : START_VA;
+  let effectiveEndVa = HAS_EXPLICIT_VA_LIST ? explicitVaNumbers[explicitVaNumbers.length - 1] : END_VA;
   let existingItems = [];
 
   if (RESUME_RUN_ID) {
@@ -1674,11 +1767,12 @@ async function main() {
     }
 
     run = data;
+    activeRun = run;
     effectiveStartVa = Number(data.start_va);
     effectiveEndVa = Number(data.end_va);
     existingItems = await loadExistingRunItems(run.id);
 
-    const meta = { ...(data.meta || {}), workers: WORKERS, pid: process.pid, resumed_at: new Date().toISOString() };
+    const meta = { ...(data.meta || {}), ...BATCH_META, workers: WORKERS, pid: process.pid, resumed_at: new Date().toISOString() };
     const { error: resumeErr } = await supabase
       .from("fightpassport_sync_runs")
       .update({ status: "running", finished_at: null, error_message: null, meta })
@@ -1693,22 +1787,38 @@ async function main() {
         start_va: effectiveStartVa,
         end_va: effectiveEndVa,
         run_type: "full",
-        meta: { workers: WORKERS, pid: process.pid, cycle_started_at: new Date().toISOString() },
+        meta: {
+          ...BATCH_META,
+          workers: WORKERS,
+          pid: process.pid,
+          cycle_started_at: new Date().toISOString(),
+          run_kind: RUN_KIND,
+          is_retry: IS_RETRY_RUN,
+          explicit_va_list: HAS_EXPLICIT_VA_LIST ? explicitVaNumbers.map(String) : undefined,
+        },
       })
       .select("*")
       .single();
 
     if (error) throw error;
     run = data;
+    activeRun = run;
   }
 
   const terminalStatuses = new Set(["success", "not_found", "skipped", "error"]);
   const terminalByVa = new Map(existingItems.map((item) => [String(item.va_nummer), String(item.status || "").toLowerCase()]));
 
+  const requestedVaNumbers = HAS_EXPLICIT_VA_LIST
+    ? explicitVaNumbers
+    : Array.from(
+        { length: effectiveEndVa - effectiveStartVa + 1 },
+        (_, index) => effectiveStartVa + index
+      );
+
   const confirmedDeleted = await loadConfirmedDeletedVaNumbers(effectiveStartVa, effectiveEndVa);
   const vaList = [];
   let skippedConfirmedDeleted = 0;
-  for (let va = effectiveStartVa; va <= effectiveEndVa; va++) {
+  for (const va of requestedVaNumbers) {
     const vaString = String(va);
     const status = terminalByVa.get(vaString);
     if (terminalStatuses.has(status)) continue;
@@ -1835,16 +1945,29 @@ async function main() {
   let idx = 0;
 
   async function updateRunProgress(lastVa = lastProcessedVa) {
-    if (lastVa != null) lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(lastVa || 0));
+    if (lastVa != null) {
+      lastProcessedVa = Math.max(
+        Number(lastProcessedVa || 0),
+        Number(lastVa || 0)
+      );
+    }
+
+    const progressPatch = {
+      status: "running",
+      finished_at: null,
+      last_processed_va: lastProcessedVa,
+      processed_count: processed,
+      found_count: found,
+      licensed_count: licensed,
+      error_count: errors,
+    };
+
+    Object.assign(run, progressPatch);
+    activeRun = run;
+
     await supabase
       .from("fightpassport_sync_runs")
-      .update({
-        last_processed_va: lastProcessedVa,
-        processed_count: processed,
-        found_count: found,
-        licensed_count: licensed,
-        error_count: errors,
-      })
+      .update(progressPatch)
       .eq("id", run.id);
   }
 
@@ -2025,7 +2148,7 @@ async function main() {
     await Promise.all(Array.from({ length: WORKERS }, (_, i) => workerLoop(i)));
     await updateRunProgress();
 
-    const allDone = processed >= (effectiveEndVa - effectiveStartVa + 1);
+    const allDone = processed >= requestedVaNumbers.length;
     const now = new Date().toISOString();
     const currentMeta = { ...(run.meta || {}), pid: null, last_stopped_at: stopRequested ? now : undefined, last_stop_signal: stopSignal || undefined };
 

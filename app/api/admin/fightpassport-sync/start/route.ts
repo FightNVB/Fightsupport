@@ -3,9 +3,11 @@ import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import {
   requireUserWithRole,
 } from "@/app/api/_utils/authz";
+import { supabaseAdmin } from "@/lib/api/requireRole";
 
 export const runtime = "nodejs";
 
@@ -104,7 +106,7 @@ export async function POST(req: Request) {
     const startVa = clampInt(body?.start_va, 775, 1, 99999);
     const endVa = clampInt(body?.end_va, startVa, 1, 99999);
 
-    const workers = clampInt(body?.workers ?? 8, 8, 1, 10);
+    const workersPerProcess = 8;
     const staggerMs = clampInt(body?.stagger_ms ?? 2500, 2500, 0, 10000);
     const tabAttempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
     const softWaitMs = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);
@@ -137,6 +139,28 @@ export async function POST(req: Request) {
       );
     }
 
+    const { data: activeRun, error: activeRunError } = await supabaseAdmin
+      .from("fightpassport_sync_runs")
+      .select("id,status,start_va,end_va,meta")
+      .eq("run_type", "full")
+      .in("status", ["running", "paused"])
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (activeRunError) throw activeRunError;
+    if (activeRun) {
+      return NextResponse.json(
+        {
+          error: activeRun.status === "paused"
+            ? "Er staat al een gepauzeerde Total AutoCheck-run klaar. Hervat die run via de geplande Total-start."
+            : "Er draait al een Total AutoCheck-run. Stop die eerst voordat je een nieuwe start.",
+          run_id: activeRun.id,
+        },
+        { status: 409 }
+      );
+    }
+
     const totalRobotPath = resolveScriptPath(
       "scrapers",
       "fp_total",
@@ -146,64 +170,71 @@ export async function POST(req: Request) {
     console.log("[fightpassport-sync/start] ▶ totaal robot start", {
       start_va: startVa,
       end_va: endVa,
-      workers,
+      workers_per_process: workersPerProcess,
+      processes: 2,
       robot: TOTAL_ROBOT_FILE,
       role,
       totalRobotPath,
     });
 
-    /*
-      Zelfde startmethode als app/api/control-engine/admin/start:
-      - spawn("node", ...)
-      - cwd = map van het script
-      - stdout/stderr via pipe
-      - master FightPassport sessie
-      - dezelfde headless/worker env-opzet
+    const batchId = crypto.randomUUID();
+    const totalCount = endVa - startVa + 1;
+    const firstCount = Math.ceil(totalCount / 2);
+    const firstStartVa = startVa;
+    const firstEndVa = startVa + firstCount - 1;
+    const secondStartVa = firstEndVa + 1;
+    const parts = [
+      { part: 1, startVa: firstStartVa, endVa: firstEndVa },
+      ...(secondStartVa <= endVa
+        ? [{ part: 2, startVa: secondStartVa, endVa }]
+        : []),
+    ];
 
-      Bewust AWAITEN we de robot hier, net zoals de admin-control route.
-      Zo komt een echte Puppeteer- of Node-fout terug als HTTP 500
-      en verdwijnt die niet in een los detached proces.
-    */
-    // Start de Total scraper op de achtergrond en geef direct antwoord aan de browser.
-    // Zo voorkomt een lange run een HTTP-timeout terwijl de scraper gewoon doorgaat.
-    void runNodeScript(
-      totalRobotPath,
-      [String(startVa), String(endVa)],
-      {
-        FP_MATCHMAKER_ID: "",
-        FP_SESSION_MODE: "master",
-
-        HEADLESS: process.env.HEADLESS ?? "false",
-        PUPPETEER_HEADLESS:
-          process.env.PUPPETEER_HEADLESS ??
-          process.env.HEADLESS ??
-          "false",
-
-        WORKERS: String(workers),
-        FP_TOTAL_WORKERS: String(workers),
-        STAGGER_MS: String(staggerMs),
-        TAB_ATTEMPTS: String(tabAttempts),
-        SOFT_WAIT_MS: String(softWaitMs),
-        BETWEEN_ATTEMPTS_MS: String(betweenAttemptsMs),
-        FP_TOTAL_TIMEOUT_MS: String(totalTimeoutMs),
-        FP_TOTAL_RESULTS: "true",
-      },
-      "fp_total_admin"
-    )
-      .then((result) => {
-        console.log("[fightpassport-sync/start] ✅ totaal robot klaar", {
-          ms: result.ms,
-          start_va: startVa,
-          end_va: endVa,
-          workers,
+    for (const part of parts) {
+      void runNodeScript(
+        totalRobotPath,
+        [String(part.startVa), String(part.endVa)],
+        {
+          FP_MATCHMAKER_ID: "",
+          FP_SESSION_MODE: "master",
+          HEADLESS: process.env.HEADLESS ?? "false",
+          PUPPETEER_HEADLESS:
+            process.env.PUPPETEER_HEADLESS ??
+            process.env.HEADLESS ??
+            "false",
+          WORKERS: String(workersPerProcess),
+          FP_TOTAL_WORKERS: String(workersPerProcess),
+          FP_TOTAL_BATCH_ID: batchId,
+          FP_TOTAL_BATCH_PART: String(part.part),
+          FP_TOTAL_BATCH_PARTS: String(parts.length),
+          FP_TOTAL_BATCH_START_VA: String(startVa),
+          FP_TOTAL_BATCH_END_VA: String(endVa),
+          STAGGER_MS: String(staggerMs),
+          TAB_ATTEMPTS: String(tabAttempts),
+          SOFT_WAIT_MS: String(softWaitMs),
+          BETWEEN_ATTEMPTS_MS: String(betweenAttemptsMs),
+          FP_TOTAL_TIMEOUT_MS: String(totalTimeoutMs),
+          FP_TOTAL_RESULTS: "true",
+        },
+        `fp_total_admin_${part.part}`
+      )
+        .then((result) => {
+          console.log("[fightpassport-sync/start] ✅ deelrobot klaar", {
+            batch_id: batchId,
+            part: part.part,
+            ms: result.ms,
+            start_va: part.startVa,
+            end_va: part.endVa,
+            workers: workersPerProcess,
+          });
+        })
+        .catch((err) => {
+          console.error(
+            `[fightpassport-sync/start] ❌ deelrobot ${part.part} achtergrondfout:`,
+            err
+          );
         });
-      })
-      .catch((err) => {
-        console.error(
-          "[fightpassport-sync/start] ❌ totaal robot achtergrondfout:",
-          err
-        );
-      });
+    }
 
     return NextResponse.json(
       {
@@ -211,8 +242,11 @@ export async function POST(req: Request) {
         started: true,
         start_va: startVa,
         end_va: endVa,
-        workers,
-        message: `Total AutoCheck gestart voor VA ${startVa} t/m ${endVa}.`,
+        batch_id: batchId,
+        processes: parts.length,
+        workers_per_process: workersPerProcess,
+        parts: parts.map((part) => ({ part: part.part, start_va: part.startVa, end_va: part.endVa })),
+        message: `Total AutoCheck gestart als ${parts.length} processen van ${workersPerProcess} workers voor VA ${startVa} t/m ${endVa}.`,
       },
       { status: 202 }
     );

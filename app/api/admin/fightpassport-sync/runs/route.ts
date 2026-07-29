@@ -28,6 +28,32 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Run-id ontbreekt." }, { status: 400 });
     }
 
+    const { data: run, error: readError } = await supabaseAdmin
+      .from("fightpassport_sync_runs")
+      .select("id,status,run_type,meta")
+      .eq("id", runId)
+      .maybeSingle();
+
+    if (readError) throw readError;
+    if (!run) {
+      return NextResponse.json({ error: "Run niet gevonden." }, { status: 404 });
+    }
+
+    const status = String(run.status ?? "").toLowerCase();
+    if (["running", "paused"].includes(status)) {
+      return NextResponse.json(
+        { error: "Een actieve of gepauzeerde run kan niet worden verwijderd. Stop of rond de run eerst af." },
+        { status: 409 }
+      );
+    }
+
+    const { error: itemsError } = await supabaseAdmin
+      .from("fightpassport_sync_items")
+      .delete()
+      .eq("sync_run_id", runId);
+
+    if (itemsError) throw itemsError;
+
     const { error } = await supabaseAdmin
       .from("fightpassport_sync_runs")
       .delete()

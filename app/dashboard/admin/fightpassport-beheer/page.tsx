@@ -24,6 +24,8 @@ export default function FightPaspoortBeheerPage() {
   const [aiView, setAiView] = useState<"open" | "archive">("open");
   const [missingQuery, setMissingQuery] = useState("");
   const [missingBusy, setMissingBusy] = useState("");
+  const [selectedMissingVa, setSelectedMissingVa] = useState<string[]>([]);
+  const [bulkMissingBusy, setBulkMissingBusy] = useState(false);
   const [selectedRun, setSelectedRun] = useState<string>("");
   const [q, setQ] = useState("");
   const [licentie, setLicentie] = useState("all");
@@ -36,6 +38,7 @@ export default function FightPaspoortBeheerPage() {
   const [busyTotal, setBusyTotal] = useState(false);
   const [busyTeam, setBusyTeam] = useState(false);
   const [busyRetryTeam, setBusyRetryTeam] = useState(false);
+  const [busyRetryRun, setBusyRetryRun] = useState(false);
   const [busyDeleteTotal, setBusyDeleteTotal] = useState(false);
   const [busyDeleteTeam, setBusyDeleteTeam] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string>("");
@@ -88,6 +91,7 @@ export default function FightPaspoortBeheerPage() {
     if (res.ok) {
       setMissingVa(json.items ?? []);
       setMissingStats(json.stats ?? {});
+      setSelectedMissingVa([]);
     } else {
       setMessage(json.error || "AI Controle laden mislukt.");
     }
@@ -96,7 +100,7 @@ export default function FightPaspoortBeheerPage() {
   async function updateMissingVa(vaNumber: string, action: string) {
     const labels: Record<string,string> = {
       confirm_deleted: "definitief als verwijderd bevestigen",
-      retry: "opnieuw laten controleren",
+      retry: "in de retry-wachtrij zetten",
       restore: "terugzetten naar beoordeling",
       resolve: "als opgelost markeren",
     };
@@ -110,9 +114,81 @@ export default function FightPaspoortBeheerPage() {
     });
     const json = await res.json().catch(() => ({}));
     setMissingBusy("");
-    setMessage(res.ok ? `VA ${vaNumber}: ${labels[action]}.` : json.error || "Actie mislukt.");
+    setMessage(res.ok ? (json.message || `VA ${vaNumber}: ${labels[action]}.`) : json.error || "Actie mislukt.");
+    if (res.ok) {
+      await loadMissingVa();
+
+    }
+  }
+
+  async function bulkUpdateMissingVa(action: "confirm_deleted" | "retry" | "resolve") {
+    const vaNumbers = selectedMissingVa;
+    if (!vaNumbers.length) {
+      setMessage("Selecteer eerst één of meer VA-nummers.");
+      return;
+    }
+
+    const labels = {
+      confirm_deleted: "als verwijderd markeren",
+      retry: "naar retry zetten",
+      resolve: "als opgelost markeren",
+    } as const;
+
+    if (!window.confirm(`${vaNumbers.length} geselecteerde VA-nummer${vaNumbers.length === 1 ? "" : "s"} ${labels[action]}?`)) return;
+
+    setBulkMissingBusy(true);
+    setMessage("");
+    const res = await authedFetch("/api/admin/fightpassport-beheer/missing-va", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ va_numbers: vaNumbers, action }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setBulkMissingBusy(false);
+    setMessage(res.ok ? (json.message || `${vaNumbers.length} VA-nummers bijgewerkt.`) : json.error || "Bulkactie mislukt.");
     if (res.ok) await loadMissingVa();
   }
+
+  function toggleMissingSelection(vaNumber: string) {
+    setSelectedMissingVa((current) =>
+      current.includes(vaNumber)
+        ? current.filter((value) => value !== vaNumber)
+        : [...current, vaNumber]
+    );
+  }
+
+  async function startRetryRun() {
+    const queued = Number(missingStats.retry_requested ?? 0);
+    if (queued <= 0) {
+      setMessage("Er staan geen VA-nummers in de retry-wachtrij.");
+      return;
+    }
+
+    if (!window.confirm(`${queued} VA-nummer${queued === 1 ? "" : "s"} achter elkaar opnieuw controleren?`)) return;
+
+    setBusyRetryRun(true);
+    setMessage("");
+
+    const res = await authedFetch("/api/admin/fightpassport-beheer/missing-va", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start_retry_run" }),
+    });
+    const json = await res.json().catch(() => ({}));
+
+    setBusyRetryRun(false);
+    setMessage(
+      res.ok
+        ? (json.message || `Retry-run gestart voor ${queued} VA-nummer${queued === 1 ? "" : "s"}.`)
+        : json.error || "Retry-run starten mislukt."
+    );
+
+    if (res.ok) {
+      await loadMissingVa();
+      setTimeout(loadRuns, 1200);
+    }
+  }
+
 
   const loadTeamErrors = useCallback(async (runId: string) => {
     if (!runId) return setTeamErrors([]);
@@ -173,13 +249,60 @@ export default function FightPaspoortBeheerPage() {
     }
   }
 
-  const activeTotalRun = useMemo(() => {
+  const isRetryRun = useCallback((run: any) => {
+    return (
+      run?.meta?.is_retry === true ||
+      String(run?.meta?.run_kind ?? "").toLowerCase() === "retry" ||
+      Array.isArray(run?.meta?.explicit_va_list)
+    );
+  }, []);
+
+  const runTotalCount = useCallback((run: any) => {
+    if (Array.isArray(run?.meta?.explicit_va_list)) {
+      return run.meta.explicit_va_list.length;
+    }
+    return Math.max(0, Number(run?.end_va ?? 0) - Number(run?.start_va ?? 0) + 1);
+  }, []);
+
+  const activeTotalRuns = useMemo(() => {
+    return runs.filter((run: any) => {
+      const status = String(run?.status ?? "").toLowerCase();
+      const runType = String(run?.run_type ?? "").toLowerCase();
+      return runType === "full" && !isRetryRun(run) && status === "running";
+    });
+  }, [runs, isRetryRun]);
+
+  const activeTotalRun = activeTotalRuns[0] ?? null;
+  const activeTotalBatch = useMemo(() => {
+    if (!activeTotalRuns.length) return null;
+    const first = activeTotalRuns[0];
+    const batchId = String(first?.meta?.batch_id ?? "");
+    const grouped = batchId
+      ? activeTotalRuns.filter((run: any) => String(run?.meta?.batch_id ?? "") === batchId)
+      : [first];
+    return {
+      batchId: batchId || null,
+      runs: grouped,
+      startVa: Math.min(...grouped.map((run: any) => Number(run?.meta?.batch_start_va ?? run?.start_va ?? 0))),
+      endVa: Math.max(...grouped.map((run: any) => Number(run?.meta?.batch_end_va ?? run?.end_va ?? 0))),
+      processed: grouped.reduce((sum: number, run: any) => sum + Number(run?.processed_count ?? 0), 0),
+      total: grouped.reduce((sum: number, run: any) => sum + runTotalCount(run), 0),
+      startedAt: grouped.map((run: any) => run?.started_at).filter(Boolean).sort()[0] ?? null,
+      workers: grouped.reduce((sum: number, run: any) => sum + Number(run?.meta?.workers_per_process ?? run?.meta?.workers ?? 0), 0),
+    };
+  }, [activeTotalRuns, runTotalCount]);
+
+  const activeRetryRun = useMemo(() => {
     return runs.find((run: any) => {
       const status = String(run?.status ?? "").toLowerCase();
       const runType = String(run?.run_type ?? "").toLowerCase();
-      return runType === "full" && !["completed", "failed", "cancelled", "canceled"].includes(status);
+      return (
+        runType === "full" &&
+        isRetryRun(run) &&
+        status === "running"
+      );
     }) ?? null;
-  }, [runs]);
+  }, [runs, isRetryRun]);
 
   const activeTeamRun = useMemo(() => {
     return runs.find((run: any) => {
@@ -191,10 +314,8 @@ export default function FightPaspoortBeheerPage() {
 
   async function startTotalRobot() {
     if (activeTotalRun) {
-      const startAnyway = window.confirm(
-        "Er loopt al een Total AutoCheck-run. Weet je zeker dat je een tweede run wilt starten?\n\nKies Annuleren om de bestaande run alleen door te laten lopen."
-      );
-      if (!startAnyway) return;
+      setMessage("Er draait al een Total AutoCheck-batch. Stop die eerst voordat je een nieuwe start.");
+      return;
     }
 
     setBusyTotal(true); setMessage("");
@@ -210,7 +331,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTotal(false);
     setMessage(
       res.ok
-        ? `Total AutoCheck gestart voor VA ${startVa} t/m ${endVa}.`
+        ? (json.message || `Total AutoCheck gestart als 2 processen van 8 workers voor VA ${startVa} t/m ${endVa}.`)
         : json.error || "Total AutoCheck starten mislukt."
     );
     setTimeout(loadRuns, 1200);
@@ -281,7 +402,7 @@ export default function FightPaspoortBeheerPage() {
 
     setMessage(
       res.ok
-        ? "Run gestopt."
+        ? (json.message || "Run gestopt.")
         : json.error || "Run stoppen mislukt."
     );
 
@@ -385,6 +506,21 @@ export default function FightPaspoortBeheerPage() {
     );
   }, [missingVa, aiView]);
 
+  const visibleMissingNumbers = useMemo(
+    () => visibleMissingVa.map((item:any) => String(item.va_number)),
+    [visibleMissingVa]
+  );
+  const allVisibleMissingSelected = visibleMissingNumbers.length > 0 && visibleMissingNumbers.every((va) => selectedMissingVa.includes(va));
+
+  function toggleAllVisibleMissing() {
+    setSelectedMissingVa((current) => {
+      if (allVisibleMissingSelected) {
+        return current.filter((va) => !visibleMissingNumbers.includes(va));
+      }
+      return Array.from(new Set([...current, ...visibleMissingNumbers]));
+    });
+  }
+
   return <main style={styles.page}><div style={styles.wrap}>
     <header style={styles.header}><div><h1 style={{margin:0}}>FightPaspoort Beheer</h1><p style={styles.sub}>Slim vechterdossier, centrale database en synchronisatie</p></div><button style={styles.silver} onClick={() => router.push("/dashboard/admin")}><ArrowLeft size={16}/>Terug</button></header>
 
@@ -429,24 +565,52 @@ export default function FightPaspoortBeheerPage() {
     </>}
 
     {tab === "sync" && <>
-      {activeTotalRun&&<section style={styles.activeRunBanner}>
+      {activeTotalBatch&&<section style={styles.activeRunBanner}>
         <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <span style={styles.activeRunBadge}>● TOTAL AUTOCHECK ACTIEF</span>
-            <b>VA {activeTotalRun.start_va}–{activeTotalRun.end_va}</b>
-            <span>
-              {activeTotalRun.processed_count ?? 0}/{Math.max(0,(activeTotalRun.end_va ?? 0)-(activeTotalRun.start_va ?? 0)+1)} verwerkt
-            </span>
-            <span>Laatste VA {activeTotalRun.last_processed_va ?? "—"}</span>
-            <span>Gestart {fmt(activeTotalRun.started_at)}</span>
-            <span>Loopt {formatDuration(activeTotalRun.started_at)}</span>
+            <b>VA {activeTotalBatch.startVa}–{activeTotalBatch.endVa}</b>
+            <span>{activeTotalBatch.runs.length} processen · {activeTotalBatch.workers || 16} workers</span>
+            <span>{activeTotalBatch.processed}/{activeTotalBatch.total} verwerkt</span>
+            <span>Gestart {fmt(activeTotalBatch.startedAt)}</span>
+            <span>Loopt {formatDuration(activeTotalBatch.startedAt)}</span>
           </div>
           <button
             style={styles.stop}
-            disabled={stoppingRunId===activeTotalRun.id}
-            onClick={()=>stopRun(activeTotalRun.id)}
+            disabled={stoppingRunId===activeTotalRun?.id}
+            onClick={()=>activeTotalRun&&stopRun(activeTotalRun.id)}
           >
-            <StopCircle size={15}/>{stoppingRunId===activeTotalRun.id?"Stoppen...":"Stop run"}
+            <StopCircle size={15}/>{stoppingRunId===activeTotalRun?.id?"Stoppen...":"Stop beide processen"}
+          </button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:8,marginTop:12}}>
+          {activeTotalBatch.runs
+            .slice()
+            .sort((a:any,b:any)=>Number(a?.meta?.batch_part??1)-Number(b?.meta?.batch_part??1))
+            .map((run:any)=><div key={run.id} style={{border:"1px solid #81401f",background:"#160b06",padding:"9px 11px",fontSize:12}}>
+              <b>Deel {run?.meta?.batch_part ?? 1}/{run?.meta?.batch_parts ?? activeTotalBatch.runs.length}</b>
+              <span> · VA {run.start_va}–{run.end_va}</span>
+              <span> · {run.processed_count ?? 0}/{runTotalCount(run)}</span>
+              <span> · laatste {run.last_processed_va ?? "—"}</span>
+            </div>)}
+        </div>
+      </section>}
+      {activeRetryRun&&<section style={styles.retryRunBanner}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <span style={styles.retryRunBadge}>● RETRY-RUN ACTIEF</span>
+            <b>{runTotalCount(activeRetryRun)} VA-nummers</b>
+            <span>{activeRetryRun.processed_count ?? 0}/{runTotalCount(activeRetryRun)} verwerkt</span>
+            <span>Laatste VA {activeRetryRun.last_processed_va ?? "—"}</span>
+            <span>Gestart {fmt(activeRetryRun.started_at)}</span>
+            <span>Loopt {formatDuration(activeRetryRun.started_at)}</span>
+          </div>
+          <button
+            style={styles.stop}
+            disabled={stoppingRunId===activeRetryRun.id}
+            onClick={()=>stopRun(activeRetryRun.id)}
+          >
+            <StopCircle size={15}/>{stoppingRunId===activeRetryRun.id?"Stoppen...":"Stop retry-run"}
           </button>
         </div>
       </section>}
@@ -472,12 +636,12 @@ export default function FightPaspoortBeheerPage() {
       </section>}
       <section style={styles.panel}>
         <h2 style={{marginTop:0}}>Nieuwe synchronisatie</h2>
-        <p style={{color:"#bbb"}}>De Total AutoCheck en Sportscholen Sync zijn losse processen. Je kunt beide tegelijk laten draaien.</p>
+        <p style={{color:"#bbb"}}>De Total AutoCheck verdeelt de VA-range automatisch over 2 processen met elk 8 workers. De Sportscholen Sync blijft een los proces en kan tegelijk draaien.</p>
         <div style={styles.filters}>
           <label style={styles.label}>Start VA<input style={styles.input} value={startVa} onChange={e=>setStartVa(e.target.value)}/></label>
           <label style={styles.label}>Eind VA<input style={styles.input} value={endVa} onChange={e=>setEndVa(e.target.value)}/></label>
-          <button style={styles.orange} disabled={busyTotal} onClick={startTotalRobot}>
-            <Play size={16}/>{busyTotal?"Total draait...":"Start Total AutoCheck"}
+          <button style={styles.orange} disabled={busyTotal||!!activeTotalRun} onClick={startTotalRobot}>
+            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 2 × 8"}
           </button>
           <button style={styles.silver} disabled={busyTeam||!!activeTeamRun} onClick={startTeamRobot}>
             <Users size={16}/>{busyTeam||activeTeamRun?"Sportscholen draaien...":"Start Sportscholen Sync"}
@@ -495,17 +659,19 @@ export default function FightPaspoortBeheerPage() {
         const finishedAt = r.finished_at ?? r.completed_at ?? r.ended_at ?? null;
         const isDone = ["completed","failed","cancelled","canceled"].includes(String(r.status ?? "").toLowerCase());
         const isTeam = String(r.run_type ?? "").toLowerCase() === "team";
+        const isRetry = !isTeam && isRetryRun(r);
         const totalTeamSchools = r.meta?.total_schools ?? r.end_va ?? 0;
+        const totalRunItems = runTotalCount(r);
         return <tr key={r.id}>
           <Td>{fmt(r.started_at)}</Td>
           <Td>{finishedAt ? fmt(finishedAt) : isDone ? "-" : "Nog bezig"}</Td>
           <Td>{formatDuration(r.started_at, finishedAt)}</Td>
-          <Td>{isTeam ? `${totalTeamSchools} sportscholen` : `${r.start_va}–${r.end_va}`}</Td>
+          <Td>{isTeam ? `${totalTeamSchools} sportscholen` : isRetry ? `${totalRunItems} retry-VA's` : r?.meta?.batch_id ? `Deel ${r?.meta?.batch_part ?? 1}/${r?.meta?.batch_parts ?? 2}: ${r.start_va}–${r.end_va}` : `${r.start_va}–${r.end_va}`}</Td>
           <Td>{isTeam ? "—" : (r.last_processed_va ?? "—")}</Td>
-          <Td>{r.processed_count ?? 0}/{isTeam ? totalTeamSchools : (r.end_va-r.start_va+1)}</Td>
+          <Td>{r.processed_count ?? 0}/{isTeam ? totalTeamSchools : totalRunItems}</Td>
           <Td>{isTeam ? (r.meta?.succeeded ?? r.found_count ?? 0) : r.found_count}</Td>
           <Td>{r.error_count}</Td>
-          <Td>{isTeam ? `team · ${r.status}` : r.status}</Td>
+          <Td>{isTeam ? `team · ${r.status}` : isRetry ? `retry · ${r.status}` : r.status}</Td>
           <Td>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               {!isTeam&&!isDone&&<button
@@ -573,7 +739,16 @@ export default function FightPaspoortBeheerPage() {
           <h2 style={{margin:"0 0 6px"}}>AI Controle · ontbrekende VA-nummers</h2>
           <p style={{margin:0,color:"#c8cdd2"}}>Open toont alleen VA-nummers waar nog actie op nodig is. Bevestigd verwijderde en opgeloste VA-nummers worden automatisch naar het archief verplaatst.</p>
         </div>
-        <button style={styles.silver} onClick={loadMissingVa}><RefreshCw size={15}/>Verversen</button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+          <button
+            style={styles.orange}
+            disabled={busyRetryRun || Number(missingStats.retry_requested ?? 0) <= 0}
+            onClick={startRetryRun}
+          >
+            <Play size={15}/>{busyRetryRun ? "Retry-run starten..." : `Start retry-run (${missingStats.retry_requested ?? 0})`}
+          </button>
+          <button style={styles.silver} onClick={loadMissingVa}><RefreshCw size={15}/>Verversen</button>
+        </div>
       </section>
 
       <div style={styles.aiSubTabs}>
@@ -593,7 +768,7 @@ export default function FightPaspoortBeheerPage() {
 
       <section style={styles.statGrid}>
         <StatCard label="Te beoordelen" value={missingStats.pending_review ?? 0} hint="Handmatige controle nodig" />
-        <StatCard label="Opnieuw proberen" value={missingStats.retry_requested ?? 0} hint="Volgende Total-run" />
+        <StatCard label="Opnieuw proberen" value={missingStats.retry_requested ?? 0} hint="Klaar voor de retry-run" />
         <StatCard label="Bevestigd verwijderd" value={missingStats.confirmed_deleted ?? 0} hint="Veilig overgeslagen" />
         <StatCard label="Opgelost" value={missingStats.resolved ?? 0} hint="Later weer gevonden" />
         <StatCard label="Aandacht nodig" value={missingStats.attention ?? 0} hint="Openstaande acties" />
@@ -615,23 +790,37 @@ export default function FightPaspoortBeheerPage() {
       </section>
 
       <section style={{...styles.panel,marginTop:16}}>
-        <Table><thead><tr><Th>Prioriteit</Th><Th>VA</Th><Th>Status</Th><Th>Advies</Th><Th>Keer niet gevonden</Th><Th>Eerste keer</Th><Th>Laatste keer</Th><Th>Bron</Th><Th>Acties</Th></tr></thead>
+        <div style={styles.bulkBar}>
+          <label style={styles.bulkSelectLabel}>
+            <input type="checkbox" checked={allVisibleMissingSelected} onChange={toggleAllVisibleMissing} disabled={!visibleMissingNumbers.length || bulkMissingBusy}/>
+                      </label>
+          <b>{selectedMissingVa.length} geselecteerd</b>
+          {aiView === "open" && <>
+            <button style={styles.dangerMini} disabled={!selectedMissingVa.length || bulkMissingBusy || !!missingBusy} onClick={()=>bulkUpdateMissingVa("confirm_deleted")}><Trash2 size={14}/>{bulkMissingBusy?"Bezig...":"Delete"}</button>
+            <button style={styles.mini} disabled={!selectedMissingVa.length || bulkMissingBusy || !!missingBusy} onClick={()=>bulkUpdateMissingVa("retry")}><RotateCcw size={14}/>Retry</button>
+            <button style={styles.mini} disabled={!selectedMissingVa.length || bulkMissingBusy || !!missingBusy} onClick={()=>bulkUpdateMissingVa("resolve")}><CheckCircle2 size={14}/>Klaar</button>
+          </>}
+          {!!selectedMissingVa.length && <button style={styles.link} disabled={bulkMissingBusy} onClick={()=>setSelectedMissingVa([])}>Selectie wissen</button>}
+        </div>
+        <Table><thead><tr><Th><input aria-label="Hele pagina selecteren" type="checkbox" checked={allVisibleMissingSelected} onChange={toggleAllVisibleMissing} disabled={!visibleMissingNumbers.length || bulkMissingBusy}/></Th><Th>Prioriteit</Th><Th>VA</Th><Th>Status</Th><Th>Advies</Th><Th>Keer niet gevonden</Th><Th>Eerste keer</Th><Th>Laatste keer</Th><Th>Bron</Th><Th>Acties</Th></tr></thead>
         <tbody>{visibleMissingVa.map((item:any)=>{
           const advice = missingAdvice(item);
+          const vaNumber = String(item.va_number);
           return <tr key={item.id}>
+            <Td><input aria-label={`VA ${vaNumber} selecteren`} type="checkbox" checked={selectedMissingVa.includes(vaNumber)} disabled={bulkMissingBusy} onChange={()=>toggleMissingSelection(vaNumber)}/></Td>
             <Td><span style={priorityStyle(advice.priority)}>{advice.priority}</span></Td>
             <Td><b>{item.va_number}</b></Td>
             <Td>{missingStatusLabel(item.status)}</Td>
             <Td><b>{advice.text}</b>{item.last_error_message&&<><br/><small>{item.last_error_message}</small></>}</Td>
             <Td>{item.not_found_count ?? 0}</Td><Td>{fmt(item.first_seen_at)}</Td><Td>{fmt(item.last_seen_at)}</Td><Td>{item.last_source ?? "-"}</Td>
             <Td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {aiView==="open"&&item.status!=="confirmed_deleted"&&<button style={styles.dangerMini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"confirm_deleted")}><ShieldCheck size={13}/>Verwijderd</button>}
-              {aiView==="open"&&item.status!=="retry_requested"&&item.status!=="resolved"&&<button style={styles.mini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"retry")}><RotateCcw size={13}/>Retry</button>}
-              {item.status==="confirmed_deleted"&&<button style={styles.mini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"restore")}><RotateCcw size={13}/>Herstellen</button>}
-              {aiView==="open"&&item.status!=="resolved"&&<button style={styles.mini} disabled={!!missingBusy} onClick={()=>updateMissingVa(item.va_number,"resolve")}><CheckCircle2 size={13}/>Opgelost</button>}
+              {aiView==="open"&&item.status!=="confirmed_deleted"&&<button style={styles.dangerMini} disabled={!!missingBusy || bulkMissingBusy} onClick={()=>updateMissingVa(item.va_number,"confirm_deleted")}><ShieldCheck size={13}/>Verwijderd</button>}
+              {aiView==="open"&&item.status!=="retry_requested"&&item.status!=="resolved"&&<button style={styles.mini} disabled={!!missingBusy || bulkMissingBusy} onClick={()=>updateMissingVa(item.va_number,"retry")}><RotateCcw size={13}/>Retry</button>}
+              {item.status==="confirmed_deleted"&&<button style={styles.mini} disabled={!!missingBusy || bulkMissingBusy} onClick={()=>updateMissingVa(item.va_number,"restore")}><RotateCcw size={13}/>Herstellen</button>}
+              {aiView==="open"&&item.status!=="resolved"&&<button style={styles.mini} disabled={!!missingBusy || bulkMissingBusy} onClick={()=>updateMissingVa(item.va_number,"resolve")}><CheckCircle2 size={13}/>Opgelost</button>}
             </div></Td>
           </tr>})}
-          {!visibleMissingVa.length&&<tr><Td colSpan={9}>Geen VA-nummers voor dit filter.</Td></tr>}
+          {!visibleMissingVa.length&&<tr><Td colSpan={10}>Geen VA-nummers voor dit filter.</Td></tr>}
         </tbody></Table>
       </section>
     </>}
@@ -671,7 +860,7 @@ export default function FightPaspoortBeheerPage() {
 function StatCard({label,value,hint}:any){return <div style={styles.statCard}><span style={{color:"#ff8c58",fontSize:12,fontWeight:900,textTransform:"uppercase"}}>{label}</span><strong style={{fontSize:30}}>{value}</strong><small style={{color:"#aeb5bc"}}>{hint}</small></div>}
 function missingStatusLabel(status:any){const labels:any={pending_review:"Te beoordelen",retry_requested:"Opnieuw proberen",confirmed_deleted:"Bevestigd verwijderd",resolved:"Opgelost"};return labels[String(status)]||status||"-"}
 function missingAdvice(item:any){
-  if(item.status==="retry_requested") return {priority:"HOOG",text:"Laat Total opnieuw controleren"};
+  if(item.status==="retry_requested") return {priority:"HOOG",text:"Staat in de retry-wachtrij"};
   if(item.status==="confirmed_deleted") return {priority:"LAAG",text:"Geen actie; wordt veilig overgeslagen"};
   if(item.status==="resolved") return {priority:"LAAG",text:"Profiel is weer gevonden"};
   if(Number(item.not_found_count||0)>=3) return {priority:"HOOG",text:"Direct handmatig controleren"};
@@ -733,5 +922,5 @@ function formatDuration(start:any,end?:any){
   if(minutes>0)return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
 }
-const styles:any={aiSubTabs:{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"},aiSubTab:{height:38,padding:"0 16px",border:"1px solid #4b535c",background:"#11161c",color:"#d7dce1",fontWeight:900,cursor:"pointer"},aiSubTabActive:{border:"1px solid #ff7438",background:"linear-gradient(#ff6320,#c93b00)",color:"#fff"},aiIntro:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,border:"1px solid #ff7438",background:"linear-gradient(135deg,#261108,#111820)",padding:18,boxShadow:"0 12px 30px #0008"},statGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginTop:16},statCard:{display:"grid",gap:6,border:"1px solid #48515b",background:"linear-gradient(180deg,#1b2229,#0c1014)",padding:16},page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},activeRunBanner:{border:"1px solid #ff7b3b",background:"linear-gradient(180deg,#3a1707,#1a0b05)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #ff4d0033,0 12px 30px #0008"},activeRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #ff7b3b",background:"#ff4d00",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},teamRunBanner:{border:"1px solid #3b9fb7",background:"linear-gradient(180deg,#08252d,#07161b)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #2a9db733,0 12px 30px #0008"},teamRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #55bed6",background:"#167f98",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
+const styles:any={bulkBar:{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:12,padding:"10px 12px",border:"1px solid #4b535c",background:"#0d1217"},bulkSelectLabel:{display:"inline-flex",alignItems:"center",gap:8,fontWeight:900,cursor:"pointer"},aiSubTabs:{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"},aiSubTab:{height:38,padding:"0 16px",border:"1px solid #4b535c",background:"#11161c",color:"#d7dce1",fontWeight:900,cursor:"pointer"},aiSubTabActive:{border:"1px solid #ff7438",background:"linear-gradient(#ff6320,#c93b00)",color:"#fff"},aiIntro:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,border:"1px solid #ff7438",background:"linear-gradient(135deg,#261108,#111820)",padding:18,boxShadow:"0 12px 30px #0008"},statGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginTop:16},statCard:{display:"grid",gap:6,border:"1px solid #48515b",background:"linear-gradient(180deg,#1b2229,#0c1014)",padding:16},page:{minHeight:"100vh",background:"linear-gradient(180deg,#050607,#0c1015)",color:"#fff",padding:24},wrap:{maxWidth:1380,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:16},sub:{margin:"6px 0 0",color:"#ff4d00",textTransform:"uppercase",fontSize:11,letterSpacing:1.5},tabs:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"},tab:{display:"inline-flex",alignItems:"center",gap:8,height:42,padding:"0 18px",background:"#11161c",color:"#ddd",border:"1px solid #444",fontWeight:900,cursor:"pointer"},tabActive:{background:"linear-gradient(#ff6320,#c93b00)",border:"1px solid #ff7438",color:"white"},panel:{border:"1px solid #40464e",background:"linear-gradient(180deg,#171b20,#0c0f13)",padding:18,boxShadow:"0 12px 30px #0008"},activeRunBanner:{border:"1px solid #ff7b3b",background:"linear-gradient(180deg,#3a1707,#1a0b05)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #ff4d0033,0 12px 30px #0008"},activeRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #ff7b3b",background:"#ff4d00",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},retryRunBanner:{border:"1px solid #a56fd6",background:"linear-gradient(180deg,#24132f,#120b18)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #8b4db833,0 12px 30px #0008"},retryRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #c18cec",background:"#7a3fa3",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},teamRunBanner:{border:"1px solid #3b9fb7",background:"linear-gradient(180deg,#08252d,#07161b)",padding:16,marginBottom:16,boxShadow:"0 0 0 1px #2a9db733,0 12px 30px #0008"},teamRunBadge:{display:"inline-flex",alignItems:"center",padding:"7px 10px",border:"1px solid #55bed6",background:"#167f98",color:"#fff",fontSize:12,fontWeight:1000,letterSpacing:.5},filters:{display:"flex",gap:12,alignItems:"end",flexWrap:"wrap"},label:{display:"grid",gap:6,fontSize:12,color:"#ccc",minWidth:140},input:{height:40,padding:"0 11px",border:"1px solid #5b626b",background:"#080a0d",color:"white"},silver:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:7,height:40,padding:"0 15px",border:"1px solid #aaa",background:"linear-gradient(#fff,#bbb)",color:"#111",fontWeight:900,cursor:"pointer"},danger:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #c94a4a",background:"linear-gradient(#6d2020,#3b1010)",color:"white",fontWeight:900,cursor:"pointer"},
 orange:{display:"inline-flex",alignItems:"center",gap:7,height:40,padding:"0 16px",border:"1px solid #ff7b3b",background:"linear-gradient(#ff6a20,#d83e00)",color:"white",fontWeight:900,cursor:"pointer"},table:{width:"100%",borderCollapse:"collapse",fontSize:13},th:{textAlign:"left",padding:"10px 9px",borderBottom:"1px solid #555",color:"#ff8c58",whiteSpace:"nowrap"},td:{padding:"10px 9px",borderBottom:"1px solid #2d3238",verticalAlign:"top",color:"#f0f0f0"},mini:{background:"#e8e8e8",border:"1px solid #999",color:"#111",fontWeight:800,padding:"6px 10px",cursor:"pointer"},dangerMini:{display:"inline-flex",alignItems:"center",gap:5,background:"#4a1717",border:"1px solid #a94444",color:"#fff",fontWeight:800,padding:"6px 10px",cursor:"pointer"},stop:{display:"inline-flex",alignItems:"center",gap:5,background:"#6d2020",border:"1px solid #c94a4a",color:"#fff",fontWeight:900,padding:"6px 10px",cursor:"pointer"},link:{background:"none",border:0,color:"#ff8852",fontWeight:900,cursor:"pointer",padding:0},pagination:{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}};

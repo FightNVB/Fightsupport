@@ -12,19 +12,13 @@ function isFinishedStatus(status: unknown) {
 
 function childPids(pid: number): number[] {
   if (!Number.isInteger(pid) || pid <= 1) return [];
-
   try {
     const out = execFileSync("pgrep", ["-P", String(pid)], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-
     if (!out) return [];
-
-    return out
-      .split(/\s+/)
-      .map(Number)
-      .filter((n) => Number.isInteger(n) && n > 1);
+    return out.split(/\s+/).map(Number).filter((n) => Number.isInteger(n) && n > 1);
   } catch {
     return [];
   }
@@ -33,24 +27,17 @@ function childPids(pid: number): number[] {
 function collectProcessTree(rootPid: number): number[] {
   const seen = new Set<number>();
   const ordered: number[] = [];
-
   function walk(pid: number) {
     if (seen.has(pid)) return;
     seen.add(pid);
-
-    for (const child of childPids(pid)) {
-      walk(child);
-    }
-
+    for (const child of childPids(pid)) walk(child);
     ordered.push(pid);
   }
-
   walk(rootPid);
   return ordered;
 }
 
 function signalProcessTree(rootPid: number, signal: NodeJS.Signals) {
-  // Kindprocessen eerst, hoofdproces als laatste.
   for (const pid of collectProcessTree(rootPid)) {
     try {
       process.kill(pid, signal);
@@ -72,7 +59,6 @@ function isProcessAlive(pid: number) {
 export async function POST(req: Request) {
   try {
     await requireRole(req, ["admin", "superadmin"]);
-
     const body = await req.json().catch(() => ({}));
     const runId = String(body?.run_id ?? "").trim();
 
@@ -80,51 +66,53 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "run_id ontbreekt." }, { status: 400 });
     }
 
-    const { data: run, error: runError } = await supabaseAdmin
+    const { data: selectedRun, error: runError } = await supabaseAdmin
       .from("fightpassport_sync_runs")
       .select("id,status,run_type,meta,started_at,finished_at")
       .eq("id", runId)
       .single();
 
-    if (runError || !run) {
+    if (runError || !selectedRun) {
       return NextResponse.json({ error: "Run niet gevonden." }, { status: 404 });
     }
-
-    if (String(run.run_type ?? "").toLowerCase() !== "full") {
+    if (String(selectedRun.run_type ?? "").toLowerCase() !== "full") {
       return NextResponse.json(
         { error: "Alleen Total AutoCheck-runs kunnen via deze route worden gestopt." },
         { status: 400 }
       );
     }
-
-    if (isFinishedStatus(run.status)) {
-      return NextResponse.json(
-        { error: "Deze run is al afgerond." },
-        { status: 409 }
-      );
+    if (isFinishedStatus(selectedRun.status)) {
+      return NextResponse.json({ error: "Deze run is al afgerond." }, { status: 409 });
     }
 
-    const pid = Number((run.meta as any)?.pid);
+    const batchId = String((selectedRun.meta as any)?.batch_id ?? "").trim();
+    let runsToStop: any[] = [selectedRun];
 
-    if (!Number.isInteger(pid) || pid <= 1) {
-      return NextResponse.json(
-        { error: "Voor deze run is geen geldig scraperproces geregistreerd." },
-        { status: 409 }
+    if (batchId) {
+      const { data: activeRuns, error: activeRunsError } = await supabaseAdmin
+        .from("fightpassport_sync_runs")
+        .select("id,status,run_type,meta,started_at,finished_at")
+        .eq("run_type", "full")
+        .in("status", ["running", "paused"]);
+      if (activeRunsError) throw activeRunsError;
+      runsToStop = (activeRuns ?? []).filter(
+        (run: any) => String(run?.meta?.batch_id ?? "") === batchId
       );
+      if (!runsToStop.length) runsToStop = [selectedRun];
     }
 
-    // Eerst vriendelijk stoppen.
-    signalProcessTree(pid, "SIGTERM");
+    const pids = runsToStop
+      .map((run: any) => Number(run?.meta?.pid))
+      .filter((pid: number) => Number.isInteger(pid) && pid > 1);
 
+    for (const pid of pids) signalProcessTree(pid, "SIGTERM");
     await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    // Puppeteer blijft soms hangen; dan dezelfde boom hard beëindigen.
-    if (isProcessAlive(pid)) {
-      signalProcessTree(pid, "SIGKILL");
+    for (const pid of pids) {
+      if (isProcessAlive(pid)) signalProcessTree(pid, "SIGKILL");
     }
 
     const finishedAt = new Date().toISOString();
-
+    const runIds = runsToStop.map((run: any) => String(run.id));
     const { error: updateError } = await supabaseAdmin
       .from("fightpassport_sync_runs")
       .update({
@@ -132,22 +120,23 @@ export async function POST(req: Request) {
         finished_at: finishedAt,
         error_message: null,
       })
-      .eq("id", runId);
-
+      .in("id", runIds);
     if (updateError) throw updateError;
 
     return NextResponse.json({
       ok: true,
-      run_id: runId,
-      pid,
+      batch_id: batchId || null,
+      run_ids: runIds,
+      pids,
       status: "cancelled",
       finished_at: finishedAt,
+      message: batchId
+        ? `Beide Total AutoCheck-deelruns zijn gestopt.`
+        : "Run gestopt.",
     });
   } catch (err: any) {
     if (err instanceof NextResponse) return err;
-
     console.error("[fightpassport-sync/stop] stoppen mislukt:", err);
-
     return NextResponse.json(
       { error: err?.message ?? "Run stoppen mislukt." },
       { status: 500 }
