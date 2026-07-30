@@ -10,49 +10,38 @@ function isFinishedStatus(status: unknown) {
   );
 }
 
-function childPids(pid: number): number[] {
-  if (!Number.isInteger(pid) || pid <= 1) return [];
+function findTotalScraperPids(): number[] {
   try {
-    const out = execFileSync("pgrep", ["-P", String(pid)], {
+    const out = execFileSync("pgrep", ["-f", "scraper_fp_total\\.js"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
+
     if (!out) return [];
-    return out.split(/\s+/).map(Number).filter((n) => Number.isInteger(n) && n > 1);
+
+    return [...new Set(
+      out
+        .split(/\s+/)
+        .map(Number)
+        .filter(
+          (pid) =>
+            Number.isInteger(pid) &&
+            pid > 1 &&
+            pid !== process.pid
+        )
+    )];
   } catch {
     return [];
   }
 }
 
-function collectProcessTree(rootPid: number): number[] {
-  const seen = new Set<number>();
-  const ordered: number[] = [];
-  function walk(pid: number) {
-    if (seen.has(pid)) return;
-    seen.add(pid);
-    for (const child of childPids(pid)) walk(child);
-    ordered.push(pid);
-  }
-  walk(rootPid);
-  return ordered;
-}
-
-function signalProcessTree(rootPid: number, signal: NodeJS.Signals) {
-  for (const pid of collectProcessTree(rootPid)) {
-    try {
-      process.kill(pid, signal);
-    } catch (err: any) {
-      if (err?.code !== "ESRCH") throw err;
-    }
-  }
-}
-
-function isProcessAlive(pid: number) {
+function signalProcess(pid: number, signal: NodeJS.Signals) {
   try {
-    process.kill(pid, 0);
+    process.kill(pid, signal);
     return true;
-  } catch {
-    return false;
+  } catch (err: any) {
+    if (err?.code === "ESRCH") return false;
+    throw err;
   }
 }
 
@@ -75,18 +64,20 @@ export async function POST(req: Request) {
     if (runError || !selectedRun) {
       return NextResponse.json({ error: "Run niet gevonden." }, { status: 404 });
     }
+
     if (String(selectedRun.run_type ?? "").toLowerCase() !== "full") {
       return NextResponse.json(
-        { error: "Alleen Total AutoCheck-runs kunnen via deze route worden gestopt." },
+        { error: "Alleen Total AutoCheck-runs kunnen via deze route worden gepauzeerd." },
         { status: 400 }
       );
     }
+
     if (isFinishedStatus(selectedRun.status)) {
       return NextResponse.json({ error: "Deze run is al afgerond." }, { status: 409 });
     }
 
     const batchId = String((selectedRun.meta as any)?.batch_id ?? "").trim();
-    let runsToStop: any[] = [selectedRun];
+    let runsToPause: any[] = [selectedRun];
 
     if (batchId) {
       const { data: activeRuns, error: activeRunsError } = await supabaseAdmin
@@ -94,51 +85,64 @@ export async function POST(req: Request) {
         .select("id,status,run_type,meta,started_at,finished_at")
         .eq("run_type", "full")
         .in("status", ["running", "paused"]);
+
       if (activeRunsError) throw activeRunsError;
-      runsToStop = (activeRuns ?? []).filter(
+
+      runsToPause = (activeRuns ?? []).filter(
         (run: any) => String(run?.meta?.batch_id ?? "") === batchId
       );
-      if (!runsToStop.length) runsToStop = [selectedRun];
+
+      if (!runsToPause.length) runsToPause = [selectedRun];
     }
 
-    const pids = runsToStop
+    const databasePids = runsToPause
       .map((run: any) => Number(run?.meta?.pid))
       .filter((pid: number) => Number.isInteger(pid) && pid > 1);
 
-    for (const pid of pids) signalProcessTree(pid, "SIGTERM");
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Zoek daarnaast rechtstreeks in de actieve processen. Zo wordt ook een
+    // tweede deelproces gestopt als meta.pid ontbreekt of verouderd is.
+    const detectedPids = findTotalScraperPids();
+    const pids = [...new Set([...databasePids, ...detectedPids])];
+
+    const signaledPids: number[] = [];
     for (const pid of pids) {
-      if (isProcessAlive(pid)) signalProcessTree(pid, "SIGKILL");
+      if (signalProcess(pid, "SIGTERM")) signaledPids.push(pid);
     }
 
-    const finishedAt = new Date().toISOString();
-    const runIds = runsToStop.map((run: any) => String(run.id));
+    // De scraper handelt SIGTERM zelf af: geen nieuwe VA's uitdelen,
+    // lopende workers afronden en daarna de run als paused opslaan.
+    // Daarom bewust géén automatische SIGKILL en géén finished_at.
+    const runIds = runsToPause.map((run: any) => String(run.id));
     const { error: updateError } = await supabaseAdmin
       .from("fightpassport_sync_runs")
       .update({
-        status: "cancelled",
-        finished_at: finishedAt,
+        status: "paused",
+        finished_at: null,
         error_message: null,
       })
       .in("id", runIds);
+
     if (updateError) throw updateError;
 
     return NextResponse.json({
       ok: true,
+      stopped: signaledPids.length > 0,
+      graceful: true,
       batch_id: batchId || null,
       run_ids: runIds,
-      pids,
-      status: "cancelled",
-      finished_at: finishedAt,
-      message: batchId
-        ? `Beide Total AutoCheck-deelruns zijn gestopt.`
-        : "Run gestopt.",
+      database_pids: databasePids,
+      detected_pids: detectedPids,
+      signaled_pids: signaledPids,
+      status: "paused",
+      message: signaledPids.length
+        ? "Pauzesignaal naar alle Total AutoCheck-processen verstuurd. Lopende VA's worden nog netjes afgerond."
+        : "Geen actief Total AutoCheck-proces gevonden; de bijbehorende ronde(s) zijn als gepauzeerd gemarkeerd.",
     });
   } catch (err: any) {
     if (err instanceof NextResponse) return err;
-    console.error("[fightpassport-sync/stop] stoppen mislukt:", err);
+    console.error("[fightpassport-sync/stop] pauzeren mislukt:", err);
     return NextResponse.json(
-      { error: err?.message ?? "Run stoppen mislukt." },
+      { error: err?.message ?? "Run pauzeren mislukt." },
       { status: 500 }
     );
   }

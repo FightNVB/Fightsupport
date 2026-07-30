@@ -1,265 +1,148 @@
-// app/api/admin/fightpassport-sync/start/route.ts
 import { NextResponse } from "next/server";
-import { spawn } from "child_process";
-import path from "path";
-import fs from "fs";
-import crypto from "crypto";
-import {
-  requireUserWithRole,
-} from "@/app/api/_utils/authz";
-import { supabaseAdmin } from "@/lib/api/requireRole";
+import { execFileSync } from "child_process";
+import { requireRole, supabaseAdmin } from "@/lib/api/requireRole";
 
 export const runtime = "nodejs";
 
-const TOTAL_ROBOT_FILE = "scraper_fp_total.js";
-
-function resolveScriptPath(...parts: string[]) {
-  const root = process.cwd();
-
-  const candidates = [
-    path.join(root, ...parts),
-    path.join(root, "ControlEngine", ...parts),
-    path.join(root, "ControlEngine", "ControlEngine", ...parts),
-  ];
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-
-  throw new Error(`Robot niet gevonden:\n- ${candidates.join("\n- ")}`);
+function isFinishedStatus(status: unknown) {
+  return ["completed", "failed", "cancelled", "canceled"].includes(
+    String(status ?? "").toLowerCase()
+  );
 }
 
-function clampInt(n: any, def: number, min: number, max: number): number {
-  const num = Number(n);
-  if (!Number.isFinite(num)) return def;
-  const v = Math.floor(num);
-  return Math.max(min, Math.min(max, v));
-}
+function findTotalScraperPids(): number[] {
+  try {
+    const out = execFileSync("pgrep", ["-f", "scraper_fp_total\\.js"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
 
-function isRoleAllowedForRoute(role: string | null | undefined) {
-  return role === "admin" || role === "superadmin";
-}
+    if (!out) return [];
 
-function runNodeScript(
-  scriptPath: string,
-  args: string[],
-  envExtra?: Record<string, string>,
-  logPrefix?: string
-): Promise<{ stdout: string; stderr: string; ms: number }> {
-  return new Promise((resolve, reject) => {
-    const t0 = Date.now();
-
-    const proc = spawn("node", [scriptPath, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      cwd: path.dirname(scriptPath),
-      windowsHide: true,
-      env: { ...process.env, ...envExtra },
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (d) => {
-      const s = d.toString();
-      stdout += s;
-      process.stdout.write(logPrefix ? `[${logPrefix}] ${s}` : s);
-    });
-
-    proc.stderr.on("data", (d) => {
-      const s = d.toString();
-      stderr += s;
-      process.stderr.write(logPrefix ? `[${logPrefix}] ${s}` : s);
-    });
-
-    proc.on("error", (err) => {
-      const ms = Date.now() - t0;
-      reject(
-        new Error(
-          `Robot spawn error: ${
-            err?.message ?? err
-          }\n(ms=${ms})\n\nSTDERR:\n${stderr}\n\nSTDOUT:\n${stdout}`
+    return [...new Set(
+      out
+        .split(/\s+/)
+        .map(Number)
+        .filter(
+          (pid) =>
+            Number.isInteger(pid) &&
+            pid > 1 &&
+            pid !== process.pid
         )
-      );
-    });
+    )];
+  } catch {
+    return [];
+  }
+}
 
-    proc.on("close", (code) => {
-      const ms = Date.now() - t0;
-
-      if (code === 0) {
-        resolve({ stdout, stderr, ms });
-      } else {
-        reject(
-          new Error(
-            `Robot failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\n\nSTDERR:\n${stderr}\n\nSTDOUT:\n${stdout}`
-          )
-        );
-      }
-    });
-  });
+function signalProcess(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch (err: any) {
+    if (err?.code === "ESRCH") return false;
+    throw err;
+  }
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    await requireRole(req, ["admin", "superadmin"]);
+    const body = await req.json().catch(() => ({}));
+    const runId = String(body?.run_id ?? "").trim();
 
-    const startVa = clampInt(body?.start_va, 775, 1, 99999);
-    const endVa = clampInt(body?.end_va, startVa, 1, 99999);
+    if (!runId) {
+      return NextResponse.json({ error: "run_id ontbreekt." }, { status: 400 });
+    }
 
-    const workersPerProcess = 8;
-    const staggerMs = clampInt(body?.stagger_ms ?? 2500, 2500, 0, 10000);
-    const tabAttempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
-    const softWaitMs = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);
-    const betweenAttemptsMs = clampInt(
-      body?.between_attempts_ms ?? 700,
-      700,
-      0,
-      5000
-    );
-    const totalTimeoutMs = clampInt(
-      body?.total_timeout_ms ?? 150000,
-      150000,
-      5000,
-      300000
-    );
+    const { data: selectedRun, error: runError } = await supabaseAdmin
+      .from("fightpassport_sync_runs")
+      .select("id,status,run_type,meta,started_at,finished_at")
+      .eq("id", runId)
+      .single();
 
-    if (endVa < startVa) {
+    if (runError || !selectedRun) {
+      return NextResponse.json({ error: "Run niet gevonden." }, { status: 404 });
+    }
+
+    if (String(selectedRun.run_type ?? "").toLowerCase() !== "full") {
       return NextResponse.json(
-        { error: "Eind VA mag niet lager zijn dan Start VA." },
+        { error: "Alleen Total AutoCheck-runs kunnen via deze route worden gepauzeerd." },
         { status: 400 }
       );
     }
 
-    const { role } = await requireUserWithRole(req);
-
-    if (!isRoleAllowedForRoute(role)) {
-      return NextResponse.json(
-        { error: "Geen toegang tot FightPaspoort AutoCheck." },
-        { status: 403 }
-      );
+    if (isFinishedStatus(selectedRun.status)) {
+      return NextResponse.json({ error: "Deze run is al afgerond." }, { status: 409 });
     }
 
-    const { data: activeRun, error: activeRunError } = await supabaseAdmin
+    const batchId = String((selectedRun.meta as any)?.batch_id ?? "").trim();
+    let runsToPause: any[] = [selectedRun];
+
+    if (batchId) {
+      const { data: activeRuns, error: activeRunsError } = await supabaseAdmin
+        .from("fightpassport_sync_runs")
+        .select("id,status,run_type,meta,started_at,finished_at")
+        .eq("run_type", "full")
+        .in("status", ["running", "paused"]);
+
+      if (activeRunsError) throw activeRunsError;
+
+      runsToPause = (activeRuns ?? []).filter(
+        (run: any) => String(run?.meta?.batch_id ?? "") === batchId
+      );
+
+      if (!runsToPause.length) runsToPause = [selectedRun];
+    }
+
+    const databasePids = runsToPause
+      .map((run: any) => Number(run?.meta?.pid))
+      .filter((pid: number) => Number.isInteger(pid) && pid > 1);
+
+    // Zoek daarnaast rechtstreeks in de actieve processen. Zo wordt ook een
+    // tweede deelproces gestopt als meta.pid ontbreekt of verouderd is.
+    const detectedPids = findTotalScraperPids();
+    const pids = [...new Set([...databasePids, ...detectedPids])];
+
+    const signaledPids: number[] = [];
+    for (const pid of pids) {
+      if (signalProcess(pid, "SIGTERM")) signaledPids.push(pid);
+    }
+
+    // De scraper handelt SIGTERM zelf af: geen nieuwe VA's uitdelen,
+    // lopende workers afronden en daarna de run als paused opslaan.
+    // Daarom bewust géén automatische SIGKILL en géén finished_at.
+    const runIds = runsToPause.map((run: any) => String(run.id));
+    const { error: updateError } = await supabaseAdmin
       .from("fightpassport_sync_runs")
-      .select("id,status,start_va,end_va,meta")
-      .eq("run_type", "full")
-      .in("status", ["running", "paused"])
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .update({
+        status: "paused",
+        finished_at: null,
+        error_message: null,
+      })
+      .in("id", runIds);
 
-    if (activeRunError) throw activeRunError;
-    if (activeRun) {
-      return NextResponse.json(
-        {
-          error: activeRun.status === "paused"
-            ? "Er staat al een gepauzeerde Total AutoCheck-run klaar. Hervat die run via de geplande Total-start."
-            : "Er draait al een Total AutoCheck-run. Stop die eerst voordat je een nieuwe start.",
-          run_id: activeRun.id,
-        },
-        { status: 409 }
-      );
-    }
+    if (updateError) throw updateError;
 
-    const totalRobotPath = resolveScriptPath(
-      "scrapers",
-      "fp_total",
-      TOTAL_ROBOT_FILE
-    );
-
-    console.log("[fightpassport-sync/start] ▶ totaal robot start", {
-      start_va: startVa,
-      end_va: endVa,
-      workers_per_process: workersPerProcess,
-      processes: 2,
-      robot: TOTAL_ROBOT_FILE,
-      role,
-      totalRobotPath,
+    return NextResponse.json({
+      ok: true,
+      stopped: signaledPids.length > 0,
+      graceful: true,
+      batch_id: batchId || null,
+      run_ids: runIds,
+      database_pids: databasePids,
+      detected_pids: detectedPids,
+      signaled_pids: signaledPids,
+      status: "paused",
+      message: signaledPids.length
+        ? "Pauzesignaal naar alle Total AutoCheck-processen verstuurd. Lopende VA's worden nog netjes afgerond."
+        : "Geen actief Total AutoCheck-proces gevonden; de bijbehorende ronde(s) zijn als gepauzeerd gemarkeerd.",
     });
-
-    const batchId = crypto.randomUUID();
-    const totalCount = endVa - startVa + 1;
-    const firstCount = Math.ceil(totalCount / 2);
-    const firstStartVa = startVa;
-    const firstEndVa = startVa + firstCount - 1;
-    const secondStartVa = firstEndVa + 1;
-    const parts = [
-      { part: 1, startVa: firstStartVa, endVa: firstEndVa },
-      ...(secondStartVa <= endVa
-        ? [{ part: 2, startVa: secondStartVa, endVa }]
-        : []),
-    ];
-
-    for (const part of parts) {
-      void runNodeScript(
-        totalRobotPath,
-        [String(part.startVa), String(part.endVa)],
-        {
-          FP_MATCHMAKER_ID: "",
-          FP_SESSION_MODE: "master",
-          HEADLESS: process.env.HEADLESS ?? "false",
-          PUPPETEER_HEADLESS:
-            process.env.PUPPETEER_HEADLESS ??
-            process.env.HEADLESS ??
-            "false",
-          WORKERS: String(workersPerProcess),
-          FP_TOTAL_WORKERS: String(workersPerProcess),
-          FP_TOTAL_BATCH_ID: batchId,
-          FP_TOTAL_BATCH_PART: String(part.part),
-          FP_TOTAL_BATCH_PARTS: String(parts.length),
-          FP_TOTAL_BATCH_START_VA: String(startVa),
-          FP_TOTAL_BATCH_END_VA: String(endVa),
-          STAGGER_MS: String(staggerMs),
-          TAB_ATTEMPTS: String(tabAttempts),
-          SOFT_WAIT_MS: String(softWaitMs),
-          BETWEEN_ATTEMPTS_MS: String(betweenAttemptsMs),
-          FP_TOTAL_TIMEOUT_MS: String(totalTimeoutMs),
-          FP_TOTAL_RESULTS: "true",
-        },
-        `fp_total_admin_${part.part}`
-      )
-        .then((result) => {
-          console.log("[fightpassport-sync/start] ✅ deelrobot klaar", {
-            batch_id: batchId,
-            part: part.part,
-            ms: result.ms,
-            start_va: part.startVa,
-            end_va: part.endVa,
-            workers: workersPerProcess,
-          });
-        })
-        .catch((err) => {
-          console.error(
-            `[fightpassport-sync/start] ❌ deelrobot ${part.part} achtergrondfout:`,
-            err
-          );
-        });
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        started: true,
-        start_va: startVa,
-        end_va: endVa,
-        batch_id: batchId,
-        processes: parts.length,
-        workers_per_process: workersPerProcess,
-        parts: parts.map((part) => ({ part: part.part, start_va: part.startVa, end_va: part.endVa })),
-        message: `Total AutoCheck gestart als ${parts.length} processen van ${workersPerProcess} workers voor VA ${startVa} t/m ${endVa}.`,
-      },
-      { status: 202 }
-    );
   } catch (err: any) {
-    console.error(
-      "[fightpassport-sync/start] ❌ totaal robot mislukt:",
-      err
-    );
-
+    if (err instanceof NextResponse) return err;
+    console.error("[fightpassport-sync/stop] pauzeren mislukt:", err);
     return NextResponse.json(
-      {
-        error: err?.message ?? "Onbekende fout bij starten van de AutoCheck.",
-      },
+      { error: err?.message ?? "Run pauzeren mislukt." },
       { status: 500 }
     );
   }
