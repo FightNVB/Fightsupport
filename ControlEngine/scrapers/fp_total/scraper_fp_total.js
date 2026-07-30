@@ -14,7 +14,7 @@ const START_VA = Number(process.argv[2] || process.env.FP_TOTAL_START_VA || 775)
 const END_VA = Number(process.argv[3] || process.env.FP_TOTAL_END_VA || 33150);
 const WORKERS_RAW = Number(process.env.FP_TOTAL_WORKERS ?? process.env.WORKERS ?? "8");
 const WORKERS = Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
-  ? Math.min(10, Math.max(1, Math.floor(WORKERS_RAW)))
+  ? Math.min(12, Math.max(1, Math.floor(WORKERS_RAW)))
   : 8;
 const FULL_DETAILS_ONLY_LICENSED = String(process.env.FP_TOTAL_ONLY_LICENSED || "false").toLowerCase() === "true";
 const SCRAPE_RESULTS = String(process.env.FP_TOTAL_RESULTS || "true").toLowerCase() !== "false";

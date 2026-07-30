@@ -106,7 +106,7 @@ export async function POST(req: Request) {
     const startVa = clampInt(body?.start_va, 775, 1, 99999);
     const endVa = clampInt(body?.end_va, startVa, 1, 99999);
 
-    const workersPerProcess = 8;
+    const workersPerProcess = 12;
     const staggerMs = clampInt(body?.stagger_ms ?? 2500, 2500, 0, 10000);
     const tabAttempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
     const softWaitMs = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);
@@ -171,23 +171,15 @@ export async function POST(req: Request) {
       start_va: startVa,
       end_va: endVa,
       workers_per_process: workersPerProcess,
-      processes: 2,
+      processes: 1,
       robot: TOTAL_ROBOT_FILE,
       role,
       totalRobotPath,
     });
 
     const batchId = crypto.randomUUID();
-    const totalCount = endVa - startVa + 1;
-    const firstCount = Math.ceil(totalCount / 2);
-    const firstStartVa = startVa;
-    const firstEndVa = startVa + firstCount - 1;
-    const secondStartVa = firstEndVa + 1;
     const parts = [
-      { part: 1, startVa: firstStartVa, endVa: firstEndVa },
-      ...(secondStartVa <= endVa
-        ? [{ part: 2, startVa: secondStartVa, endVa }]
-        : []),
+      { part: 1, startVa, endVa },
     ];
 
     for (const part of parts) {
@@ -247,7 +239,7 @@ export async function POST(req: Request) {
         processes: parts.length,
         workers_per_process: workersPerProcess,
         parts: parts.map((part) => ({ part: part.part, start_va: part.startVa, end_va: part.endVa })),
-        message: `Total AutoCheck gestart als ${parts.length} processen van ${workersPerProcess} workers voor VA ${startVa} t/m ${endVa}.`,
+        message: `Total AutoCheck gestart als ${parts.length} proces met ${workersPerProcess} workers voor VA ${startVa} t/m ${endVa}.`,
       },
       { status: 202 }
     );

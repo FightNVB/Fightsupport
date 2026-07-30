@@ -331,7 +331,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTotal(false);
     setMessage(
       res.ok
-        ? (json.message || `Total AutoCheck gestart als 2 processen van 8 workers voor VA ${startVa} t/m ${endVa}.`)
+        ? (json.message || `Total AutoCheck gestart als 1 proces met 12 workers voor VA ${startVa} t/m ${endVa}.`)
         : json.error || "Total AutoCheck starten mislukt."
     );
     setTimeout(loadRuns, 1200);
@@ -570,7 +570,7 @@ export default function FightPaspoortBeheerPage() {
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <span style={styles.activeRunBadge}>● TOTAL AUTOCHECK ACTIEF</span>
             <b>VA {activeTotalBatch.startVa}–{activeTotalBatch.endVa}</b>
-            <span>{activeTotalBatch.runs.length} processen · {activeTotalBatch.workers || 16} workers</span>
+            <span>1 proces · {activeTotalBatch.workers || 12} workers</span>
             <span>{activeTotalBatch.processed}/{activeTotalBatch.total} verwerkt</span>
             <span>Gestart {fmt(activeTotalBatch.startedAt)}</span>
             <span>Loopt {formatDuration(activeTotalBatch.startedAt)}</span>
@@ -580,19 +580,13 @@ export default function FightPaspoortBeheerPage() {
             disabled={stoppingRunId===activeTotalRun?.id}
             onClick={()=>activeTotalRun&&stopRun(activeTotalRun.id)}
           >
-            <StopCircle size={15}/>{stoppingRunId===activeTotalRun?.id?"Stoppen...":"Stop beide processen"}
+            <StopCircle size={15}/>{stoppingRunId===activeTotalRun?.id?"Stoppen...":"Stop proces"}
           </button>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:8,marginTop:12}}>
-          {activeTotalBatch.runs
-            .slice()
-            .sort((a:any,b:any)=>Number(a?.meta?.batch_part??1)-Number(b?.meta?.batch_part??1))
-            .map((run:any)=><div key={run.id} style={{border:"1px solid #81401f",background:"#160b06",padding:"9px 11px",fontSize:12}}>
-              <b>Deel {run?.meta?.batch_part ?? 1}/{run?.meta?.batch_parts ?? activeTotalBatch.runs.length}</b>
-              <span> · VA {run.start_va}–{run.end_va}</span>
-              <span> · {run.processed_count ?? 0}/{runTotalCount(run)}</span>
-              <span> · laatste {run.last_processed_va ?? "—"}</span>
-            </div>)}
+        <div style={{border:"1px solid #81401f",background:"#160b06",padding:"9px 11px",fontSize:12,marginTop:12}}>
+          <b>VA {activeTotalRun?.start_va}–{activeTotalRun?.end_va}</b>
+          <span> · {activeTotalRun?.processed_count ?? 0}/{activeTotalRun ? runTotalCount(activeTotalRun) : 0}</span>
+          <span> · laatste {activeTotalRun?.last_processed_va ?? "—"}</span>
         </div>
       </section>}
       {activeRetryRun&&<section style={styles.retryRunBanner}>
@@ -636,12 +630,12 @@ export default function FightPaspoortBeheerPage() {
       </section>}
       <section style={styles.panel}>
         <h2 style={{marginTop:0}}>Nieuwe synchronisatie</h2>
-        <p style={{color:"#bbb"}}>De Total AutoCheck verdeelt de VA-range automatisch over 2 processen met elk 8 workers. De Sportscholen Sync blijft een los proces en kan tegelijk draaien.</p>
+        <p style={{color:"#bbb"}}>De Total AutoCheck verwerkt de volledige VA-range in 1 proces met 12 workers. De Sportscholen Sync blijft een los proces en kan tegelijk draaien.</p>
         <div style={styles.filters}>
           <label style={styles.label}>Start VA<input style={styles.input} value={startVa} onChange={e=>setStartVa(e.target.value)}/></label>
           <label style={styles.label}>Eind VA<input style={styles.input} value={endVa} onChange={e=>setEndVa(e.target.value)}/></label>
           <button style={styles.orange} disabled={busyTotal||!!activeTotalRun} onClick={startTotalRobot}>
-            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 2 × 8"}
+            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 1 × 12"}
           </button>
           <button style={styles.silver} disabled={busyTeam||!!activeTeamRun} onClick={startTeamRobot}>
             <Users size={16}/>{busyTeam||activeTeamRun?"Sportscholen draaien...":"Start Sportscholen Sync"}
@@ -666,7 +660,7 @@ export default function FightPaspoortBeheerPage() {
           <Td>{fmt(r.started_at)}</Td>
           <Td>{finishedAt ? fmt(finishedAt) : isDone ? "-" : "Nog bezig"}</Td>
           <Td>{formatDuration(r.started_at, finishedAt)}</Td>
-          <Td>{isTeam ? `${totalTeamSchools} sportscholen` : isRetry ? `${totalRunItems} retry-VA's` : r?.meta?.batch_id ? `Deel ${r?.meta?.batch_part ?? 1}/${r?.meta?.batch_parts ?? 2}: ${r.start_va}–${r.end_va}` : `${r.start_va}–${r.end_va}`}</Td>
+          <Td>{isTeam ? `${totalTeamSchools} sportscholen` : isRetry ? `${totalRunItems} retry-VA's` : `${r.start_va}–${r.end_va}`}</Td>
           <Td>{isTeam ? "—" : (r.last_processed_va ?? "—")}</Td>
           <Td>{r.processed_count ?? 0}/{isTeam ? totalTeamSchools : totalRunItems}</Td>
           <Td>{isTeam ? (r.meta?.succeeded ?? r.found_count ?? 0) : r.found_count}</Td>
