@@ -990,7 +990,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     }, found.selector);
   };
 
-  console.log(`[fp-total] ⬇️ VA ${va} download gestart; wachten op Excel...`);
+  console.log(`[uitslagen] ⬇️ VA ${va} download gestart; wachten op Excel...`);
   await clickDownload();
 
   const start = Date.now();
@@ -1015,7 +1015,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     if (Date.now() - lastLogAt >= 5000) {
       lastLogAt = Date.now();
       console.log(
-        `[fp-total] ⏳ VA ${va} wacht op Excel (${Math.round(elapsedMs / 1000)}s)`,
+        `[uitslagen] ⏳ VA ${va} wacht op Excel (${Math.round(elapsedMs / 1000)}s)`,
         { files: filesNow }
       );
     }
@@ -1042,7 +1042,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
       const candidate = xlsxFiles[0];
 
       console.log(
-        `[fp-total] 📥 VA ${va} Excel gezien; wachten tot bestand volledig klaar is: ${path.basename(candidate)}`
+        `[uitslagen] 📥 VA ${va} Excel gezien; wachten tot bestand volledig klaar is: ${path.basename(candidate)}`
       );
 
       let lastSize = -1;
@@ -1088,7 +1088,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
             await readXlsxToRows(candidate, { sheetIndex: 0 });
 
             console.log(
-              `[fp-total] ✅ VA ${va} Excel volledig binnen (${size} bytes)`
+              `[uitslagen] ✅ VA ${va} Excel volledig binnen (${size} bytes)`
             );
 
             return {
@@ -1097,7 +1097,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
             };
           } catch (e) {
             console.log(
-              `[fp-total] ⏳ VA ${va} Excel bestaat maar is nog niet leesbaar:`,
+              `[uitslagen] ⏳ VA ${va} Excel bestaat maar is nog niet leesbaar:`,
               e?.message ?? String(e)
             );
             stableSince = null;
@@ -1115,7 +1115,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     ) {
       retried = true;
       console.log(
-        `[fp-total] 🔁 VA ${va} na 20s nog geen bestand; download één keer opnieuw klikken`
+        `[uitslagen] 🔁 VA ${va} na 20s nog geen bestand; download één keer opnieuw klikken`
       );
       await clickDownload().catch(() => {});
     }
@@ -1230,7 +1230,7 @@ async function scrapeResults(page, va) {
     return { status: "skipped", rows: [], error: null, download: null };
   }
 
-  console.log(`[fp-total] ▶️ UITSLAGEN start VA ${va}`);
+  console.log(`[uitslagen] ▶️ start VA ${va}`);
 
   const MAX_TRIES = Number(
     process.env.FP_RESULTS_TRIES ??
@@ -1253,7 +1253,7 @@ async function scrapeResults(page, va) {
       download = await downloadResultsExcel(page, va, downloadControl);
 
       if (!download) {
-        console.log(`[fp-total] ❌ VA ${va} geen volledig Excel-bestand ontvangen`);
+        console.log(`[uitslagen] ❌ VA ${va} geen volledig Excel-bestand ontvangen`);
         return {
           status: "error",
           rows: [],
@@ -1268,7 +1268,7 @@ async function scrapeResults(page, va) {
       if (parsed?.meta?.ok) {
         const n = parsed.rows.length;
 
-        console.log(`[fp-total] ✅ UITSLAGEN done VA ${va} (n=${n})`);
+        console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
 
         // Pas na succesvolle DB-save opruimen.
         return {
@@ -1284,7 +1284,7 @@ async function scrapeResults(page, va) {
       const headers = lastMeta?.headers ?? [];
 
       console.log(
-        `[fp-total] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`,
+        `[uitslagen] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`,
         {
           attempt,
           missingHeaders: missing,
@@ -1318,7 +1318,7 @@ async function scrapeResults(page, va) {
       }
 
       console.log(
-        `[fp-total] ⚠️ VA ${va} UITSLAGEN poging ${attempt}/${MAX_TRIES} mislukt:`,
+        `[uitslagen] ⚠️ VA ${va} UITSLAGEN poging ${attempt}/${MAX_TRIES} mislukt:`,
         msg
       );
 
@@ -1587,9 +1587,9 @@ async function scrapeOne(page, va, openFreshPage) {
       // Net als de bundle altijd de echte UITSLAGEN-export openen.
       // De profielheader "Wedstrijden" is alleen informatief en mag nooit bepalen
       // of de uitslagen wel of niet worden opgehaald.
-      const resultStep = await withFreshVaTab("UITSLAGEN", async (p) => {
-        return await scrapeResults(p, va);
-      }).catch((e) => ({
+      // Exact als bundle: UITSLAGEN op dezelfde reeds geopende en geverifieerde
+      // workerpagina uitvoeren, direct na FULLFIGHTER. Geen tweede VA-tab openen.
+      const resultStep = await scrapeResults(page, va).catch((e) => ({
         status: "error",
         rows: [],
         error: e?.message ?? String(e),
