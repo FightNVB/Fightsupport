@@ -1943,7 +1943,6 @@ async function main() {
   const STAGGER = Number(process.env.STAGGER_MS ?? "2500");
 
   let idx = 0;
-  const retryQueued = new Set();
 
   async function updateRunProgress(lastVa = lastProcessedVa) {
     if (lastVa != null) {
@@ -2056,7 +2055,6 @@ async function main() {
         );
 
         processed++;
-        retryQueued.delete(String(va));
         lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
         if (res.exists) {
           found++;
@@ -2107,18 +2105,12 @@ async function main() {
             // Deze worker moet altijd opnieuw aan de actuele browser worden gekoppeld.
             await resetWorkerContext(`browser recovery VA ${va}`);
 
-            // De VA staat altijd al in de oorspronkelijke vaList. Daarom mag hier
-            // niet met vaList.includes() worden gecontroleerd: dat voorkwam juist
-            // dat een pending VA ooit opnieuw werd uitgevoerd. Houd alleen bij of
-            // voor deze VA al een retry achteraan in de queue is gezet.
-            const retryVa = String(va);
-            if (!retryQueued.has(retryVa)) {
-              retryQueued.add(retryVa);
-              vaList.push(retryVa);
-              console.log(`[fp-total] ♻️ ${label} VA ${va} opnieuw achteraan ingepland`);
-            } else {
-              console.log(`[fp-total] ↪️ ${label} VA ${va} stond al in de retry-queue`);
+            // Plan dezelfde VA niet meerdere keren achteraan in.
+            if (!vaList.includes(String(va))) {
+              vaList.push(String(va));
             }
+
+            console.log(`[fp-total] ♻️ ${label} VA ${va} opnieuw achteraan ingepland`);
           } catch (restartError) {
             processed++;
             errors++;
@@ -2178,44 +2170,7 @@ async function main() {
     await Promise.all(Array.from({ length: WORKERS }, (_, i) => workerLoop(i)));
     await updateRunProgress();
 
-    // Baseer de eindstatus op de werkelijk opgeslagen itemstatussen en niet
-    // uitsluitend op de lokale teller. Zo kunnen pending/processing-items nooit
-    // ongemerkt als afgerond gelden en veroorzaken tellerafwijkingen geen foutieve
-    // eindstatus.
-    const { data: finalItems, error: finalItemsError } = await supabase
-      .from("fightpassport_sync_items")
-      .select("va_nummer,status,profiel_gevonden,licentie_actief")
-      .eq("sync_run_id", run.id);
-
-    if (finalItemsError) throw finalItemsError;
-
-    const requestedSet = new Set(requestedVaNumbers.map((va) => String(va)));
-    const relevantFinalItems = (finalItems || []).filter((item) =>
-      requestedSet.has(String(item.va_nummer))
-    );
-    const terminalFinalItems = relevantFinalItems.filter((item) =>
-      terminalStatuses.has(String(item.status || "").toLowerCase())
-    );
-
-    processed = terminalFinalItems.length;
-    found = terminalFinalItems.filter((item) => item.profiel_gevonden === true).length;
-    licensed = terminalFinalItems.filter((item) => item.licentie_actief === true).length;
-    errors = terminalFinalItems.filter((item) =>
-      String(item.status || "").toLowerCase() === "error"
-    ).length;
-
-    const finalItemByVa = new Map(
-      relevantFinalItems.map((item) => [String(item.va_nummer), item])
-    );
-    const unfinishedItems = requestedVaNumbers
-      .map((va) => {
-        const vaNummer = String(va);
-        return finalItemByVa.get(vaNummer) || { va_nummer: vaNummer, status: "missing" };
-      })
-      .filter((item) =>
-        !terminalStatuses.has(String(item.status || "").toLowerCase())
-      );
-    const allDone = processed === requestedVaNumbers.length && unfinishedItems.length === 0;
+    const allDone = processed >= requestedVaNumbers.length;
     const now = new Date().toISOString();
     const currentMeta = { ...(run.meta || {}), pid: null, last_stopped_at: stopRequested ? now : undefined, last_stop_signal: stopSignal || undefined };
 
@@ -2245,7 +2200,7 @@ async function main() {
       licensed_count: licensed,
       error_count: errors,
       finished_at: now,
-      error_message: `Scraper beëindigd met ${unfinishedItems.length} niet-afgeronde VA-nummers: ${unfinishedItems.slice(0, 25).map((item) => item.va_nummer).join(", ")}${unfinishedItems.length > 25 ? "…" : ""}.`,
+      error_message: "Scraper beëindigd voordat alle VA-nummers waren verwerkt, zonder stopsignaal.",
       meta: currentMeta,
     };
 
