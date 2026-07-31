@@ -1295,7 +1295,6 @@ async function scrapeOne(page, va, openFreshPage) {
   }
 
   const licensed = boolFromJaNee(summary.licentie) === true;
-  const reportedMatches = intFrom(summary.wedstrijden) ?? 0;
   let details = {};
   let gyms = [];
   let startbans = [];
@@ -1442,7 +1441,7 @@ async function scrapeOne(page, va, openFreshPage) {
       });
     }
 
-    if (SCRAPE_RESULTS && reportedMatches > 0) {
+    if (SCRAPE_RESULTS) {
       const resultStep = await withFreshVaTab("UITSLAGEN", async (p) => {
         return await scrapeResults(p, va);
       }).catch((e) => ({
@@ -1455,14 +1454,6 @@ async function scrapeOne(page, va, openFreshPage) {
       resultsError = resultStep.error;
       results = resultStep.rows || [];
       resultsDownload = resultStep.download || null;
-    } else if (SCRAPE_RESULTS) {
-      // Geen wedstrijden volgens de profielheader: er is dan niets te downloaden.
-      // Markeer dit als een succesvolle lege uitslagensnapshot zodat oude foutieve
-      // resultaten uit een eerdere scrape worden verwijderd.
-      resultsStatus = "no_results";
-      resultsError = null;
-      results = [];
-      resultsDownload = null;
     }
   }
 
