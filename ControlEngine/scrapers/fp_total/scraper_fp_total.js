@@ -2001,6 +2001,12 @@ async function main() {
       const itemStartedAt = new Date().toISOString();
 
       await ensureCurrentWorkerContext();
+
+      // Onthoud met welke browsergeneratie deze VA daadwerkelijk begint.
+      // Wanneer een andere worker de gedeelde browser inmiddels al herstelt,
+      // mag een fout uit deze oude generatie niet nóg een volledige herstart veroorzaken.
+      const vaBrowserGeneration = browserGeneration;
+
       console.log(`[fp-total] 🤖 ${label} → VA ${va}`);
       await upsertSyncItem(run.id, va, { status: "processing", started_at: itemStartedAt, finished_at: null });
 
@@ -2085,9 +2091,25 @@ async function main() {
           });
 
           try {
-            await restartBrowserLocked(`${label} VA ${va}`);
+            if (vaBrowserGeneration === browserGeneration) {
+              // Alleen de eerste worker die een fout uit deze browsergeneratie ziet,
+              // mag de volledige gedeelde browser opnieuw starten.
+              await restartBrowserLocked(`${label} VA ${va}`);
+            } else {
+              console.log(
+                `[fp-total] ♻️ ${label} gebruikte oude browsergeneratie ${vaBrowserGeneration}; ` +
+                `actuele generatie is ${browserGeneration}. Geen extra browserherstart nodig.`
+              );
+            }
+
+            // Deze worker moet altijd opnieuw aan de actuele browser worden gekoppeld.
             await resetWorkerContext(`browser recovery VA ${va}`);
-            vaList.push(String(va));
+
+            // Plan dezelfde VA niet meerdere keren achteraan in.
+            if (!vaList.includes(String(va))) {
+              vaList.push(String(va));
+            }
+
             console.log(`[fp-total] ♻️ ${label} VA ${va} opnieuw achteraan ingepland`);
           } catch (restartError) {
             processed++;
