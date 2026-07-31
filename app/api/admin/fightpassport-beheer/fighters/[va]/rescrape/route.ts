@@ -55,7 +55,7 @@ export async function POST(
       TOTAL_ROBOT_FILE,
     );
 
-    const proc = spawn("node", [robotPath, va, va], {
+    const proc = spawn(process.execPath, [robotPath, va, va], {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
       cwd: path.dirname(robotPath),
