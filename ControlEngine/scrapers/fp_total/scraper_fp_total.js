@@ -9,6 +9,13 @@ import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const wait = sleep;
+
+function safeSlug(v) {
+  return String(v ?? "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "");
+}
 
 const START_VA = Number(process.argv[2] || process.env.FP_TOTAL_START_VA || 775);
 const END_VA = Number(process.argv[3] || process.env.FP_TOTAL_END_VA || 33150);
@@ -838,7 +845,7 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
   return null;
 }
 
-async function openResultsTileVerified(page, va, timeoutMs = 20000) {
+async function openUitslagenTile(page, va, timeoutMs = 20000) {
   await closeAnyModal(page);
 
   const start = Date.now();
@@ -862,23 +869,23 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000) {
     }, va).catch(() => false);
 
     if (!clicked) {
-      await sleep(400);
+      await wait(400);
       continue;
     }
 
-    await sleep(1200);
+    await wait(1200);
 
-    const found = await findResultsDownloadControl(page, 8000);
+    const found = await findUitslagenDownloadControl(page, 8000);
     if (found) return found;
 
     await closeAnyModal(page).catch(() => {});
-    await sleep(600);
+    await wait(600);
   }
 
   return null;
 }
 
-async function findResultsDownloadControl(page, timeoutMs = 10000) {
+async function findUitslagenDownloadControl(page, timeoutMs = 10000) {
   const start = Date.now();
   const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
 
@@ -940,23 +947,18 @@ async function findResultsDownloadControl(page, timeoutMs = 10000) {
       }
     }
 
-    await sleep(300);
+    await wait(300);
   }
 
   return null;
 }
 
-function cleanupDownloadDir(dir) {
-  if (!dir) return;
-  try {
-    fs.rmSync(dir, { recursive: true, force: true });
-  } catch {}
-}
-
-async function downloadResultsExcel(page, va, initialFound = null) {
+async function downloadExcel(page, _matchmaking_id, va, initialFound = null) {
+  const mm = safeSlug("total");
   const vaSafe = String(va ?? "").replace(/[^0-9]/g, "");
   const uniq = crypto.randomUUID().slice(0, 8);
-  const downloadDir = path.resolve(__dirname, "downloads", `${vaSafe}_${uniq}`);
+
+  const downloadDir = path.resolve(__dirname, "downloads", mm, `${vaSafe}_${uniq}`);
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const client = await page.target().createCDPSession();
@@ -967,7 +969,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
 
   const found =
     initialFound ||
-    await findResultsDownloadControl(page, 45000);
+    await findUitslagenDownloadControl(page, 45000);
 
   if (!found) {
     fs.rmSync(downloadDir, { recursive: true, force: true });
@@ -994,11 +996,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
   await clickDownload();
 
   const start = Date.now();
-  const maxWaitMs = Number(
-    process.env.FP_RESULTS_DOWNLOAD_TIMEOUT_MS ??
-    process.env.UITSLAGEN_DOWNLOAD_TIMEOUT_MS ??
-    "180000"
-  );
+  const maxWaitMs = Number(process.env.UITSLAGEN_DOWNLOAD_TIMEOUT_MS ?? "180000");
   let retried = false;
   let lastLogAt = 0;
 
@@ -1082,7 +1080,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
           stableSince !== null &&
           Date.now() - stableSince >= 4000
         ) {
-          await sleep(1500);
+          await wait(1500);
 
           try {
             await readXlsxToRows(candidate, { sheetIndex: 0 });
@@ -1104,7 +1102,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
           }
         }
 
-        await sleep(500);
+        await wait(500);
       }
     }
 
@@ -1120,18 +1118,16 @@ async function downloadResultsExcel(page, va, initialFound = null) {
       await clickDownload().catch(() => {});
     }
 
-    await sleep(500);
+    await wait(500);
   }
 
   fs.rmSync(downloadDir, { recursive: true, force: true });
   return null;
 }
 
-async function parseResultsExcel(filePath, va) {
+async function parseExcel(filePath, va, _matchmaking_id, _controle_run_id) {
   const rows = await readXlsxToRows(filePath, { sheetIndex: 0 });
 
-  // Exact dezelfde exportindeling als de werkende bundle:
-  // rij 5 in Excel (array-index 4) bevat de kolomkoppen.
   const headerRow = rows[4] || [];
   const headers = headerRow.map((h) => (h ? String(h).trim() : ""));
 
@@ -1175,19 +1171,21 @@ async function parseResultsExcel(filePath, va) {
     const d = row[idxDatum];
     if (!d) continue;
 
-    const datum = parseNlDate(d);
-    if (!datum) continue;
+    const isoDatum = parseNlDate(d);
+    if (!isoDatum) continue;
 
     out.push({
       va_nummer: String(va),
-      datum,
-      evenement: String(row[idxEvenement] ?? "").trim() || null,
-      tegenstander: String(row[idxTegenstander] ?? "").trim() || null,
-      sportschool: idxSportschool !== -1 ? String(row[idxSportschool] ?? "").trim() || null : null,
-      discipline: String(row[idxDiscipline] ?? "").trim() || null,
-      klasse: idxKlasse !== -1 ? String(row[idxKlasse] ?? "").trim() || null : null,
-      gewicht: idxGewicht !== -1 ? String(row[idxGewicht] ?? "").trim() || null : null,
-      uitslag: String(row[idxUitslag] ?? "").trim() || null,
+
+      datum: isoDatum,
+      evenement: toStr(row[idxEvenement]) ?? null,
+      tegenstander: toStr(row[idxTegenstander]) ?? null,
+
+      sportschool: idxSportschool !== -1 ? toStr(row[idxSportschool]) ?? null : null,
+      discipline: toStr(row[idxDiscipline]) ?? null,
+      klasse: idxKlasse !== -1 ? toStr(row[idxKlasse]) ?? null : null,
+      gewicht: idxGewicht !== -1 ? toStr(row[idxGewicht]) ?? null : null,
+      uitslag: toStr(row[idxUitslag]) ?? null,
       raw_json: { headers, row },
       last_seen_at: new Date().toISOString(),
     });
@@ -1196,22 +1194,27 @@ async function parseResultsExcel(filePath, va) {
   const seen = new Set();
   const deduped = [];
 
-  for (const row of out) {
-    const key = [
-      row.va_nummer,
-      row.datum,
-      row.evenement,
-      row.tegenstander,
-      row.uitslag,
-      row.discipline,
-      row.klasse,
+  for (const r of out) {
+    const k = [
+      r.va_nummer,
+      r.datum,
+      r.evenement,
+      r.tegenstander,
+      r.uitslag,
+      r.discipline,
+      r.klasse,
     ]
-      .map((x) => String(x ?? "").replace(/\s+/g, " ").trim())
+      .map((x) =>
+        String(x ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+      )
       .join("||");
 
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(row);
+    if (seen.has(k)) continue;
+
+    seen.add(k);
+    deduped.push(r);
   }
 
   return {
@@ -1225,59 +1228,41 @@ async function parseResultsExcel(filePath, va) {
   };
 }
 
-async function scrapeResults(page, va) {
-  if (!SCRAPE_RESULTS) {
-    return { status: "skipped", rows: [], error: null, download: null };
-  }
-
+async function doUitslagen(page, va) {
   console.log(`[uitslagen] ▶️ start VA ${va}`);
 
-  const MAX_TRIES = Number(
-    process.env.FP_RESULTS_TRIES ??
-    process.env.UITSLAGEN_TRIES ??
-    "1"
-  );
-
+  const MAX_TRIES = Number(process.env.UITSLAGEN_TRIES ?? "1");
   let lastMeta = null;
 
   for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
     let download = null;
 
     try {
-      const downloadControl = await openResultsTileVerified(page, va);
+      const downloadControl = await openUitslagenTile(page, va);
 
       if (!downloadControl) {
         throw new Error(`UITSLAGEN tegel/downloadknop niet geladen — VA ${va}`);
       }
 
-      download = await downloadResultsExcel(page, va, downloadControl);
+      download = await downloadExcel(page, "total", va, downloadControl);
 
       if (!download) {
         console.log(`[uitslagen] ❌ VA ${va} geen volledig Excel-bestand ontvangen`);
-        return {
-          status: "error",
-          rows: [],
-          error: "Uitslagenbestand niet gedownload",
-          download: null,
-        };
+        return { status: "error", rows: [], error: "Uitslagenbestand niet gedownload" };
       }
 
-      const parsed = await parseResultsExcel(download.file, va);
+      const parsed = await parseExcel(download.file, va, null, null);
       lastMeta = parsed?.meta ?? null;
 
       if (parsed?.meta?.ok) {
-        const n = parsed.rows.length;
+        await saveResultsSnapshot(va, parsed.rows);
+        const n = parsed.rows.length ?? 0;
+
+        // Exact als bundle: pas NA succesvolle DB-save opruimen.
+        fs.rmSync(download.dir, { recursive: true, force: true });
 
         console.log(`[uitslagen] ✅ done VA ${va} (n=${n})`);
-
-        // Pas na succesvolle DB-save opruimen.
-        return {
-          status: n ? "success" : "no_results",
-          rows: parsed.rows,
-          error: null,
-          download,
-          headers: lastMeta?.headers ?? [],
-        };
+        return { status: n ? "success" : "no_results", rows: parsed.rows, error: null };
       }
 
       const missing = lastMeta?.missingHeaders ?? [];
@@ -1285,56 +1270,37 @@ async function scrapeResults(page, va) {
 
       console.log(
         `[uitslagen] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`,
-        {
-          attempt,
-          missingHeaders: missing,
-          headers,
-        }
+        { attempt, missingHeaders: missing, headers }
       );
 
-      // Ook deze aantoonbaar lege export wordt pas na succesvolle DB-save opgeruimd.
-      return {
-        status: "no_results",
-        rows: [],
-        error: null,
-        download,
-        headers,
-        missingHeaders: missing,
-      };
+      await saveResultsSnapshot(va, []);
+      fs.rmSync(download.dir, { recursive: true, force: true });
+
+      return { status: "no_results", rows: [], error: null };
     } catch (e) {
       const msg = e?.message ?? String(e);
+      const looksLikeDbError =
+        /supabase|duplicate|violates|constraint|database|insert|upsert|delete/i.test(msg);
 
-      if (download?.dir) {
-        cleanupDownloadDir(download.dir);
+      if (download?.dir && !looksLikeDbError) {
+        fs.rmSync(download.dir, { recursive: true, force: true });
       }
 
       if (attempt >= MAX_TRIES) {
-        return {
-          status: "error",
-          rows: [],
-          error: msg,
-          download: null,
-        };
+        return { status: "error", rows: [], error: msg };
       }
 
       console.log(
-        `[uitslagen] ⚠️ VA ${va} UITSLAGEN poging ${attempt}/${MAX_TRIES} mislukt:`,
+        `[uitslagen] ⚠️ VA ${va} poging ${attempt}/${MAX_TRIES} mislukt:`,
         msg
       );
 
       await closeAnyModal(page).catch(() => {});
-      await sleep(1000);
-    } finally {
-      await page.keyboard.press("Escape").catch(() => {});
+      await wait(1000);
     }
   }
 
-  return {
-    status: "error",
-    rows: [],
-    error: "UITSLAGEN onbekende fout",
-    download: null,
-  };
+  return { status: "error", rows: [], error: "no_uitslagen" };
 }
 
 async function saveChildSnapshot(table, va, rows, mapper) {
@@ -1444,7 +1410,6 @@ async function scrapeOne(page, va, openFreshPage) {
   let results = [];
   let resultsStatus = SCRAPE_RESULTS ? "pending" : "skipped";
   let resultsError = null;
-  let resultsDownload = null;
 
   // Iedere tegel krijgt bewust een SCHONE, opnieuw geverifieerde VA-tab.
   // Zo kunnen oude modals/downloadknoppen van o.a. LICENTIES nooit meekomen
@@ -1589,42 +1554,21 @@ async function scrapeOne(page, va, openFreshPage) {
       // of de uitslagen wel of niet worden opgehaald.
       // Exact als bundle: UITSLAGEN op dezelfde reeds geopende en geverifieerde
       // workerpagina uitvoeren, direct na FULLFIGHTER. Geen tweede VA-tab openen.
-      const resultStep = await scrapeResults(page, va).catch((e) => ({
+      const resultStep = await doUitslagen(page, va).catch((e) => ({
         status: "error",
         rows: [],
         error: e?.message ?? String(e),
-        download: null,
       }));
 
       resultsStatus = resultStep.status;
       resultsError = resultStep.error;
       results = resultStep.rows || [];
-      resultsDownload = resultStep.download || null;
     }
   }
 
   // FULLFIGHTER en UITSLAGEN zijn bewust twee losse opslagstappen.
   await saveFighter({ va, summary, details, gyms, startbans, licenses, results });
 
-  if (resultsStatus === "success" || resultsStatus === "no_results") {
-    try {
-      // Eerst parsen-resultaat naar database schrijven.
-      await saveResultsSnapshot(va, results);
-
-      // Pas NA succesvolle database-save het gedownloade Excel-bestand/map opruimen.
-      if (resultsDownload?.dir) {
-        cleanupDownloadDir(resultsDownload.dir);
-        resultsDownload = null;
-      }
-    } catch (e) {
-      // Bij databasefout download bewust laten staan voor controle/herstel.
-      console.log(
-        `[fp-total] ❌ VA ${va} uitslagen DB-save mislukt; download blijft staan:`,
-        resultsDownload?.file || null
-      );
-      throw e;
-    }
-  }
 
   return {
     exists: true,
