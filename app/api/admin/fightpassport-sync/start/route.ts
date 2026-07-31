@@ -106,7 +106,7 @@ export async function POST(req: Request) {
     const startVa = clampInt(body?.start_va, 775, 1, 99999);
     const endVa = clampInt(body?.end_va, startVa, 1, 99999);
 
-    const workersPerProcess = 16;
+    const workersPerProcess = 20;
     const staggerMs = clampInt(body?.stagger_ms ?? 2500, 2500, 0, 10000);
     const tabAttempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
     const softWaitMs = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);

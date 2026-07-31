@@ -14,7 +14,7 @@ const START_VA = Number(process.argv[2] || process.env.FP_TOTAL_START_VA || 775)
 const END_VA = Number(process.argv[3] || process.env.FP_TOTAL_END_VA || 33150);
 const WORKERS_RAW = Number(process.env.FP_TOTAL_WORKERS ?? process.env.WORKERS ?? "8");
 const WORKERS = Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
-  ? Math.min(12, Math.max(1, Math.floor(WORKERS_RAW)))
+  ? Math.min(20, Math.max(1, Math.floor(WORKERS_RAW)))
   : 8;
 const FULL_DETAILS_ONLY_LICENSED = String(process.env.FP_TOTAL_ONLY_LICENSED || "false").toLowerCase() === "true";
 const SCRAPE_RESULTS = String(process.env.FP_TOTAL_RESULTS || "true").toLowerCase() !== "false";
@@ -899,53 +899,29 @@ async function findResultsDownloadControl(page, timeoutMs = 10000) {
         }
 
         for (const handle of handles) {
-          const verdict = await frame.evaluate((el) => {
-            const visible = (node) => {
-              if (!node) return false;
-              const r = node.getBoundingClientRect();
-              const st = getComputedStyle(node);
-              return (
-                r.width > 0 &&
-                r.height > 0 &&
-                st.display !== "none" &&
-                st.visibility !== "hidden"
-              );
-            };
+          const isVisible = await frame.evaluate((el) => {
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            const st = getComputedStyle(el);
+            return (
+              r.width > 0 &&
+              r.height > 0 &&
+              st.display !== "none" &&
+              st.visibility !== "hidden" &&
+              st.opacity !== "0"
+            );
+          }, handle).catch(() => false);
 
-            if (!visible(el)) return { ok: false };
-
-            const container =
-              el.closest(".outer, .modal, [role=dialog], .ui-dialog, .tile, body") ||
-              document.body;
-
-            const contextText = String(container.innerText || document.body.innerText || "")
-              .replace(/\u00a0/g, " ")
-              .toUpperCase();
-
-            // Nooit een downloadknop uit LICENTIES accepteren.
-            if (contextText.includes("LICENTIES") && !contextText.includes("UITSLAGEN")) {
-              return { ok: false };
-            }
-
-            const looksLikeResults =
-              contextText.includes("UITSLAGEN") ||
-              (
-                contextText.includes("DATUM") &&
-                contextText.includes("EVENEMENT") &&
-                contextText.includes("TEGENSTANDER")
-              );
-
-            return { ok: looksLikeResults };
-          }, handle).catch(() => ({ ok: false }));
-
-          if (verdict?.ok) {
+          // Zodra de zichtbare Excel-downloadknop bestaat, direct gebruiken.
+          // Niet wachten op tabelkoppen of geladen uitslagregels.
+          if (isVisible) {
             return { frame, selector, handle };
           }
         }
       }
     }
 
-    await sleep(300);
+    await sleep(200);
   }
 
   return null;
@@ -1017,7 +993,6 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     process.env.FP_RESULTS_DOWNLOAD_TIMEOUT_MS ?? "180000"
   );
 
-  let retried = false;
   let lastLogAt = 0;
 
   while (Date.now() - downloadStartedAt < maxDownloadWaitMs) {
@@ -1129,21 +1104,6 @@ async function downloadResultsExcel(page, va, initialFound = null) {
 
         await sleep(500);
       }
-    }
-
-    // Alleen opnieuw klikken als er na 20 seconden werkelijk nog geen enkel
-    // downloadbestand of tijdelijke .crdownload zichtbaar is.
-    if (
-      !retried &&
-      elapsedMs > 20000 &&
-      filesNow.length === 0 &&
-      crdownloads.length === 0
-    ) {
-      retried = true;
-      console.log(
-        `[fp-total] 🔁 VA ${va} nog geen downloadbestand na 20s; UITSLAGEN download één keer opnieuw klikken`
-      );
-      await clickDownload().catch(() => {});
     }
 
     await sleep(500);
