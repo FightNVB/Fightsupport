@@ -360,21 +360,34 @@ function calcAge(dob: any, ref: any) {
   if (m < 0 || (m === 0 && date.getUTCDate() < birth.getUTCDate())) age -= 1;
   return age >= 0 ? `${age}` : "";
 }
-function leeftijdOf(f: Fighter) {
-  return (
-    calcAge(
-      f.geboortedatum,
-      pickFirst(f.event_datum, f.event_date, f.datum, f.matchmaking_datum),
-    ) || "-"
+function fighterBirthDate(f: Fighter) {
+  // Voor de leeftijd op het evenement is de gecontroleerde FightPassport-datum
+  // leidend. Daarna volgen de normale en de oorspronkelijke invoerwaarde.
+  return pickFirst(
+    f.fp_geboortedatum,
+    f.geboortedatum,
+    f.geboortedatum_input,
+    f.aanmelding_geboortedatum,
+    getPath(f, "extra.raw.aanmelding.geboortedatum"),
   );
 }
-function leeftijdSortValue(f: Fighter) {
-  const age = Number(
-    calcAge(
-      f.geboortedatum,
-      pickFirst(f.event_datum, f.event_date, f.datum, f.matchmaking_datum),
-    ),
+
+function fighterEventDate(f: Fighter) {
+  return pickFirst(
+    f.evenement_datum,
+    f.event_datum,
+    f.event_date,
+    f.matchmaking_datum,
+    f.datum,
   );
+}
+
+function leeftijdOf(f: Fighter) {
+  return calcAge(fighterBirthDate(f), fighterEventDate(f)) || "-";
+}
+
+function leeftijdSortValue(f: Fighter) {
+  const age = Number(calcAge(fighterBirthDate(f), fighterEventDate(f)));
   return Number.isFinite(age) && age >= 0 ? age : Number.POSITIVE_INFINITY;
 }
 
@@ -1748,16 +1761,42 @@ export default function FightersPage() {
                 )
               : [];
 
-      setMatchRows(getActiveMatchRows(jsonWithDbBouts));
-      setMatchmakingMeta(
+      const loadedMatchmakingMeta =
         obj(json?.matchmaking) ||
-          obj(json?.event) ||
-          obj(json?.matchmaking_meta) ||
-          {},
+        obj(json?.event) ||
+        obj(json?.matchmaking_meta) ||
+        {};
+
+      // De contextregels bevatten niet altijd zelf de evenementdatum. Geef de
+      // datum van deze matchmaking daarom expliciet aan iedere vechter mee.
+      // Zo gebruiken leeftijd, tabindeling en klassetoewijzing nooit de datum
+      // van vandaag wanneer iemand vóór het gala 18 wordt.
+      const matchmakingEventDate = pickFirst(
+        loadedMatchmakingMeta?.evenement_datum,
+        loadedMatchmakingMeta?.event_datum,
+        loadedMatchmakingMeta?.event_date,
+        loadedMatchmakingMeta?.datum,
+        json?.evenement_datum,
+        json?.event_datum,
+        json?.event_date,
+        json?.datum,
+        loadedFighters[0]?.evenement_datum,
       );
-      setFighters(loadedFighters);
+      const fightersWithEventDate = loadedFighters.map((fighter: Fighter) => ({
+        ...fighter,
+        evenement_datum: pickFirst(
+          fighter?.evenement_datum,
+          fighter?.event_datum,
+          fighter?.event_date,
+          matchmakingEventDate,
+        ),
+      }));
+
+      setMatchRows(getActiveMatchRows(jsonWithDbBouts));
+      setMatchmakingMeta(loadedMatchmakingMeta);
+      setFighters(fightersWithEventDate);
       const vaNumbers = Array.from(
-        new Set(loadedFighters.map(vaOf).filter(Boolean)),
+        new Set(fightersWithEventDate.map(vaOf).filter(Boolean)),
       );
       const fightPassportResults = await fetchFightPassportResults(vaNumbers);
       setUitslagenRows(fightPassportResults);
@@ -1765,14 +1804,14 @@ export default function FightersPage() {
       setTournamentCode(nextTournamentCode(loadedTournaments));
       setSelected((cur) =>
         cur.filter((id) =>
-          loadedFighters.some(
+          fightersWithEventDate.some(
             (f: Fighter) => rowKeyOf(f) === id && !isBlockedFromMatching(f),
           ),
         ),
       );
       setTournamentIds((cur) =>
         cur.filter((id) =>
-          loadedFighters.some(
+          fightersWithEventDate.some(
             (f: Fighter) =>
               inschrijvingIdOf(f) === id && !isBlockedFromMatching(f),
           ),
@@ -1780,7 +1819,7 @@ export default function FightersPage() {
       );
       setMatchRed((cur) =>
         cur &&
-        loadedFighters.some(
+        fightersWithEventDate.some(
           (f: Fighter) =>
             inschrijvingIdOf(f) === cur && !isBlockedFromMatching(f),
         )
