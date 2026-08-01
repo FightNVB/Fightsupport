@@ -18,6 +18,7 @@ export default function FightPaspoortBeheerPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [items, setItems] = useState<SyncItem[]>([]);
   const [teamErrors, setTeamErrors] = useState<any[]>([]);
+  const [startverbodErrors, setStartverbodErrors] = useState<any[]>([]);
   const [missingVa, setMissingVa] = useState<any[]>([]);
   const [missingStats, setMissingStats] = useState<any>({});
   const [missingStatus, setMissingStatus] = useState("all");
@@ -37,6 +38,7 @@ export default function FightPaspoortBeheerPage() {
   const [message, setMessage] = useState("");
   const [busyTotal, setBusyTotal] = useState(false);
   const [busyTeam, setBusyTeam] = useState(false);
+  const [busyStartverbod, setBusyStartverbod] = useState(false);
   const [busyRetryTeam, setBusyRetryTeam] = useState(false);
   const [busyRetryRun, setBusyRetryRun] = useState(false);
   const [busyDeleteTotal, setBusyDeleteTotal] = useState(false);
@@ -206,10 +208,24 @@ export default function FightPaspoortBeheerPage() {
     }
   }, []);
 
+
+  const loadStartverbodErrors = useCallback(async () => {
+    const res = await authedFetch("/api/admin/fightpassport-sync/startverbod-errors?open=true");
+    const json = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      setStartverbodErrors(json.errors ?? []);
+    } else {
+      setStartverbodErrors([]);
+      setMessage(json.error || "Startverbod-koppelfouten laden mislukt.");
+    }
+  }, []);
+
   useEffect(() => {
     if (tab === "fighters") loadFighters();
     if (tab === "ai") loadMissingVa();
-  }, [tab, loadFighters, loadMissingVa]);
+    if (tab === "errors") loadStartverbodErrors();
+  }, [tab, loadFighters, loadMissingVa, loadStartverbodErrors]);
 
   useEffect(() => {
     loadRuns();
@@ -331,7 +347,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTotal(false);
     setMessage(
       res.ok
-        ? (json.message || `Total AutoCheck gestart als 1 proces met 12 workers voor VA ${startVa} t/m ${endVa}.`)
+        ? (json.message || `Total AutoCheck gestart als 1 proces met 20 workers voor VA ${startVa} t/m ${endVa}.`)
         : json.error || "Total AutoCheck starten mislukt."
     );
     setTimeout(loadRuns, 1200);
@@ -355,6 +371,25 @@ export default function FightPaspoortBeheerPage() {
         : json.error || "Sportscholensynchronisatie starten mislukt."
     );
     setTimeout(loadRuns, 1200);
+  }
+
+
+  async function startStartverbodRobot() {
+    setBusyStartverbod(true);
+    setMessage("");
+
+    const res = await authedFetch("/api/admin/fightpassport-sync/start-startverbod", {
+      method: "POST",
+    });
+
+    const json = await res.json().catch(() => ({}));
+    setBusyStartverbod(false);
+
+    setMessage(
+      res.ok
+        ? (json.message || "Startverboden Sync gestart.")
+        : json.error || "Startverboden Sync starten mislukt."
+    );
   }
 
 
@@ -570,7 +605,7 @@ export default function FightPaspoortBeheerPage() {
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <span style={styles.activeRunBadge}>● TOTAL AUTOCHECK ACTIEF</span>
             <b>VA {activeTotalBatch.startVa}–{activeTotalBatch.endVa}</b>
-            <span>1 proces · {activeTotalBatch.workers || 12} workers</span>
+            <span>1 proces · {activeTotalBatch.workers || 20} workers</span>
             <span>{activeTotalBatch.processed}/{activeTotalBatch.total} verwerkt</span>
             <span>Gestart {fmt(activeTotalBatch.startedAt)}</span>
             <span>Loopt {formatDuration(activeTotalBatch.startedAt)}</span>
@@ -630,15 +665,18 @@ export default function FightPaspoortBeheerPage() {
       </section>}
       <section style={styles.panel}>
         <h2 style={{marginTop:0}}>Nieuwe synchronisatie</h2>
-        <p style={{color:"#bbb"}}>De Total AutoCheck verwerkt de volledige VA-range in 1 proces met 12 workers. De Sportscholen Sync blijft een los proces en kan tegelijk draaien.</p>
+        <p style={{color:"#bbb"}}>De Total AutoCheck verwerkt de volledige VA-range in 1 proces met 20 workers. Sportscholen Sync en Startverboden Sync zijn losse processen en kunnen afzonderlijk worden gestart.</p>
         <div style={styles.filters}>
           <label style={styles.label}>Start VA<input style={styles.input} value={startVa} onChange={e=>setStartVa(e.target.value)}/></label>
           <label style={styles.label}>Eind VA<input style={styles.input} value={endVa} onChange={e=>setEndVa(e.target.value)}/></label>
           <button style={styles.orange} disabled={busyTotal||!!activeTotalRun} onClick={startTotalRobot}>
-            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 1 × 12"}
+            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 1 × 20"}
           </button>
           <button style={styles.silver} disabled={busyTeam||!!activeTeamRun} onClick={startTeamRobot}>
             <Users size={16}/>{busyTeam||activeTeamRun?"Sportscholen draaien...":"Start Sportscholen Sync"}
+          </button>
+          <button style={styles.silver} disabled={busyStartverbod} onClick={startStartverbodRobot}>
+            <ShieldCheck size={16}/>{busyStartverbod?"Startverboden starten...":"Start Startverboden Sync"}
           </button>
           <button style={styles.danger} disabled={busyDeleteTotal} onClick={deleteTotalData}>
             <Trash2 size={16}/>{busyDeleteTotal?"Verwijderen...":"Verwijder Total data"}
@@ -819,34 +857,64 @@ export default function FightPaspoortBeheerPage() {
       </section>
     </>}
 
-    {tab === "errors" && <section style={styles.panel}>
-      <h2 style={{marginTop:0}}>{selectedRunIsTeam ? "Sportscholen Sync-fouten" : "Total AutoCheck-fouten"}</h2>
-      {!selectedRunData ? (
-        <p style={{color:"#aaa"}}>Selecteer eerst bij Synchronisaties een run via Details.</p>
-      ) : selectedRunIsTeam ? (
-        <Table>
-          <thead><tr><Th>Sportschool ID</Th><Th>Sportschool</Th><Th>Plaats</Th><Th>Status</Th><Th>Foutmelding</Th></tr></thead>
-          <tbody>
-            {teamErrors.map((i:any)=><tr key={i.id ?? `${i.sync_run_id}-${i.sportschool_id}`}>
-              <Td>{i.sportschool_id}</Td>
-              <Td>{i.sportschool_naam||"-"}</Td>
-              <Td>{i.plaats||"-"}</Td>
-              <Td>{i.status||"-"}</Td>
-              <Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td>
-            </tr>)}
-            {!teamErrors.length&&<tr><Td colSpan={5}>Geen sportschoolfouten gevonden.</Td></tr>}
-          </tbody>
-        </Table>
-      ) : (
-        <Table>
-          <thead><tr><Th>VA</Th><Th>Stap</Th><Th>Foutmelding</Th><Th>Tijd</Th></tr></thead>
-          <tbody>
-            {allErrors.map(i=><tr key={i.id}><Td>{i.va_nummer}</Td><Td>{i.error_step||"-"}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td><Td>{fmt(i.finished_at)}</Td></tr>)}
-            {!allErrors.length&&<tr><Td colSpan={4}>Geen fouten geladen.</Td></tr>}
-          </tbody>
-        </Table>
-      )}
-    </section>}
+    {tab === "errors" && <>
+      <section style={styles.panel}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <h2 style={{margin:"0 0 5px"}}>Startverbod-koppelfouten ({startverbodErrors.length})</h2>
+            <p style={{margin:0,color:"#aaa"}}>Namen uit het dashboardrapport die niet veilig aan precies één VA-nummer konden worden gekoppeld.</p>
+          </div>
+          <button style={styles.silver} onClick={loadStartverbodErrors}><RefreshCw size={15}/>Verversen</button>
+        </div>
+        <div style={{marginTop:14}}>
+          <Table>
+            <thead><tr><Th>Bronnaam</Th><Th>Soort</Th><Th>Ingang</Th><Th>Einde</Th><Th>Probleem</Th><Th>Mogelijke VA's</Th><Th>Mogelijke namen</Th><Th>Run</Th></tr></thead>
+            <tbody>
+              {startverbodErrors.map((i:any)=><tr key={i.id}>
+                <Td><b>{i.naam_bron||"-"}</b></Td>
+                <Td>{i.soort||"-"}</Td>
+                <Td>{fmtDate(i.ingang)}</Td>
+                <Td>{i.einde?fmtDate(i.einde):"Geen einddatum"}</Td>
+                <Td style={{color:"#ff7d69"}}>{i.fout_type==="duplicate"?"Meerdere vechters met deze naam":"Niet gevonden"}</Td>
+                <Td>{Array.isArray(i.mogelijke_va_nummers)&&i.mogelijke_va_nummers.length?i.mogelijke_va_nummers.join(", "):"-"}</Td>
+                <Td>{Array.isArray(i.mogelijke_namen)&&i.mogelijke_namen.length?i.mogelijke_namen.join(" | "):"-"}</Td>
+                <Td>{i.run_id?String(i.run_id).slice(0,8):"-"}</Td>
+              </tr>)}
+              {!startverbodErrors.length&&<tr><Td colSpan={8}>Geen open startverbod-koppelfouten.</Td></tr>}
+            </tbody>
+          </Table>
+        </div>
+      </section>
+
+      <section style={{...styles.panel,marginTop:16}}>
+        <h2 style={{marginTop:0}}>{selectedRunIsTeam ? "Sportscholen Sync-fouten" : "Total AutoCheck-fouten"}</h2>
+        {!selectedRunData ? (
+          <p style={{color:"#aaa"}}>Selecteer bij Synchronisaties een Total- of Sportscholen-run via Details om die fouten te bekijken.</p>
+        ) : selectedRunIsTeam ? (
+          <Table>
+            <thead><tr><Th>Sportschool ID</Th><Th>Sportschool</Th><Th>Plaats</Th><Th>Status</Th><Th>Foutmelding</Th></tr></thead>
+            <tbody>
+              {teamErrors.map((i:any)=><tr key={i.id ?? `${i.sync_run_id}-${i.sportschool_id}`}>
+                <Td>{i.sportschool_id}</Td>
+                <Td>{i.sportschool_naam||"-"}</Td>
+                <Td>{i.plaats||"-"}</Td>
+                <Td>{i.status||"-"}</Td>
+                <Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td>
+              </tr>)}
+              {!teamErrors.length&&<tr><Td colSpan={5}>Geen sportschoolfouten gevonden.</Td></tr>}
+            </tbody>
+          </Table>
+        ) : (
+          <Table>
+            <thead><tr><Th>VA</Th><Th>Stap</Th><Th>Foutmelding</Th><Th>Tijd</Th></tr></thead>
+            <tbody>
+              {allErrors.map(i=><tr key={i.id}><Td>{i.va_nummer}</Td><Td>{i.error_step||"-"}</Td><Td style={{color:"#ff7d69"}}>{i.error_message||"Onbekende fout"}</Td><Td>{fmt(i.finished_at)}</Td></tr>)}
+              {!allErrors.length&&<tr><Td colSpan={4}>Geen fouten geladen.</Td></tr>}
+            </tbody>
+          </Table>
+        )}
+      </section>
+    </>}
   </div></main>;
 }
 
@@ -900,6 +968,11 @@ function ClassBadge({text}:any){
   return <span style={{display:"inline-flex",minWidth:36,justifyContent:"center",padding:"5px 9px",border:`1px solid ${c.border}`,background:c.background,color:c.color,fontWeight:900}}>{raw}</span>
 }
 function fmt(v:any){return v?new Date(v).toLocaleString("nl-NL"):"-"}
+function fmtDate(v:any){
+  if(!v)return "-";
+  const d=new Date(`${String(v).slice(0,10)}T12:00:00`);
+  return Number.isNaN(d.getTime())?"-":d.toLocaleDateString("nl-NL");
+}
 
 function formatDuration(start:any,end?:any){
   if(!start)return "-";

@@ -11,6 +11,7 @@ trap 'rm -f "$TMP_FILE"' EXIT
   | grep -v '/api/admin/cron/teams' \
   | grep -v '/api/admin/cron/fightpassport-total/start' \
   | grep -v '/api/admin/cron/fightpassport-total/stop' \
+  | grep -v '/api/admin/cron/startverbod' \
   > "$TMP_FILE"
 
 cat >> "$TMP_FILE" <<'CRON'

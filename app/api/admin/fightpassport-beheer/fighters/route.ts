@@ -37,7 +37,14 @@ export async function GET(req: Request) {
 
     if (q) {
       const safeQ = q.replace(/[%(),]/g, "");
-      query = query.or(`naam.ilike.%${safeQ}%,va_nummer.ilike.%${safeQ}%`);
+
+      if (/^\d+$/.test(safeQ)) {
+        query = query.or(
+          `naam.ilike.%${safeQ}%,va_nummer.eq.${Number(safeQ)}`
+        );
+      } else {
+        query = query.ilike("naam", `%${safeQ}%`);
+      }
     }
 
     if (licentie === "yes") query = query.eq("licentie_actief", true);

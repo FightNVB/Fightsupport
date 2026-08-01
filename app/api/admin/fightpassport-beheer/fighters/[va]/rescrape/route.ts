@@ -62,6 +62,15 @@ export async function POST(
       windowsHide: true,
       env: {
         ...process.env,
+
+        // Deze route herscrapet exact één vechter.
+        FP_TOTAL_VA_LIST: va,
+        FP_TOTAL_RUN_KIND: "retry",
+        FP_TOTAL_START_VA: va,
+        FP_TOTAL_END_VA: va,
+        FP_TOTAL_BATCH_START_VA: va,
+        FP_TOTAL_BATCH_END_VA: va,
+
         FP_MATCHMAKER_ID: "",
         FP_SESSION_MODE: "master",
         HEADLESS: process.env.HEADLESS ?? "false",
@@ -69,6 +78,7 @@ export async function POST(
           process.env.PUPPETEER_HEADLESS ??
           process.env.HEADLESS ??
           "false",
+
         WORKERS: "1",
         FP_TOTAL_WORKERS: "1",
         STAGGER_MS: "0",

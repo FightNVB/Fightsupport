@@ -41,6 +41,9 @@ type SportschoolOption = {
   sportschool_id: number;
   naam: string;
   plaats?: string | null;
+  canonical_naam?: string | null;
+  aliases?: string[];
+  zoeknamen?: string[];
 };
 type FighterOption = {
   va_nummer: string;
@@ -70,6 +73,11 @@ type NameVaCheck = {
   resolved_va_nummer?: string | null;
 };
 
+type DuplicateGroup = {
+  va_nummer: string;
+  rows: Aanmelding[];
+};
+
 type BusyMode = "idle" | "upload" | "manual" | "delete" | "save" | "load";
 
 type FighterForm = {
@@ -86,6 +94,16 @@ type FighterForm = {
 
 function s(v: unknown) {
   return String(v ?? "").trim();
+}
+
+function normalizeDiscipline(value: unknown) {
+  const raw = s(value).toUpperCase();
+
+  if (raw.includes("MMA") || raw.includes("MIXED MARTIAL")) return "MMA";
+  if (raw.includes("THAI") || raw.includes("MUAY")) return "THAIBOKSEN";
+  if (raw.includes("KICK")) return "KICKBOKSEN";
+
+  return raw;
 }
 
 function pick(r: Aanmelding, keys: string[]) {
@@ -237,6 +255,7 @@ export default function AanmeldingenPage() {
   const [searchMode, setSearchMode] = useState<"fighter" | "school">("fighter");
   const [sportscholen, setSportscholen] = useState<SportschoolOption[]>([]);
   const [selectedSportschoolId, setSelectedSportschoolId] = useState("");
+  const [schoolSearch, setSchoolSearch] = useState("");
   const [fighters, setFighters] = useState<FighterOption[]>([]);
   const [selectedVa, setSelectedVa] = useState("");
   const [fighterSearch, setFighterSearch] = useState("");
@@ -281,17 +300,67 @@ export default function AanmeldingenPage() {
     );
   }, [fighters, fighterSearch]);
 
+  const filteredSportscholen = useMemo(() => {
+    const wanted = normalizeSchoolName(schoolSearch);
+
+    const searchableNames = (school: SportschoolOption) =>
+      Array.from(
+        new Set([
+          school.naam,
+          school.canonical_naam,
+          ...(school.aliases ?? []),
+          ...(school.zoeknamen ?? []),
+        ]),
+      )
+        .map(normalizeSchoolName)
+        .filter(Boolean);
+
+    if (!wanted) return sportscholen;
+
+    return sportscholen.filter((school) =>
+      searchableNames(school).some((candidate) => candidate.includes(wanted)),
+    );
+  }, [schoolSearch, sportscholen]);
+
+  const selectedSportschool = useMemo(
+    () =>
+      sportscholen.find(
+        (school) => String(school.sportschool_id) === selectedSportschoolId,
+      ) ?? null,
+    [sportscholen, selectedSportschoolId],
+  );
+
   const resolvedMissingVaSchool = useMemo(() => {
     const wanted = normalizeSchoolName(missingVaSchoolName);
     if (!wanted) return null;
 
+    const namesOf = (school: SportschoolOption) =>
+      Array.from(
+        new Set([
+          school.naam,
+          school.canonical_naam,
+          ...(school.aliases ?? []),
+          ...(school.zoeknamen ?? []),
+        ]),
+      )
+        .map(normalizeSchoolName)
+        .filter(Boolean);
+
+    // Eerst een exacte match op officiële naam of alias.
+    const exact = sportscholen.find((school) =>
+      namesOf(school).some((candidate) => candidate === wanted),
+    );
+    if (exact) return exact;
+
+    // Daarna pas een ruime terugval voor kleine schrijfverschillen.
     return (
-      sportscholen.find((school) => normalizeSchoolName(school.naam) === wanted) ??
-      sportscholen.find((school) => {
-        const candidate = normalizeSchoolName(school.naam);
-        return candidate.includes(wanted) || wanted.includes(candidate);
-      }) ??
-      null
+      sportscholen.find((school) =>
+        namesOf(school).some(
+          (candidate) =>
+            candidate.length >= 4 &&
+            (candidate.includes(wanted) || wanted.includes(candidate)),
+        ),
+      ) ?? null
     );
   }, [missingVaSchoolName, sportscholen]);
 
@@ -301,7 +370,22 @@ export default function AanmeldingenPage() {
       const res = await authedFetch("/api/matchmaker/fighter-selector", { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Sportscholen laden mislukt");
-      setSportscholen(Array.isArray(json?.sportscholen) ? json.sportscholen : []);
+      const loaded = Array.isArray(json?.sportscholen)
+        ? (json.sportscholen as SportschoolOption[])
+        : [];
+
+      const uniqueById = new Map<number, SportschoolOption>();
+      for (const school of loaded) {
+        const id = Number(school?.sportschool_id);
+        if (!Number.isInteger(id) || id <= 0) continue;
+        if (!uniqueById.has(id)) uniqueById.set(id, school);
+      }
+
+      setSportscholen(
+        Array.from(uniqueById.values()).sort((a, b) =>
+          a.naam.localeCompare(b.naam, "nl", { sensitivity: "base" }),
+        ),
+      );
     } catch (e: any) {
       setMsg(e?.message || "Sportscholen laden mislukt");
     } finally {
@@ -449,6 +533,42 @@ export default function AanmeldingenPage() {
     [allRows],
   );
 
+  const duplicateGroups = useMemo<DuplicateGroup[]>(() => {
+    const byVa = new Map<string, Aanmelding[]>();
+
+    for (const row of rowsWithVa) {
+      const va = pick(row, ["va_nummer", "va", "fightpaspoort_nummer"]);
+      if (!va) continue;
+      const current = byVa.get(va) ?? [];
+      current.push(row);
+      byVa.set(va, current);
+    }
+
+    return Array.from(byVa.entries())
+      .filter(([, duplicateRows]) => duplicateRows.length > 1)
+      .map(([va_nummer, duplicateRows]) => ({
+        va_nummer,
+        rows: duplicateRows,
+      }))
+      .sort((a, b) => a.va_nummer.localeCompare(b.va_nummer, "nl", { numeric: true }));
+  }, [rowsWithVa]);
+
+  const duplicateVaNumbers = useMemo(
+    () => new Set(duplicateGroups.map((group) => group.va_nummer)),
+    [duplicateGroups],
+  );
+
+  const selectedFighterAlreadyAdded = useMemo(() => {
+    if (!selectedFighter) return null;
+    const va = String(selectedFighter.va_nummer);
+    return (
+      rowsWithVa.find(
+        (row) =>
+          pick(row, ["va_nummer", "va", "fightpaspoort_nummer"]) === va,
+      ) ?? null
+    );
+  }, [rowsWithVa, selectedFighter]);
+
   const activeRows = activeTab === "withoutVa" ? missingVaRows : rowsWithVa;
 
   const filteredRows = useMemo(() => {
@@ -536,32 +656,44 @@ export default function AanmeldingenPage() {
       setMsg("Kies eerst een vechter.");
       return;
     }
+    if (selectedFighterAlreadyAdded) {
+      setMsg(
+        `${selectedFighter.naam} (VA ${selectedFighter.va_nummer}) staat al in deze matchmaking.`,
+      );
+      return;
+    }
+    if (!s(form.discipline)) {
+      setMsg("Kies de discipline voor deze aanmelding.");
+      return;
+    }
+    if (!s(form.klasse)) {
+      setMsg("Kies de klasse voor deze aanmelding.");
+      return;
+    }
     if (!s(form.gewicht)) {
       setMsg("Vul het actuele wedstrijdgewicht in.");
       return;
     }
 
     const linkedSchools = selectedFighter.sportscholen ?? [];
-    const resolvedSchoolId = searchMode === "school"
-      ? selectedSportschoolId
-      : "";
-    const manualSchoolName = s(form.gym);
+    const resolvedSchoolId = selectedSportschoolId;
+    const sportschool =
+      sportscholen.find(
+        (row) => String(row.sportschool_id) === resolvedSchoolId,
+      ) ??
+      linkedSchools.find(
+        (row) => String(row.sportschool_id) === resolvedSchoolId,
+      ) ??
+      null;
 
-    if (searchMode === "school" && !resolvedSchoolId) {
-      setMsg("Kies de sportschool waarvoor deze vechter wordt aangemeld.");
+    if (!resolvedSchoolId || !sportschool) {
+      setMsg(
+        searchMode === "school"
+          ? "Kies eerst een sportschool."
+          : "Kies de sportschool waarvoor deze vechter wordt aangemeld.",
+      );
       return;
     }
-
-    if (searchMode === "fighter" && !manualSchoolName) {
-      setMsg("Vul de sportschool voor deze aanmelding in.");
-      return;
-    }
-
-    const sportschool = searchMode === "school"
-      ? sportscholen.find(
-          (row) => String(row.sportschool_id) === resolvedSchoolId,
-        ) ?? linkedSchools.find((row) => String(row.sportschool_id) === resolvedSchoolId)
-      : null;
 
     setBusyMode("manual");
     setMsg("");
@@ -572,25 +704,45 @@ export default function AanmeldingenPage() {
         body: JSON.stringify({
           matchmaking_id: matchmakingId,
           matchmaker_id: matchmaking?.matchmaker_id || matchmaking?.maker_user_id || null,
-          sportschool_id: resolvedSchoolId ? Number(resolvedSchoolId) : null,
+          sportschool_id: Number(resolvedSchoolId),
           va_nummer: selectedFighter.va_nummer,
+          discipline: normalizeDiscipline(form.discipline),
+          klasse: s(form.klasse),
           gewicht: form.gewicht,
-          gym: searchMode === "fighter" ? manualSchoolName : sportschool?.naam || "",
+          gym: sportschool.naam,
         }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || "Toevoegen mislukt");
+      if (!res.ok) {
+        if (res.status === 409 && json?.duplicate) {
+          const existing = json?.existing;
+          throw new Error(
+            `${json?.error || "Deze vechter staat al in de matchmaking."}${
+              existing?.gewicht ? ` Bestaand gewicht: ${existing.gewicht} kg.` : ""
+            }`,
+          );
+        }
+        throw new Error(json?.error || "Toevoegen mislukt");
+      }
 
       setSelectedVa("");
       setSelectedSportschoolId("");
+      setSchoolSearch("");
       setFighterSearch("");
       setFighters([]);
-      setForm((current) => ({ ...current, gewicht: "", gym: "" }));
-      const linkedSchoolIds = (selectedFighter.sportscholen ?? []).map((row) => String(row.sportschool_id));
-      const linkedSchoolNames = (selectedFighter.sportscholen ?? []).map((row) => normalizeSchoolName(row.naam));
-      const schoolWasChanged = searchMode === "fighter"
-        ? !linkedSchoolNames.includes(normalizeSchoolName(manualSchoolName))
-        : !linkedSchoolIds.includes(String(resolvedSchoolId));
+      setForm((current) => ({
+        ...current,
+        discipline: "KICKBOKSEN",
+        klasse: "",
+        gewicht: "",
+        gym: "",
+      }));
+      const linkedSchoolIds = (selectedFighter.sportscholen ?? []).map(
+        (row) => String(row.sportschool_id),
+      );
+      const schoolWasChanged =
+        searchMode === "fighter" &&
+        !linkedSchoolIds.includes(String(resolvedSchoolId));
       setMsg(
         schoolWasChanged
           ? `${selectedFighter.naam} is toegevoegd. De opgegeven sportschool is opgeslagen en voor admin geregistreerd.`
@@ -640,6 +792,12 @@ export default function AanmeldingenPage() {
           ? `Naam ${check.naam_upload} is goedgekeurd voor VA ${check.va_nummer_upload}.`
           : `VA-nummer aangepast en FightPassport-gegevens opnieuw geladen.`,
       );
+
+      if (json?.refresh_page) {
+        window.location.reload();
+        return;
+      }
+
       await load(true);
     } catch (e: any) {
       setMsg(e?.message || "Naam/VA-controle opslaan mislukt");
@@ -1095,6 +1253,7 @@ export default function AanmeldingenPage() {
           <Stat icon={<FileUp size={20} />} label="Uploads" value={uploads.length} />
           <Stat icon={<Users size={20} />} label="Aanmeldingen" value={allRows.length} />
           <Stat icon={<AlertTriangle size={20} />} label="Naam/VA open" value={nameVaChecks.filter((check) => check.status === "open").length} />
+          <Stat icon={<AlertTriangle size={20} />} label="Dubbele VA" value={duplicateGroups.length} />
           <Stat icon={<Search size={20} />} label="Zonder VA" value={missingVaRows.length} />
         </div>
 
@@ -1216,6 +1375,7 @@ export default function AanmeldingenPage() {
                 onClick={() => {
                   setSearchMode("fighter");
                   setSelectedSportschoolId("");
+                  setSchoolSearch("");
                   setSelectedVa("");
                   setFighters([]);
                   setForm((current) => ({ ...current, gym: "" }));
@@ -1229,6 +1389,8 @@ export default function AanmeldingenPage() {
                 onClick={() => {
                   setSearchMode("school");
                   setFighterSearch("");
+                  setSchoolSearch("");
+                  setSelectedSportschoolId("");
                   setSelectedVa("");
                   setFighters([]);
                   setForm((current) => ({ ...current, gym: "" }));
@@ -1241,26 +1403,57 @@ export default function AanmeldingenPage() {
 
             <div style={manualSmartGrid}>
               {searchMode === "school" ? (
-                <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
-                  <span>Sportschool</span>
-                  <select
-                    value={selectedSportschoolId}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setSelectedSportschoolId(value);
-                      void loadFightersForSchool(value);
-                    }}
-                    style={input}
-                    disabled={busy || selectorLoading}
-                  >
-                    <option value="">Kies sportschool</option>
-                    {sportscholen.map((school) => (
-                      <option key={school.sportschool_id} value={school.sportschool_id}>
-                        {school.naam}{school.plaats ? ` — ${school.plaats}` : ""}
+                <>
+                  <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                    <span>Zoek sportschool</span>
+                    <input
+                      value={schoolSearch}
+                      onChange={(e) => {
+                        setSchoolSearch(e.target.value);
+                        setSelectedSportschoolId("");
+                        setSelectedVa("");
+                        setFighters([]);
+                      }}
+                      placeholder="Typ de eerste letters, bijvoorbeeld Khalid"
+                      style={input}
+                      disabled={busy || selectorLoading}
+                      autoComplete="off"
+                    />
+                  </label>
+
+                  <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                    <span>Sportschool</span>
+                    <select
+                      value={selectedSportschoolId}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setSelectedSportschoolId(value);
+                        const school = sportscholen.find(
+                          (row) => String(row.sportschool_id) === value,
+                        );
+                        setSchoolSearch(school?.naam ?? schoolSearch);
+                        void loadFightersForSchool(value);
+                      }}
+                      style={input}
+                      disabled={busy || selectorLoading}
+                    >
+                      <option value="">
+                        {schoolSearch
+                          ? `${filteredSportscholen.length} sportschool(en) gevonden`
+                          : "Typ hierboven om een sportschool te zoeken"}
                       </option>
-                    ))}
-                  </select>
-                </label>
+                      {filteredSportscholen.map((school) => (
+                        <option
+                          key={school.sportschool_id}
+                          value={school.sportschool_id}
+                        >
+                          {school.naam}
+                          {school.plaats ? ` — ${school.plaats}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               ) : (
                 <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
                   <span>Zoek in alle vechters</span>
@@ -1287,10 +1480,36 @@ export default function AanmeldingenPage() {
                   onChange={(e) => {
                     const va = e.target.value;
                     setSelectedVa(va);
-                    const fighter = fighters.find((row) => String(row.va_nummer) === va);
+                    const fighter = fighters.find(
+                      (row) => String(row.va_nummer) === va,
+                    );
                     const schools = fighter?.sportscholen ?? [];
+
+                    const suggestedDiscipline = normalizeDiscipline(
+                      fighter?.primary_discipline ??
+                        fighter?.nulmeting_discipline ??
+                        "",
+                    );
+
+                    const suggestedClass = s(
+                      fighter?.berekende_klasse ??
+                        fighter?.nulmeting_klasse ??
+                        "",
+                    );
+
+                    setForm((current) => ({
+                      ...current,
+                      discipline:
+                        suggestedDiscipline || current.discipline || "KICKBOKSEN",
+                      klasse: suggestedClass || current.klasse,
+                    }));
+
                     if (searchMode === "fighter") {
-                      setSelectedSportschoolId(schools.length === 1 ? String(schools[0].sportschool_id) : "");
+                      const singleSchool = schools.length === 1 ? schools[0] : null;
+                      setSelectedSportschoolId(
+                        singleSchool ? String(singleSchool.sportschool_id) : "",
+                      );
+                      setSchoolSearch(singleSchool?.naam ?? "");
                     }
                   }}
                   style={input}
@@ -1318,49 +1537,129 @@ export default function AanmeldingenPage() {
                     <span>{selectedFighter.licentie_actief ? "Licentie actief" : "Geen actieve licentie"}</span>
                     <span>{selectedFighter.fit_to_fight ? "Fit to fight" : "Niet fit to fight"}</span>
                     {selectedFighter.heeft_startverbod && <strong>Startverbod</strong>}
+                    {selectedFighterAlreadyAdded && (
+                      <strong style={{ color: "#fca5a5" }}>
+                        Staat al in deze matchmaking
+                        {pick(selectedFighterAlreadyAdded, ["gewicht", "gewicht_kg"])
+                          ? ` · ${pick(selectedFighterAlreadyAdded, ["gewicht", "gewicht_kg"])} kg`
+                          : ""}
+                      </strong>
+                    )}
                   </div>
 
-                  <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
-                    <span>Sportschool voor deze aanmelding</span>
-                    {searchMode === "fighter" ? (
-                      <input
-                        value={form.gym}
-                        onChange={(e) =>
-                          setForm((current) => ({ ...current, gym: e.target.value }))
-                        }
-                        placeholder="Vul de sportschool in"
-                        style={input}
-                        disabled={busy}
-                        autoComplete="off"
-                      />
-                    ) : (
-                      <select
-                        value={selectedSportschoolId}
-                        onChange={(e) => setSelectedSportschoolId(e.target.value)}
-                        style={input}
-                        disabled={busy || selectorLoading}
-                      >
-                        <option value="">Kies sportschool</option>
-                        {sportscholen.map((school) => {
-                          const linked = (selectedFighter.sportscholen ?? []).some(
-                            (item) => Number(item.sportschool_id) === Number(school.sportschool_id),
-                          );
-                          return (
-                            <option key={school.sportschool_id} value={school.sportschool_id}>
-                              {school.naam}{school.plaats ? ` — ${school.plaats}` : ""}{linked ? " · gekoppeld in FightPassport" : ""}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    )}
-                    <span style={schoolHelpText}>
-                      {searchMode === "fighter"
-                        ? "Vul hier zelf de sportschool in waarvoor de vechter wordt aangemeld."
-                        : "Kies de sportschool waarvoor deze vechter wordt aangemeld."}
-                    </span>
-                  </label>
+                  {searchMode === "fighter" ? (
+                    <>
+                      <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                        <span>Zoek sportschool voor deze aanmelding</span>
+                        <input
+                          value={schoolSearch}
+                          onChange={(e) => {
+                            setSchoolSearch(e.target.value);
+                            setSelectedSportschoolId("");
+                          }}
+                          placeholder="Typ de eerste letters van de sportschool"
+                          style={input}
+                          disabled={busy || selectorLoading}
+                          autoComplete="off"
+                        />
+                      </label>
+
+                      <label style={{ ...fieldLabel, gridColumn: "span 2" }}>
+                        <span>Sportschool voor deze aanmelding</span>
+                        <select
+                          value={selectedSportschoolId}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setSelectedSportschoolId(value);
+                            const school = sportscholen.find(
+                              (row) => String(row.sportschool_id) === value,
+                            );
+                            setSchoolSearch(school?.naam ?? schoolSearch);
+                          }}
+                          style={input}
+                          disabled={busy || selectorLoading}
+                        >
+                          <option value="">
+                            {schoolSearch
+                              ? `${filteredSportscholen.length} sportschool(en) gevonden`
+                              : "Typ hierboven om een sportschool te zoeken"}
+                          </option>
+                          {filteredSportscholen.map((school) => {
+                            const linked = (selectedFighter.sportscholen ?? []).some(
+                              (item) =>
+                                Number(item.sportschool_id) ===
+                                Number(school.sportschool_id),
+                            );
+                            return (
+                              <option
+                                key={school.sportschool_id}
+                                value={school.sportschool_id}
+                              >
+                                {school.naam}
+                                {school.plaats ? ` — ${school.plaats}` : ""}
+                                {linked ? " · gekoppeld in FightPassport" : ""}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <span style={schoolHelpText}>
+                          Kies de sportschool waarvoor deze vechter wordt aangemeld.
+                        </span>
+                      </label>
+                    </>
+                  ) : (
+                    <div style={{ ...fighterPreview, gridColumn: "span 2" }}>
+                      <b>Sportschool staat vast</b>
+                      <span>
+                        {selectedSportschool?.naam || "Geselecteerde sportschool"}
+                        {selectedSportschool?.plaats
+                          ? ` — ${selectedSportschool.plaats}`
+                          : ""}
+                      </span>
+                      <span>
+                        De vechter wordt rechtstreeks onder deze sportschool toegevoegd.
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
+
+              <label style={fieldLabel}>
+                <span>Discipline voor deze aanmelding</span>
+                <select
+                  value={form.discipline}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      discipline: e.target.value,
+                    }))
+                  }
+                  style={input}
+                  disabled={!selectedFighter || busy}
+                >
+                  <option value="">Kies discipline</option>
+                  <option value="KICKBOKSEN">Kickboksen</option>
+                  <option value="THAIBOKSEN">Thaiboksen</option>
+                  <option value="MMA">MMA</option>
+                </select>
+              </label>
+
+              <label style={fieldLabel}>
+                <span>Klasse voor deze aanmelding</span>
+                <input
+                  placeholder="Bijvoorbeeld J, N, C, B, A of R"
+                  value={form.klasse}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      klasse: e.target.value.toUpperCase(),
+                    }))
+                  }
+                  style={input}
+                  disabled={!selectedFighter || busy}
+                  autoComplete="off"
+                />
+              </label>
 
               <label style={fieldLabel}>
                 <span>Actueel wedstrijdgewicht</span>
@@ -1368,7 +1667,12 @@ export default function AanmeldingenPage() {
                   placeholder="Bijvoorbeeld 67,5"
                   inputMode="decimal"
                   value={form.gewicht}
-                  onChange={(e) => setForm((f) => ({ ...f, gewicht: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      gewicht: e.target.value,
+                    }))
+                  }
                   style={input}
                   disabled={!selectedFighter || busy}
                 />
@@ -1378,7 +1682,16 @@ export default function AanmeldingenPage() {
                 <button
                   className="fs-silver-btn compact-action"
                   onClick={addManual}
-                  disabled={busy || selectorLoading || !selectedFighter}
+                  disabled={
+                    busy ||
+                    selectorLoading ||
+                    !selectedFighter ||
+                    !s(form.discipline) ||
+                    !s(form.klasse) ||
+                    !s(form.gewicht) ||
+                    !selectedSportschoolId ||
+                    Boolean(selectedFighterAlreadyAdded)
+                  }
                 >
                   <Plus size={16} />
                   Toevoegen
@@ -1387,6 +1700,97 @@ export default function AanmeldingenPage() {
             </div>
           </AccordionPanel>
         </section>
+
+        {duplicateGroups.length > 0 && (
+          <section style={metalPanelNoPadding}>
+            <div style={tableHead}>
+              <div>
+                <h2 style={tableTitle}>Dubbele aanmeldingen</h2>
+                <div style={smallMuted}>
+                  Hetzelfde VA-nummer staat meer dan één keer in deze matchmaking.
+                </div>
+              </div>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  minHeight: 28,
+                  padding: "4px 9px",
+                  border: "1px solid #ef4444",
+                  background: "#7f1d1d",
+                  color: "#ffffff",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {duplicateGroups.length} VA-nummer(s)
+              </span>
+            </div>
+
+            <div style={{ padding: 14, display: "grid", gap: 12 }}>
+              {duplicateGroups.map((group) => (
+                <div
+                  key={group.va_nummer}
+                  style={{
+                    border: "1px solid #7f1d1d",
+                    background: "#2a1111",
+                    padding: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      flexWrap: "wrap",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <strong>VA {group.va_nummer}</strong>
+                    <span style={smallMuted}>{group.rows.length} aanmeldingen</span>
+                  </div>
+
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {group.rows.map((row) => (
+                      <div
+                        key={aanmeldingId(row) || `${group.va_nummer}-${uploadId(row)}-${name(row)}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(180px,1.4fr) repeat(3,minmax(90px,1fr)) auto",
+                          gap: 10,
+                          alignItems: "center",
+                          borderTop: "1px solid #3f3f46",
+                          paddingTop: 8,
+                        }}
+                      >
+                        <div>
+                          <b>{name(row)}</b>
+                          <div style={smallMuted}>
+                            {pick(row, ["gym", "sportschool", "sportschool_naam"]) || "Sportschool onbekend"}
+                          </div>
+                        </div>
+                        <span>{pick(row, ["discipline", "sport"]) || "-"}</span>
+                        <span>{pick(row, ["gewicht", "gewicht_kg"]) || "-"} kg</span>
+                        <span>{uploadId(row) ? "Upload" : "Handmatig"}</span>
+                        <button
+                          type="button"
+                          className="fs-red-btn compact"
+                          onClick={() => deleteFighter(row)}
+                          disabled={busy}
+                        >
+                          <Trash2 size={14} />
+                          Verwijderen
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {nameVaChecks.some((check) => check.status === "open") && (
           <section style={metalPanelNoPadding}>
@@ -2058,26 +2462,29 @@ const messageBox: CSSProperties = {
 
 const statsGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4,minmax(160px,1fr))",
-  gap: 12,
-  marginBottom: 14,
+  gridTemplateColumns: "repeat(5,minmax(0,1fr))",
+  gap: 8,
+  marginBottom: 12,
 };
 
 const statCard: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 12,
+  minWidth: 0,
+  minHeight: 72,
+  gap: 9,
   border: "1px solid rgba(255,255,255,.20)",
-  borderRadius: 16,
-  padding: 13,
+  borderRadius: 12,
+  padding: "10px 12px",
   background: "linear-gradient(180deg,#3a3d44,#17181d)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,.2), 0 12px 30px rgba(0,0,0,.28)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.2), 0 9px 22px rgba(0,0,0,.25)",
 };
 
 const statIcon: CSSProperties = {
-  width: 42,
-  height: 42,
-  borderRadius: 10,
+  width: 38,
+  height: 38,
+  minWidth: 38,
+  borderRadius: 9,
   display: "grid",
   placeItems: "center",
   color: "#fff",
@@ -2085,15 +2492,22 @@ const statIcon: CSSProperties = {
 };
 
 const statLabel: CSSProperties = {
-  fontSize: 11,
+  minWidth: 0,
+  fontSize: 10,
+  lineHeight: 1.15,
   textTransform: "uppercase",
-  letterSpacing: 1.5,
+  letterSpacing: 1.1,
   color: "#aeb4bd",
   fontWeight: 950,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
 };
 
 const statValue: CSSProperties = {
-  fontSize: 24,
+  marginTop: 2,
+  fontSize: 21,
+  lineHeight: 1,
   fontWeight: 950,
   color: "#fff",
 };

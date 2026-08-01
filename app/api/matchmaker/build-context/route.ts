@@ -16,7 +16,7 @@ function s(v: unknown) {
 
 /**
  * Bouwt de matchmaker-context rechtstreeks uit:
- *   aanmeldingen + fightpassport_fighters + fightpassport_results.
+ *   aanmeldingen + fightpassport_fighters + fightpassport_results + startverbod.
  * De oude matchmaker_fighters_raw/fighters_raw tussenlaag wordt niet meer gebruikt.
  */
 export async function POST(req: Request) {
@@ -49,6 +49,7 @@ export async function POST(req: Request) {
       naam_afwijkingen: naamAfwijkingen,
       controle_run_id: result.controleRunId,
       rule_hits: result.hits.length,
+      startverbod_bron: "startverbod",
     });
   } catch (err: any) {
     return NextResponse.json(

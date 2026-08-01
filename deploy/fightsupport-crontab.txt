@@ -11,3 +11,11 @@
 0 8 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/stop >> /var/log/fightsupport-total-cron.log 2>&1
 
 # De oude teams-job is bewust verwijderd; team/vechterdata komt uit de centrale Total AutoCheck-database.
+
+
+# Startverboden Sync
+# Maandag t/m vrijdag om 00:00.
+0 0 * * 1-5 cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/startverbod >> /var/log/fightsupport-startverbod-cron.log 2>&1
+
+# Zaterdag om 09:00.
+0 9 * * 6 cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/startverbod >> /var/log/fightsupport-startverbod-cron.log 2>&1

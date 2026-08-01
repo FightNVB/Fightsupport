@@ -28,6 +28,35 @@ function firstFilled(...values: unknown[]): string | null {
   return null;
 }
 
+function isoDateOnly(v: unknown): string | null {
+  if (!v) return null;
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function hasActiveStartverbodAtDate(
+  rows: AnyRow[] | undefined,
+  eventDate: string | null,
+  fallback: boolean | null
+): boolean | null {
+  const relevantRows = Array.isArray(rows) ? rows : [];
+  if (relevantRows.length === 0) return fallback;
+
+  const checkDate = isoDateOnly(eventDate) ?? new Date().toISOString().slice(0, 10);
+
+  return relevantRows.some((row) => {
+    if (row?.is_actueel === false) return false;
+
+    const ingang = isoDateOnly(row?.ingang);
+    const einde = isoDateOnly(row?.einde);
+
+    if (!ingang || ingang > checkDate) return false;
+    if (einde && einde < checkDate) return false;
+    return true;
+  });
+}
+
 function normalizeNameForComparison(v: unknown): string {
   return cleanNamePart(v)
     .toLowerCase()
@@ -174,6 +203,7 @@ export function buildSingleFighterContext(params: {
 
   fightersRaw?: AnyRow | null;
   uitslagen?: AnyRow[];
+  startverboden?: AnyRow[];
   eventDate?: string | null;
 }) {
   const {
@@ -183,6 +213,7 @@ export function buildSingleFighterContext(params: {
     toernooiFighter = null,
     fightersRaw: raw = null,
     uitslagen = [],
+    startverboden = [],
     eventDate = null,
   } = params;
 
@@ -232,6 +263,11 @@ export function buildSingleFighterContext(params: {
   const klasseInput = pick(source, ["klasse", "klasse_mm"]);
   const licentieRaw = pick(raw, ["licentie_actief", "licentie", "licentie_status", "licentie_ok", "heeft_licentie"]);
   const startverbodRaw = pick(raw, ["heeft_startverbod", "startverbod"]);
+  const heeftStartverbod = hasActiveStartverbodAtDate(
+    startverboden,
+    eventDate,
+    boolish(startverbodRaw)
+  );
   const keurmerkRaw = pick(raw, ["heeft_keurmerk", "keurmerk", "gym_keurmerk"]);
   const now = new Date().toISOString();
 
@@ -308,8 +344,8 @@ export function buildSingleFighterContext(params: {
     licentie_status: licentieRaw ?? null,
     licentie_ok: boolish(licentieRaw),
     fit_to_fight: boolish(pick(raw, ["fit_to_fight"])),
-    heeft_startverbod: startverbodRaw ?? null,
-    startverbod: startverbodRaw ?? null,
+    heeft_startverbod: heeftStartverbod,
+    startverbod: heeftStartverbod,
     heeft_keurmerk: keurmerkRaw ?? null,
     keurmerk: keurmerkRaw ?? null,
 

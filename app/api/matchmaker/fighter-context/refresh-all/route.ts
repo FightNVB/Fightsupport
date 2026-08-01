@@ -75,6 +75,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      refresh_page: true,
       matchmaking_id: matchmakingId,
       processed: processing.processed,
       controle_run_id: processing.controleRunId,

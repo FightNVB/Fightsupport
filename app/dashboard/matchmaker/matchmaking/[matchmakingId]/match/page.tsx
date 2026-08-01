@@ -107,6 +107,7 @@ function normalizeClassLabel(v: unknown) {
   const token = normalizeClassToken(raw);
   const labels: Record<string, string> = {
     j: "J",
+    "j+": "J+",
     r: "R",
     n: "N",
     c: "C",
@@ -150,8 +151,12 @@ function klasseOf(f: Fighter) {
   );
 }
 function disciplineOf(f: Fighter) {
+  // Voor matchmaking is de discipline van de aanmelding leidend.
   return val(
     pickFirst(
+      f.aanmelding_discipline,
+      f.discipline,
+      getPath(f, "aanmelding.discipline"),
       f.nulmeting_discipline,
       f.primary_discipline,
     ),
@@ -182,7 +187,13 @@ function klasseTabOf(f: Fighter) {
   // Vanaf 18 jaar mag iemand nooit meer in een jeugdtab worden geplaatst.
   // Bij een ongeldige jeugd-opgave gebruiken we alleen voor de zichtbare tab
   // de berekende volwassen klasse als veilige terugval; fighterRules meldt de fout.
-  if (k.includes("jeugd") || k === "j" || k.includes("youth")) {
+  if (
+    k.includes("jeugd") ||
+    k === "j" ||
+    k === "j+" ||
+    k.includes("talentstatus") ||
+    k.includes("youth")
+  ) {
     if (isVolwassen) {
       const volwassenFallback = lower(
         normalizeClassLabel(
@@ -413,6 +424,11 @@ function normalizeClassToken(v: unknown) {
   const repeatedClass = compact.match(/^([jrncba])\1$/i);
   if (repeatedClass) return repeatedClass[1].toLowerCase();
 
+  if (
+    compact === "j+" ||
+    compact.includes("j+") ||
+    compact.includes("talentstatus")
+  ) return "j+";
   if (compact === "j" || compact.startsWith("jeugd") || compact.includes("youth")) return "j";
   if (compact === "r" || compact.startsWith("rclas") || compact.startsWith("rclass") || compact.includes("recreant")) return "r";
   if (compact === "n" || compact.startsWith("nclas") || compact.startsWith("nclass") || compact.includes("nieuweling")) return "n";
@@ -459,7 +475,7 @@ function recordClassLabelOf(f: Fighter) {
     const raw = s(candidate);
     const token = normalizeClassToken(raw);
 
-    if (token === "j") return "J";
+    if (token === "j" || token === "j+") return "J";
     if (token === "r") return "R";
     if (token === "n") return "N";
     if (token === "c") return "C";
@@ -512,6 +528,7 @@ function classRank(token: string) {
   // Het record wordt altijd getoond in de hoogste klasse waarin een echte uitslag staat.
   const order: Record<string, number> = {
     j: 1,
+    "j+": 1,
     r: 2,
     n: 3,
     c: 4,
@@ -658,6 +675,7 @@ function sortFightersInTab(a: Fighter, b: Fighter) {
 function recordClassDisplay(token: string) {
   const labels: Record<string, string> = {
     j: "J",
+    "j+": "J",
     r: "R",
     n: "N",
     c: "C",
@@ -987,6 +1005,93 @@ function mergeAanmeldingStatusIntoFighters(
   });
 }
 
+function aanmeldingAsMatchFighter(a: Fighter): Fighter {
+  const id = s(pickFirst(a.id, a.aanmelding_id, a.inschrijving_id));
+  const va = onlyDigits(
+    pickFirst(a.va_nummer, a.va, a.fightpaspoort_nummer),
+  );
+
+  return {
+    ...a,
+    id,
+    inschrijving_id: id,
+    aanmelding_id: id,
+    va_nummer: va || pickFirst(a.va_nummer, a.va),
+    aanmelding_va_nummer: va || pickFirst(a.va_nummer, a.va),
+    aanmelding_naam: pickFirst(a.naam, a.volledige_naam),
+    aanmelding_sportschool: pickFirst(
+      a.sportschool,
+      a.gym,
+      a.sportschool_naam,
+    ),
+    aanmelding_gym: pickFirst(a.gym, a.sportschool, a.sportschool_naam),
+    aanmelding_gewicht: pickFirst(a.gewicht, a.gewicht_kg),
+    aanmelding_klasse: pickFirst(a.klasse, a.klasse_mm),
+    aanmelding_discipline: pickFirst(a.discipline, a.sport),
+    __fs_aanmelding_status: statusOf(a),
+    __fs_context_ontbreekt: true,
+  };
+}
+
+function mergeAllAanmeldingenIntoFighters(
+  contextFighters: Fighter[],
+  aanmeldingen: Fighter[],
+) {
+  const merged = mergeAanmeldingStatusIntoFighters(
+    contextFighters,
+    aanmeldingen,
+  );
+
+  const contextIds = new Set(
+    merged.map(inschrijvingIdOf).filter(Boolean),
+  );
+
+  const vaCounts = new Map<string, number>();
+  for (const a of aanmeldingen) {
+    const va = onlyDigits(
+      pickFirst(a.va_nummer, a.va, a.fightpaspoort_nummer),
+    );
+    if (va) vaCounts.set(va, (vaCounts.get(va) ?? 0) + 1);
+  }
+
+  const contextVas = new Set(
+    merged.map(vaOf).filter(Boolean),
+  );
+
+  for (const aanmelding of aanmeldingen) {
+    const id = s(
+      pickFirst(
+        aanmelding.id,
+        aanmelding.aanmelding_id,
+        aanmelding.inschrijving_id,
+      ),
+    );
+    const va = onlyDigits(
+      pickFirst(
+        aanmelding.va_nummer,
+        aanmelding.va,
+        aanmelding.fightpaspoort_nummer,
+      ),
+    );
+
+    const alreadyPresentById = !!id && contextIds.has(id);
+    const safelyPresentByVa =
+      !id &&
+      !!va &&
+      vaCounts.get(va) === 1 &&
+      contextVas.has(va);
+
+    if (alreadyPresentById || safelyPresentByVa) continue;
+
+    const fallback = aanmeldingAsMatchFighter(aanmelding);
+    merged.push(fallback);
+    if (id) contextIds.add(id);
+    if (va) contextVas.add(va);
+  }
+
+  return merged;
+}
+
 function collectMatchedKeys(json: any) {
   const ids = new Set<string>();
   const vas = new Set<string>();
@@ -1291,8 +1396,19 @@ export default function FightersPage() {
       // De API koppelt alleen de actuele aanmelding-status eraan; deze client haalt
       // niet opnieuw losse FightPassport- of aanmeldingvelden op en mengt die niet.
       const contextFighters = Array.isArray(json?.fighters) ? json.fighters : [];
-      const loadedFighters = markMatchedFromBouts(
+      const aanmeldingen = Array.isArray(json?.aanmeldingen)
+        ? json.aanmeldingen
+        : [];
+
+      // Toon altijd iedere aanmelding. Wanneer de samengestelde context nog niet
+      // bestaat of de verwerking daarvan is mislukt, blijft de aanmelding als
+      // veilige fallback zichtbaar en kan de matchmaker ermee verder.
+      const allRegisteredFighters = mergeAllAanmeldingenIntoFighters(
         contextFighters,
+        aanmeldingen,
+      );
+      const loadedFighters = markMatchedFromBouts(
+        allRegisteredFighters,
         jsonWithDbBouts,
       );
       const loadedTournaments = Array.isArray(jsonWithDbBouts?.toernooien)
@@ -1614,7 +1730,11 @@ export default function FightersPage() {
         throw new Error(json?.error || "Vechterdata vernieuwen mislukt");
       }
 
-      await load(true);
+      if (json?.refresh_page) {
+        window.location.reload();
+        return;
+      }
+
       setMsg(`${Number(json?.processed ?? 0)} vechters opnieuw verwerkt.`);
     } catch (e: any) {
       setMsg(e?.message || "Vechterdata vernieuwen mislukt");

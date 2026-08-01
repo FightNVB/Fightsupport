@@ -2339,11 +2339,18 @@ function buildEqualityInfoHits(opts: {
   const blauwWinRecord = recordBlauw.wins > recordBlauw.losses;
   const blauwVerliesRecord = recordBlauw.losses > recordBlauw.wins;
 
+  // Een winst- of verliestrend is pas betekenisvol na meerdere echte partijen.
+  // Met één of twee partijen kan één uitslag het volledige record bepalen; daarom
+  // tonen we deze gelijkwaardigheidsmelding pas vanaf 3 partijen per vechter.
+  const minimumPartijenVoorRecordVergelijking = 3;
+
   if (
     recordRood.source !== "scrape" &&
     recordBlauw.source !== "scrape" &&
     recordRood.source !== "onbekend" &&
     recordBlauw.source !== "onbekend" &&
+    recordRood.total >= minimumPartijenVoorRecordVergelijking &&
+    recordBlauw.total >= minimumPartijenVoorRecordVergelijking &&
     ((roodVerliesRecord && blauwWinRecord) || (blauwVerliesRecord && roodWinRecord))
   ) {
     const verliesNaam = roodVerliesRecord ? naamRood : naamBlauw;

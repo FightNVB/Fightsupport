@@ -343,6 +343,30 @@ function groupByVa(rows: any[]): Map<string, any[]> {
   return out;
 }
 
+function hasActiveStartverbodAtDate(
+  rows: any[],
+  eventDate: any,
+  fallback: boolean | null
+): boolean | null {
+  const relevantRows = Array.isArray(rows) ? rows : [];
+  if (relevantRows.length === 0) return fallback;
+
+  const checkDate = toIsoDateOnly(eventDate) ?? dayjs().format("YYYY-MM-DD");
+
+  return relevantRows.some((row: any) => {
+    // Alleen regels uit de laatste actuele dashboardrapportage zijn leidend.
+    if (row?.is_actueel === false) return false;
+
+    const ingang = toIsoDateOnly(row?.ingang);
+    const einde = toIsoDateOnly(row?.einde);
+
+    if (!ingang) return false;
+    if (ingang > checkDate) return false;
+    if (einde && einde < checkDate) return false;
+    return true;
+  });
+}
+
 function normalizeLooseText(v: any): string {
   return String(v ?? "")
     .trim()
@@ -553,6 +577,30 @@ if (scopedPartijNr != null) {
       requested_vas: vaList.length,
       fighter_rows: fighters?.length ?? 0,
       unique_fighters: newestFighters.size,
+    });
+  }
+
+  const startverbodenByVa = new Map<string, any[]>();
+  if (vaList.length > 0) {
+    const { data: startverboden, error: svErr } = await supabaseAdmin
+      .from("startverbod")
+      .select("va_nummer,soort,ingang,einde,is_actueel,laatst_gezien_op")
+      .in("va_nummer", vaList)
+      .order("ingang", { ascending: false });
+
+    if (svErr) throw svErr;
+
+    const grouped = groupByVa(startverboden ?? []);
+    for (const [va, rows] of grouped.entries()) {
+      startverbodenByVa.set(va, rows);
+    }
+
+    console.log("[buildControleBoutContext] startverboden loaded", {
+      matchmaking_id,
+      requested_vas: vaList.length,
+      startverbod_rows: startverboden?.length ?? 0,
+      unique_vas: grouped.size,
+      evenement_datum,
     });
   }
 
@@ -806,6 +854,32 @@ if (scopedPartijNr != null) {
     const mr = vaR ? matchmakerContextByVa.get(vaR) : null;
     const mb = vaB ? matchmakerContextByVa.get(vaB) : null;
 
+    const roodStartverbodFallback =
+      toNullableBool(fr?.heeft_startverbod) ??
+      toNullableBool(fr?.startverbod_actief) ??
+      toBoolJaNeeLoose(mr?.heeft_startverbod) ??
+      null;
+    const blauwStartverbodFallback =
+      toNullableBool(fb?.heeft_startverbod) ??
+      toNullableBool(fb?.startverbod_actief) ??
+      toBoolJaNeeLoose(mb?.heeft_startverbod) ??
+      null;
+
+    const roodHeeftStartverbod = vaR
+      ? hasActiveStartverbodAtDate(
+          startverbodenByVa.get(vaR) ?? [],
+          evenement_datum,
+          roodStartverbodFallback
+        )
+      : roodStartverbodFallback;
+    const blauwHeeftStartverbod = vaB
+      ? hasActiveStartverbodAtDate(
+          startverbodenByVa.get(vaB) ?? [],
+          evenement_datum,
+          blauwStartverbodFallback
+        )
+      : blauwStartverbodFallback;
+
     const currentClass =
       partij?.klasse ?? partij?.klasse_mm ?? mr?.klasse ?? mb?.klasse ?? null;
     const recRClass = buildClassAwareRecord(uitslagenR, currentClass);
@@ -946,20 +1020,12 @@ if (scopedPartijNr != null) {
       rood_licentie: resolveLicentieValue(fr) ?? resolveLicentieValue(mr),
       keurmerk_rood: toNullableBool(mr?.heeft_keurmerk),
       keurmerk_reden_rood: toNullableStr(mr?.keurmerk_reden),
-      rood_heeft_startverbod:
-        toNullableBool(fr?.heeft_startverbod) ??
-        toNullableBool(fr?.startverbod_actief) ??
-        toBoolJaNeeLoose(mr?.heeft_startverbod) ??
-        null,
+      rood_heeft_startverbod: roodHeeftStartverbod,
 
       blauw_licentie: resolveLicentieValue(fb) ?? resolveLicentieValue(mb),
       keurmerk_blauw: toNullableBool(mb?.heeft_keurmerk),
       keurmerk_reden_blauw: toNullableStr(mb?.keurmerk_reden),
-      blauw_heeft_startverbod:
-        toNullableBool(fb?.heeft_startverbod) ??
-        toNullableBool(fb?.startverbod_actief) ??
-        toBoolJaNeeLoose(mb?.heeft_startverbod) ??
-        null,
+      blauw_heeft_startverbod: blauwHeeftStartverbod,
 
       rood_nulmeting_totaal:
         fr?.nulmeting_totaal ?? mr?.nulmeting_totaal ?? null,
@@ -1467,7 +1533,33 @@ export async function buildToernooiContext(
     });
   }
 
-  // 5) Uitslagen ophalen uit fightpassport_results.
+  // 5) Startverboden ophalen uit de aparte dashboardrapport-tabel.
+  const startverbodenByVa = new Map<string, any[]>();
+
+  if (vaList.length > 0) {
+    const { data: startverboden, error: svErr } = await supabaseAdmin
+      .from("startverbod")
+      .select("va_nummer,soort,ingang,einde,is_actueel,laatst_gezien_op")
+      .in("va_nummer", vaList)
+      .order("ingang", { ascending: false });
+
+    if (svErr) throw svErr;
+
+    const grouped = groupByVa(startverboden ?? []);
+    for (const [va, rows] of grouped.entries()) {
+      startverbodenByVa.set(va, rows);
+    }
+
+    console.log("[buildToernooiContext] startverboden loaded", {
+      matchmaking_id,
+      requested_vas: vaList.length,
+      startverbod_rows: startverboden?.length ?? 0,
+      unique_vas: grouped.size,
+      evenement_datum,
+    });
+  }
+
+  // 6) Uitslagen ophalen uit fightpassport_results.
   const uitslagenByVa = new Map<string, any[]>();
 
   if (vaList.length > 0) {
@@ -1658,11 +1750,14 @@ export async function buildToernooiContext(
         null,
 
       licentie: resolveLicentieValue(fr) ?? row?.licentie ?? null,
-      heeft_startverbod:
+      heeft_startverbod: hasActiveStartverbodAtDate(
+        va ? startverbodenByVa.get(va) ?? [] : [],
+        evenement_datum,
         toNullableBool(fr?.heeft_startverbod) ??
-        toNullableBool(fr?.startverbod_actief) ??
-        toNullableBool(row?.heeft_startverbod) ??
-        null,
+          toNullableBool(fr?.startverbod_actief) ??
+          toNullableBool(row?.heeft_startverbod) ??
+          null
+      ),
 
       nulmeting_totaal: fr?.nulmeting_totaal ?? row?.nulmeting_totaal ?? null,
       nulmeting_klasse: fr?.nulmeting_klasse ?? row?.nulmeting_klasse ?? null,

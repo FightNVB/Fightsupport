@@ -16,7 +16,6 @@ const WORKERS_RAW = Number(process.env.FP_TOTAL_WORKERS ?? process.env.WORKERS ?
 const WORKERS = Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
   ? Math.min(20, Math.max(1, Math.floor(WORKERS_RAW)))
   : 8;
-const FULL_DETAILS_ONLY_LICENSED = String(process.env.FP_TOTAL_ONLY_LICENSED || "false").toLowerCase() === "true";
 const SCRAPE_RESULTS = String(process.env.FP_TOTAL_RESULTS || "true").toLowerCase() !== "false";
 const RESUME_RUN_ID = String(process.env.FP_TOTAL_RUN_ID || "").trim();
 const EXPLICIT_VA_LIST = String(process.env.FP_TOTAL_VA_LIST || "")
@@ -994,6 +993,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
   );
 
   let lastLogAt = 0;
+  let retried = false;
 
   while (Date.now() - downloadStartedAt < maxDownloadWaitMs) {
     let filesNow = [];
@@ -1043,11 +1043,10 @@ async function downloadResultsExcel(page, va, initialFound = null) {
         `[fp-total] 📥 VA ${va} Excel gezien; wachten tot bestand volledig klaar is: ${path.basename(candidate)}`
       );
 
-      // Bestand moet minimaal 4 seconden volledig stabiel zijn,
-      // zonder .crdownload, voordat de scraper verder mag.
-      let lastSize = -1;
-      let stableSince = null;
+      // Zodra Chrome klaar is met downloaden (geen .crdownload meer),
+      // direct proberen te openen met ExcelJS. Geen vaste extra wachttijd.
       const completeCheckStartedAt = Date.now();
+      let lastReadError = null;
 
       while (Date.now() - completeCheckStartedAt < 60000) {
         let currentFiles = [];
@@ -1068,25 +1067,7 @@ async function downloadResultsExcel(page, va, initialFound = null) {
           size = 0;
         }
 
-        if (!stillDownloading && size > 0 && size === lastSize) {
-          if (stableSince === null) stableSince = Date.now();
-        } else {
-          stableSince = null;
-        }
-
-        lastSize = size;
-
-        if (
-          !stillDownloading &&
-          size > 0 &&
-          stableSince !== null &&
-          Date.now() - stableSince >= 4000
-        ) {
-          // Extra marge voordat ExcelJS het bestand opent.
-          await sleep(1500);
-
-          // Laat ExcelJS het bestand hier al één keer echt openen.
-          // Pas als dit lukt noemen we de download voltooid.
+        if (!stillDownloading && size > 0) {
           try {
             await readXlsxToRows(candidate, { sheetIndex: 0 });
             console.log(
@@ -1094,16 +1075,26 @@ async function downloadResultsExcel(page, va, initialFound = null) {
             );
             return { file: candidate, dir };
           } catch (e) {
-            console.log(
-              `[fp-total] ⏳ VA ${va} Excel bestaat maar is nog niet leesbaar:`,
-              e?.message ?? String(e)
-            );
-            stableSince = null;
+            lastReadError = e?.message ?? String(e);
           }
         }
 
-        await sleep(500);
+        await sleep(200);
       }
+
+      if (lastReadError) {
+        console.log(
+          `[fp-total] ⚠️ VA ${va} Excel bleef tijdelijk onleesbaar: ${lastReadError}`
+        );
+      }
+    }
+
+    if (!retried && elapsedMs > 20000 && filesNow.length === 0) {
+      retried = true;
+      console.log(
+        `[fp-total] 🔁 VA ${va} na 20s nog geen bestand; download één keer opnieuw klikken`
+      );
+      await clickDownload().catch(() => {});
     }
 
     await sleep(500);
@@ -1120,29 +1111,102 @@ async function downloadResultsExcel(page, va, initialFound = null) {
 
 async function parseResultsExcel(filePath, va) {
   const rows = await readXlsxToRows(filePath, { sheetIndex: 0 });
-  const headerIndex = rows.findIndex((r) => Array.isArray(r) && r.some((x) => String(x || "").trim() === "Datum") && r.some((x) => String(x || "").trim() === "Evenement"));
-  if (headerIndex < 0) return [];
-  const headers = rows[headerIndex].map((h) => String(h || "").trim());
-  const ix = (n) => headers.indexOf(n);
+
+  // Bewust exact dezelfde Excel-opbouw als de stabiele bundle scraper.
+  const headerRow = rows[4] || [];
+  const headers = headerRow.map((h) => (h ? String(h).trim() : ""));
+
+  const idxDatum = headers.indexOf("Datum");
+  const idxEvenement = headers.indexOf("Evenement");
+  const idxTegenstander = headers.indexOf("Tegenstander");
+  const idxSportschool = headers.indexOf("Sportschool");
+  const idxDiscipline = headers.indexOf("Discipline");
+  const idxKlasse = headers.indexOf("Kl.");
+  const idxGewicht = headers.indexOf("Gewicht");
+  const idxUitslag = headers.indexOf("Uitslag");
+
+  const must = [
+    ["Datum", idxDatum],
+    ["Evenement", idxEvenement],
+    ["Tegenstander", idxTegenstander],
+    ["Discipline", idxDiscipline],
+    ["Uitslag", idxUitslag],
+  ];
+
+  const missing = must.filter(([, idx]) => idx === -1).map(([name]) => name);
+
+  if (missing.length) {
+    return {
+      rows: [],
+      meta: {
+        ok: false,
+        emptyExport: true,
+        missingHeaders: missing,
+        headers: headers.filter(Boolean),
+      },
+    };
+  }
+
   const out = [];
-  for (const row of rows.slice(headerIndex + 1)) {
-    if (!row || !row[ix("Datum")]) continue;
-    const datum = parseNlDate(row[ix("Datum")]);
+  const toStr = (v) => {
+    if (v == null) return null;
+    const value = String(v).trim();
+    return value.length ? value : null;
+  };
+
+  for (let r = 5; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row) continue;
+
+    const rawDate = row[idxDatum];
+    if (!rawDate) continue;
+
+    const datum = parseNlDate(rawDate);
     if (!datum) continue;
+
     out.push({
-      va_nummer: String(va), datum,
-      evenement: ix("Evenement") >= 0 ? String(row[ix("Evenement")] || "").trim() || null : null,
-      tegenstander: ix("Tegenstander") >= 0 ? String(row[ix("Tegenstander")] || "").trim() || null : null,
-      sportschool: ix("Sportschool") >= 0 ? String(row[ix("Sportschool")] || "").trim() || null : null,
-      discipline: ix("Discipline") >= 0 ? String(row[ix("Discipline")] || "").trim() || null : null,
-      klasse: ix("Kl.") >= 0 ? String(row[ix("Kl.")] || "").trim() || null : null,
-      gewicht: ix("Gewicht") >= 0 ? String(row[ix("Gewicht")] || "").trim() || null : null,
-      uitslag: ix("Uitslag") >= 0 ? String(row[ix("Uitslag")] || "").trim() || null : null,
+      va_nummer: String(va),
+      datum,
+      evenement: toStr(row[idxEvenement]),
+      tegenstander: toStr(row[idxTegenstander]),
+      sportschool: idxSportschool !== -1 ? toStr(row[idxSportschool]) : null,
+      discipline: toStr(row[idxDiscipline]),
+      klasse: idxKlasse !== -1 ? toStr(row[idxKlasse]) : null,
+      gewicht: idxGewicht !== -1 ? toStr(row[idxGewicht]) : null,
+      uitslag: toStr(row[idxUitslag]),
       raw_json: { headers, row },
       last_seen_at: new Date().toISOString(),
     });
   }
-  return out;
+
+  const deduped = [
+    ...new Map(
+      out.map((row) => {
+        const key = [
+          row.va_nummer,
+          row.datum,
+          row.evenement,
+          row.tegenstander,
+          row.uitslag,
+          row.discipline,
+          row.klasse,
+        ]
+          .map((value) => String(value ?? "").replace(/\s+/g, " ").trim())
+          .join("||");
+        return [key, row];
+      })
+    ).values(),
+  ];
+
+  return {
+    rows: deduped,
+    meta: {
+      ok: true,
+      emptyExport: false,
+      missingHeaders: [],
+      headers: headers.filter(Boolean),
+    },
+  };
 }
 
 async function scrapeResults(page, va) {
@@ -1172,13 +1236,20 @@ async function scrapeResults(page, va) {
   }
 
   try {
-    const rows = await parseResultsExcel(dl.file, va);
+    const parsed = await parseResultsExcel(dl.file, va);
 
-    // BELANGRIJK:
-    // nog NIET opruimen. Dit gebeurt pas nadat saveResultsSnapshot succesvol is.
+    // Exact zoals bundle: alleen een geldig herkend exportformaat mag opgeslagen worden.
+    // Een export zonder de verwachte kolomkoppen wordt apart gelogd als lege export.
+    if (!parsed?.meta?.ok) {
+      console.log(`[fp-total] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`, {
+        missingHeaders: parsed?.meta?.missingHeaders ?? [],
+        headers: parsed?.meta?.headers ?? [],
+      });
+    }
+
     return {
-      status: rows.length ? "success" : "no_results",
-      rows,
+      status: parsed?.meta?.ok && parsed.rows.length ? "success" : "no_results",
+      rows: parsed?.rows || [],
       error: null,
       download: dl,
     };
@@ -1296,17 +1367,17 @@ async function scrapeOne(page, va, openFreshPage) {
 
   const licensed = boolFromJaNee(summary.licentie) === true;
   let details = {};
-  let gyms = [];
-  let startbans = [];
-  let licenses = [];
+  // Niet apart openen: licentie en startverbod staan direct op de vechterpagina.
+  const gyms = [];
+  const startbans = [];
+  const licenses = [];
   let results = [];
   let resultsStatus = SCRAPE_RESULTS ? "pending" : "skipped";
   let resultsError = null;
   let resultsDownload = null;
 
-  // Iedere tegel krijgt bewust een SCHONE, opnieuw geverifieerde VA-tab.
-  // Zo kunnen oude modals/downloadknoppen van o.a. LICENTIES nooit meekomen
-  // wanneer daarna UITSLAGEN wordt geopend.
+  // Alleen DETAILS en UITSLAGEN krijgen zo nodig een schone, opnieuw geverifieerde VA-tab.
+  // Licentie en startverbod worden rechtstreeks van de hoofdpagina gelezen.
   async function withFreshVaTab(stepName, fn) {
     const freshPage = await openFreshPage(stepName);
     if (!freshPage) throw new Error(`${stepName}: VA ${va} kon niet opnieuw worden geopend`);
@@ -1319,7 +1390,7 @@ async function scrapeOne(page, va, openFreshPage) {
     }
   }
 
-  if (!FULL_DETAILS_ONLY_LICENSED || licensed) {
+  {
     // DETAILS is verplicht. Gebruik de reeds geverifieerde hoofdtab voor poging 1.
     // Alleen bij een echte fout openen we een nieuwe schone VA-tab.
     // Dit scheelt per geldige vechter een volledige extra paginalaad.
@@ -1432,29 +1503,24 @@ async function scrapeOne(page, va, openFreshPage) {
       );
     }
 
-    if (summary.heeft_startverbod) {
-      startbans = await withFreshVaTab("STARTVERBODEN", async (p) => {
-        return await scrapeTileTable(p, va, "STARTVERBODEN");
-      }).catch((e) => {
-        console.log(`[fp-total] ⚠️ VA ${va} STARTVERBODEN fout:`, e?.message ?? String(e));
-        return [];
-      });
-    }
+  }
 
-    if (SCRAPE_RESULTS) {
-      const resultStep = await withFreshVaTab("UITSLAGEN", async (p) => {
-        return await scrapeResults(p, va);
-      }).catch((e) => ({
-        status: "error",
-        rows: [],
-        error: e?.message ?? String(e),
-      }));
+  // UITSLAGEN hoort bij iedere bestaande VA te worden uitgevoerd.
+  // Licentie en startverbod zijn uitsluitend opgeslagen waarden en nooit selectievoorwaarden.
+  if (SCRAPE_RESULTS) {
+    const resultStep = await withFreshVaTab("UITSLAGEN", async (p) => {
+      return await scrapeResults(p, va);
+    }).catch((e) => ({
+      status: "error",
+      rows: [],
+      error: e?.message ?? String(e),
+      download: null,
+    }));
 
-      resultsStatus = resultStep.status;
-      resultsError = resultStep.error;
-      results = resultStep.rows || [];
-      resultsDownload = resultStep.download || null;
-    }
+    resultsStatus = resultStep.status;
+    resultsError = resultStep.error;
+    results = resultStep.rows || [];
+    resultsDownload = resultStep.download || null;
   }
 
   // FULLFIGHTER en UITSLAGEN zijn bewust twee losse opslagstappen.

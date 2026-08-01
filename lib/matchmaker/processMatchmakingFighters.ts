@@ -25,6 +25,7 @@ type SingleFighterSources = {
   aanmelding: AnyRow;
   fighterRaw?: AnyRow | null;
   uitslagen?: AnyRow[];
+  startverboden?: AnyRow[];
 };
 
 async function buildAndSaveSingleFighter(params: {
@@ -34,7 +35,13 @@ async function buildAndSaveSingleFighter(params: {
   sources: SingleFighterSources;
 }) {
   const { supabase, matchmakingId, controleRunId, sources } = params;
-  const { matchmaking, aanmelding, fighterRaw = null, uitslagen = [] } = sources;
+  const {
+    matchmaking,
+    aanmelding,
+    fighterRaw = null,
+    uitslagen = [],
+    startverboden = [],
+  } = sources;
 
   const built = buildSingleFighterContext({
     matchmakingId,
@@ -42,6 +49,7 @@ async function buildAndSaveSingleFighter(params: {
     aanmelding,
     fightersRaw: fighterRaw,
     uitslagen,
+    startverboden,
     eventDate: matchmaking.datum ?? null,
   });
 
@@ -122,11 +130,13 @@ export async function processSingleFighter(params: {
   const va = normalizeVa(aanmelding?.va_nummer ?? aanmelding?.va ?? aanmelding?.fighter_id);
   let fighterRaw: AnyRow | null = null;
   let uitslagen: AnyRow[] = [];
+  let startverboden: AnyRow[] = [];
 
   if (va) {
     const [
       { data: fighter, error: fighterError },
       { data: resultRows, error: resultsError },
+      { data: startverbodRows, error: startverbodError },
     ] = await Promise.all([
       supabase
         .from("fightpassport_fighters")
@@ -137,12 +147,18 @@ export async function processSingleFighter(params: {
         .from("fightpassport_results")
         .select("*")
         .eq("va_nummer", va),
+      supabase
+        .from("startverbod")
+        .select("*")
+        .eq("va_nummer", va),
     ]);
 
     requireNoError("FightPassport-vechter laden mislukt", fighterError);
     requireNoError("FightPassport-uitslagen laden mislukt", resultsError);
+    requireNoError("Startverboden laden mislukt", startverbodError);
     fighterRaw = (fighter ?? null) as AnyRow | null;
     uitslagen = (resultRows ?? []) as AnyRow[];
+    startverboden = (startverbodRows ?? []) as AnyRow[];
   }
 
   const result = await buildAndSaveSingleFighter({
@@ -154,6 +170,7 @@ export async function processSingleFighter(params: {
       aanmelding: aanmelding as AnyRow,
       fighterRaw,
       uitslagen,
+      startverboden,
     },
   });
 
@@ -227,20 +244,25 @@ export async function processMatchmakingFighters(params: {
 
   let fighterRows: AnyRow[] = [];
   let resultRows: AnyRow[] = [];
+  let startverbodRows: AnyRow[] = [];
 
   if (vaNummers.length) {
     const [
       { data: fighters, error: fightersError },
       { data: results, error: resultsError },
+      { data: startverboden, error: startverbodenError },
     ] = await Promise.all([
       supabase.from("fightpassport_fighters").select("*").in("va_nummer", vaNummers),
       supabase.from("fightpassport_results").select("*").in("va_nummer", vaNummers),
+      supabase.from("startverbod").select("*").in("va_nummer", vaNummers),
     ]);
 
     requireNoError("FightPassport-vechters laden mislukt", fightersError);
     requireNoError("FightPassport-uitslagen laden mislukt", resultsError);
+    requireNoError("Startverboden laden mislukt", startverbodenError);
     fighterRows = (fighters ?? []) as AnyRow[];
     resultRows = (results ?? []) as AnyRow[];
+    startverbodRows = (startverboden ?? []) as AnyRow[];
   }
 
   const fighterByVa = new Map<string, AnyRow>();
@@ -256,6 +278,17 @@ export async function processMatchmakingFighters(params: {
     const list = resultsByVa.get(va) ?? [];
     list.push(result);
     resultsByVa.set(va, list);
+  }
+
+  const startverbodenByVa = new Map<string, AnyRow[]>();
+  for (const startverbod of startverbodRows) {
+    const va = normalizeVa(
+      startverbod?.va_nummer ?? startverbod?.va ?? startverbod?.fighter_id,
+    );
+    if (!va) continue;
+    const list = startverbodenByVa.get(va) ?? [];
+    list.push(startverbod);
+    startverbodenByVa.set(va, list);
   }
 
   const contexts: AnyRow[] = [];
@@ -274,6 +307,7 @@ export async function processMatchmakingFighters(params: {
         aanmelding,
         fighterRaw: va ? fighterByVa.get(va) ?? null : null,
         uitslagen: va ? resultsByVa.get(va) ?? [] : [],
+        startverboden: va ? startverbodenByVa.get(va) ?? [] : [],
       },
     });
 

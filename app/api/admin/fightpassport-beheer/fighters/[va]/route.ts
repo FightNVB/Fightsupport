@@ -5,11 +5,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ va: stri
   try {
     await requireRole(req, ["admin", "superadmin"]);
     const { va } = await params;
-    const [fighter, results, gyms, bans, licenses, syncItems, doping, fighterSchools] = await Promise.all([
+    const [fighter, results, gyms, startverbod, licenses, syncItems, doping, fighterSchools] = await Promise.all([
       supabaseAdmin.from("fightpassport_fighters").select("*").eq("va_nummer", va).maybeSingle(),
       supabaseAdmin.from("fightpassport_results").select("*").eq("va_nummer", va).order("datum", { ascending: false }),
       supabaseAdmin.from("fightpassport_fighter_gyms").select("*").eq("va_nummer", va).order("last_seen_at", { ascending: false }),
-      supabaseAdmin.from("fightpassport_startbans").select("*").eq("va_nummer", va).order("ingang", { ascending: false }),
+      supabaseAdmin
+        .from("startverbod")
+        .select("id,va_nummer,naam,naam_bron,soort,ingang,einde,is_actueel,koppel_methode,eerste_gezien_op,laatst_gezien_op,laatste_run_id")
+        .eq("va_nummer", va)
+        .order("is_actueel", { ascending: false })
+        .order("ingang", { ascending: false }),
       supabaseAdmin.from("fightpassport_licenses").select("*").eq("va_nummer", va).order("geldig_tot", { ascending: false }),
       supabaseAdmin.from("fightpassport_sync_items").select("*, fightpassport_sync_runs(start_va,end_va,started_at,status)").eq("va_nummer", va).order("created_at", { ascending: false }).limit(50),
       supabaseAdmin.from("doping_fighters").select("*").eq("va_nummer", va).maybeSingle(),
@@ -24,6 +29,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ va: stri
     if (fighter.error) throw fighter.error;
     if (!fighter.data) return NextResponse.json({ error: "Vechter niet gevonden." }, { status: 404 });
     if (fighterSchools.error) throw fighterSchools.error;
+    if (startverbod.error) throw startverbod.error;
 
     const sportschoolIds = [
       ...new Set(
@@ -53,7 +59,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ va: stri
       results: results.data ?? [],
       gyms: gyms.data ?? [],
       sportscholen,
-      startbans: bans.data ?? [],
+      startverbod: startverbod.data ?? [],
       licenses: licenses.data ?? [],
       syncItems: syncItems.data ?? [],
       doping: doping.data ?? null,

@@ -5,11 +5,50 @@ import { ArrowLeft, RefreshCw } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
 
 export default function FighterDossierPage(){
- const {va}=useParams<{va:string}>(); const router=useRouter(); const [data,setData]=useState<any>(null); const [error,setError]=useState("");
- async function load(){const r=await authedFetch(`/api/admin/fightpassport-beheer/fighters/${va}`);const j=await r.json().catch(()=>({}));if(r.ok)setData(j);else setError(j.error||"Laden mislukt");}
+ const {va}=useParams<{va:string}>();
+ const router=useRouter();
+ const [data,setData]=useState<any>(null);
+ const [error,setError]=useState("");
+ const [hercheckBusy,setHercheckBusy]=useState(false);
+ const [hercheckMessage,setHercheckMessage]=useState("");
+ async function load(){
+  const r=await authedFetch(`/api/admin/fightpassport-beheer/fighters/${va}`,{cache:"no-store"});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok){setData(j);setError("");}
+  else setError(j.error||"Laden mislukt");
+ }
+
+ async function startHercheck(){
+  if(hercheckBusy)return;
+
+  setHercheckBusy(true);
+  setHercheckMessage("");
+  setError("");
+
+  const r=await authedFetch(
+   `/api/admin/fightpassport-beheer/fighters/${va}/rescrape`,
+   {method:"POST"}
+  );
+  const j=await r.json().catch(()=>({}));
+
+  if(!r.ok){
+   setHercheckBusy(false);
+   setHercheckMessage(j.error||"Hercheck starten mislukt.");
+   return;
+  }
+
+  setHercheckMessage(j.message||`Herscrape voor VA ${va} is gestart.`);
+
+  window.setTimeout(async()=>{
+   await load();
+   setHercheckBusy(false);
+   setHercheckMessage("Hercheck gestart. Ververs later nogmaals als de scraper nog bezig is.");
+  },5000);
+ }
  useEffect(()=>{load()},[va]); if(error)return <main style={s.page}><button style={s.silver} onClick={()=>router.back()}>Terug</button><p>{error}</p></main>; if(!data)return <main style={s.page}>Dossier laden...</main>;
  const f=data.fighter;
  const resultRows=Array.isArray(data.results)?data.results:[];
+ const startverbodRows=Array.isArray(data.startverbod)?data.startverbod:[];
  const record=resultRows.reduce((acc:any,r:any)=>{
   const u=String(r?.uitslag||"").trim().toLowerCase();
   if(/win|winst|gewonnen|wint/.test(u))acc.w++;
@@ -25,7 +64,9 @@ export default function FighterDossierPage(){
       <div style={s.logoWrap}>
         <img src="/branding/fightsupport/excel-logo.png" alt="FightSupport" style={s.logo}/>
       </div>
-      <button style={s.silver} onClick={load}><RefreshCw size={16}/>Hercheck</button>
+      <button style={s.silver} disabled={hercheckBusy} onClick={startHercheck}>
+        <RefreshCw size={16}/>{hercheckBusy?"Hercheck loopt...":"Hercheck"}
+       </button>
     </div>
     <div style={s.heroBottom}>
       <div style={s.heroIdentity}>
@@ -40,12 +81,32 @@ export default function FighterDossierPage(){
       </div>
     </div>
   </header>
+  {hercheckMessage&&<div style={s.notice}>{hercheckMessage}</div>}
  <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/></div>
  <Section title="Profiel & contact"><Grid rows={[["Naam",f.naam],["E-mail",f.email],["Geboortedatum",f.geboortedatum],["Geslacht",f.geslacht]]}/></Section>
  <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Leeftijd",calcAge(f.geboortedatum)],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden",f.nulmeting_totaal],["W / V / O",`${record.w} / ${record.v} / ${record.o}`],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
  <Section title={`Sportscholen (${(data.sportscholen||data.gyms||[]).length})`}><Table headers={["Sportschool","Plaats","Land","Sportschool ID","Laatste synchronisatie"]} rows={(data.sportscholen||data.gyms||[]).map((r:any)=>[r.naam||r.organisatie_naam,r.plaats,r.land,r.sportschool_id||r.organisatie_id||"-",fmt(r.last_team_sync_at||r.last_seen_at)])}/></Section>
  <Section title={`Wedstrijdhistorie (${data.results.length})`}><Table headers={["Datum","Evenement","Discipline","Klasse","Tegenstander","Sportschool","Uitslag"]} rows={data.results.map((r:any)=>[r.datum,r.evenement,r.discipline,r.klasse,r.tegenstander,r.sportschool,r.uitslag])}/></Section>
- {Array.isArray(data.startbans)&&data.startbans.length>0&&<Section title={`Startverboden (${data.startbans.length})`}><Table headers={["Soort","Ingang","Einde","Actief","Reden","Evenement"]} rows={data.startbans.map((r:any)=>[r.soort,r.ingang,r.einde,r.actief?"Ja":"Nee",r.reden,r.evenement])}/></Section>}
+ <Section title={`Startverboden (${startverbodRows.length})`}>
+  <Table
+   headers={["Status","Soort","Ingang","Einde","In actuele rapportage","Laatste waarneming"]}
+   rows={startverbodRows
+    .slice()
+    .sort((a:any,b:any)=>{
+     const activeDiff=Number(Boolean(b.is_actueel))-Number(Boolean(a.is_actueel));
+     if(activeDiff!==0)return activeDiff;
+     return String(b.ingang||"").localeCompare(String(a.ingang||""));
+    })
+    .map((r:any)=>[
+     startverbodStatus(r),
+     r.soort,
+     fmtDate(r.ingang),
+     r.einde?fmtDate(r.einde):"Geen einddatum",
+     r.is_actueel?"Ja":"Nee",
+     fmt(r.laatst_gezien_op)
+   ])}
+  />
+ </Section>
  <Section title="Dopingeducatie"><Grid rows={[["Status",data.doping?.status||"Niet gestart"],["Uitgenodigd",fmt(data.doping?.invited_at)],["Certificaat",data.doping?.certificate_status||"Niet ontvangen"],["FightPaspoort verwerkt",data.doping?.fightpassport_processed?"Ja":"Nee"]]}/></Section>
  </div></main>
 }
@@ -54,6 +115,16 @@ function Section({title,children}:any){return <section style={s.section}><h2 sty
 function Grid({rows}:any){return <div style={s.grid}>{rows.map((r:any,i:number)=><div key={i} style={{...s.field,...(r[2]==="wide"?s.fieldWide:{}),...(r[2]==="full"?s.fieldFull:{})}}><span style={s.muted}>{r[0]}</span><b style={{wordBreak:"break-word",lineHeight:1.35}}>{r[1]??"-"}</b></div>)}</div>}
 function Table({headers,rows}:any){return <div style={{overflowX:"auto",border:"1px solid #444b52"}}><table style={s.table}><thead><tr>{headers.map((h:any)=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{rows.map((r:any,i:number)=>{const light=i%2===1;return <tr key={i}>{r.map((v:any,j:number)=><td key={j} style={{...s.td,...(light?s.tdLight:s.tdDark)}}>{v??"-"}</td>)}</tr>})}{!rows.length&&<tr><td style={{...s.td,...s.tdDark}} colSpan={headers.length}>Geen gegevens.</td></tr>}</tbody></table></div>}
 function fmt(v:any){return v?new Date(v).toLocaleString("nl-NL"):"-"}
+function fmtDate(v:any){
+ const d=v?new Date(v):null;
+ return d&&!Number.isNaN(d.getTime())?d.toLocaleDateString("nl-NL"):"-";
+}
+function startverbodStatus(r:any){
+ if(!r?.is_actueel)return "Historie";
+ if(!r?.einde)return "Actueel · geen einddatum";
+ const end=new Date(`${String(r.einde).slice(0,10)}T23:59:59`);
+ return !Number.isNaN(end.getTime())&&end>=new Date()?"Actueel":"Verlopen";
+}
 function calcAge(v:any){
  const birth=new Date(v);
  if(!v||Number.isNaN(birth.getTime()))return "-";
@@ -78,6 +149,7 @@ title:{margin:0,fontSize:34,fontWeight:950,letterSpacing:.3,color:"#ff6a2a",text
 identityStrip:{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center"},
 identityChip:{padding:"6px 9px",border:"1px solid #6b3018",background:"#22120b",color:"#ffffff",fontSize:12,fontWeight:850},
 silver:{display:"inline-flex",gap:7,alignItems:"center",justifyContent:"center",height:38,padding:"0 13px",background:"linear-gradient(#fff,#c7c7c7)",color:"#111",border:"1px solid #aaa",fontWeight:900,cursor:"pointer",boxShadow:"inset 0 1px 0 #fff,0 4px 10px rgba(0,0,0,.28)"},
+ notice:{marginBottom:14,padding:"10px 12px",border:"1px solid #ff7438",background:"#211108",color:"#ffd5c2",fontWeight:800},
 orange:{color:"#ff6c2c",fontWeight:800},
 summary:{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:12,marginBottom:16},
 card:{border:"1px solid #555d65",borderTop:"3px solid #ff4d00",background:"linear-gradient(180deg,#1c2228,#0d1115)",padding:"13px 15px",boxShadow:"0 8px 18px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.04)"},

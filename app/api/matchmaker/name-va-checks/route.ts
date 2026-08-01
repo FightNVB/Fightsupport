@@ -114,7 +114,23 @@ export async function PATCH(req: Request) {
         .eq("id", checkId);
 
       if (error) throw new Error(error.message);
-      return NextResponse.json({ ok: true, resolution: "upload_name_approved" });
+
+      const processing = await processMatchmakingFighters({
+        supabase: supabaseAdmin,
+        matchmakingId,
+        aanmeldingId: check.aanmelding_id,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        resolution: "upload_name_approved",
+        refresh_page: true,
+        fighter_processing: {
+          processed: processing.processed,
+          controle_run_id: processing.controleRunId,
+          rule_hits: processing.hits.length,
+        },
+      });
     }
 
     if (action === "correct_va") {
@@ -172,13 +188,19 @@ export async function PATCH(req: Request) {
       const processing = await processMatchmakingFighters({
         supabase: supabaseAdmin,
         matchmakingId,
+        aanmeldingId: check.aanmelding_id,
       });
 
       return NextResponse.json({
         ok: true,
         resolution: "va_corrected",
+        refresh_page: true,
         fighter,
-        fighter_processing: { processed: processing.processed },
+        fighter_processing: {
+          processed: processing.processed,
+          controle_run_id: processing.controleRunId,
+          rule_hits: processing.hits.length,
+        },
       });
     }
 

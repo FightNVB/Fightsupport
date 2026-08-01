@@ -19,6 +19,16 @@ function n(v: unknown) {
   return Number.isFinite(x) ? x : null;
 }
 
+function normalizeDiscipline(value: unknown) {
+  const raw = s(value).toUpperCase();
+
+  if (raw.includes("MMA") || raw.includes("MIXED MARTIAL")) return "MMA";
+  if (raw.includes("THAI") || raw.includes("MUAY")) return "THAIBOKSEN";
+  if (raw.includes("KICK")) return "KICKBOKSEN";
+
+  return raw;
+}
+
 async function getUser(req: Request) {
   const authorization = req.headers.get("authorization") || "";
   const token = authorization.startsWith("Bearer ")
@@ -41,6 +51,8 @@ export async function POST(req: Request) {
     const sportschoolIdRaw = s(body?.sportschool_id);
     const sportschoolId = sportschoolIdRaw ? Number(sportschoolIdRaw) : null;
     const manualSchoolName = s(body?.gym);
+    const requestedDiscipline = normalizeDiscipline(body?.discipline);
+    const requestedClass = s(body?.klasse).toUpperCase();
     const gewicht = n(body?.gewicht);
 
     if (!matchmakingId) {
@@ -55,8 +67,29 @@ export async function POST(req: Request) {
     if (sportschoolId === null && !manualSchoolName) {
       return NextResponse.json({ error: "Vul de sportschool voor deze aanmelding in." }, { status: 400 });
     }
-    if (gewicht === null) {
-      return NextResponse.json({ error: "Vul een geldig wedstrijdgewicht in." }, { status: 400 });
+    if (!requestedDiscipline) {
+      return NextResponse.json(
+        { error: "Kies de discipline voor deze aanmelding." },
+        { status: 400 },
+      );
+    }
+    if (!["KICKBOKSEN", "THAIBOKSEN", "MMA"].includes(requestedDiscipline)) {
+      return NextResponse.json(
+        { error: "Ongeldige discipline gekozen." },
+        { status: 400 },
+      );
+    }
+    if (!requestedClass) {
+      return NextResponse.json(
+        { error: "Kies de klasse voor deze aanmelding." },
+        { status: 400 },
+      );
+    }
+    if (gewicht === null || gewicht <= 0) {
+      return NextResponse.json(
+        { error: "Vul een geldig wedstrijdgewicht groter dan 0 in." },
+        { status: 400 },
+      );
     }
 
     const { data: matchmaking, error: matchmakingError } = await supabaseAdmin
@@ -161,14 +194,18 @@ export async function POST(req: Request) {
 
     const { data: existing, error: duplicateError } = await supabaseAdmin
       .from("aanmeldingen")
-      .select("id")
+      .select("id, naam, va_nummer, gym, discipline, gewicht, source_type, upload_batch_id")
       .eq("matchmaking_id", matchmakingId)
       .eq("va_nummer", vaNummer)
       .limit(1);
     if (duplicateError) throw duplicateError;
     if ((existing ?? []).length > 0) {
       return NextResponse.json(
-        { error: `${fighter.naam || `VA ${vaNummer}`} staat al in deze matchmaking.` },
+        {
+          error: `${fighter.naam || `VA ${vaNummer}`} staat al in deze matchmaking.`,
+          duplicate: true,
+          existing: existing![0],
+        },
         { status: 409 },
       );
     }
@@ -179,8 +216,16 @@ export async function POST(req: Request) {
       matchmaking_id: matchmakingId,
       row_nr: null,
       status: "rauw",
-      discipline: s(fighter.primary_discipline) || s(fighter.nulmeting_discipline) || null,
-      klasse: s(fighter.berekende_klasse) || s(fighter.nulmeting_klasse) || null,
+      discipline:
+        requestedDiscipline ||
+        normalizeDiscipline(fighter.primary_discipline) ||
+        normalizeDiscipline(fighter.nulmeting_discipline) ||
+        null,
+      klasse:
+        requestedClass ||
+        s(fighter.berekende_klasse) ||
+        s(fighter.nulmeting_klasse) ||
+        null,
       geslacht: s(fighter.geslacht) || null,
       voornaam: s(fighter.voornaam) || null,
       achternaam: s(fighter.achternaam) || null,
@@ -201,6 +246,17 @@ export async function POST(req: Request) {
         matchmaking_id: matchmakingId,
         matchmaker_id: dbMatchmakerId || null,
         sportschool_id: sportschoolId,
+        discipline_opgegeven: requestedDiscipline,
+        discipline_fightpassport:
+          normalizeDiscipline(fighter.primary_discipline) ||
+          normalizeDiscipline(fighter.nulmeting_discipline) ||
+          null,
+        klasse_opgegeven: requestedClass,
+        klasse_fightpassport:
+          s(fighter.berekende_klasse) ||
+          s(fighter.nulmeting_klasse) ||
+          null,
+        gewicht_opgegeven: gewicht,
         toegevoegd_door: user.id,
         toegevoegd_op: new Date().toISOString(),
         fit_to_fight: fighter.fit_to_fight,
@@ -249,6 +305,7 @@ export async function POST(req: Request) {
     const processing = await processMatchmakingFighters({
       supabase: supabaseAdmin,
       matchmakingId,
+      aanmeldingId: data.id,
     });
 
     return NextResponse.json({
