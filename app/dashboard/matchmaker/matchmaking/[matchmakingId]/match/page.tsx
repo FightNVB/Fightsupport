@@ -17,6 +17,7 @@ import {
   Ban,
   Download,
   Eye,
+  Globe2,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -1267,6 +1268,303 @@ function boutStatus(row: any) {
   return value || 'Concept';
 }
 
+function formatDurationExact(mins: number): string {
+  // Toon de geschatte galaduur als een normale kloktijd, bijvoorbeeld 6:01 uur.
+  // Halve minuten worden niet als decimalen weergegeven, maar naar beneden afgerond.
+  const totalMinutes = Math.max(0, Math.floor(mins));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${hours}:${String(minutes).padStart(2, "0")} uur`;
+}
+
+const KLASSE_MINUTEN: Record<string, number> = {
+  "a titel": 31,
+  a: 21,
+  "a k1": 21,
+  b: 14,
+  c: 13,
+  n: 11.5,
+  "16/17": 10.5,
+  jeugd: 8.5,
+  "jeugd 16+": 10.5,
+  talentstatus: 10.5,
+  jplus: 10.5,
+  r: 8.5,
+  recreant: 8.5,
+  demo: 6,
+  boksen: 10,
+  "mma pro": 17,
+  "mma amateur": 17,
+  "mma jeugd": 17,
+};
+
+function normalizeDuurKlasse(raw: unknown): string {
+  return s(raw)
+    .toLowerCase()
+    .replace(/\+/g, " plus ")
+    .replace(/[._/\\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\bklas\b/g, " klasse ")
+    .replace(/\bklasse\b/g, " ")
+    .replace(/\bclass\b/g, " ")
+    .replace(/\bpartij(en)?\b/g, " ")
+    .replace(/\bmet\b/g, " ")
+    .replace(/\b(heren?|dames?|jongens?|meisjes?)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasDuurKlasseToken(text: string, token: "a" | "b" | "c" | "j" | "n" | "r") {
+  return new RegExp(`(^|\\s)${token}(\\s|$)`, "i").test(text);
+}
+
+function ageNumberOnEvent(row: any, side: "rood" | "blauw"): number | null {
+  const birth = parseDateOnly(
+    pickFirst(
+      row?.[`${side}_geboortedatum_fp`],
+      row?.[`${side}_geboortedatum_mm`],
+      row?.[`${side}_geboortedatum`],
+    ),
+  );
+  const eventDate = parseDateOnly(
+    pickFirst(row?.evenement_datum, row?.event_datum, row?.event_date, row?.datum),
+  );
+  if (!birth || !eventDate) return null;
+
+  let age = eventDate.getUTCFullYear() - birth.getUTCFullYear();
+  const monthDiff = eventDate.getUTCMonth() - birth.getUTCMonth();
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && eventDate.getUTCDate() < birth.getUTCDate())
+  ) {
+    age -= 1;
+  }
+  return Number.isFinite(age) && age >= 0 ? age : null;
+}
+
+function bothFightersAtLeastAge(row: any, minAge: number) {
+  const red = ageNumberOnEvent(row, "rood");
+  const blue = ageNumberOnEvent(row, "blauw");
+  return red != null && blue != null && red >= minAge && blue >= minAge;
+}
+
+function isTournamentDurationRow(row: any): boolean {
+  const raw = boutRaw(row);
+  const candidates = [
+    row?.toernooi_code,
+    row?.toernooi_id,
+    row?.toernooi_nummer,
+    row?.toernooi,
+    row?.t_nummer,
+    row?.t_code,
+    row?.tournament_code,
+    raw?.toernooi_code,
+    raw?.toernooi_id,
+    raw?.toernooi_nummer,
+    raw?.toernooi,
+    raw?.t_nummer,
+    raw?.t_code,
+    raw?.tournament_code,
+  ];
+
+  if (candidates.some((value) => /^T\d+$/i.test(s(value)))) return true;
+  return boolish(row?.is_toernooi) || boolish(raw?.is_toernooi);
+}
+
+function boolish(value: unknown) {
+  return value === true || s(value) === "1" || lower(value) === "true";
+}
+
+function tournamentDurationKey(row: any): string {
+  const raw = boutRaw(row);
+  return (
+    s(
+      pickFirst(
+        row?.toernooi_code,
+        row?.toernooi_id,
+        row?.toernooi_nummer,
+        row?.t_nummer,
+        row?.t_code,
+        row?.tournament_code,
+        raw?.toernooi_code,
+        raw?.toernooi_id,
+        raw?.toernooi_nummer,
+        raw?.t_nummer,
+        raw?.t_code,
+        raw?.tournament_code,
+      ),
+    ).toUpperCase() || "TOERNOOI"
+  );
+}
+
+function tournamentFighterDurationKey(row: any, side: "rood" | "blauw") {
+  const raw = boutRaw(row);
+  const sideRaw = obj(raw?.[side]);
+  const va = onlyDigits(
+    pickFirst(
+      row?.[side === "rood" ? "va_rood" : "va_blauw"],
+      row?.[`${side}_va_mm`],
+      row?.[`${side}_va`],
+      sideRaw?.va_nummer,
+      sideRaw?.va,
+    ),
+  );
+  if (va) return `va:${va}`;
+
+  const fighterName = lower(
+    pickFirst(
+      row?.[`${side}_naam_fp`],
+      row?.[`${side}_naam_mm`],
+      row?.[`${side}_naam`],
+      sideRaw?.naam,
+    ),
+  );
+  const gym = lower(
+    pickFirst(
+      row?.[`${side}_gym_mm`],
+      row?.[`${side}_gym_fp`],
+      row?.[`${side}_gym`],
+      sideRaw?.sportschool,
+      sideRaw?.gym,
+    ),
+  );
+  return fighterName ? `naam:${fighterName}|${gym}` : "";
+}
+
+function durationForClass(klasse: unknown, discipline: unknown, row?: any): number | null {
+  const rawClass = lower(klasse);
+  const normalizedClass = normalizeDuurKlasse(rawClass);
+  const normalizedDiscipline = lower(discipline)
+    .replace(/[._/\\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const haystack = `${normalizedClass} ${normalizedDiscipline}`.trim();
+
+  if (!haystack) return null;
+
+  if (normalizedClass.includes("mma") || normalizedDiscipline.includes("mma")) {
+    if (normalizedClass.includes("pro") || normalizedDiscipline.includes("pro")) {
+      return KLASSE_MINUTEN["mma pro"];
+    }
+    if (
+      normalizedClass.includes("jeugd") ||
+      normalizedClass.includes("youth") ||
+      normalizedClass.includes("junior") ||
+      normalizedDiscipline.includes("jeugd") ||
+      normalizedDiscipline.includes("youth")
+    ) {
+      return KLASSE_MINUTEN["mma jeugd"];
+    }
+    return KLASSE_MINUTEN["mma amateur"];
+  }
+
+  if (
+    ["boksen", "boxing", "boxen"].includes(normalizedDiscipline) ||
+    normalizedClass.includes("boksen") ||
+    normalizedClass.includes("boxing")
+  ) {
+    return KLASSE_MINUTEN.boksen;
+  }
+
+  if (haystack.includes("titel")) return KLASSE_MINUTEN["a titel"];
+
+  if (
+    rawClass.includes("j+") ||
+    normalizedClass.includes("j plus") ||
+    normalizedClass.includes("talentstatus") ||
+    normalizedClass.includes("talent status")
+  ) {
+    return KLASSE_MINUTEN.talentstatus;
+  }
+
+  if (/16\s*17/.test(normalizedClass) || /16\s*\/\s*17/.test(rawClass)) {
+    return KLASSE_MINUTEN["16/17"];
+  }
+
+  const isYouth =
+    hasDuurKlasseToken(normalizedClass, "j") ||
+    normalizedClass.includes("jeugd") ||
+    normalizedClass.includes("youth") ||
+    normalizedClass.includes("junior");
+
+  if (isYouth) {
+    return bothFightersAtLeastAge(row, 16)
+      ? KLASSE_MINUTEN["jeugd 16+"]
+      : KLASSE_MINUTEN.jeugd;
+  }
+
+  if (
+    hasDuurKlasseToken(normalizedClass, "r") ||
+    normalizedClass.includes("recreant") ||
+    normalizedClass.includes("recreatief")
+  ) return KLASSE_MINUTEN.r;
+
+  if (
+    hasDuurKlasseToken(normalizedClass, "n") ||
+    normalizedClass.includes("nieuweling") ||
+    normalizedClass.includes("novice") ||
+    normalizedClass.includes("newcomer")
+  ) return KLASSE_MINUTEN.n;
+
+  if (hasDuurKlasseToken(normalizedClass, "c")) return KLASSE_MINUTEN.c;
+  if (hasDuurKlasseToken(normalizedClass, "b")) return KLASSE_MINUTEN.b;
+  if (hasDuurKlasseToken(normalizedClass, "a")) return KLASSE_MINUTEN.a;
+  if (normalizedClass.includes("demo") || normalizedClass.includes("demonstratie")) {
+    return KLASSE_MINUTEN.demo;
+  }
+
+  return null;
+}
+
+function calculateMatchmakingDuration(rows: any[]) {
+  let totalMinutes = 0;
+  const normalRows = rows.filter((row) => !isTournamentDurationRow(row));
+
+  for (const row of normalRows) {
+    const minutes = durationForClass(
+      pickFirst(row?.klasse_mm, row?.klasse, boutField(row, "klasse")),
+      pickFirst(row?.discipline, boutField(row, "discipline")),
+      row,
+    );
+    if (minutes != null) totalMinutes += minutes;
+  }
+
+  const tournamentGroups = new Map<string, any[]>();
+  for (const row of rows) {
+    if (!isTournamentDurationRow(row)) continue;
+    const key = tournamentDurationKey(row);
+    const group = tournamentGroups.get(key) ?? [];
+    group.push(row);
+    tournamentGroups.set(key, group);
+  }
+
+  for (const groupRows of tournamentGroups.values()) {
+    const fighters = new Set<string>();
+    for (const row of groupRows) {
+      const red = tournamentFighterDurationKey(row, "rood");
+      const blue = tournamentFighterDurationKey(row, "blauw");
+      if (red) fighters.add(red);
+      if (blue) fighters.add(blue);
+    }
+
+    const calculatedBouts = fighters.size >= 2 ? fighters.size - 1 : 0;
+    const boutCount = calculatedBouts > 0 ? calculatedBouts : groupRows.length;
+    const example = groupRows.find((row) =>
+      s(pickFirst(row?.klasse_mm, row?.klasse, boutField(row, "klasse"))),
+    ) ?? groupRows[0];
+
+    const minutes = durationForClass(
+      pickFirst(example?.klasse_mm, example?.klasse, boutField(example, "klasse")),
+      pickFirst(example?.discipline, boutField(example, "discipline")),
+      example,
+    );
+    if (minutes != null) totalMinutes += minutes * boutCount;
+  }
+
+  return Math.round(totalMinutes * 10) / 10;
+}
+
 function nextTournamentCode(existing: any[]) {
   let max = 0;
   for (const t of existing || []) {
@@ -1353,6 +1651,31 @@ export default function FightersPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [busyText, setBusyText] = useState("");
+
+  const openOrCreatePublicMatchmaking = useCallback(async () => {
+    if (!matchmakingId) return;
+    setBusyId("public-matchmaking");
+    setBusyText("Openbare matchmaking wordt klaargezet...");
+    try {
+      const res = await authedFetch("/api/matchmaker/public-matchmaking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmakingId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Openbare matchmaking aanmaken mislukt");
+      const token = s(json?.publication?.public_token);
+      if (!token) throw new Error("De openbare link bevat geen token.");
+      const url = `${window.location.origin}/openbare-matchmaking/${token}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error: any) {
+      setMsg(error?.message || "Openbare matchmaking aanmaken mislukt");
+    } finally {
+      setBusyId(null);
+      setBusyText("");
+    }
+  }, [matchmakingId]);
+
   const [msg, setMsg] = useState("");
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -1367,6 +1690,7 @@ export default function FightersPage() {
   const [tournamentWeight, setTournamentWeight] = useState("");
   const [existingTournaments, setExistingTournaments] = useState<any[]>([]);
   const [matchRows, setMatchRows] = useState<any[]>([]);
+  const [matchmakingMeta, setMatchmakingMeta] = useState<Record<string, any>>({});
   const [mainView, setMainView] = useState<"fighters" | "matches">("fighters");
 
   const load = useCallback(async (silent = false) => {
@@ -1425,6 +1749,12 @@ export default function FightersPage() {
               : [];
 
       setMatchRows(getActiveMatchRows(jsonWithDbBouts));
+      setMatchmakingMeta(
+        obj(json?.matchmaking) ||
+          obj(json?.event) ||
+          obj(json?.matchmaking_meta) ||
+          {},
+      );
       setFighters(loadedFighters);
       const vaNumbers = Array.from(
         new Set(loadedFighters.map(vaOf).filter(Boolean)),
@@ -1526,6 +1856,53 @@ export default function FightersPage() {
       gematcht,
     };
   }, [fighters]);
+
+  const estimatedGalaMinutes = useMemo(() => {
+    const fighterByVa = new Map<string, Fighter>();
+    for (const fighter of fighters) {
+      const va = vaOf(fighter);
+      if (va && !fighterByVa.has(va)) fighterByVa.set(va, fighter);
+    }
+
+    const enrichedRows = matchRows.map((row) => {
+      const raw = boutRaw(row);
+      const redRaw = obj(raw?.rood);
+      const blueRaw = obj(raw?.blauw);
+      const redVa = onlyDigits(
+        pickFirst(row?.va_rood, row?.rood_va, redRaw?.va_nummer, redRaw?.va),
+      );
+      const blueVa = onlyDigits(
+        pickFirst(row?.va_blauw, row?.blauw_va, blueRaw?.va_nummer, blueRaw?.va),
+      );
+      const red = fighterByVa.get(redVa);
+      const blue = fighterByVa.get(blueVa);
+
+      return {
+        ...row,
+        evenement_datum: pickFirst(
+          row?.evenement_datum,
+          row?.event_datum,
+          matchmakingMeta?.evenement_datum,
+          matchmakingMeta?.event_datum,
+          matchmakingMeta?.datum,
+          red?.evenement_datum,
+          blue?.evenement_datum,
+        ),
+        rood_geboortedatum_fp: pickFirst(
+          row?.rood_geboortedatum_fp,
+          red?.fp_geboortedatum,
+          red?.geboortedatum,
+        ),
+        blauw_geboortedatum_fp: pickFirst(
+          row?.blauw_geboortedatum_fp,
+          blue?.fp_geboortedatum,
+          blue?.geboortedatum,
+        ),
+      };
+    });
+
+    return calculateMatchmakingDuration(enrichedRows);
+  }, [matchRows, fighters, matchmakingMeta]);
 
   const visible = useMemo(() => {
     const needle = q.toLowerCase().trim();
@@ -1973,8 +2350,62 @@ export default function FightersPage() {
           border:1px solid #fff; text-decoration:none;
         }
         .fs-page315 .fs-party-detail:hover { background:#ff4d00; border-color:#ff4d00; }
+        .fs-matchmaking-hero {
+          position:relative; min-height:250px; overflow:hidden; isolation:isolate;
+          display:flex; align-items:flex-end; justify-content:space-between;
+          padding:34px 38px 30px; margin-bottom:14px; border:1px solid #39393d;
+          background-image:
+            linear-gradient(90deg, rgba(5,5,6,.96) 0%, rgba(5,5,6,.82) 38%, rgba(5,5,6,.28) 72%, rgba(5,5,6,.16) 100%),
+            linear-gradient(0deg, rgba(5,5,6,.48) 0%, rgba(5,5,6,.04) 55%, rgba(5,5,6,.24) 100%),
+            url('/branding/fightsupport/matchmaking.png');
+          background-size:cover;
+          background-position:center center;
+          background-repeat:no-repeat;
+          box-shadow:0 20px 55px rgba(0,0,0,.35), inset 0 -1px 0 rgba(255,77,0,.45);
+        }
+        .fs-matchmaking-hero:before {
+          content:""; position:absolute; inset:0; z-index:-1;
+          background:linear-gradient(90deg, rgba(0,0,0,.36) 0%, transparent 58%);
+          pointer-events:none;
+        }
+        .fs-matchmaking-hero:after {
+          content:""; position:absolute; left:0; bottom:0; width:160px; height:4px; background:#ff4d00;
+          box-shadow:160px 0 0 rgba(255,77,0,.45), 320px 0 0 rgba(255,77,0,.16);
+        }
+        .fs-ring-watermark {
+          position:absolute; right:4%; top:13%; width:43%; height:69%; z-index:-1;
+          transform:perspective(520px) rotateX(58deg) rotateZ(-7deg); transform-origin:center;
+          border:5px solid rgba(255,255,255,.15); box-shadow:0 0 0 8px rgba(255,77,0,.04), inset 0 0 32px rgba(255,255,255,.04);
+          background:repeating-linear-gradient(0deg, transparent 0 22%, rgba(255,255,255,.13) 22% 24%, transparent 24% 31%);
+        }
+        .fs-ring-watermark:before, .fs-ring-watermark:after {
+          content:""; position:absolute; inset:9%; border:2px solid rgba(255,255,255,.10);
+        }
+        .fs-ring-watermark:after { inset:18%; border-color:rgba(255,77,0,.15); }
+        .fs-ring-post { position:absolute; width:10px; height:150%; top:-25%; background:linear-gradient(#85858b,#262629); box-shadow:0 0 18px rgba(0,0,0,.8); }
+        .fs-ring-post-a { left:-7px; } .fs-ring-post-b { right:-7px; }
+        .fs-ring-post-c { left:-7px; transform:translateY(54%); } .fs-ring-post-d { right:-7px; transform:translateY(54%); }
+        .fs-hero-glow { position:absolute; right:10%; top:-55%; width:420px; height:420px; border-radius:50%; background:radial-gradient(circle, rgba(255,77,0,.18), transparent 67%); filter:blur(8px); z-index:-1; }
+        .fs-hero-content { max-width:68%; position:relative; z-index:1; }
+        .fs-hero-kicker { color:#ff4d00; font-size:11px; font-weight:950; letter-spacing:3.2px; margin-bottom:12px; }
+        .fs-hero-title { margin:0; max-width:850px; color:#f5f5f6; font-size:clamp(38px,5vw,76px); line-height:.94; letter-spacing:-1.8px; text-transform:uppercase; font-weight:950; text-shadow:0 5px 30px rgba(0,0,0,.8); }
+        .fs-hero-meta { display:flex; align-items:center; gap:12px; margin-top:18px; color:#b8b8bd; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.8px; }
+        .fs-hero-meta i { width:4px; height:4px; background:#ff4d00; transform:rotate(45deg); }
+        .fs-hero-badges { align-self:flex-start; display:flex; flex-direction:column; align-items:flex-end; gap:9px; position:relative; z-index:2; }
+        .fs-hero-status { border:1px solid rgba(255,77,0,.72); color:#ff7b42; background:rgba(255,77,0,.08); padding:8px 13px; font-size:10px; font-weight:950; letter-spacing:2px; }
+        .fs-hero-duration { display:flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.24); color:#f5f5f6; background:rgba(8,8,10,.72); backdrop-filter:blur(8px); padding:9px 13px; box-shadow:0 10px 28px rgba(0,0,0,.28); }
+        .fs-hero-duration-label { color:#a8a8ae; font-size:9px; font-weight:900; letter-spacing:1.35px; text-transform:uppercase; }
+        .fs-hero-duration-value { color:#fff; font-size:13px; font-weight:950; white-space:nowrap; }
         @media (max-width: 900px) {
           .fs-page315 { padding:8px; }
+          .fs-matchmaking-hero { min-height:210px; padding:26px 20px 22px; }
+          .fs-hero-content { max-width:88%; }
+          .fs-hero-title { font-size:clamp(34px,10vw,54px); }
+          .fs-ring-watermark { width:72%; right:-20%; opacity:.72; }
+          .fs-hero-badges { position:absolute; top:16px; right:16px; }
+          .fs-hero-duration { padding:7px 10px; }
+          .fs-hero-duration-label { display:none; }
+          .fs-hero-meta { flex-wrap:wrap; gap:8px; }
           .fs-compact-header { grid-template-columns:1fr auto; }
           .fs-header-logo { display:none; }
           .fs-header-actions { grid-column:1 / -1; justify-content:flex-start; flex-wrap:wrap; }
@@ -2010,6 +2441,15 @@ export default function FightersPage() {
           <img src={LOGO} alt="FightSupport" className="fs-header-logo" />
 
           <div className="fs-header-actions">
+            <button
+              className="fs-action-btn fs-action-primary"
+              onClick={openOrCreatePublicMatchmaking}
+              disabled={!!busyId || loading || !matchRows.length}
+              title="Open de live openbare matchmaking"
+            >
+              <Globe2 size={16} />
+              <span>Openbare matchmaking</span>
+            </button>
             <button
               className="fs-action-btn"
               onClick={downloadCheckedExcel}
@@ -2401,12 +2841,49 @@ export default function FightersPage() {
 
         {mainView === "matches" && (
         <section style={matchmakingSection}>
+          <div className="fs-matchmaking-hero">
+            <div className="fs-hero-content">
+              <div className="fs-hero-kicker">LIVE MATCHMAKING</div>
+              <h2 className="fs-hero-title">
+                {val(
+                  pickFirst(
+                    matchmakingMeta?.evenement_naam,
+                    matchmakingMeta?.event_name,
+                    matchmakingMeta?.naam,
+                    matchmakingMeta?.title,
+                    matchRows[0]?.evenement_naam,
+                    matchRows[0]?.event_name,
+                    matchRows[0]?.event?.naam,
+                    "FightSupport matchmaking",
+                  ),
+                )}
+              </h2>
+              <div className="fs-hero-meta">
+                <span>{matchRows.length} partijen</span>
+                <i />
+                <span>Automatisch bijgewerkt</span>
+              </div>
+            </div>
+            <div className="fs-hero-badges">
+              <div className="fs-hero-status">CONCEPT</div>
+              <div
+                className="fs-hero-duration"
+                title="De schatting wordt direct opnieuw berekend wanneer de matchmaking verandert."
+              >
+                <span className="fs-hero-duration-label">Geschatte galaduur</span>
+                <span className="fs-hero-duration-value">
+                  {formatDurationExact(estimatedGalaMinutes)}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div style={matchmakingHeader}>
             <div>
               <div style={eyebrowSmall}>MATCHMAKING</div>
               <h2 style={matchmakingTitle}>Opgebouwde partijen</h2>
               <p style={matchmakingText}>
-                Iedere opgeslagen match verschijnt direct hieronder. Open de partij via Detail.
+                Iedere opgeslagen match verschijnt direct hieronder.
               </p>
             </div>
             <span style={matchmakingCount}>{matchRows.length} partijen</span>
@@ -2417,8 +2894,8 @@ export default function FightersPage() {
               <thead>
                 <tr>
                   <th style={matchThNr}>Partij</th>
-                  <th style={matchThCompact}>Klasse</th>
-                  <th style={matchThGender}>Geslacht</th>
+                  <th style={matchThCompact}>K</th>
+                  <th style={matchThGender}>M/V</th>
                   <th style={matchThName}>Rode hoek</th>
                   <th style={matchThGym}>Sportschool</th>
                   <th style={matchThRecord}>Record</th>
@@ -2516,7 +2993,7 @@ export default function FightersPage() {
                     >
                       <td style={matchTdNr}>{partijNr ?? (code || '-')}</td>
                       <td style={matchTdCompact}>{klasse}</td>
-                      <td style={matchTdGender}>{geslacht}</td>
+                      <td style={matchTdGender}>{geslacht === "Vrouw" ? "V" : geslacht === "Man" ? "M" : "-"}</td>
                       <td style={matchTdName}>
                         {roodVa ? (
                           <Link
@@ -3196,7 +3673,7 @@ const matchFighterName: CSSProperties = {
   fontWeight: 900,
 };
 const matchThNr: CSSProperties = { ...th, width: 50, textAlign: "center" };
-const matchThCompact: CSSProperties = { ...th, width: 62, textAlign: "center" };
+const matchThCompact: CSSProperties = { ...th, width: 48, minWidth: 48, maxWidth: 48, paddingLeft: 6, paddingRight: 6, textAlign: "center" };
 const matchThGender: CSSProperties = { ...th, width: 72, textAlign: "center" };
 const matchThName: CSSProperties = { ...th, width: 126 };
 const matchThGym: CSSProperties = { ...th, width: 112 };
@@ -3206,7 +3683,7 @@ const matchTd: CSSProperties = { ...td, padding: "7px 6px", fontSize: 11.5 };
 const matchTdName: CSSProperties = { ...matchTd, color: "#fff", fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const matchTdGym: CSSProperties = { ...matchTd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const matchTdRecord: CSSProperties = { ...matchTd, whiteSpace: "nowrap", fontWeight: 900 };
-const matchTdGender: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap" };
+const matchTdGender: CSSProperties = { ...matchTd, width: 48, minWidth: 48, maxWidth: 48, paddingLeft: 6, paddingRight: 6, textAlign: "center", whiteSpace: "nowrap", fontWeight: 900 };
 const matchTdNr: CSSProperties = { ...matchTd, textAlign: "center", color: ORANGE, fontSize: 14, fontWeight: 950 };
 const matchTdCompact: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap" };
 const matchTdAction: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap", padding: "5px" };
