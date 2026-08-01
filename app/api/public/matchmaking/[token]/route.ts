@@ -152,6 +152,13 @@ function classRank(value: unknown) {
   return 99;
 }
 
+function weightSortValue(value: unknown) {
+  const match = s(value).replace(",", ".").match(/\d+(?:\.\d+)?/);
+  if (!match) return Number.POSITIVE_INFINITY;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
 export async function GET(_req: Request, ctx: { params: Promise<{ token: string }> }) {
   try {
     const { token } = await ctx.params;
@@ -213,6 +220,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
       if (blueVa) matchedVas.add(blueVa);
     }
 
+    const mm = mmRes.data ?? {};
+    const eventDate = s(first(mm.event_datum, mm.datum, mm.evenement_datum));
+
     const bouts = activeRows
       .map((row: AnyRow) => {
         const raw = obj(row.raw_json);
@@ -233,6 +243,18 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
           discipline: s(first(row.discipline, raw.discipline, redContext?.discipline, blueContext?.discipline)) || "—",
           maxGewicht: displayMaxWeight(row, raw),
           status,
+          sortAge: Math.min(
+            ...[
+              ageOnDate(
+                first(redContext?.geboortedatum, redContext?.fp_geboortedatum, redContext?.geboortedatum_input),
+                first(redContext?.evenement_datum, eventDate),
+              ),
+              ageOnDate(
+                first(blueContext?.geboortedatum, blueContext?.fp_geboortedatum, blueContext?.geboortedatum_input),
+                first(blueContext?.evenement_datum, eventDate),
+              ),
+            ].filter((value): value is number => value !== null),
+          ),
           red: {
             naam: s(first(row.rood_naam, raw.rood_naam, red.naam)) || "Tegenstander gezocht",
             sportschool: s(first(row.rood_gym, red.sportschool, red.gym, redContext?.gym_input, redContext?.fp_gym)) || "—",
@@ -248,10 +270,22 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
       .filter((bout: AnyRow) => {
         if (bout.status === "onder_voorbehoud" && publication.show_pending === false) return false;
         return bout.status !== "tegenstander_gezocht";
-      });
+      })
+      .sort((a: AnyRow, b: AnyRow) => {
+        const klasseDiff = classRank(a.klasse) - classRank(b.klasse);
+        if (klasseDiff !== 0) return klasseDiff;
 
-    const mm = mmRes.data ?? {};
-    const eventDate = s(first(mm.event_datum, mm.datum, mm.evenement_datum));
+        const ageA = Number.isFinite(a.sortAge) ? a.sortAge : Number.POSITIVE_INFINITY;
+        const ageB = Number.isFinite(b.sortAge) ? b.sortAge : Number.POSITIVE_INFINITY;
+        if (ageA !== ageB) return ageA - ageB;
+
+        const gewichtDiff = weightSortValue(a.maxGewicht) - weightSortValue(b.maxGewicht);
+        if (gewichtDiff !== 0) return gewichtDiff;
+
+        const partijA = Number.isFinite(a.partijNr) ? a.partijNr : Number.POSITIVE_INFINITY;
+        const partijB = Number.isFinite(b.partijNr) ? b.partijNr : Number.POSITIVE_INFINITY;
+        return partijA - partijB;
+      });
 
     const searching = publication.show_opponent_search === false
       ? []

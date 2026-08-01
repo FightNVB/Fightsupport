@@ -9,3 +9,10 @@
 
 /* Losse lijst voor vechters waarvoor een tegenstander wordt gezocht */
 .pm-searchingTable{min-width:900px!important}.pm-searchingTable th:nth-child(1){width:22%}.pm-searchingTable th:nth-child(2){width:25%}.pm-searchingTable th:nth-child(3){width:15%}.pm-searchingTable .col-class{width:120px;text-align:center}.pm-searchingTable .col-gender{width:70px;text-align:center}.pm-searchingTable .col-age{width:92px;text-align:center}.pm-searchingTable .col-weight{width:105px;text-align:center}.pm-searchingTable td{height:54px}.pm-searchingTable .search-name{font-size:15px;font-weight:800;color:#fff;border-left:4px solid var(--orange)}.pm-searchingTable .search-record{font-weight:800;color:#e1e4e7}.pm-searchingTable .search-weight{font-weight:800;color:#fff}.pm-searchingWrap{border-top:2px solid rgba(255,77,0,.65)}
+
+/* Compacte tabs openbare matchmaking: alles zichtbaar zonder horizontaal scrollen */
+.pm-tabs{display:flex;flex-wrap:wrap;overflow:visible;gap:4px;padding:8px 0}
+.pm-tabs button{height:42px;padding:0 11px;border:1px solid transparent;border-bottom:2px solid transparent;font-size:10px;letter-spacing:.15px}
+.pm-tabs button.active{border-color:rgba(255,77,0,.28);border-bottom-color:var(--orange);background:rgba(255,77,0,.07)}
+.pm-tabs span{margin-left:4px;padding:1px 6px;font-size:10px}
+@media(max-width:720px){.pm-tabs{gap:3px}.pm-tabs button{height:38px;padding:0 8px;font-size:9px}.pm-tabs span{padding:1px 5px;font-size:9px}}

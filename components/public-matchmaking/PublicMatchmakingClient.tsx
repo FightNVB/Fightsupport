@@ -42,12 +42,11 @@ type Payload = {
   searching: SearchingFighter[];
 };
 
-type FilterKey = "all" | BoutStatus | "tegenstander_gezocht";
+type FilterKey = "all" | "bevestigd" | "concept" | "tegenstander_gezocht";
 
 const labels: Record<FilterKey, string> = {
   all: "Alle partijen",
   bevestigd: "Bevestigd",
-  onder_voorbehoud: "Onder voorbehoud",
   concept: "Concept",
   tegenstander_gezocht: "Tegenstander gezocht",
 };
@@ -184,7 +183,6 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
   const counts: Record<FilterKey, number> = {
     all: data.counts.total,
     bevestigd: data.counts.confirmed,
-    onder_voorbehoud: data.counts.pending,
     concept: data.bouts.filter((bout) => bout.status === "concept").length,
     tegenstander_gezocht: data.counts.searching,
   };
