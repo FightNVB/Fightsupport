@@ -1893,19 +1893,35 @@ export default function FightersPage() {
   }, [matchmakingId]);
 
   useEffect(() => {
-    if (!matchmakingId || typeof window === "undefined") return;
-    try {
-      const saved = JSON.parse(
-        window.localStorage.getItem(`fightsupport:match-stars:${matchmakingId}`) || "[]",
-      );
-      setStarredIds(Array.isArray(saved) ? saved.map(String).filter(Boolean) : []);
-    } catch {
-      setStarredIds([]);
-    }
+    if (!matchmakingId) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await authedFetch(
+          `/api/matchmaker/prioriteiten?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || "Prioriteiten laden mislukt");
+        if (!cancelled) {
+          setStarredIds(
+            Array.isArray(json?.inschrijving_ids)
+              ? json.inschrijving_ids.map(String).filter(Boolean)
+              : [],
+          );
+        }
+      } catch (e: any) {
+        if (!cancelled) setMsg(e?.message || "Prioriteiten laden mislukt");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [matchmakingId]);
 
   useEffect(() => {
-    if (!matchmakingId || typeof window === "undefined") return;
     const activeIds = new Set(
       fighters
         .filter((fighter) => !isGematcht(fighter))
@@ -1914,15 +1930,12 @@ export default function FightersPage() {
     );
     setStarredIds((current) => {
       const cleaned = current.filter((id) => activeIds.has(id));
-      window.localStorage.setItem(
-        `fightsupport:match-stars:${matchmakingId}`,
-        JSON.stringify(cleaned),
-      );
-      return cleaned.length === current.length && cleaned.every((id, index) => id === current[index])
+      return cleaned.length === current.length &&
+        cleaned.every((id, index) => id === current[index])
         ? current
         : cleaned;
     });
-  }, [fighters, matchmakingId]);
+  }, [fighters]);
 
   useEffect(() => {
     if (matchmakingId) load();
@@ -2082,21 +2095,43 @@ export default function FightersPage() {
     );
   }
 
-  function toggleStar(f: Fighter) {
+  async function toggleStar(f: Fighter) {
     const id = inschrijvingIdOf(f);
-    if (!id || isGematcht(f)) return;
-    setStarredIds((current) => {
-      const next = current.includes(id)
+    if (!id || isGematcht(f) || busyId) return;
+
+    const wasStarred = starredIds.includes(id);
+    setStarredIds((current) =>
+      wasStarred
         ? current.filter((value) => value !== id)
-        : [...current, id];
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(
-          `fightsupport:match-stars:${matchmakingId}`,
-          JSON.stringify(next),
-        );
-      }
-      return next;
-    });
+        : [...current, id],
+    );
+
+    try {
+      const res = await authedFetch("/api/matchmaker/prioriteiten", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          inschrijving_id: id,
+          actief: !wasStarred,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Ster opslaan mislukt");
+
+      setStarredIds(
+        Array.isArray(json?.inschrijving_ids)
+          ? json.inschrijving_ids.map(String).filter(Boolean)
+          : [],
+      );
+    } catch (e: any) {
+      setStarredIds((current) =>
+        wasStarred
+          ? Array.from(new Set([...current, id]))
+          : current.filter((value) => value !== id),
+      );
+      setMsg(e?.message || "Ster opslaan mislukt");
+    }
   }
 
   function toggleAllVisible() {
@@ -2259,12 +2294,8 @@ export default function FightersPage() {
         throw new Error(json?.error || "Vechterdata vernieuwen mislukt");
       }
 
-      if (json?.refresh_page) {
-        window.location.reload();
-        return;
-      }
-
-      setMsg(`${Number(json?.processed ?? 0)} vechters opnieuw verwerkt.`);
+      window.location.reload();
+      return;
     } catch (e: any) {
       setMsg(e?.message || "Vechterdata vernieuwen mislukt");
     } finally {

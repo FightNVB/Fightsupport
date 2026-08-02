@@ -447,9 +447,26 @@ export async function POST(req: Request) {
 
     if (error) throw error;
 
-    const matchedIds = [rood.inschrijving_id, blauw.inschrijving_id].filter(Boolean);
+    const matchedIds = [rood.inschrijving_id, blauw.inschrijving_id]
+      .map(s)
+      .filter(Boolean);
     await safeUpdateAanmeldingenMatched(matchmakingId, matchedIds, partijNr);
     await markContextMatched(matchmakingId, matchedIds, partijNr);
+
+    if (matchedIds.length) {
+      const { error: priorityDeleteError } = await supabaseAdmin
+        .from("matchmaker_prioriteiten")
+        .delete()
+        .eq("matchmaking_id", matchmakingId)
+        .in("inschrijving_id", matchedIds);
+
+      if (priorityDeleteError) {
+        console.warn(
+          "Prioriteitssterren van gematchte vechters verwijderen mislukt",
+          priorityDeleteError,
+        );
+      }
+    }
 
     let controleRunId = await getLatestControleRunId(matchmakingId);
     let nieuweControleRun = false;
