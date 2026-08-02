@@ -2005,55 +2005,50 @@ function priorityClassRank(value: unknown) {
   return order[token] ?? 99;
 }
 
-function priorityRegistrationKeys(row: Row) {
-  const source = obj(row?.__source_aanmelding) || {};
-  const extra = obj(row?.extra) || {};
-  const raw = obj(extra?.raw) || {};
-  const rawAanmelding = obj(raw?.aanmelding) || {};
-
-  return [
-    row?.inschrijving_id,
-    row?.aanmelding_id,
-    source?.inschrijving_id,
-    source?.aanmelding_id,
-    source?.id,
-    rawAanmelding?.inschrijving_id,
-    rawAanmelding?.aanmelding_id,
-    rawAanmelding?.id,
-  ]
-    .map(s)
-    .filter(Boolean);
-}
-
 function selectPriorityFighters(priorities: Row[], fighters: Row[]) {
-  const priorityIds = new Set<string>();
-  const priorityVas = new Set<string>();
+  // De oude, werkende koppeling blijft leidend: zoek iedere ster rechtstreeks
+  // terug op inschrijving_id en gebruik VA alleen als veilige fallback.
+  const byId = new Map<string, Row>();
+  const byVa = new Map<string, Row>();
 
-  for (const priority of priorities) {
-    [priority.inschrijving_id, priority.aanmelding_id]
+  for (const fighter of fighters) {
+    const source = obj(fighter?.__source_aanmelding) || {};
+    const extra = obj(fighter?.extra) || {};
+    const raw = obj(extra?.raw) || {};
+    const rawAanmelding = obj(raw?.aanmelding) || {};
+
+    const ids = [
+      fighter?.inschrijving_id,
+      fighter?.aanmelding_id,
+      source?.inschrijving_id,
+      source?.aanmelding_id,
+      source?.id,
+      rawAanmelding?.inschrijving_id,
+      rawAanmelding?.aanmelding_id,
+      rawAanmelding?.id,
+      fighter?.id,
+    ]
       .map(s)
-      .filter(Boolean)
-      .forEach((id) => priorityIds.add(id));
+      .filter(Boolean);
 
-    const va = onlyDigits(pickFirst(priority.va_nummer, priority.va));
-    if (va) priorityVas.add(va);
+    for (const id of ids) {
+      if (!byId.has(id)) byId.set(id, fighter);
+    }
+
+    const va = vaOf(fighter);
+    if (va && !byVa.has(va)) byVa.set(va, fighter);
   }
 
   const selected: Row[] = [];
   const seen = new Set<string>();
 
-  for (const fighter of fighters) {
-    const ids = priorityRegistrationKeys(fighter);
-    const va = vaOf(fighter);
-    const isPriority =
-      ids.some((id) => priorityIds.has(id)) ||
-      (!!va && priorityVas.has(va));
+  for (const priority of priorities) {
+    const id = s(pickFirst(priority.inschrijving_id, priority.aanmelding_id));
+    const va = onlyDigits(pickFirst(priority.va_nummer, priority.va));
+    const fighter = (id && byId.get(id)) || (va && byVa.get(va)) || null;
+    if (!fighter) continue;
 
-    if (!isPriority) continue;
-
-    const key =
-      ids.map((id) => `id:${id}`).find((id) => !seen.has(id)) ||
-      (va ? `va:${va}` : fighterKey(fighter));
+    const key = id ? `id:${id}` : va ? `va:${va}` : fighterKey(fighter);
     if (seen.has(key)) continue;
     seen.add(key);
     selected.push(fighter);
@@ -2068,10 +2063,15 @@ function fillPrioriteitenTemplateSheet(
   uitslagenRows: Row[],
   matchmaking: Row | null,
 ) {
-  // Rij 1 met de door Renate gekozen kolomkoppen blijft exact intact.
-  // Rij 2 uit de template is uitsluitend de voorbeeldstijl voor gegevensrijen.
-  const dataStyle = ws.getRow(2);
-  clearRowsBelow(ws, 2);
+  // Rij 1 en alle door Renate gemaakte template-opmaak blijven exact intact.
+  // De bestaande gegevensrijen worden alleen geleegd en opnieuw gevuld.
+  const templateStyleRow = ws.getRow(2);
+  const existingLastRow = Math.max(ws.rowCount, 2);
+
+  for (let rowNumber = 2; rowNumber <= existingLastRow; rowNumber += 1) {
+    const row = ws.getRow(rowNumber);
+    for (let col = 1; col <= 9; col += 1) row.getCell(col).value = null;
+  }
 
   const sorted = [...fighters].sort((a, b) => {
     const classDiff = priorityClassRank(klasseOf(a)) - priorityClassRank(klasseOf(b));
@@ -2088,8 +2088,15 @@ function fillPrioriteitenTemplateSheet(
     return nameOf(a).localeCompare(nameOf(b), "nl");
   });
 
-  for (const fighter of sorted) {
-    const row = ws.addRow([
+  sorted.forEach((fighter, index) => {
+    const rowNumber = index + 2;
+    const row = ws.getRow(rowNumber);
+
+    // Alleen wanneer de template niet genoeg voorgemaakte rijen bevat,
+    // kopiëren we de stijl van rij 2 naar de extra gegevensrij.
+    if (rowNumber > existingLastRow) copyRowStyle(templateStyleRow, row);
+
+    const values = [
       disciplineOf(fighter),
       klasseOf(fighter),
       geslachtOf(fighter),
@@ -2099,13 +2106,16 @@ function fillPrioriteitenTemplateSheet(
       recordOf(fighter, uitslagenRows),
       leeftijdNumberOf(fighter, matchmaking) ?? "",
       gewichtOf(fighter),
-    ]);
-    copyRowStyle(dataStyle, row);
-    row.getCell(6).numFmt = "0";
-  }
+    ];
 
-  // Bewust geen autoFilter, freeze panes, kolombreedtes of aanvullende opmaak:
-  // het werkblad blijft precies zoals het in de Excel-template is ontworpen.
+    values.forEach((value, colIndex) => {
+      row.getCell(colIndex + 1).value = value;
+    });
+    row.getCell(6).numFmt = "0";
+    row.commit();
+  });
+
+  // Geen autoFilter, freeze panes, kolombreedtes of aanvullende opmaak.
 }
 
 async function createTemplateWorkbook(
@@ -2162,6 +2172,40 @@ async function queryTable(
   return (data ?? []) as Row[];
 }
 
+async function fetchFightPassportResults(vaNumbers: string[]) {
+  const uniqueVas = Array.from(new Set(vaNumbers.map(onlyDigits).filter(Boolean)));
+  if (!uniqueVas.length) return [] as Row[];
+
+  const rows: Row[] = [];
+  const vaChunkSize = 100;
+  const pageSize = 1000;
+
+  for (let chunkStart = 0; chunkStart < uniqueVas.length; chunkStart += vaChunkSize) {
+    const vaChunk = uniqueVas.slice(chunkStart, chunkStart + vaChunkSize);
+
+    for (let pageStart = 0; ; pageStart += pageSize) {
+      const { data, error } = await supabase
+        .from("fightpassport_results")
+        .select(
+          "id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,last_seen_at,created_at",
+        )
+        .in("va_nummer", vaChunk)
+        .order("datum", { ascending: false })
+        .range(pageStart, pageStart + pageSize - 1);
+
+      if (error) {
+        throw new Error(`fightpassport_results laden mislukt: ${error.message}`);
+      }
+
+      const page = (data ?? []) as Row[];
+      rows.push(...page);
+      if (page.length < pageSize) break;
+    }
+  }
+
+  return rows;
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -2214,12 +2258,22 @@ export async function GET(req: Request) {
 
     const allAanmeldingen = markMatchedFromBouts(withAanmeldingStatus, bouts);
     const priorityFighters = selectPriorityFighters(priorities, allAanmeldingen);
+
+    // Gebruik exact dezelfde centrale uitslagenbron als tab Matchmaking.
+    // De bestaande prioriteiten-selectie en het vullen van werkblad 2 blijven onaangeraakt.
+    const centralUitslagenRows = await fetchFightPassportResults(
+      allAanmeldingen.map(vaOf).filter(Boolean),
+    );
+    const recordRows = centralUitslagenRows.length
+      ? centralUitslagenRows
+      : uitslagenRows;
+
     const workbook = await createTemplateWorkbook(
       matchmaking ?? null,
       controlled,
       allAanmeldingen,
       bouts,
-      uitslagenRows,
+      recordRows,
       priorityFighters,
     );
 
