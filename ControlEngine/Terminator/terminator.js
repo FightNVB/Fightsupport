@@ -19,6 +19,7 @@ function resolveBaseUrl(explicitBaseUrl) {
   return clean(
     explicitBaseUrl ||
       process.env.FIGHTSUPPORT_INTERNAL_URL ||
+      process.env.INTERNAL_APP_URL ||
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.APP_URL,
   ).replace(/\/$/, "");

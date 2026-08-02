@@ -208,7 +208,10 @@ export async function POST(req: Request) {
           BETWEEN_ATTEMPTS_MS: String(betweenAttemptsMs),
           FP_TOTAL_TIMEOUT_MS: String(totalTimeoutMs),
           FP_TOTAL_RESULTS: "true",
-          FIGHTSUPPORT_INTERNAL_URL: new URL(req.url).origin,
+          FIGHTSUPPORT_INTERNAL_URL:
+          process.env.FIGHTSUPPORT_INTERNAL_URL ||
+          process.env.INTERNAL_APP_URL ||
+          new URL(req.url).origin,
           TERMINATOR_INTERNAL_TOKEN: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
         },
         `fp_total_admin_${part.part}`
