@@ -2003,7 +2003,15 @@ async function createTemplateWorkbook(
   fillSportscholenTemplateSheet(third, allAanmeldingen, matchmaking);
 
   // Open het gedownloade werkboek standaard op het eerste tabblad: MM.
-  workbook.views = [{ activeTab: 0, firstSheet: 0, visibility: "visible" }];
+  workbook.views = [{
+    x: 0,
+    y: 0,
+    width: 12000,
+    height: 20000,
+    activeTab: 0,
+    firstSheet: 0,
+    visibility: "visible",
+  }];
   first.state = "visible";
   return workbook;
 }
