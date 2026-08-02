@@ -1769,7 +1769,7 @@ export default function FightersPage() {
     if (!silent) setLoading(true);
     setMsg("");
     try {
-      const res = await authedFetch(`/api/matchmaker/${matchmakingId}`);
+      const res = await authedFetch(`/api/matchmaker/${matchmakingId}`, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Laden mislukt");
 
@@ -2294,8 +2294,11 @@ export default function FightersPage() {
         throw new Error(json?.error || "Vechterdata vernieuwen mislukt");
       }
 
-      window.location.reload();
-      return;
+      await load(true);
+      router.refresh();
+      setMsg(
+        `${json?.processed ?? json?.fighter_contexts ?? 0} vechtercontext(en) en ${json?.bouts ?? 0} wedstrijd(en) opnieuw opgebouwd.`,
+      );
     } catch (e: any) {
       setMsg(e?.message || "Vechterdata vernieuwen mislukt");
     } finally {

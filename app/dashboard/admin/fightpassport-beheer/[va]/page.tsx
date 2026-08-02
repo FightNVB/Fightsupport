@@ -14,8 +14,9 @@ export default function FighterDossierPage(){
  async function load(){
   const r=await authedFetch(`/api/admin/fightpassport-beheer/fighters/${va}`,{cache:"no-store"});
   const j=await r.json().catch(()=>({}));
-  if(r.ok){setData(j);setError("");}
-  else setError(j.error||"Laden mislukt");
+  if(r.ok){setData(j);setError("");return j;}
+  setError(j.error||"Laden mislukt");
+  return null;
  }
 
  async function startHercheck(){
@@ -37,13 +38,26 @@ export default function FighterDossierPage(){
    return;
   }
 
+  const previousScrapedAt=String(data?.fighter?.last_scraped_at||"");
   setHercheckMessage(j.message||`Herscrape voor VA ${va} is gestart.`);
 
-  window.setTimeout(async()=>{
-   await load();
-   setHercheckBusy(false);
-   setHercheckMessage("Hercheck gestart. Ververs later nogmaals als de scraper nog bezig is.");
-  },5000);
+  // De scraper draait op de achtergrond. Blijf het dossier controleren totdat
+  // last_scraped_at verandert, zodat de pagina zichzelf direct na afronding vernieuwt.
+  for(let attempt=1;attempt<=180;attempt++){
+   await new Promise((resolve)=>window.setTimeout(resolve,3000));
+   const latest=await load();
+   const latestScrapedAt=String(latest?.fighter?.last_scraped_at||"");
+   if(latestScrapedAt&&latestScrapedAt!==previousScrapedAt){
+    router.refresh();
+    setHercheckBusy(false);
+    setHercheckMessage("Hercheck afgerond. Het dossier en gekoppelde contexten zijn vernieuwd.");
+    return;
+   }
+   setHercheckMessage(`Hercheck loopt... controle ${attempt}/180`);
+  }
+
+  setHercheckBusy(false);
+  setHercheckMessage("De hercheck draait mogelijk nog. Gebruik Hercheck opnieuw om de actuele stand op te halen.");
  }
  useEffect(()=>{load()},[va]); if(error)return <main style={s.page}><button style={s.silver} onClick={()=>router.back()}>Terug</button><p>{error}</p></main>; if(!data)return <main style={s.page}>Dossier laden...</main>;
  const f=data.fighter;

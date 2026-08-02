@@ -137,7 +137,8 @@ export default function FighterDossierPage() {
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || "Vernieuwen mislukt.");
       await load();
-      setNotice("Deze vechter en de bijbehorende regels zijn opnieuw opgebouwd.");
+      router.refresh();
+      setNotice("Deze vechter en de bijbehorende regels zijn opnieuw opgebouwd en opnieuw geladen.");
     } catch (e: any) {
       setNotice(e?.message || "Vernieuwen mislukt.");
     } finally {
@@ -173,7 +174,8 @@ export default function FighterDossierPage() {
       if (!response.ok) throw new Error(json.error || "Correctie opslaan mislukt.");
       setEditOpen(false);
       await load();
-      setNotice("De opgave is gecorrigeerd en alleen deze vechter is opnieuw opgebouwd.");
+      router.refresh();
+      setNotice("De opgave is gecorrigeerd en alleen deze vechter is opnieuw opgebouwd en geladen.");
     } catch (e: any) {
       setNotice(e?.message || "Correctie opslaan mislukt.");
     } finally {
