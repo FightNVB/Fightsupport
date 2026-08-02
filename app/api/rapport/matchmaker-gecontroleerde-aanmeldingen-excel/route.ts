@@ -1543,10 +1543,10 @@ function copyRowStyle(source: ExcelJS.Row | undefined, target: ExcelJS.Row) {
     const dst = target.getCell(col);
     dst.style = { ...src.style };
     dst.numFmt = src.numFmt;
-    dst.alignment = src.alignment ? { ...src.alignment } : undefined;
-    dst.border = src.border ? { ...src.border } : undefined;
-    dst.fill = src.fill ? { ...src.fill } : undefined;
-    dst.font = src.font ? { ...src.font } : undefined;
+    if (src.alignment) dst.alignment = { ...src.alignment };
+    if (src.border) dst.border = { ...src.border };
+    if (src.fill) dst.fill = { ...src.fill };
+    if (src.font) dst.font = { ...src.font };
   }
 }
 
