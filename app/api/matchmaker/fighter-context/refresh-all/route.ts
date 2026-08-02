@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { processMatchmakingFighters } from "@/lib/matchmaker/processMatchmakingFighters";
+import { refreshMatchmaking } from "@/lib/matchmaker/terminator";
 
 export const runtime = "nodejs";
 
@@ -68,18 +68,17 @@ export async function POST(req: Request) {
 
     await assertAccess(user.id, matchmakingId);
 
-    const processing = await processMatchmakingFighters({
+    const terminator = await refreshMatchmaking({
       supabase: supabaseAdmin,
       matchmakingId,
     });
 
     return NextResponse.json({
-      ok: true,
+      ...terminator,
       refresh_page: true,
       matchmaking_id: matchmakingId,
-      processed: processing.processed,
-      controle_run_id: processing.controleRunId,
-      rule_hits: processing.hits.length,
+      processed: terminator.fighter_contexts,
+      rebuilt_bouts: terminator.bouts,
     });
   } catch (error: any) {
     console.error("[POST /api/matchmaker/fighter-context/refresh-all]", error);

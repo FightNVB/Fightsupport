@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
 import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
+import { terminateSyncRun } from "../../Terminator/terminator.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1880,6 +1881,9 @@ async function main() {
       })
       .eq("id", run.id);
     console.log(`[fp-total] ✅ run ${run.id} was al volledig verwerkt`);
+    await terminateSyncRun({ syncRunId: run.id }).catch((error) => {
+      console.log(`[TERMINATOR] Fout na reeds complete run ${run.id}:`, error?.message ?? String(error));
+    });
     return;
   }
 
@@ -2231,6 +2235,13 @@ async function main() {
       : stopRequested
         ? `[fp-total] ⏸️ ronde ${run.id} gepauzeerd na expliciet stopsignaal en ${processed} verwerkte VA's`
         : `[fp-total] ❌ ronde ${run.id} onverwacht beëindigd na ${processed} verwerkte VA's`);
+
+    if (allDone) {
+      await terminateSyncRun({ syncRunId: run.id }).catch((error) => {
+        // De scrape blijft voltooid; de fout is zichtbaar en de admin endpoint kan handmatig opnieuw worden gestart.
+        console.log(`[TERMINATOR] Fout na total run ${run.id}:`, error?.message ?? String(error));
+      });
+    }
   } catch (e) {
     await supabase
       .from("fightpassport_sync_runs")

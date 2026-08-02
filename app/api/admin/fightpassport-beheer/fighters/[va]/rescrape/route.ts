@@ -87,6 +87,8 @@ export async function POST(
         BETWEEN_ATTEMPTS_MS: process.env.BETWEEN_ATTEMPTS_MS ?? "1200",
         FP_TOTAL_TIMEOUT_MS: process.env.FP_TOTAL_TIMEOUT_MS ?? "480000",
         FP_TOTAL_RESULTS: "true",
+        FIGHTSUPPORT_INTERNAL_URL: new URL(req.url).origin,
+        TERMINATOR_INTERNAL_TOKEN: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
       },
     });
 
