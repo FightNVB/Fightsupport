@@ -1,6 +1,6 @@
 import { buildControleBoutContext } from "./buildControleBoutContext";
 import { enrichControleBoutContext } from "./enrichControleBoutContext";
-import { processMatchmakingFighters, processSingleFighter } from "./processMatchmakingFighters";
+import { processSingleFighter } from "./processMatchmakingFighters";
 import { rulesEngine } from "./rulesEngine";
 import { normalizeVa, type AnyRow, type SupabaseLike } from "./singleFighterUtils";
 
@@ -111,8 +111,44 @@ export async function refreshMatchmaking(params: {
 
   console.info(`[TERMINATOR] Matchmaking target acquired: ${matchmakingId}`);
 
-  const processing = await processMatchmakingFighters({ supabase, matchmakingId });
+  const { data: registrations, error: registrationsError } = await supabase
+    .from("aanmeldingen")
+    .select("id")
+    .eq("matchmaking_id", matchmakingId)
+    .order("created_at", { ascending: true, nullsFirst: false });
+
+  if (registrationsError) {
+    throw new Error(`Aanmeldingen laden mislukt: ${registrationsError.message}`);
+  }
+
+  const registrationRows = (registrations ?? []) as AnyRow[];
+  console.info(`[TERMINATOR] ${registrationRows.length} aanmeldingen gevonden.`);
+
+  let processed = 0;
+  for (const registration of registrationRows) {
+    const aanmeldingId = text(registration?.id);
+    if (!aanmeldingId) continue;
+
+    // Exact hetzelfde codepad als de goed werkende handmatige Refresh.
+    await processSingleFighter({
+      supabase,
+      matchmakingId,
+      aanmeldingId,
+      controleRunId: matchmakingId,
+    });
+    processed++;
+
+    if (processed === 1 || processed === registrationRows.length || processed % 10 === 0) {
+      console.info(
+        `[TERMINATOR] Fighter contexts: ${processed}/${registrationRows.length} verwerkt.`,
+      );
+    }
+  }
+
+  console.info(`[TERMINATOR] Fighter contexts klaar: ${processed}.`);
+
   const bouts = await loadBouts(supabase, matchmakingId);
+  console.info(`[TERMINATOR] ${bouts.length} wedstrijden gevonden.`);
   const controleRunId = await latestControleRunId(supabase, matchmakingId);
 
   let rebuilt = 0;
@@ -120,12 +156,22 @@ export async function refreshMatchmaking(params: {
     for (const bout of bouts) {
       const partijNr = Number(bout?.partij_nr);
       if (!Number.isFinite(partijNr) || partijNr <= 0) continue;
-      if (await rebuildBout(supabase, matchmakingId, controleRunId, partijNr)) rebuilt++;
+      if (await rebuildBout(supabase, matchmakingId, controleRunId, partijNr)) {
+        rebuilt++;
+      }
+
+      if (rebuilt === 1 || rebuilt === bouts.length || rebuilt % 10 === 0) {
+        console.info(
+          `[TERMINATOR] Wedstrijden: ${rebuilt}/${bouts.length} opnieuw opgebouwd.`,
+        );
+      }
     }
+  } else if (bouts.length) {
+    console.info("[TERMINATOR] Geen controlerun gevonden; wedstrijdrebuild overgeslagen.");
   }
 
   console.info(
-    `[TERMINATOR] Mission complete: ${processing.processed} fighter contexts, ${rebuilt} bouts rebuilt. I'll be back.`,
+    `[TERMINATOR] Mission complete: ${processed} fighter contexts, ${rebuilt} bouts rebuilt. I'll be back.`,
   );
 
   return {
@@ -133,7 +179,7 @@ export async function refreshMatchmaking(params: {
     mode: "matchmaking",
     va_numbers: [],
     matchmakings: 1,
-    fighter_contexts: processing.processed,
+    fighter_contexts: processed,
     bouts: rebuilt,
     skipped_without_run: controleRunId ? 0 : bouts.length > 0 ? 1 : 0,
     errors: [],

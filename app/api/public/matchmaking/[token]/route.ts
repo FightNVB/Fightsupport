@@ -101,6 +101,189 @@ function recordFromContext(row?: AnyRow | null, includeClass = true) {
   return `${prefix}${wins}-${losses}-${draws}${total ? ` (${total})` : ""}`;
 }
 
+function normalizeRecordClass(value: unknown) {
+  const raw = s(value)
+    .toLowerCase()
+    .replace(/\b(?:klasse|class|clas)\b/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const compact = raw.replace(/[^a-z0-9+]/g, "");
+
+  const repeated = compact.match(/^([jrncba])\1$/i);
+  if (repeated) return repeated[1].toLowerCase();
+  if (compact === "j+" || compact.includes("j+") || compact.includes("talentstatus")) return "j+";
+  if (compact === "j" || compact.startsWith("jeugd") || compact.includes("youth")) return "j";
+  if (compact === "r" || compact.startsWith("rclas") || compact.startsWith("rclass") || compact.includes("recreant")) return "r";
+  if (compact === "n" || compact.startsWith("nclas") || compact.startsWith("nclass") || compact.includes("nieuweling")) return "n";
+  if (compact === "c" || compact.startsWith("cclas") || compact.startsWith("cclass")) return "c";
+  if (compact === "b" || compact.startsWith("bclas") || compact.startsWith("bclass")) return "b";
+  if (compact === "a" || compact.startsWith("aclas") || compact.startsWith("aclass") || compact.includes("elite")) return "a";
+  if (compact.includes("amateur") || compact.includes("ama")) return "amateur";
+  if (compact.includes("pro")) return "pro";
+  return compact;
+}
+
+function resultKind(value: unknown): "win" | "loss" | "draw" | "other" {
+  const raw = s(value).toLowerCase().replace(/\s+/g, " ").trim();
+  if (!raw) return "other";
+  if (raw.includes("demo") || raw.includes("no contest") || raw.includes("nocontest") || raw === "nc") return "other";
+  if (raw.includes("onbeslist") || raw.includes("gelijk") || raw.includes("draw")) return "draw";
+  if (raw.includes("verliest") || raw.includes("verlies") || raw.includes("verloren") || raw.includes("loss") || raw === "l") return "loss";
+  if (raw.includes("wint") || raw.includes("winst") || raw.includes("gewonnen") || raw === "win" || raw === "w") return "win";
+  return "other";
+}
+
+function recordClassRank(token: string) {
+  return ({ j: 1, "j+": 1, r: 2, n: 3, c: 4, b: 5, a: 6, amateur: 3, pro: 6 } as Record<string, number>)[token] ?? 0;
+}
+
+function recordClassDisplay(token: string) {
+  return ({ j: "J", "j+": "J", r: "R", n: "N", c: "C", b: "B", a: "A", amateur: "Amateur", pro: "Pro" } as Record<string, string>)[token] || "—";
+}
+
+function resultRowsForContext(context: AnyRow | undefined, allRows: AnyRow[]) {
+  if (!context) return [];
+  const va = digits(first(context.va_nummer, context.va, context.fighter_id));
+  if (!va) return [];
+
+  const rows = allRows.filter((row) =>
+    digits(first(row.va_nummer, row.bron_va_nummer, row.va, row.fighter_id)) === va
+  );
+
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = s(first(
+      row.id,
+      [
+        row.va_nummer,
+        row.datum,
+        row.evenement,
+        row.tegenstander,
+        row.uitslag,
+        row.klasse,
+      ].map((value) => s(value).toLowerCase()).join("|"),
+    ));
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function recordFromResults(
+  context: AnyRow | undefined,
+  allRows: AnyRow[],
+  includeClass = true,
+) {
+  if (!context) return "—";
+  const rows = resultRowsForContext(context, allRows);
+
+  let highestClass = "";
+  let highestRank = 0;
+  for (const row of rows) {
+    if (resultKind(first(row.uitslag, row.resultaat, row.outcome)) === "other") continue;
+    const token = normalizeRecordClass(first(
+      row.klasse,
+      row.class,
+      row.wedstrijdklasse,
+      row.niveau,
+      row.fight_class,
+    ));
+    const rank = recordClassRank(token);
+    if (rank > highestRank) {
+      highestClass = token;
+      highestRank = rank;
+    }
+  }
+
+  if (!highestClass) return recordFromContext(context, includeClass);
+
+  let wins = 0;
+  let losses = 0;
+  let draws = 0;
+  let other = 0;
+
+  for (const row of rows) {
+    const kind = resultKind(first(row.uitslag, row.resultaat, row.outcome));
+    const token = normalizeRecordClass(first(
+      row.klasse,
+      row.class,
+      row.wedstrijdklasse,
+      row.niveau,
+      row.fight_class,
+    ));
+
+    if (token === highestClass && kind === "win") wins += 1;
+    else if (token === highestClass && kind === "loss") losses += 1;
+    else if (token === highestClass && kind === "draw") draws += 1;
+    else other += 1;
+  }
+
+  const prefix = includeClass ? `${recordClassDisplay(highestClass)} ` : "";
+  return `${prefix}${wins}-${losses}-${draws} (${other})`;
+}
+
+
+function contextName(row?: AnyRow | null) {
+  return s(first(
+    row?.naam,
+    row?.fp_naam,
+    row?.naam_input,
+    row?.naam_matchmaker,
+  ));
+}
+
+function contextGym(row?: AnyRow | null) {
+  return s(first(
+    row?.gym_input,
+    row?.sportschool_input,
+    row?.fp_gym,
+    row?.gym,
+    row?.sportschool,
+  ));
+}
+
+function contextClass(row?: AnyRow | null) {
+  return s(first(
+    row?.klasse,
+    row?.fp_klasse,
+    row?.berekende_klasse,
+    row?.nulmeting_klasse,
+  ));
+}
+
+function contextDiscipline(row?: AnyRow | null) {
+  return s(first(
+    row?.discipline,
+    row?.primary_discipline,
+    row?.nulmeting_discipline,
+  ));
+}
+
+function registrationId(value: unknown) {
+  return s(value);
+}
+
+function fighterView(
+  context: AnyRow | undefined,
+  snapshot: AnyRow,
+  row: AnyRow,
+  corner: "rood" | "blauw",
+  resultRows: AnyRow[],
+) {
+  const rowName = corner === "rood" ? row.rood_naam : row.blauw_naam;
+  const rowGym = corner === "rood" ? row.rood_gym : row.blauw_gym;
+
+  return {
+    // Terminator-ready: actuele fighter-context is de waarheid.
+    // De bout-snapshot blijft uitsluitend fallback voor oude of incomplete data.
+    naam: contextName(context) || s(first(rowName, snapshot.naam, snapshot.naam_input)) || "Tegenstander gezocht",
+    sportschool: contextGym(context) || s(first(rowGym, snapshot.sportschool, snapshot.gym)) || "—",
+    record: context ? recordFromResults(context, resultRows) : s(first(snapshot.record, snapshot.record_string)) || "—",
+  };
+}
+
 function parseDate(value: unknown): Date | null {
   const raw = s(value);
   if (!raw) return null;
@@ -198,10 +381,64 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     if (boutsRes.error) throw boutsRes.error;
     if (contextsRes.error) throw contextsRes.error;
 
+    // Exact dezelfde recordbron als tab Matchmaking: de centrale
+    // FightPassport-uitslagenhistorie, niet matchmaker_uitslagen_raw.
+    const contextVaNumbers = Array.from(
+      new Set(
+        (contextsRes.data ?? [])
+          .map((context: AnyRow) => digits(first(context.va_nummer, context.va, context.fighter_id)))
+          .filter(Boolean),
+      ),
+    );
+
+    let resultRows: AnyRow[] = [];
+    if (contextVaNumbers.length) {
+      const { data: fightPassportResults, error: resultsError } = await supabaseAdmin
+        .from("fightpassport_results")
+        .select("*")
+        .in("va_nummer", contextVaNumbers)
+        .order("datum", { ascending: false });
+
+      if (resultsError) throw resultsError;
+      resultRows = (fightPassportResults ?? []) as AnyRow[];
+    }
+
     const contextByVa = new Map<string, AnyRow>();
+    const contextByRegistrationId = new Map<string, AnyRow>();
     for (const context of contextsRes.data ?? []) {
       const va = digits(context.va_nummer);
+      const aanmeldingId = registrationId(first(context.inschrijving_id, context.aanmelding_id));
       if (va && !contextByVa.has(va)) contextByVa.set(va, context);
+      if (aanmeldingId && !contextByRegistrationId.has(aanmeldingId)) {
+        contextByRegistrationId.set(aanmeldingId, context);
+      }
+    }
+
+    function contextForCorner(row: AnyRow, raw: AnyRow, corner: "rood" | "blauw") {
+      const snapshot = obj(raw[corner]);
+
+      // Een bout verwijst naar een concrete aanmelding. Die sleutel is altijd
+      // specifieker dan VA, omdat hetzelfde VA binnen één matchmaking vaker kan
+      // voorkomen. Alleen bij oude bouts zonder inschrijving-ID vallen we terug op VA.
+      const aanmeldingId = registrationId(first(
+        row[`${corner}_aanmelding_id`],
+        row[`${corner}_inschrijving_id`],
+        snapshot.aanmelding_id,
+        snapshot.inschrijving_id,
+        snapshot.id,
+      ));
+      if (aanmeldingId && contextByRegistrationId.has(aanmeldingId)) {
+        return contextByRegistrationId.get(aanmeldingId);
+      }
+
+      const va = digits(first(
+        row[`va_${corner}`],
+        row[`${corner}_va`],
+        row[`${corner}_va_nummer`],
+        snapshot.va_nummer,
+        snapshot.va,
+      ));
+      return va && contextByVa.has(va) ? contextByVa.get(va) : undefined;
     }
 
     const activeRows = (boutsRes.data ?? []).filter((row: AnyRow) => {
@@ -229,18 +466,36 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
         const red = obj(raw.rood);
         const blue = obj(raw.blauw);
 
-        const redVa = digits(first(row.va_rood, row.rood_va, red.va_nummer, red.va));
-        const blueVa = digits(first(row.va_blauw, row.blauw_va, blue.va_nummer, blue.va));
-        const redContext = contextByVa.get(redVa);
-        const blueContext = contextByVa.get(blueVa);
+        const redContext = contextForCorner(row, raw, "rood");
+        const blueContext = contextForCorner(row, raw, "blauw");
         const status = normalizeStatus(first(row.status, row.partij_status, row.bout_status, raw.status));
 
         return {
           id: s(row.id),
           partijNr: Number(first(row.partij_nr, raw.partij_nr)) || null,
-          klasse: s(first(row.klasse, row.klasse_mm, raw.klasse, redContext?.klasse, blueContext?.klasse)) || "—",
-          geslacht: genderLabel(first(row.geslacht, raw.geslacht, redContext?.geslacht, blueContext?.geslacht)),
-          discipline: s(first(row.discipline, raw.discipline, redContext?.discipline, blueContext?.discipline)) || "—",
+          // De gekoppelde context is actueel na iedere Terminator-run.
+          // Boutvelden blijven fallback voor partij-specifieke of oudere gegevens.
+          klasse: s(first(
+            contextClass(redContext),
+            contextClass(blueContext),
+            row.klasse,
+            row.klasse_mm,
+            raw.klasse,
+          )) || "—",
+          geslacht: genderLabel(first(
+            redContext?.geslacht,
+            redContext?.fp_geslacht,
+            blueContext?.geslacht,
+            blueContext?.fp_geslacht,
+            row.geslacht,
+            raw.geslacht,
+          )),
+          discipline: s(first(
+            contextDiscipline(redContext),
+            contextDiscipline(blueContext),
+            row.discipline,
+            raw.discipline,
+          )) || "—",
           maxGewicht: displayMaxWeight(row, raw),
           status,
           sortAge: Math.min(
@@ -255,16 +510,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
               ),
             ].filter((value): value is number => value !== null),
           ),
-          red: {
-            naam: s(first(row.rood_naam, raw.rood_naam, red.naam)) || "Tegenstander gezocht",
-            sportschool: s(first(row.rood_gym, red.sportschool, red.gym, redContext?.gym_input, redContext?.fp_gym)) || "—",
-            record: recordFromContext(redContext),
-          },
-          blue: {
-            naam: s(first(row.blauw_naam, raw.blauw_naam, blue.naam)) || "Tegenstander gezocht",
-            sportschool: s(first(row.blauw_gym, blue.sportschool, blue.gym, blueContext?.gym_input, blueContext?.fp_gym)) || "—",
-            record: recordFromContext(blueContext),
-          },
+          red: fighterView(redContext, red, row, "rood", resultRows),
+          blue: fighterView(blueContext, blue, row, "blauw", resultRows),
         };
       })
       .filter((bout: AnyRow) => {
@@ -318,7 +565,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
               id: s(first(context.id, context.inschrijving_id, context.va_nummer)),
               naam: s(first(context.naam, context.fp_naam, context.naam_input)) || "Onbekend",
               sportschool: s(first(context.gym_input, context.fp_gym)) || "—",
-              record: recordFromContext(context, false),
+              record: recordFromResults(context, resultRows, false),
               klasse: s(first(context.klasse, context.fp_klasse, context.nulmeting_klasse)) || "—",
               geslacht: genderLabel(first(context.geslacht, context.fp_geslacht)),
               leeftijd: ageOnDate(birthDate, contextEventDate),

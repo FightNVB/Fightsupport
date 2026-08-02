@@ -292,7 +292,11 @@ async function deleteOldContexts(params: {
       .in("inschrijving_id", inschrijvingIds);
   }
 
+  // Hetzelfde VA kan binnen één matchmaking aan meerdere aanmeldingen hangen.
+  // Bij een concrete inschrijving verwijderen we daarom uitsluitend op
+  // inschrijving_id. De VA-fallback is alleen voor oude contexten zonder ID.
   const normalVaNummers = normalRows
+    .filter((r) => i(pick(r, ["inschrijving_id"])) === null)
     .map((r) => normalizeVa(pick(r, ["va_nummer", "va"])))
     .filter(Boolean);
 

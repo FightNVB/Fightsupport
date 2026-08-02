@@ -1170,7 +1170,6 @@ function fillSheet(
     kleurKlasseCell(row.getCell(3), klasseMeldingForFighter(f, resultRows));
   }
 
-  ws.views = [{ state: "frozen", ySplit: 5 }];
   ws.columns = [
     { width: 12 }, // Geslacht
     { width: 16 }, // Discipline
@@ -1296,7 +1295,6 @@ function fillMeldingenSheet(
     });
     row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
   }
-  ws.views = [{ state: "frozen", ySplit: 5 }];
   ws.columns = [
     { width: 28 },
     { width: 10 },
@@ -1371,7 +1369,6 @@ function fillKeurmerkenSheet(
     });
     row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
   }
-  ws.views = [{ state: "frozen", ySplit: 5 }];
   ws.columns = [
     { width: 32 },
     { width: 32 },
@@ -1431,7 +1428,6 @@ function fillOpmerkingenSheet(workbook: ExcelJS.Workbook, fighters: Row[]) {
     });
     row.getCell(1).font = { bold: true, color: { argb: ORANGE } };
   }
-  ws.views = [{ state: "frozen", ySplit: 5 }];
   ws.columns = [
     { width: 30 },
     { width: 78 },
@@ -1555,14 +1551,33 @@ function clearRowsBelow(ws: ExcelJS.Worksheet, startRow: number) {
 }
 
 function normalizeTemplateSheets(workbook: ExcelJS.Workbook) {
-  const first = workbook.worksheets[0] || workbook.addWorksheet("MM");
-  const second = workbook.worksheets[1] || workbook.addWorksheet("Aanmeldingen");
-  const third = workbook.worksheets[2] || workbook.addWorksheet("Sportscholen");
+  // Volgorde in de aangeleverde template:
+  // 1. MM, 2. Prioriteiten, 3. Aanmeldingen, 4. Sportscholen.
+  // De template-opmaak blijft leidend; we maken hier geen nieuw werkblad aan
+  // wanneer het bestaande werkblad al aanwezig is.
+  const first =
+    workbook.getWorksheet("MM") ||
+    workbook.worksheets[0] ||
+    workbook.addWorksheet("MM");
+  const priorities =
+    workbook.getWorksheet("Prioriteiten") ||
+    workbook.worksheets[1] ||
+    workbook.addWorksheet("Prioriteiten");
+  const second =
+    workbook.getWorksheet("Aanmeldingen") ||
+    workbook.worksheets[2] ||
+    workbook.addWorksheet("Aanmeldingen");
+  const third =
+    workbook.getWorksheet("Sportscholen") ||
+    workbook.worksheets[3] ||
+    workbook.addWorksheet("Sportscholen");
+
   first.name = "MM";
+  priorities.name = "Prioriteiten";
   second.name = "Aanmeldingen";
   third.name = "Sportscholen";
-  while (workbook.worksheets.length > 3) workbook.removeWorksheet(workbook.worksheets[3].id);
-  return { first, second, third };
+
+  return { first, priorities, second, third };
 }
 
 function boutWeightNumber(raw: unknown) {
@@ -1897,9 +1912,7 @@ function fillMatchmakingSheet(
     rowNo += 1;
   }
 
-  ws.views = [{ state: "frozen", ySplit: 1 }];
   // Bewust geen filter op MM: de klassebalken moeten zichtbaar blijven.
-  ws.autoFilter = undefined;
 }
 
 function fillAanmeldingenTemplateSheet(
@@ -1929,8 +1942,6 @@ function fillAanmeldingenTemplateSheet(
     copyRowStyle(dataStyle, row);
   }
 
-  ws.views = [{ state: "frozen", ySplit: 1 }];
-  ws.autoFilter = { from: "A1", to: "J1" };
 }
 
 function fillSportscholenTemplateSheet(
@@ -1979,12 +1990,131 @@ function fillSportscholenTemplateSheet(
   }
 }
 
+
+function priorityClassRank(value: unknown) {
+  const token = normalizeClassToken(value);
+  const order: Record<string, number> = {
+    a: 0,
+    b: 1,
+    c: 2,
+    n: 3,
+    "j+": 4,
+    r: 5,
+    j: 6,
+  };
+  return order[token] ?? 99;
+}
+
+function priorityRegistrationKeys(row: Row) {
+  const source = obj(row?.__source_aanmelding) || {};
+  const extra = obj(row?.extra) || {};
+  const raw = obj(extra?.raw) || {};
+  const rawAanmelding = obj(raw?.aanmelding) || {};
+
+  return [
+    row?.inschrijving_id,
+    row?.aanmelding_id,
+    source?.inschrijving_id,
+    source?.aanmelding_id,
+    source?.id,
+    rawAanmelding?.inschrijving_id,
+    rawAanmelding?.aanmelding_id,
+    rawAanmelding?.id,
+  ]
+    .map(s)
+    .filter(Boolean);
+}
+
+function selectPriorityFighters(priorities: Row[], fighters: Row[]) {
+  const priorityIds = new Set<string>();
+  const priorityVas = new Set<string>();
+
+  for (const priority of priorities) {
+    [priority.inschrijving_id, priority.aanmelding_id]
+      .map(s)
+      .filter(Boolean)
+      .forEach((id) => priorityIds.add(id));
+
+    const va = onlyDigits(pickFirst(priority.va_nummer, priority.va));
+    if (va) priorityVas.add(va);
+  }
+
+  const selected: Row[] = [];
+  const seen = new Set<string>();
+
+  for (const fighter of fighters) {
+    const ids = priorityRegistrationKeys(fighter);
+    const va = vaOf(fighter);
+    const isPriority =
+      ids.some((id) => priorityIds.has(id)) ||
+      (!!va && priorityVas.has(va));
+
+    if (!isPriority) continue;
+
+    const key =
+      ids.map((id) => `id:${id}`).find((id) => !seen.has(id)) ||
+      (va ? `va:${va}` : fighterKey(fighter));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selected.push(fighter);
+  }
+
+  return selected;
+}
+
+function fillPrioriteitenTemplateSheet(
+  ws: ExcelJS.Worksheet,
+  fighters: Row[],
+  uitslagenRows: Row[],
+  matchmaking: Row | null,
+) {
+  // Rij 1 met de door Renate gekozen kolomkoppen blijft exact intact.
+  // Rij 2 uit de template is uitsluitend de voorbeeldstijl voor gegevensrijen.
+  const dataStyle = ws.getRow(2);
+  clearRowsBelow(ws, 2);
+
+  const sorted = [...fighters].sort((a, b) => {
+    const classDiff = priorityClassRank(klasseOf(a)) - priorityClassRank(klasseOf(b));
+    if (classDiff !== 0) return classDiff;
+
+    const ageA = leeftijdNumberOf(a, matchmaking) ?? Number.POSITIVE_INFINITY;
+    const ageB = leeftijdNumberOf(b, matchmaking) ?? Number.POSITIVE_INFINITY;
+    if (ageA !== ageB) return ageA - ageB;
+
+    const weightA = gewichtNumberOf(a) ?? Number.POSITIVE_INFINITY;
+    const weightB = gewichtNumberOf(b) ?? Number.POSITIVE_INFINITY;
+    if (weightA !== weightB) return weightA - weightB;
+
+    return nameOf(a).localeCompare(nameOf(b), "nl");
+  });
+
+  for (const fighter of sorted) {
+    const row = ws.addRow([
+      disciplineOf(fighter),
+      klasseOf(fighter),
+      geslachtOf(fighter),
+      nameOf(fighter),
+      gymOf(fighter),
+      vaExcelValue(vaOf(fighter)),
+      recordOf(fighter, uitslagenRows),
+      leeftijdNumberOf(fighter, matchmaking) ?? "",
+      gewichtOf(fighter),
+    ]);
+    copyRowStyle(dataStyle, row);
+    row.getCell(6).numFmt = "0";
+  }
+
+  // Bewust geen autoFilter, freeze panes, kolombreedtes of aanvullende opmaak:
+  // het werkblad blijft precies zoals het in de Excel-template is ontworpen.
+}
+
 async function createTemplateWorkbook(
   matchmaking: Row | null,
   controlled: Row[],
   allAanmeldingen: Row[],
   bouts: Row[],
   uitslagenRows: Row[],
+  priorityFighters: Row[],
 ) {
   const templatePath = path.join(process.cwd(), "public", "templates", "matchmaking-template.xlsx");
   if (!fs.existsSync(templatePath)) {
@@ -1996,9 +2126,10 @@ async function createTemplateWorkbook(
   workbook.creator = "FightSupport";
   workbook.modified = new Date();
 
-  const { first, second, third } = normalizeTemplateSheets(workbook);
+  const { first, priorities, second, third } = normalizeTemplateSheets(workbook);
   first.name = safeSheetTitle(`MM ${eventLabelOf(matchmaking)}`, "MM");
   fillMatchmakingSheet(first, bouts, controlled, uitslagenRows, matchmaking);
+  fillPrioriteitenTemplateSheet(priorities, priorityFighters, uitslagenRows, matchmaking);
   fillAanmeldingenTemplateSheet(second, allAanmeldingen, uitslagenRows, matchmaking);
   fillSportscholenTemplateSheet(third, allAanmeldingen, matchmaking);
 
@@ -2055,6 +2186,7 @@ export async function GET(req: Request) {
       uitslagenRows,
       bouts,
       resultRows,
+      priorities,
     ] = await Promise.all([
       supabase
         .from("matchmakings")
@@ -2067,6 +2199,7 @@ export async function GET(req: Request) {
       queryTable("matchmaker_uitslagen_raw", matchmakingId, "datum"),
       queryTable("matchmaking_bouts_raw", matchmakingId, "partij_nr"),
       queryTable("matchmaker_fighter_resultaten", matchmakingId, "created_at"),
+      queryTable("matchmaker_prioriteiten", matchmakingId, "created_at"),
     ]);
 
     // Context is leidend: daarin staan licentie, startverbod, keurmerk_reden en de geneste raw scrape.
@@ -2080,12 +2213,14 @@ export async function GET(req: Request) {
     const controlled = marked.filter(isControlledFighter);
 
     const allAanmeldingen = markMatchedFromBouts(withAanmeldingStatus, bouts);
+    const priorityFighters = selectPriorityFighters(priorities, allAanmeldingen);
     const workbook = await createTemplateWorkbook(
       matchmaking ?? null,
       controlled,
       allAanmeldingen,
       bouts,
       uitslagenRows,
+      priorityFighters,
     );
 
     const buffer = await workbook.xlsx.writeBuffer();
