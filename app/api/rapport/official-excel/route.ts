@@ -616,37 +616,45 @@ function getRondeTijden(ctx: any, eventDate: any) {
       klasseTxt.includes("jeugd") ||
       klasseTxt.includes("youth")
     ) {
-      return "2x3 min";
+      return "2 x 3 min";
     }
+
     if (klasseTxt.includes("pro") || klasseTxt.includes("professional")) {
-      return titleFight ? "5x5 min" : "3x5 min";
+      return titleFight ? "5 x 5 min" : "3 x 5 min";
     }
-    if (klasseTxt.includes("amateur"))
-      return titleFight ? "5x3 min" : "3x3 min";
-    return titleFight ? "5x3 min" : "3x3 min";
+
+    if (klasseTxt.includes("amateur")) {
+      return titleFight ? "5 x 3 min" : "3 x 3 min";
+    }
+
+    return titleFight ? "5 x 3 min" : "3 x 3 min";
   }
 
-  if (titleFight) return "5 rondes";
+  if (titleFight && includesClass(klasse, "A")) return "5 x 3 min";
 
-  if (isJeugdKlasse(klasse)) {
+  // Bij jeugd zijn de regels van de jongste vechter leidend.
+  // Alleen als beide vechters op de eventdatum minimaal 16 zijn: 3 x 1,5 min.
+  if (isJeugdKlasse(klasse) || klasseTxt.includes("talentstatus")) {
     const roodAge = ageNumber(ctx, "rood", eventDate);
     const blauwAge = ageNumber(ctx, "blauw", eventDate);
+
     if (
       roodAge != null &&
       blauwAge != null &&
       roodAge >= 16 &&
       blauwAge >= 16
     ) {
-      return "3x1,5 min";
+      return "3 x 1,5 min";
     }
-    return "3x1 min";
+
+    return "3 x 1 min";
   }
 
-  if (includesClass(klasse, "R")) return "3x1 min";
-  if (includesClass(klasse, "N")) return "3x1,5 min";
-  if (includesClass(klasse, "C")) return "3x2 min";
-  if (includesClass(klasse, "B")) return "3x3 min";
-  if (includesClass(klasse, "A")) return "3x3 min";
+  if (includesClass(klasse, "R")) return "3 x 1 min";
+  if (includesClass(klasse, "N")) return "3 x 1,5 min";
+  if (includesClass(klasse, "C")) return "3 x 2 min";
+  if (includesClass(klasse, "B")) return "3 x 3 min";
+  if (includesClass(klasse, "A")) return "3 x 3 min";
 
   return "";
 }

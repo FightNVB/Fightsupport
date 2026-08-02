@@ -272,20 +272,31 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
         return bout.status !== "tegenstander_gezocht";
       })
       .sort((a: AnyRow, b: AnyRow) => {
+        // Zelfde zichtbare volgorde als tab Matchmaking:
+        // A -> B -> C -> N -> J+ -> R -> J.
         const klasseDiff = classRank(a.klasse) - classRank(b.klasse);
         if (klasseDiff !== 0) return klasseDiff;
 
+        // Binnen iedere klasse: lichtste maximale gewicht bovenaan.
+        const gewichtDiff = weightSortValue(a.maxGewicht) - weightSortValue(b.maxGewicht);
+        if (gewichtDiff !== 0) return gewichtDiff;
+
+        // Bij gelijk gewicht: jongste partij eerst.
         const ageA = Number.isFinite(a.sortAge) ? a.sortAge : Number.POSITIVE_INFINITY;
         const ageB = Number.isFinite(b.sortAge) ? b.sortAge : Number.POSITIVE_INFINITY;
         if (ageA !== ageB) return ageA - ageB;
 
-        const gewichtDiff = weightSortValue(a.maxGewicht) - weightSortValue(b.maxGewicht);
-        if (gewichtDiff !== 0) return gewichtDiff;
-
+        // Alleen als stabiele laatste terugval; bepaalt niet de zichtbare nummering.
         const partijA = Number.isFinite(a.partijNr) ? a.partijNr : Number.POSITIVE_INFINITY;
         const partijB = Number.isFinite(b.partijNr) ? b.partijNr : Number.POSITIVE_INFINITY;
         return partijA - partijB;
-      });
+      })
+      .map((bout: AnyRow, index: number, sorted: AnyRow[]) => ({
+        ...bout,
+        // Bovenaan staat de main card en die wordt als laatste gevochten.
+        // Daarom krijgt de bovenste partij het hoogste nummer en de onderste jeugdpartij nummer 1.
+        partijNr: sorted.length - index,
+      }));
 
     const searching = publication.show_opponent_search === false
       ? []

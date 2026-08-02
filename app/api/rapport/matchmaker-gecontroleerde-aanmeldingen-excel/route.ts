@@ -1441,6 +1441,573 @@ function fillOpmerkingenSheet(workbook: ExcelJS.Workbook, fighters: Row[]) {
   ];
 }
 
+
+
+function safeSheetTitle(value: unknown, fallback: string) {
+  return (s(value) || fallback)
+    .replace(/[\/?*\[\]:]/g, "-")
+    .slice(0, 31);
+}
+
+function eventLabelOf(matchmaking: Row | null) {
+  const name = s(
+    pickFirst(
+      matchmaking?.naam,
+      matchmaking?.titel,
+      matchmaking?.event_naam,
+      matchmaking?.event_name,
+      matchmaking?.omschrijving,
+    ),
+  );
+  const date = fmtDate(
+    pickFirst(
+      matchmaking?.event_datum,
+      matchmaking?.datum,
+      matchmaking?.event_date,
+    ),
+  );
+  return [name, date].filter(Boolean).join(" - ") || "Matchmaking";
+}
+
+function boutValue(row: Row, ...keys: string[]) {
+  const raw = obj(row?.raw_json) || {};
+  for (const key of keys) {
+    const value = pickFirst(row?.[key], raw?.[key]);
+    if (s(value)) return value;
+  }
+  return "";
+}
+
+function fighterLookupKeys(f: Row) {
+  return [
+    inschrijvingIdOf(f) ? `id:${inschrijvingIdOf(f)}` : "",
+    vaOf(f) ? `va:${vaOf(f)}` : "",
+    nameOf(f) ? `name:${lower(nameOf(f))}` : "",
+  ].filter(Boolean);
+}
+
+function buildFighterLookup(fighters: Row[]) {
+  const map = new Map<string, Row>();
+  for (const f of fighters) {
+    for (const key of fighterLookupKeys(f)) map.set(key, f);
+  }
+  return map;
+}
+
+function findBoutFighter(
+  row: Row,
+  side: "rood" | "blauw",
+  lookup: Map<string, Row>,
+) {
+  const sideRaw = obj((obj(row?.raw_json) || {})?.[side]) || {};
+  const id = s(
+    pickFirst(
+      row?.[`${side}_inschrijving_id`],
+      row?.[`${side}_aanmelding_id`],
+      row?.[side === "rood" ? "red_inschrijving_id" : "blue_inschrijving_id"],
+      sideRaw?.inschrijving_id,
+      sideRaw?.aanmelding_id,
+      sideRaw?.id,
+    ),
+  );
+  if (id && lookup.has(`id:${id}`)) return lookup.get(`id:${id}`) || null;
+
+  const va = onlyDigits(
+    pickFirst(
+      row?.[side === "rood" ? "va_rood" : "va_blauw"],
+      row?.[`${side}_va`],
+      row?.[`${side}_va_mm`],
+      sideRaw?.va_nummer,
+      sideRaw?.va,
+    ),
+  );
+  if (va && lookup.has(`va:${va}`)) return lookup.get(`va:${va}`) || null;
+
+  const naam = lower(
+    pickFirst(
+      row?.[`${side}_naam`],
+      row?.[`${side}_naam_mm`],
+      row?.[`${side}_naam_fp`],
+      row?.[side === "rood" ? "red_name" : "blue_name"],
+      sideRaw?.naam,
+    ),
+  );
+  return naam ? lookup.get(`name:${naam}`) || null : null;
+}
+
+function copyRowStyle(source: ExcelJS.Row | undefined, target: ExcelJS.Row) {
+  if (!source) return;
+  target.height = source.height;
+  for (let col = 1; col <= Math.max(source.cellCount, target.cellCount); col += 1) {
+    const src = source.getCell(col);
+    const dst = target.getCell(col);
+    dst.style = { ...src.style };
+    dst.numFmt = src.numFmt;
+    dst.alignment = src.alignment ? { ...src.alignment } : undefined;
+    dst.border = src.border ? { ...src.border } : undefined;
+    dst.fill = src.fill ? { ...src.fill } : undefined;
+    dst.font = src.font ? { ...src.font } : undefined;
+  }
+}
+
+function clearRowsBelow(ws: ExcelJS.Worksheet, startRow: number) {
+  if (ws.rowCount >= startRow) ws.spliceRows(startRow, ws.rowCount - startRow + 1);
+}
+
+function normalizeTemplateSheets(workbook: ExcelJS.Workbook) {
+  const first = workbook.worksheets[0] || workbook.addWorksheet("MM");
+  const second = workbook.worksheets[1] || workbook.addWorksheet("Aanmeldingen");
+  const third = workbook.worksheets[2] || workbook.addWorksheet("Sportscholen");
+  first.name = "MM";
+  second.name = "Aanmeldingen";
+  third.name = "Sportscholen";
+  while (workbook.worksheets.length > 3) workbook.removeWorksheet(workbook.worksheets[3].id);
+  return { first, second, third };
+}
+
+function boutWeightNumber(raw: unknown) {
+  const match = s(raw).replace(",", ".").match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const value = Number(match[0]);
+  return Number.isFinite(value) ? value : null;
+}
+
+
+function boutRoundTimes(
+  bout: Row,
+  red: Row | null,
+  blue: Row | null,
+  matchmaking: Row | null,
+) {
+  const raw = obj(bout?.raw_json) || {};
+  const klasseRaw = s(
+    pickFirst(
+      bout?.klasse,
+      bout?.klasse_mm,
+      bout?.wedstrijdklasse,
+      raw?.klasse,
+      raw?.klasse_mm,
+      red ? klasseOf(red) : "",
+      blue ? klasseOf(blue) : "",
+    ),
+  );
+  const compactClass = lower(klasseRaw)
+    .replace(/\b(?:klasse|class|clas)\b/g, "")
+    .replace(/[-_\s/]+/g, "")
+    .trim();
+
+  const discipline = lower(
+    pickFirst(
+      bout?.discipline,
+      bout?.sport,
+      bout?.vechtsport,
+      raw?.discipline,
+      red ? disciplineOf(red) : "",
+      blue ? disciplineOf(blue) : "",
+    ),
+  );
+
+  const description = lower(
+    [
+      klasseRaw,
+      discipline,
+      bout?.type,
+      bout?.partij_type,
+      bout?.titel,
+      bout?.omschrijving,
+      bout?.handschoenen,
+      raw?.type,
+      raw?.partij_type,
+      raw?.titel,
+      raw?.omschrijving,
+      raw?.handschoenen,
+    ]
+      .map(s)
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  const explicit = s(
+    pickFirst(
+      bout?.ronde_tijden,
+      bout?.rondetijden,
+      bout?.partijduur,
+      bout?.rondes,
+      raw?.ronde_tijden,
+      raw?.rondetijden,
+      raw?.partijduur,
+      raw?.rondes,
+    ),
+  );
+  if (explicit) {
+    // Toon uitsluitend de rondetijd; eventuele opgeslagen rusttekst hoort niet in deze kolom.
+    return explicit
+      .replace(/\s*\/\s*\d+(?:[,.]\d+)?\s*(?:sec(?:onden?)?|min(?:uten?)?)\s*rust.*$/i, "")
+      .replace(/\s*[-–—]\s*rust.*$/i, "")
+      .replace(/\s+rust.*$/i, "")
+      .trim();
+  }
+
+  const isTitle =
+    description.includes("titel") ||
+    description.includes("championship") ||
+    description.includes("kampioenschap");
+  const is4oz =
+    /(?:^|\s)4\s*oz(?:\s|$)/i.test(description) ||
+    description.includes("4 ounce");
+  const isThai =
+    discipline.includes("thai") ||
+    discipline.includes("muay");
+
+  if (isTitle && (compactClass === "a" || compactClass.startsWith("a"))) {
+    return "5 x 3 min";
+  }
+  if (is4oz) return "3 x 3 min";
+
+  if (compactClass === "d" || compactClass.includes("demo")) {
+    return "2 x 1 min";
+  }
+
+  const isJPlus =
+    compactClass.includes("j+") ||
+    compactClass.includes("jplus") ||
+    compactClass.includes("talentstatus") ||
+    description.includes("talentstatus");
+  if (isJPlus) return "3 x 1,5 min";
+
+  const isYouth =
+    compactClass === "j" ||
+    compactClass.startsWith("jeugd") ||
+    compactClass.includes("youth");
+  if (isYouth) {
+    const ages = [
+      red ? leeftijdNumberOf(red, matchmaking) : null,
+      blue ? leeftijdNumberOf(blue, matchmaking) : null,
+    ].filter((age): age is number => age !== null && Number.isFinite(age));
+    const youngest = ages.length ? Math.min(...ages) : null;
+    return youngest !== null && youngest >= 16
+      ? "3 x 1,5 min"
+      : "3 x 1 min";
+  }
+
+  if (compactClass === "r" || compactClass.includes("recreant")) {
+    return "3 x 1 min";
+  }
+  if (compactClass === "n" || compactClass.includes("nieuweling")) {
+    return "3 x 1,5 min";
+  }
+  if (compactClass === "c" || compactClass.startsWith("c")) {
+    return "3 x 2 min";
+  }
+  if (compactClass === "b" || compactClass.startsWith("b")) {
+    // Het thaiboksreglement staat ook 5 x 2 minuten toe. Zonder expliciete
+    // keuze in de partij gebruiken we de reguliere standaard van 3 x 3.
+    return isThai ? "3 x 3 min" : "3 x 3 min";
+  }
+  if (compactClass === "a" || compactClass.startsWith("a")) {
+    return isThai ? "3 x 3 min" : "3 x 3 min";
+  }
+
+  return "";
+}
+
+function fillMatchmakingSheet(
+  ws: ExcelJS.Worksheet,
+  bouts: Row[],
+  fighters: Row[],
+  uitslagenRows: Row[],
+  matchmaking: Row | null,
+) {
+  // De aangepaste template gebruikt:
+  // rij 1 = vaste kolomkoppen, rij 2 = klasseregel, rij 3 = partijregel.
+  const sectionStyle = ws.getRow(2);
+  const dataStyle = ws.getRow(3);
+  clearRowsBelow(ws, 2);
+
+  const lookup = buildFighterLookup(fighters);
+  const classOrder: Record<string, number> = {
+    a: 0,
+    b: 1,
+    c: 2,
+    n: 3,
+    "j+": 4,
+    j: 5,
+  };
+
+  const normalizedBouts = [...bouts].sort((a, b) => {
+    const ka = normalizeClassToken(
+      boutValue(a, "klasse", "wedstrijdklasse", "class"),
+    );
+    const kb = normalizeClassToken(
+      boutValue(b, "klasse", "wedstrijdklasse", "class"),
+    );
+    const classDiff =
+      (classOrder[ka] ?? 99) - (classOrder[kb] ?? 99);
+    if (classDiff !== 0) return classDiff;
+
+    // Exact dezelfde gewichtsbron als in tab Matchmaking: het afgesproken
+    // maximale partijgewicht, niet het losse gewicht van één van de vechters.
+    const weightA = boutWeightNumber(
+      boutValue(
+        a,
+        "max_gewicht_notatie",
+        "max_gewicht",
+        "gewicht",
+        "gewichtsklasse",
+        "weight",
+      ),
+    );
+    const weightB = boutWeightNumber(
+      boutValue(
+        b,
+        "max_gewicht_notatie",
+        "max_gewicht",
+        "gewicht",
+        "gewichtsklasse",
+        "weight",
+      ),
+    );
+    const weightDiff =
+      (weightA ?? Number.POSITIVE_INFINITY) -
+      (weightB ?? Number.POSITIVE_INFINITY);
+    if (weightDiff !== 0) return weightDiff;
+
+    const nrA = Number(boutValue(a, "partij_nr", "partijNr", "bout_nr"));
+    const nrB = Number(boutValue(b, "partij_nr", "partijNr", "bout_nr"));
+    return (Number.isFinite(nrA) ? nrA : 9999) -
+      (Number.isFinite(nrB) ? nrB : 9999);
+  });
+
+  let rowNo = 2;
+  let currentClass = "";
+
+  for (const [boutIndex, bout] of normalizedBouts.entries()) {
+    const clsToken = normalizeClassToken(
+      boutValue(bout, "klasse", "wedstrijdklasse", "class"),
+    );
+    const cls =
+      ({ a: "A", b: "B", c: "C", n: "N", "j+": "J+", j: "J" } as Record<
+        string,
+        string
+      >)[clsToken] ||
+      s(boutValue(bout, "klasse", "wedstrijdklasse", "class")) ||
+      "Onbekend";
+
+    if (cls !== currentClass) {
+      currentClass = cls;
+      const section = ws.insertRow(rowNo, []);
+      copyRowStyle(sectionStyle, section);
+
+      // Eén doorlopende lichtgrijze klassebalk boven iedere klasse.
+      ws.mergeCells(`A${rowNo}:R${rowNo}`);
+      const classCell = section.getCell(1);
+      classCell.value = `${cls}-klasse`;
+      classCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: GREY },
+      };
+      classCell.font = { bold: true, color: { argb: BLACK } };
+      classCell.alignment = { vertical: "middle", horizontal: "left" };
+      classCell.border = {};
+      for (let col = 1; col <= 18; col += 1) {
+        section.getCell(col).border = {};
+      }
+      section.height = Math.max(section.height || 15, 20);
+      rowNo += 1;
+    }
+
+    const red = findBoutFighter(bout, "rood", lookup);
+    const blue = findBoutFighter(bout, "blauw", lookup);
+    // De Matchmaking-weergave staat met de main card bovenaan en jeugd
+    // onderaan. Nummer daarom van onder naar boven: onderste partij = 1,
+    // bovenste partij = hoogste nummer. Dit nummer is alleen voor de export.
+    const partyNo = normalizedBouts.length - boutIndex;
+
+    const discipline =
+      boutValue(bout, "discipline", "sport", "vechtsport") ||
+      (red ? disciplineOf(red) : blue ? disciplineOf(blue) : "");
+    const gender =
+      boutValue(bout, "geslacht", "gender", "m_v") ||
+      (red ? geslachtOf(red) : blue ? geslachtOf(blue) : "");
+    const maxWeightRaw =
+      boutValue(
+        bout,
+        "max_gewicht_notatie",
+        "max_gewicht",
+        "gewicht",
+        "gewichtsklasse",
+        "weight",
+      ) || (red ? gewichtOf(red) : blue ? gewichtOf(blue) : "");
+    const maxWeight = boutWeightNumber(maxWeightRaw);
+
+    const row = ws.insertRow(rowNo, []);
+    copyRowStyle(dataStyle, row);
+    row.values = [
+      partyNo, // A Partijnummer gelijk aan tab Matchmaking
+      discipline, // B Discipline
+      cls, // C Klasse
+      gender, // D M/V
+      red ? nameOf(red) : boutValue(bout, "rood_naam", "rood_naam_mm", "red_name"), // E
+      red ? gymOf(red) : boutValue(bout, "rood_gym", "rood_sportschool"), // F
+      red
+        ? parseDateOnly(dobOf(red)) || fmtDate(dobOf(red))
+        : boutValue(bout, "rood_geboortedatum", "rood_geboortedatum_mm"), // G
+      red ? leeftijdNumberOf(red, matchmaking) ?? "" : boutValue(bout, "rood_leeftijd"), // H
+      red ? vaExcelValue(vaOf(red)) : vaExcelValue(boutValue(bout, "va_rood", "rood_va")), // I
+      red ? recordOf(red, uitslagenRows) : boutValue(bout, "rood_record"), // J
+      maxWeight ?? "", // K Max gew: echt getal, geen tekst
+      blue ? nameOf(blue) : boutValue(bout, "blauw_naam", "blauw_naam_mm", "blue_name"), // L
+      blue ? gymOf(blue) : boutValue(bout, "blauw_gym", "blauw_sportschool"), // M
+      blue
+        ? parseDateOnly(dobOf(blue)) || fmtDate(dobOf(blue))
+        : boutValue(bout, "blauw_geboortedatum", "blauw_geboortedatum_mm"), // N
+      blue ? leeftijdNumberOf(blue, matchmaking) ?? "" : boutValue(bout, "blauw_leeftijd"), // O
+      blue ? vaExcelValue(vaOf(blue)) : vaExcelValue(boutValue(bout, "va_blauw", "blauw_va")), // P
+      blue ? recordOf(blue, uitslagenRows) : boutValue(bout, "blauw_record"), // Q
+      boutRoundTimes(bout, red, blue, matchmaking), // R Ronde tijden volgens NVB-reglement
+    ];
+    copyRowStyle(dataStyle, row);
+
+    // Raster rond alle partijgegevens. De grijze klassebalken worden hierboven
+    // apart aangemaakt en krijgen bewust geen celranden.
+    for (let col = 1; col <= 18; col += 1) {
+      const cell = row.getCell(col);
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFBFBFBF" } },
+        left: { style: "thin", color: { argb: "FFBFBFBF" } },
+        bottom: { style: "thin", color: { argb: "FFBFBFBF" } },
+        right: { style: "thin", color: { argb: "FFBFBFBF" } },
+      };
+    }
+
+    // Max gewicht is een numerieke Excel-cel en wordt rood weergegeven.
+    const maxWeightCell = row.getCell(11);
+    maxWeightCell.numFmt = "0.0";
+    maxWeightCell.alignment = {
+      ...(maxWeightCell.alignment || {}),
+      horizontal: "center",
+      vertical: "middle",
+    };
+    maxWeightCell.font = {
+      ...(maxWeightCell.font || {}),
+      color: { argb: "FFFF0000" },
+      bold: true,
+    };
+    rowNo += 1;
+  }
+
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  // Bewust geen filter op MM: de klassebalken moeten zichtbaar blijven.
+  ws.autoFilter = undefined;
+}
+
+function fillAanmeldingenTemplateSheet(
+  ws: ExcelJS.Worksheet,
+  fighters: Row[],
+  uitslagenRows: Row[],
+  matchmaking: Row | null,
+) {
+  const dataStyle = ws.getRow(2);
+  clearRowsBelow(ws, 2);
+
+  // De kopregel uit de template blijft volledig intact.
+  const sorted = [...fighters].sort((a, b) => sortFighters(a, b, matchmaking));
+  for (const f of sorted) {
+    const row = ws.addRow([
+      disciplineOf(f),
+      klasseOf(f),
+      geslachtOf(f),
+      nameOf(f),
+      gymOf(f),
+      parseDateOnly(dobOf(f)) || fmtDate(dobOf(f)),
+      vaExcelValue(vaOf(f)),
+      recordOf(f, uitslagenRows),
+      leeftijdNumberOf(f, matchmaking) ?? "",
+      gewichtOf(f),
+    ]);
+    copyRowStyle(dataStyle, row);
+  }
+
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  ws.autoFilter = { from: "A1", to: "J1" };
+}
+
+function fillSportscholenTemplateSheet(
+  ws: ExcelJS.Worksheet,
+  fighters: Row[],
+  matchmaking: Row | null,
+) {
+  const gymStyle = ws.getRow(1);
+  const fighterStyle = ws.getRow(2);
+  clearRowsBelow(ws, 1);
+
+  const groups = new Map<string, Row[]>();
+  for (const f of fighters) {
+    const gym = gymOf(f) || "Sportschool onbekend";
+    if (!groups.has(gym)) groups.set(gym, []);
+    groups.get(gym)!.push(f);
+  }
+
+  const sortedGroups = [...groups.entries()].sort(([a], [b]) =>
+    a.localeCompare(b, "nl"),
+  );
+
+  for (const [gym, rows] of sortedGroups) {
+    // Exact volgens de aangepaste template:
+    // A = Sportschool:, C = E-mailadres:, D = leeg invulvak.
+    const gymRow = ws.addRow(["Sportschool:", gym, "E-mailadres:", ""]);
+    copyRowStyle(gymStyle, gymRow);
+    gymRow.getCell(1).font = { ...(gymRow.getCell(1).font || {}), bold: true };
+    gymRow.getCell(2).font = { ...(gymRow.getCell(2).font || {}), bold: true };
+    gymRow.getCell(3).font = { ...(gymRow.getCell(3).font || {}), bold: true };
+
+    const headerRow = ws.addRow(["Naam", "Klasse", "Gewicht", "Bijzonderheden"]);
+    copyRowStyle(fighterStyle, headerRow);
+
+    for (const f of [...rows].sort((a, b) => sortFighters(a, b, matchmaking))) {
+      const row = ws.addRow([nameOf(f), klasseOf(f), gewichtOf(f), ""]);
+      copyRowStyle(fighterStyle, row);
+      // Alleen de gegevensrij, niet de kopregel, krijgt normale tekststijl.
+      row.getCell(1).font = { ...(row.getCell(1).font || {}), bold: false };
+      row.getCell(2).font = { ...(row.getCell(2).font || {}), bold: false };
+      row.getCell(3).font = { ...(row.getCell(3).font || {}), bold: false };
+      row.getCell(4).font = { ...(row.getCell(4).font || {}), bold: false };
+    }
+
+    ws.addRow([]);
+  }
+}
+
+async function createTemplateWorkbook(
+  matchmaking: Row | null,
+  controlled: Row[],
+  allAanmeldingen: Row[],
+  bouts: Row[],
+  uitslagenRows: Row[],
+) {
+  const templatePath = path.join(process.cwd(), "public", "templates", "matchmaking-template.xlsx");
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Excel-template ontbreekt: ${templatePath}`);
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(templatePath);
+  workbook.creator = "FightSupport";
+  workbook.modified = new Date();
+
+  const { first, second, third } = normalizeTemplateSheets(workbook);
+  first.name = safeSheetTitle(`MM ${eventLabelOf(matchmaking)}`, "MM");
+  fillMatchmakingSheet(first, bouts, controlled, uitslagenRows, matchmaking);
+  fillAanmeldingenTemplateSheet(second, allAanmeldingen, uitslagenRows, matchmaking);
+  fillSportscholenTemplateSheet(third, allAanmeldingen, matchmaking);
+
+  // Open het gedownloade werkboek standaard op het eerste tabblad: MM.
+  workbook.views = [{ activeTab: 0, firstSheet: 0, visibility: "visible" }];
+  first.state = "visible";
+  return workbook;
+}
+
 async function queryTable(
   table: string,
   matchmakingId: string,
@@ -1504,50 +2071,17 @@ export async function GET(req: Request) {
     const marked = markMatchedFromBouts(withAanmeldingStatus, bouts);
     const controlled = marked.filter(isControlledFighter);
 
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = "FightSupport";
-    workbook.created = new Date();
-    workbook.modified = new Date();
-
-    fillMeldingenSheet(workbook, resultRows, controlled);
-    fillKeurmerkenSheet(workbook, controlled, matchmaking ?? null);
-    fillOpmerkingenSheet(workbook, controlled);
-
-    const grouped = new Map<string, Row[]>();
-    for (const f of controlled) {
-      const key = tabKeyOf(f);
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(f);
-    }
-
-    const sortedGroups = Array.from(grouped.entries()).sort(([a], [b]) =>
-      a.localeCompare(b, "nl"),
+    const allAanmeldingen = markMatchedFromBouts(withAanmeldingStatus, bouts);
+    const workbook = await createTemplateWorkbook(
+      matchmaking ?? null,
+      controlled,
+      allAanmeldingen,
+      bouts,
+      uitslagenRows,
     );
-    if (!sortedGroups.length) {
-      fillSheet(
-        workbook,
-        "Geen gecontroleerde aanmeldingen",
-        [],
-        uitslagenRows,
-        resultRows,
-        matchmaking ?? null,
-      );
-    } else {
-      for (const [sheetName, rows] of sortedGroups) {
-        rows.sort((a, b) => sortFighters(a, b, matchmaking ?? null));
-        fillSheet(
-          workbook,
-          sheetName,
-          rows,
-          uitslagenRows,
-          resultRows,
-          matchmaking ?? null,
-        );
-      }
-    }
 
     const buffer = await workbook.xlsx.writeBuffer();
-    const filename = `gecontroleerde-aanmeldingen-${matchmakingId}.xlsx`;
+    const filename = `matchmaking-${safeSheetTitle(eventLabelOf(matchmaking ?? null), matchmakingId)}.xlsx`;
 
     return new NextResponse(buffer, {
       status: 200,

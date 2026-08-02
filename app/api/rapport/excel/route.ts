@@ -381,8 +381,12 @@ function normalizeKlasse(v: any) {
 
 function getComputedRondetijden(ctx: any, eventDate: any) {
   const klasse = normalizeKlasse(ctx?.klasse_mm ?? ctx?.klasse);
-
   if (!klasse) return "";
+
+  // Titelpartijen in de A-klasse.
+  if (isTitelpartijContext(ctx) && klasse.startsWith("A")) {
+    return "5 x 3 min";
+  }
 
   if (klasse.startsWith("A")) return "3 x 3 min";
   if (klasse.startsWith("B")) return "3 x 3 min";
@@ -390,7 +394,15 @@ function getComputedRondetijden(ctx: any, eventDate: any) {
   if (klasse.startsWith("N")) return "3 x 1,5 min";
   if (klasse.startsWith("R") || klasse.includes("RECREANT")) return "3 x 1 min";
 
-  if (klasse.startsWith("J")) {
+  // Bij jeugd zijn de regels van de jongste vechter leidend.
+  // Alleen wanneer beide vechters op de eventdatum 16 jaar of ouder zijn,
+  // duurt een ronde 1,5 minuut. Zodra één vechter jonger dan 16 is: 1 minuut.
+  if (
+    klasse.startsWith("J") ||
+    klasse.includes("JEUGD") ||
+    klasse.includes("YOUTH") ||
+    klasse.includes("TALENTSTATUS")
+  ) {
     const leeftijdRood = getLeeftijdOpEvenementNumber(ctx, "rood", eventDate);
     const leeftijdBlauw = getLeeftijdOpEvenementNumber(ctx, "blauw", eventDate);
 

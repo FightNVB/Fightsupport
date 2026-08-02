@@ -673,17 +673,26 @@ function totaalPartijenSortValue(f: Fighter) {
   return total > 0 ? total : Number.POSITIVE_INFINITY;
 }
 function sortFightersInTab(a: Fighter, b: Fighter) {
-  // Belangrijkste sortering: gewichtsklasse/gewicht.
-  // -49 wordt als 49 gelezen, 95+ als 95, en onbekend komt onderaan.
+  const klasseVolgorde: Record<string, number> = {
+    a: 0,
+    b: 1,
+    c: 2,
+    n: 3,
+    "j+": 4,
+    j: 5,
+  };
+
+  const klasseA = normalizeClassToken(klasseOf(a));
+  const klasseB = normalizeClassToken(klasseOf(b));
+  const klasseDiff = (klasseVolgorde[klasseA] ?? 99) - (klasseVolgorde[klasseB] ?? 99);
+  if (klasseDiff !== 0) return klasseDiff;
+
   const gewichtDiff = gewichtSortValue(a) - gewichtSortValue(b);
   if (gewichtDiff !== 0) return gewichtDiff;
 
-  // Bij gelijk gewicht sorteren we daarna op leeftijd: jongste bovenaan.
   const leeftijdDiff = leeftijdSortValue(a) - leeftijdSortValue(b);
   if (leeftijdDiff !== 0) return leeftijdDiff;
 
-  const partijenDiff = totaalPartijenSortValue(a) - totaalPartijenSortValue(b);
-  if (partijenDiff !== 0) return partijenDiff;
   return name(a).localeCompare(name(b), "nl");
 }
 function recordClassDisplay(token: string) {
@@ -1244,7 +1253,55 @@ function getActiveMatchRows(json: any) {
     }
   }
 
+  const klasseVolgorde: Record<string, number> = {
+    a: 0,
+    b: 1,
+    c: 2,
+    n: 3,
+    "j+": 4,
+    j: 5,
+  };
+
+  function boutKlasseToken(row: any) {
+    return normalizeClassToken(
+      pickFirst(
+        row?.klasse,
+        row?.klasse_mm,
+        row?.wedstrijdklasse,
+        row?.class,
+        obj(row?.raw_json)?.klasse,
+        obj(row?.raw_json)?.klasse_mm,
+      ),
+    );
+  }
+
+  function boutGewichtSortValue(row: any) {
+    const raw = pickFirst(
+      row?.max_gewicht_notatie,
+      row?.max_gewicht,
+      row?.gewicht,
+      row?.gewichtsklasse,
+      obj(row?.raw_json)?.max_gewicht_notatie,
+      obj(row?.raw_json)?.max_gewicht,
+      obj(row?.raw_json)?.gewicht,
+    );
+    const parsed = parseWeightClassValue(raw);
+    return parsed.value ?? Number.POSITIVE_INFINITY;
+  }
+
   return rows.sort((a, b) => {
+    // Partijnummer is hier alleen een label. De matchmaking wordt inhoudelijk
+    // gegroepeerd op klasse en daarbinnen van licht naar zwaar weergegeven.
+    const klasseDiff =
+      (klasseVolgorde[boutKlasseToken(a)] ?? 99) -
+      (klasseVolgorde[boutKlasseToken(b)] ?? 99);
+    if (klasseDiff !== 0) return klasseDiff;
+
+    const gewichtDiff = boutGewichtSortValue(a) - boutGewichtSortValue(b);
+    if (gewichtDiff !== 0) return gewichtDiff;
+
+    // Alleen als klasse en gewicht gelijk zijn gebruiken we het bestaande
+    // partijnummer als stabiele fallback. Het nummer zelf wordt niet gewijzigd.
     const an = Number(pickFirst(a?.partij_nr, a?.partijNr, a?.bout_nr, a?.match_nr));
     const bn = Number(pickFirst(b?.partij_nr, b?.partijNr, b?.bout_nr, b?.match_nr));
     if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
@@ -1252,7 +1309,7 @@ function getActiveMatchRows(json: any) {
     if (Number.isFinite(bn)) return 1;
     return s(pickFirst(a?.toernooi_code, a?.toernooicode)).localeCompare(
       s(pickFirst(b?.toernooi_code, b?.toernooicode)),
-      'nl',
+      "nl",
       { numeric: true },
     );
   });
@@ -2949,7 +3006,11 @@ export default function FightersPage() {
               <tbody>
                 {matchRows.map((row, index) => {
                   const raw = boutRaw(row);
+                  // Het opgeslagen partijnummer blijft nodig voor detail/ontbinden.
+                  // In de Matchmaking-tabel nummeren we visueel van onder naar boven:
+                  // onderste partij = 1, bovenste (main card) = hoogste nummer.
                   const partijNr = boutPartyNr(row);
+                  const weergavePartijNr = matchRows.length - index;
                   const roodNaam = val(
                     pickFirst(
                       boutField(row, 'rood_naam', 'red_name'),
@@ -3030,7 +3091,7 @@ export default function FightersPage() {
                       key={s(row?.id) || `${partijNr ?? 'toernooi'}-${index}`}
                       style={index % 2 === 0 ? matchTrEven : matchTrOdd}
                     >
-                      <td style={matchTdNr}>{partijNr ?? (code || '-')}</td>
+                      <td style={matchTdNr}>{weergavePartijNr}</td>
                       <td style={matchTdCompact}>{klasse}</td>
                       <td style={matchTdGender}>{geslacht === "Vrouw" ? "V" : geslacht === "Man" ? "M" : "-"}</td>
                       <td style={matchTdName}>
