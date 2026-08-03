@@ -348,19 +348,47 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     const cleanToken = s(token);
     if (!cleanToken) return NextResponse.json({ error: "Ongeldige link" }, { status: 400 });
 
-    const { data: publication, error: pubError } = await supabaseAdmin
+    const { data: promoterPublication, error: promoterError } = await supabaseAdmin
       .from("matchmaking_public_pages")
       .select("*")
       .eq("public_token", cleanToken)
       .eq("is_enabled", true)
       .maybeSingle();
 
-    if (pubError) throw pubError;
+    if (promoterError) throw promoterError;
+
+    let publication = promoterPublication;
+    let audience: "promoter" | "trainers" = "promoter";
+
+    if (!publication) {
+      const { data: trainerPublication, error: trainerError } = await supabaseAdmin
+        .from("matchmaking_public_pages")
+        .select("*")
+        .eq("trainer_token", cleanToken)
+        .eq("is_enabled", true)
+        .maybeSingle();
+      if (trainerError) throw trainerError;
+      publication = trainerPublication;
+      audience = "trainers";
+    }
+
     if (!publication) {
       return NextResponse.json(
-        { error: "Deze openbare matchmaking is niet beschikbaar" },
+        { error: "Deze matchmakinglink is niet beschikbaar" },
         { status: 404 },
       );
+    }
+
+    if (audience === "trainers") {
+      if (!publication.trainer_snapshot) {
+        return NextResponse.json(
+          { error: "Er is nog geen update voor trainers gepubliceerd" },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json(publication.trainer_snapshot, {
+        headers: { "Cache-Control": "no-store, max-age=0" },
+      });
     }
 
     const matchmakingId = s(publication.matchmaking_id);
@@ -597,12 +625,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     return NextResponse.json(
       {
         ok: true,
+        audience: "promoter",
         event: {
           title: s(publication.public_title) || s(first(mm.event_naam, mm.naam, mm.titel)) || "Matchmaking",
           date: eventDate,
           location: s(publication.public_location) || s(first(mm.event_locatie, mm.locatie, mm.plaats, mm.stadium)),
           disciplines: s(publication.public_disciplines) || s(first(mm.discipline, mm.disciplines)),
-          phase: "Voorlopige matchmaking",
+          phase: "Live meekijken voor promotor",
           updatedAt,
         },
         counts: {

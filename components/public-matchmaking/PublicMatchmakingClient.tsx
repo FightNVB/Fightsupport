@@ -29,6 +29,7 @@ type SearchingFighter = {
 };
 
 type Payload = {
+  audience?: "promoter" | "trainers";
   event: {
     title: string;
     date: string;
@@ -260,7 +261,9 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
         )}
 
         <div className="pm-disclaimer">
-          Dit is een voorlopige matchmaking. Partijen kunnen nog wijzigen totdat ze officieel zijn bevestigd.
+          {data.audience === "trainers"
+            ? "Dit is de laatst door de matchmaker gepubliceerde update. Latere wijzigingen zijn pas zichtbaar na een nieuwe publicatie."
+            : "Je kijkt live mee met de actuele werkversie van de matchmaker. Wijzigingen kunnen direct zichtbaar worden."}
         </div>
       </section>
 

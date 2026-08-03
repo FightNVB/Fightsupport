@@ -18,6 +18,8 @@ import {
   Download,
   Eye,
   Globe2,
+  Copy,
+  Send,
   RefreshCw,
   Search,
   Star,
@@ -1723,24 +1725,44 @@ export default function FightersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [busyText, setBusyText] = useState("");
 
-  const openOrCreatePublicMatchmaking = useCallback(async () => {
+  const manageShareLink = useCallback(async (
+    action: "ensure" | "publish_trainers",
+    audience: "promoter" | "trainers",
+    mode: "open" | "copy" = "copy",
+  ) => {
     if (!matchmakingId) return;
-    setBusyId("public-matchmaking");
-    setBusyText("Openbare matchmaking wordt klaargezet...");
+    const busyKey = action === "publish_trainers" ? "publish-trainers" : `${audience}-${mode}`;
+    setBusyId(busyKey);
+    setBusyText(
+      action === "publish_trainers"
+        ? "Update voor trainers wordt gepubliceerd..."
+        : "Beveiligde link wordt klaargezet...",
+    );
     try {
       const res = await authedFetch("/api/matchmaker/public-matchmaking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchmakingId }),
+        body: JSON.stringify({ matchmakingId, action }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Openbare matchmaking aanmaken mislukt");
-      const token = s(json?.publication?.public_token);
-      if (!token) throw new Error("De openbare link bevat geen token.");
+      if (!res.ok) throw new Error(json?.error || "Deellink aanmaken mislukt");
+      const publication = json?.publication || {};
+      const token = s(audience === "promoter" ? publication.public_token : publication.trainer_token);
+      if (!token) throw new Error("De beveiligde link bevat geen token.");
       const url = `${window.location.origin}/openbare-matchmaking/${token}`;
-      window.open(url, "_blank", "noopener,noreferrer");
+
+      if (mode === "open") {
+        window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        await navigator.clipboard.writeText(url);
+        setMsg(
+          action === "publish_trainers"
+            ? "Update gepubliceerd en trainerslink gekopieerd."
+            : `${audience === "promoter" ? "Promotorlink" : "Trainerslink"} gekopieerd.`,
+        );
+      }
     } catch (error: any) {
-      setMsg(error?.message || "Openbare matchmaking aanmaken mislukt");
+      setMsg(error?.message || "Deellink verwerken mislukt");
     } finally {
       setBusyId(null);
       setBusyText("");
@@ -2629,12 +2651,30 @@ export default function FightersPage() {
           <div className="fs-header-actions">
             <button
               className="fs-action-btn fs-action-primary"
-              onClick={openOrCreatePublicMatchmaking}
+              onClick={() => manageShareLink("ensure", "promoter", "open")}
               disabled={!!busyId || loading || !matchRows.length}
-              title="Open de live openbare matchmaking"
+              title="Open de live beveiligde promotorlink"
             >
               <Globe2 size={16} />
-              <span>Openbare matchmaking</span>
+              <span>Promotor live</span>
+            </button>
+            <button
+              className="fs-action-btn"
+              onClick={() => manageShareLink("ensure", "promoter", "copy")}
+              disabled={!!busyId || loading || !matchRows.length}
+              title="Kopieer de live promotorlink"
+            >
+              <Copy size={16} />
+              <span>Promotorlink</span>
+            </button>
+            <button
+              className="fs-action-btn fs-action-primary"
+              onClick={() => manageShareLink("publish_trainers", "trainers", "copy")}
+              disabled={!!busyId || loading || !matchRows.length}
+              title="Publiceer de huidige versie voor trainers en kopieer hun link"
+            >
+              <Send size={16} />
+              <span>Publiceer trainers</span>
             </button>
             <button
               className="fs-action-btn"
