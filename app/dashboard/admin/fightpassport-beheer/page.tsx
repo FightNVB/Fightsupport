@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, BrainCircuit, Bug, CheckCircle2, Database, Play, RefreshCw, RotateCcw, Search, ShieldCheck, StopCircle, Trash2, Users } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
@@ -44,11 +44,13 @@ export default function FightPaspoortBeheerPage() {
   const [busyDeleteTotal, setBusyDeleteTotal] = useState(false);
   const [busyDeleteTeam, setBusyDeleteTeam] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string>("");
+  const [resumingRunId, setResumingRunId] = useState<string>("");
   const [deletingRunId, setDeletingRunId] = useState<string>("");
   const [sortKey, setSortKey] = useState<string>("va_nummer");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 75;
+  const runsRequestBusyRef = useRef(false);
 
   const loadFighters = useCallback(async () => {
     const sp = new URLSearchParams({
@@ -73,9 +75,51 @@ export default function FightPaspoortBeheerPage() {
   }, [q, licentie, startverbod, discipline, klasse, page, sortKey, sortDir]);
 
   const loadRuns = useCallback(async () => {
-    const res = await authedFetch("/api/admin/fightpassport-sync/runs");
-    const json = await res.json().catch(() => ({}));
-    if (res.ok) setRuns(json.runs ?? []);
+    // Voorkom overlappende polling-requests. Die kunnen tijdens HMR,
+    // navigatie of een trage databaseverbinding onnodige fetchfouten geven.
+    if (runsRequestBusyRef.current) return;
+    runsRequestBusyRef.current = true;
+
+    try {
+      const res = await authedFetch("/api/admin/fightpassport-sync/runs");
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json.error || `Runs laden mislukt (${res.status}).`);
+      }
+
+      const nextRuns = Array.isArray(json.runs) ? json.runs : [];
+      setRuns(nextRuns);
+
+      // Bewaar de laatst geldige lijst als visuele fallback. Hierdoor
+      // verdwijnen de runs niet bij een tijdelijke browser-/netwerkfout.
+      try {
+        window.sessionStorage.setItem(
+          "fightpassport-sync-runs-cache",
+          JSON.stringify(nextRuns)
+        );
+      } catch {
+        // Opslag kan uitgeschakeld zijn; dat mag de pagina niet breken.
+      }
+    } catch (error) {
+      console.warn("[fightpassport-beheer] Runs tijdelijk niet geladen:", error);
+
+      setRuns((currentRuns) => {
+        if (currentRuns.length > 0) return currentRuns;
+
+        try {
+          const cached = window.sessionStorage.getItem(
+            "fightpassport-sync-runs-cache"
+          );
+          const parsed = cached ? JSON.parse(cached) : [];
+          return Array.isArray(parsed) ? parsed : currentRuns;
+        } catch {
+          return currentRuns;
+        }
+      });
+    } finally {
+      runsRequestBusyRef.current = false;
+    }
   }, []);
 
   const loadItems = useCallback(async (runId: string) => {
@@ -228,11 +272,21 @@ export default function FightPaspoortBeheerPage() {
   }, [tab, loadFighters, loadMissingVa, loadStartverbodErrors]);
 
   useEffect(() => {
-    loadRuns();
-    const t = setInterval(() => {
-      loadRuns();
-    }, 5000);
-    return () => clearInterval(t);
+    void loadRuns();
+
+    const refreshRuns = () => {
+      if (document.visibilityState === "visible") {
+        void loadRuns();
+      }
+    };
+
+    const t = window.setInterval(refreshRuns, 5000);
+    document.addEventListener("visibilitychange", refreshRuns);
+
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", refreshRuns);
+    };
   }, [loadRuns]);
 
   const allErrors = useMemo(
@@ -442,6 +496,37 @@ export default function FightPaspoortBeheerPage() {
     );
 
     await loadRuns();
+  }
+
+
+  async function resumeRun(runId: string) {
+    if (activeTotalRun) {
+      setMessage("Er draait al een Total AutoCheck-run. Stop die eerst voordat je een gepauzeerde run hervat.");
+      return;
+    }
+
+    if (!window.confirm("Deze gepauzeerde Total AutoCheck-run hervatten en alleen de nog niet verwerkte VA-nummers afmaken?")) return;
+
+    setResumingRunId(runId);
+    setMessage("");
+
+    const res = await authedFetch("/api/admin/fightpassport-sync/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: runId }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    setResumingRunId("");
+
+    setMessage(
+      res.ok
+        ? (json.message || "Run hervat.")
+        : json.error || "Run hervatten mislukt."
+    );
+
+    await loadRuns();
+    if (res.ok) setTimeout(loadRuns, 1200);
   }
 
 
@@ -689,31 +774,45 @@ export default function FightPaspoortBeheerPage() {
       </section>
       <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Laatste VA</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{
         const finishedAt = r.finished_at ?? r.completed_at ?? r.ended_at ?? null;
-        const isDone = ["completed","failed","cancelled","canceled"].includes(String(r.status ?? "").toLowerCase());
-        const isTeam = String(r.run_type ?? "").toLowerCase() === "team";
-        const isRetry = !isTeam && isRetryRun(r);
+        const status = String(r.status ?? "").toLowerCase();
+        const runType = String(r.run_type ?? "").toLowerCase();
+        const isDone = ["completed","failed","cancelled","canceled"].includes(status);
+        const isPaused = status === "paused";
+        const isRunning = status === "running";
+        const isTeam = runType === "team";
+        const isStartverbod = runType === "startverbod";
+        const isFull = runType === "full";
+        const isRetry = isFull && isRetryRun(r);
         const totalTeamSchools = r.meta?.total_schools ?? r.end_va ?? 0;
-        const totalRunItems = runTotalCount(r);
+        const totalRunItems = isStartverbod ? Number(r.meta?.excel_rijen ?? r.processed_count ?? 0) : runTotalCount(r);
         return <tr key={r.id}>
           <Td>{fmt(r.started_at)}</Td>
           <Td>{finishedAt ? fmt(finishedAt) : isDone ? "-" : "Nog bezig"}</Td>
           <Td>{formatDuration(r.started_at, finishedAt)}</Td>
-          <Td>{isTeam ? `${totalTeamSchools} sportscholen` : isRetry ? `${totalRunItems} retry-VA's` : `${r.start_va}–${r.end_va}`}</Td>
-          <Td>{isTeam ? "—" : (r.last_processed_va ?? "—")}</Td>
-          <Td>{r.processed_count ?? 0}/{isTeam ? totalTeamSchools : totalRunItems}</Td>
-          <Td>{isTeam ? (r.meta?.succeeded ?? r.found_count ?? 0) : r.found_count}</Td>
+          <Td>{isTeam ? `${totalTeamSchools} sportscholen` : isStartverbod ? `${r.meta?.excel_rijen ?? r.processed_count ?? 0} Excel-rijen` : isRetry ? `${totalRunItems} retry-VA's` : `${r.start_va}–${r.end_va}`}</Td>
+          <Td>{isTeam || isStartverbod ? "—" : (r.last_processed_va ?? "—")}</Td>
+          <Td>{isStartverbod ? (r.processed_count ?? 0) : `${r.processed_count ?? 0}/${isTeam ? totalTeamSchools : totalRunItems}`}</Td>
+          <Td>{isTeam ? (r.meta?.succeeded ?? r.found_count ?? 0) : isStartverbod ? (r.meta?.gekoppeld ?? r.found_count ?? 0) : r.found_count}</Td>
           <Td>{r.error_count}</Td>
-          <Td>{isTeam ? `team · ${r.status}` : isRetry ? `retry · ${r.status}` : r.status}</Td>
+          <Td>{isTeam ? `team · ${r.status}` : isStartverbod ? `startverbod · ${r.status}` : isRetry ? `retry · ${r.status}` : r.status}</Td>
           <Td>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {!isTeam&&!isDone&&<button
+              {isFull&&isRunning&&<button
                 style={styles.stop}
                 disabled={stoppingRunId===r.id}
                 onClick={()=>stopRun(r.id)}
               >
-                <StopCircle size={14}/>{stoppingRunId===r.id?"Stoppen...":"Stop run"}
+                <StopCircle size={14}/>{stoppingRunId===r.id?"Stoppen...":"Pauzeer run"}
               </button>}
-              {isTeam&&!isDone&&<button
+              {isFull&&isPaused&&<button
+                style={styles.mini}
+                disabled={resumingRunId===r.id||!!activeTotalRun}
+                onClick={()=>resumeRun(r.id)}
+                title={activeTotalRun ? "Er draait al een Total AutoCheck-run" : "Ga verder met alleen de nog niet verwerkte VA-nummers"}
+              >
+                <Play size={14}/>{resumingRunId===r.id?"Hervatten...":"Hervat run"}
+              </button>}
+              {isTeam&&isRunning&&<button
                 style={styles.stop}
                 disabled={stoppingRunId===r.id}
                 onClick={()=>stopTeamRun(r.id)}
@@ -727,7 +826,7 @@ export default function FightPaspoortBeheerPage() {
               >
                 <RefreshCw size={14}/>{busyRetryTeam?"Starten...":`${r.error_count} fouten`}
               </button>}
-              <button style={styles.mini} onClick={()=>openRunDetails(r)}>Details</button>
+              {!isStartverbod&&<button style={styles.mini} onClick={()=>openRunDetails(r)}>Details</button>}
               <button
                 style={styles.dangerMini}
                 disabled={deletingRunId===r.id}

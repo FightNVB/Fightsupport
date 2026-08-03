@@ -25,6 +25,7 @@ export async function GET(req: Request) {
     const mappedStartverbodRuns = (startverbodRuns.data ?? []).map((run: any) => ({
       ...run,
       run_type: "startverbod",
+      source_table: "startverbod_runs",
       processed_count: run.excel_rijen ?? 0,
       found_count: run.gekoppeld ?? 0,
       error_count: run.koppelfouten ?? 0,
@@ -65,39 +66,67 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Run-id ontbreekt." }, { status: 400 });
     }
 
-    const { data: run, error: readError } = await supabaseAdmin
+    const { data: syncRun, error: syncReadError } = await supabaseAdmin
       .from("fightpassport_sync_runs")
       .select("id,status,run_type,meta")
       .eq("id", runId)
       .maybeSingle();
 
-    if (readError) throw readError;
-    if (!run) {
+    if (syncReadError) throw syncReadError;
+
+    if (syncRun) {
+      const status = String(syncRun.status ?? "").toLowerCase();
+      if (["running", "paused"].includes(status)) {
+        return NextResponse.json(
+          { error: "Een actieve of gepauzeerde run kan niet worden verwijderd. Rond de run eerst af." },
+          { status: 409 }
+        );
+      }
+
+      const { error: itemsError } = await supabaseAdmin
+        .from("fightpassport_sync_items")
+        .delete()
+        .eq("sync_run_id", runId);
+
+      if (itemsError) throw itemsError;
+
+      const { error: deleteError } = await supabaseAdmin
+        .from("fightpassport_sync_runs")
+        .delete()
+        .eq("id", runId);
+
+      if (deleteError) throw deleteError;
+      return NextResponse.json({ ok: true, source: "fightpassport_sync_runs" });
+    }
+
+    // Startverbod-runs worden voor het overzicht uit een aparte, oudere tabel
+    // samengevoegd. Daarom ook daar zoeken in plaats van onterecht 404 geven.
+    const { data: startverbodRun, error: startverbodReadError } = await supabaseAdmin
+      .from("startverbod_runs")
+      .select("id,status")
+      .eq("id", runId)
+      .maybeSingle();
+
+    if (startverbodReadError) throw startverbodReadError;
+    if (!startverbodRun) {
       return NextResponse.json({ error: "Run niet gevonden." }, { status: 404 });
     }
 
-    const status = String(run.status ?? "").toLowerCase();
-    if (["running", "paused"].includes(status)) {
+    const startverbodStatus = String(startverbodRun.status ?? "").toLowerCase();
+    if (["running", "paused"].includes(startverbodStatus)) {
       return NextResponse.json(
-        { error: "Een actieve of gepauzeerde run kan niet worden verwijderd. Stop of rond de run eerst af." },
+        { error: "Een actieve startverbod-run kan niet worden verwijderd." },
         { status: 409 }
       );
     }
 
-    const { error: itemsError } = await supabaseAdmin
-      .from("fightpassport_sync_items")
-      .delete()
-      .eq("sync_run_id", runId);
-
-    if (itemsError) throw itemsError;
-
-    const { error } = await supabaseAdmin
-      .from("fightpassport_sync_runs")
+    const { error: startverbodDeleteError } = await supabaseAdmin
+      .from("startverbod_runs")
       .delete()
       .eq("id", runId);
 
-    if (error) throw error;
-    return NextResponse.json({ ok: true });
+    if (startverbodDeleteError) throw startverbodDeleteError;
+    return NextResponse.json({ ok: true, source: "startverbod_runs" });
   } catch (err) {
     if (err instanceof NextResponse) return err;
     return NextResponse.json({ error: "Synchronisatieregel kon niet worden verwijderd." }, { status: 500 });

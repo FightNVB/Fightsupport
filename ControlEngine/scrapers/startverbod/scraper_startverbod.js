@@ -336,21 +336,21 @@ async function loadConfirmedDeletedVaNumbers() {
 
 function buildFighterIndexes(fighters) {
   const exact = new Map();
-  const compact = new Map();
 
-  const add = (map, key, fighter) => {
-    if (!key) return;
-    const list = map.get(key) ?? [];
+  const add = (key, fighter) => {
+    if (typeof key !== "string" || key.length === 0) return;
+    const list = exact.get(key) ?? [];
     list.push(fighter);
-    map.set(key, list);
+    exact.set(key, list);
   };
 
   for (const fighter of fighters) {
-    add(exact, normalizeName(fighter.naam), fighter);
-    add(compact, compactName(fighter.naam), fighter);
+    // Letterlijk dezelfde FightPassportnaam gebruiken.
+    // Geen lowercase, accentverwijdering, spatiecorrectie of fuzzy matching.
+    add(String(fighter.naam ?? ""), fighter);
   }
 
-  return { exact, compact };
+  return { exact };
 }
 
 function uniqueByVa(rows) {
@@ -363,6 +363,7 @@ function resolveCandidates(candidates, method, confirmedDeletedVaNumbers) {
     (fighter) => !confirmedDeletedVaNumbers.has(String(fighter.va_nummer))
   );
 
+  // Eén letterlijk exacte naamtreffer is veilig te koppelen.
   if (activeCandidates.length === 1) {
     return {
       status: "matched",
@@ -372,25 +373,30 @@ function resolveCandidates(candidates, method, confirmedDeletedVaNumbers) {
     };
   }
 
+  // Bij meerdere VA-nummers met exact dezelfde FightPassportnaam bepaalt
+  // heeft_startverbod welke records bij het rapport horen.
   if (activeCandidates.length > 1) {
     const withStartverbod = activeCandidates.filter(
       (fighter) => fighter.heeft_startverbod === true
     );
 
+    // FightPassport kan bewust op meerdere VA-nummers van dezelfde persoon
+    // een startverbod hebben gezet. Koppel in dat geval alle true-records.
     if (withStartverbod.length >= 1) {
       return {
         status: "matched",
         fighters: withStartverbod,
         candidates: allCandidates,
-        method: `${method}_startverbod`,
+        method: "exact",
       };
     }
 
+    // Geen actuele true-status: niet gokken.
     return {
       status: "duplicate",
       candidates: activeCandidates,
       all_candidates: allCandidates,
-      method,
+      method: "exact",
     };
   }
 
@@ -402,18 +408,23 @@ function resolveCandidates(candidates, method, confirmedDeletedVaNumbers) {
 }
 
 function matchFighter(naam, indexes, confirmedDeletedVaNumbers) {
-  const exactMatches = uniqueByVa(indexes.exact.get(normalizeName(naam)) ?? []);
+  // Letterlijke vergelijking met de naam zoals FightPassport die opslaat.
+  // P. Janssen en P. Jansen zijn dus verschillende namen.
+  const exactMatches = uniqueByVa(indexes.exact.get(String(naam ?? "")) ?? []);
+
   if (exactMatches.length) {
-    return resolveCandidates(exactMatches, "exact", confirmedDeletedVaNumbers);
+    return resolveCandidates(
+      exactMatches,
+      "exact",
+      confirmedDeletedVaNumbers
+    );
   }
 
-  // Fallback voor FightPassportnamen met losse letters/spaties, zoals "K a b i l".
-  const compactMatches = uniqueByVa(indexes.compact.get(compactName(naam)) ?? []);
-  if (compactMatches.length) {
-    return resolveCandidates(compactMatches, "compact", confirmedDeletedVaNumbers);
-  }
-
-  return { status: "not_found", candidates: [], method: null };
+  return {
+    status: "not_found",
+    candidates: [],
+    method: "exact",
+  };
 }
 
 function sourceKey(row) {
@@ -498,9 +509,24 @@ async function saveSnapshot(runId, matchedRows, hasMatchErrors) {
     raw_json: row.raw_json,
   }));
 
+  // PostgreSQL kan dezelfde conflict-sleutel niet tweemaal binnen één
+  // upsert bijwerken. Alleen volledig identieke bron_sleutels samenvoegen.
+  // Verschillende namen of VA-nummers blijven afzonderlijke records.
+  const uniquePayload = [
+    ...new Map(payload.map((row) => [row.bron_sleutel, row])).values(),
+  ];
+
+  if (uniquePayload.length !== payload.length) {
+    console.warn("[startverbod] identieke dubbele rapportregels verwijderd vóór upsert", {
+      ontvangen: payload.length,
+      uniek: uniquePayload.length,
+      verwijderd: payload.length - uniquePayload.length,
+    });
+  }
+
   const { error } = await supabase
     .from("startverbod")
-    .upsert(payload, {
+    .upsert(uniquePayload, {
       onConflict: "bron_sleutel",
       ignoreDuplicates: false,
     });
@@ -550,7 +576,7 @@ export async function scraperStartverbod() {
           ...row,
           va_nummer: String(fighter.va_nummer),
           naam: fighter.naam,
-          koppel_methode: String(match.method || "").startsWith("compact") ? "compact" : "exact",
+          koppel_methode: "exact",
         });
       }
     }
