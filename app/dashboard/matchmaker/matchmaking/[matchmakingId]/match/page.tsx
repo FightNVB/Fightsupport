@@ -18,7 +18,6 @@ import {
   Download,
   Eye,
   Globe2,
-  Copy,
   Send,
   RefreshCw,
   Search,
@@ -1725,51 +1724,103 @@ export default function FightersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [busyText, setBusyText] = useState("");
 
+  const [msg, setMsg] = useState("");
+  const [publication, setPublication] = useState<Record<string, any> | null>(null);
+
+  const hasTrainerPublication = publication?.trainer_is_published === true;
+
+  useEffect(() => {
+    if (!matchmakingId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await authedFetch(
+          `/api/matchmaker/public-matchmaking?matchmakingId=${encodeURIComponent(matchmakingId)}`,
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || "Publicatiestatus laden mislukt");
+        if (!cancelled) setPublication(json?.publication ?? null);
+      } catch (error: any) {
+        if (!cancelled) setMsg(error?.message || "Publicatiestatus laden mislukt");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [matchmakingId]);
+
+  const openPublishedPage = useCallback((token: unknown) => {
+    const value = s(token);
+    if (!value) {
+      setMsg("De beveiligde link bevat geen token.");
+      return;
+    }
+    const url = `${window.location.origin}/openbare-matchmaking/${value}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
   const manageShareLink = useCallback(async (
-    action: "ensure" | "publish_trainers",
-    audience: "promoter" | "trainers",
-    mode: "open" | "copy" = "copy",
+    action: "publish_live" | "publish_trainers" | "offline",
   ) => {
     if (!matchmakingId) return;
-    const busyKey = action === "publish_trainers" ? "publish-trainers" : `${audience}-${mode}`;
-    setBusyId(busyKey);
+
+    // Is de promotorpagina al online, dan is opnieuw publiceren niet nodig.
+    // Een klik opent gewoon de actuele livepagina.
+    if (action === "publish_live" && publication?.is_enabled && publication?.public_token) {
+      openPublishedPage(publication.public_token);
+      setMsg("Promotor-live geopend.");
+      return;
+    }
+
+    setBusyId(action);
     setBusyText(
-      action === "publish_trainers"
-        ? "Update voor trainers wordt gepubliceerd..."
-        : "Beveiligde link wordt klaargezet...",
+      action === "offline"
+        ? "Externe links worden offline gezet..."
+        : action === "publish_trainers"
+          ? "Update voor trainers wordt gepubliceerd..."
+          : "Live promotorlink wordt gepubliceerd...",
     );
     try {
+      // Alleen een werkelijk opgeslagen snapshot betekent dat trainers al
+      // gepubliceerd zijn. Een live promotorpublicatie telt hier niet voor mee.
+      const wasTrainerPublished = hasTrainerPublication;
       const res = await authedFetch("/api/matchmaker/public-matchmaking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ matchmakingId, action }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Deellink aanmaken mislukt");
-      const publication = json?.publication || {};
-      const token = s(audience === "promoter" ? publication.public_token : publication.trainer_token);
-      if (!token) throw new Error("De beveiligde link bevat geen token.");
-      const url = `${window.location.origin}/openbare-matchmaking/${token}`;
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Publicatie verwerken mislukt");
+      const nextPublication = json?.publication || null;
+      setPublication(nextPublication);
 
-      if (mode === "open") {
-        window.open(url, "_blank", "noopener,noreferrer");
-      } else {
-        await navigator.clipboard.writeText(url);
-        setMsg(
-          action === "publish_trainers"
-            ? "Update gepubliceerd en trainerslink gekopieerd."
-            : `${audience === "promoter" ? "Promotorlink" : "Trainerslink"} gekopieerd.`,
-        );
+      if (action === "offline") {
+        setMsg("Promotor- en trainerlink zijn offline gezet.");
+        return;
       }
+
+      const token = action === "publish_trainers"
+        ? nextPublication?.trainer_token
+        : nextPublication?.public_token;
+      openPublishedPage(token);
+
+      setMsg(
+        action === "publish_live"
+          ? "Promotor-live is gepubliceerd en geopend."
+          : wasTrainerPublished
+            ? "Trainerupdate is bijgewerkt en geopend."
+            : "Trainerupdate is gepubliceerd en geopend.",
+      );
     } catch (error: any) {
-      setMsg(error?.message || "Deellink verwerken mislukt");
+      setMsg(error?.message || "Publicatie verwerken mislukt");
     } finally {
       setBusyId(null);
       setBusyText("");
     }
-  }, [matchmakingId]);
+  }, [hasTrainerPublication, matchmakingId, openPublishedPage, publication]);
 
-  const [msg, setMsg] = useState("");
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [activeTab, setActiveTab] = useState("");
@@ -2651,30 +2702,30 @@ export default function FightersPage() {
           <div className="fs-header-actions">
             <button
               className="fs-action-btn fs-action-primary"
-              onClick={() => manageShareLink("ensure", "promoter", "open")}
+              onClick={() => manageShareLink("publish_live")}
               disabled={!!busyId || loading || !matchRows.length}
-              title="Open de live beveiligde promotorlink"
+              title={publication?.is_enabled ? "Open de live promotorpagina" : "Publiceer en open de live promotorpagina"}
             >
               <Globe2 size={16} />
-              <span>Promotor live</span>
-            </button>
-            <button
-              className="fs-action-btn"
-              onClick={() => manageShareLink("ensure", "promoter", "copy")}
-              disabled={!!busyId || loading || !matchRows.length}
-              title="Kopieer de live promotorlink"
-            >
-              <Copy size={16} />
-              <span>Promotorlink</span>
+              <span>{publication?.is_enabled ? "Open live" : "Publiceer live"}</span>
             </button>
             <button
               className="fs-action-btn fs-action-primary"
-              onClick={() => manageShareLink("publish_trainers", "trainers", "copy")}
-              disabled={!!busyId || loading || !matchRows.length}
-              title="Publiceer de huidige versie voor trainers en kopieer hun link"
+              onClick={() => manageShareLink("publish_trainers")}
+              disabled={!!busyId || loading || !matchRows.length || publication?.is_enabled !== true}
+              title="Publiceer de huidige momentopname voor trainers"
             >
               <Send size={16} />
-              <span>Publiceer trainers</span>
+              <span>{hasTrainerPublication ? "Update" : "Publiceer update"}</span>
+            </button>
+            <button
+              className="fs-action-btn"
+              onClick={() => manageShareLink("offline")}
+              disabled={!!busyId || loading || publication?.is_enabled !== true}
+              title="Zet zowel de promotor- als trainerlink offline"
+            >
+              <Unlink size={16} />
+              <span>Offline</span>
             </button>
             <button
               className="fs-action-btn"

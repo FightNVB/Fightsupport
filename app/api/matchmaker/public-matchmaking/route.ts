@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     const user = await requireAllowedUser(req);
     const body = await req.json().catch(() => ({}));
     const matchmakingId = s(body?.matchmakingId);
-    const action = s(body?.action) || "ensure";
+    const action = s(body?.action) || "publish_live";
     if (!matchmakingId) {
       return NextResponse.json({ error: "matchmakingId ontbreekt" }, { status: 400 });
     }
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     const now = new Date().toISOString();
     const basePayload = {
       matchmaking_id: matchmakingId,
-      is_enabled: body?.is_enabled !== false,
+      is_enabled: action === "offline" ? false : true,
       show_pending: body?.show_pending !== false,
       show_opponent_search: body?.show_opponent_search !== false,
       public_title: s(body?.public_title) || s(matchmaking.event_naam) || s(matchmaking.naam) || null,
@@ -95,6 +95,8 @@ export async function POST(req: NextRequest) {
       created_by: existing?.created_by || user.userId,
       public_token: existing?.public_token || makeToken(),
       trainer_token: existing?.trainer_token || makeToken(),
+      trainer_is_published:
+        action === "offline" ? false : existing?.trainer_is_published === true,
       updated_at: now,
     };
 
@@ -122,6 +124,24 @@ export async function POST(req: NextRequest) {
       const trainerSnapshot = {
         ...snapshot,
         audience: "trainers",
+        bouts: Array.isArray(snapshot.bouts)
+          ? snapshot.bouts.map((bout: any) => ({
+              ...bout,
+              red: bout?.red
+                ? { ...bout.red, starred: undefined, inschrijvingId: undefined }
+                : bout?.red,
+              blue: bout?.blue
+                ? { ...bout.blue, starred: undefined, inschrijvingId: undefined }
+                : bout?.blue,
+            }))
+          : [],
+        searching: Array.isArray(snapshot.searching)
+          ? snapshot.searching.map((fighter: any) => ({
+              ...fighter,
+              starred: undefined,
+              inschrijvingId: undefined,
+            }))
+          : [],
         event: {
           ...snapshot.event,
           phase: "Gepubliceerde update voor trainers",
@@ -135,6 +155,7 @@ export async function POST(req: NextRequest) {
           trainer_snapshot: trainerSnapshot,
           trainer_published_at: now,
           trainer_published_by: user.userId,
+          trainer_is_published: true,
           updated_at: now,
         })
         .eq("matchmaking_id", matchmakingId)

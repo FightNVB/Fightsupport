@@ -278,6 +278,15 @@ function fighterView(
   return {
     // Terminator-ready: actuele fighter-context is de waarheid.
     // De bout-snapshot blijft uitsluitend fallback voor oude of incomplete data.
+    inschrijvingId: registrationId(first(
+      context?.inschrijving_id,
+      context?.aanmelding_id,
+      row[`${corner}_aanmelding_id`],
+      row[`${corner}_inschrijving_id`],
+      snapshot.aanmelding_id,
+      snapshot.inschrijving_id,
+      snapshot.id,
+    )),
     naam: contextName(context) || s(first(rowName, snapshot.naam, snapshot.naam_input)) || "Tegenstander gezocht",
     sportschool: contextGym(context) || s(first(rowGym, snapshot.sportschool, snapshot.gym)) || "—",
     record: context ? recordFromResults(context, resultRows) : s(first(snapshot.record, snapshot.record_string)) || "—",
@@ -366,6 +375,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
         .select("*")
         .eq("trainer_token", cleanToken)
         .eq("is_enabled", true)
+        .eq("trainer_is_published", true)
         .maybeSingle();
       if (trainerError) throw trainerError;
       publication = trainerPublication;
@@ -486,6 +496,26 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     }
 
     const mm = mmRes.data ?? {};
+    const priorityUserId = s(first(
+      mm.matchmaker_id,
+      mm.uploaded_by,
+      mm.maker_user_id,
+      mm.huidige_eigenaar_user_id,
+    ));
+
+    let priorityIds = new Set<string>();
+    if (priorityUserId) {
+      const { data: priorities, error: prioritiesError } = await supabaseAdmin
+        .from("matchmaker_prioriteiten")
+        .select("inschrijving_id")
+        .eq("matchmaking_id", matchmakingId)
+        .eq("user_id", priorityUserId);
+      if (prioritiesError) throw prioritiesError;
+      priorityIds = new Set(
+        (priorities ?? []).map((row: AnyRow) => s(row.inschrijving_id)).filter(Boolean),
+      );
+    }
+
     const eventDate = s(first(mm.event_datum, mm.datum, mm.evenement_datum));
 
     const bouts = activeRows
@@ -538,8 +568,30 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
               ),
             ].filter((value): value is number => value !== null),
           ),
-          red: fighterView(redContext, red, row, "rood", resultRows),
-          blue: fighterView(blueContext, blue, row, "blauw", resultRows),
+          red: {
+            ...fighterView(redContext, red, row, "rood", resultRows),
+            starred: priorityIds.has(registrationId(first(
+              redContext?.inschrijving_id,
+              redContext?.aanmelding_id,
+              row.rood_aanmelding_id,
+              row.rood_inschrijving_id,
+              red.aanmelding_id,
+              red.inschrijving_id,
+              red.id,
+            ))),
+          },
+          blue: {
+            ...fighterView(blueContext, blue, row, "blauw", resultRows),
+            starred: priorityIds.has(registrationId(first(
+              blueContext?.inschrijving_id,
+              blueContext?.aanmelding_id,
+              row.blauw_aanmelding_id,
+              row.blauw_inschrijving_id,
+              blue.aanmelding_id,
+              blue.inschrijving_id,
+              blue.id,
+            ))),
+          },
         };
       })
       .filter((bout: AnyRow) => {
@@ -589,8 +641,16 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
               context.geboortedatum_input,
             );
 
+            const inschrijvingId = registrationId(first(
+              context.inschrijving_id,
+              context.aanmelding_id,
+              context.id,
+            ));
+
             return {
-              id: s(first(context.id, context.inschrijving_id, context.va_nummer)),
+              id: inschrijvingId || s(first(context.id, context.va_nummer)),
+              inschrijvingId,
+              starred: priorityIds.has(inschrijvingId),
               naam: s(first(context.naam, context.fp_naam, context.naam_input)) || "Onbekend",
               sportschool: s(first(context.gym_input, context.fp_gym)) || "—",
               record: recordFromResults(context, resultRows, false),
@@ -652,3 +712,133 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     );
   }
 }
+
+export async function POST(req: Request, ctx: { params: Promise<{ token: string }> }) {
+  try {
+    const { token } = await ctx.params;
+    const cleanToken = s(token);
+    if (!cleanToken) {
+      return NextResponse.json({ error: "Ongeldige link" }, { status: 400 });
+    }
+
+    // Alleen de actieve promotor-live-token mag prioriteiten wijzigen.
+    // De trainer-token wordt bewust niet geaccepteerd.
+    const { data: publication, error: publicationError } = await supabaseAdmin
+      .from("matchmaking_public_pages")
+      .select("matchmaking_id")
+      .eq("public_token", cleanToken)
+      .eq("is_enabled", true)
+      .maybeSingle();
+
+    if (publicationError) throw publicationError;
+    if (!publication) {
+      return NextResponse.json(
+        { error: "Deze live link is niet beschikbaar" },
+        { status: 404 },
+      );
+    }
+
+    const matchmakingId = s(publication.matchmaking_id);
+    const body = await req.json().catch(() => ({}));
+    const inschrijvingId = s(body.inschrijving_id);
+    const actief = body.actief === true;
+
+    if (!inschrijvingId) {
+      return NextResponse.json({ error: "inschrijving_id ontbreekt" }, { status: 400 });
+    }
+
+    const { data: mm, error: mmError } = await supabaseAdmin
+      .from("matchmakings")
+      .select("matchmaker_id, uploaded_by, maker_user_id, huidige_eigenaar_user_id")
+      .eq("id", matchmakingId)
+      .single();
+
+    if (mmError) throw mmError;
+
+    // Gebruik bij voorkeur dezelfde gebruiker waaronder de bestaande sterren
+    // van deze matchmaking al zijn opgeslagen. Zo sluit de promotor-livepagina
+    // exact aan op de prioriteiten die de matchmaker op de interne pagina ziet.
+    const { data: existingPriority, error: existingPriorityError } = await supabaseAdmin
+      .from("matchmaker_prioriteiten")
+      .select("user_id")
+      .eq("matchmaking_id", matchmakingId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingPriorityError) throw existingPriorityError;
+
+    const priorityUserId = s(first(
+      existingPriority?.user_id,
+      mm?.matchmaker_id,
+      mm?.uploaded_by,
+      mm?.maker_user_id,
+      mm?.huidige_eigenaar_user_id,
+    ));
+
+    if (!priorityUserId) throw new Error("Eigenaar van matchmaking niet gevonden");
+
+    // Accepteer uitsluitend een inschrijving die echt bij deze matchmaking hoort.
+    const { data: fighterContext, error: fighterError } = await supabaseAdmin
+      .from("matchmaker_fighter_context")
+      .select("id")
+      .eq("matchmaking_id", matchmakingId)
+      .or(`inschrijving_id.eq.${inschrijvingId},aanmelding_id.eq.${inschrijvingId},id.eq.${inschrijvingId}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (fighterError) throw fighterError;
+    if (!fighterContext) {
+      return NextResponse.json(
+        { error: "Vechter hoort niet bij deze matchmaking" },
+        { status: 400 },
+      );
+    }
+
+    if (actief) {
+      const { error } = await supabaseAdmin
+        .from("matchmaker_prioriteiten")
+        .upsert(
+          {
+            matchmaking_id: matchmakingId,
+            inschrijving_id: inschrijvingId,
+            user_id: priorityUserId,
+          },
+          {
+            onConflict: "matchmaking_id,inschrijving_id,user_id",
+            ignoreDuplicates: true,
+          },
+        );
+      if (error) throw error;
+    } else {
+      const { error } = await supabaseAdmin
+        .from("matchmaker_prioriteiten")
+        .delete()
+        .eq("matchmaking_id", matchmakingId)
+        .eq("inschrijving_id", inschrijvingId)
+        .eq("user_id", priorityUserId);
+      if (error) throw error;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      inschrijving_id: inschrijvingId,
+      actief,
+    });
+  } catch (error: any) {
+    console.error("[public-matchmaking] Ster opslaan mislukt", {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+    });
+
+    return NextResponse.json(
+      {
+        error: s(error?.message) || "Ster opslaan mislukt",
+        code: s(error?.code),
+      },
+      { status: 500 },
+    );
+  }
+}
+

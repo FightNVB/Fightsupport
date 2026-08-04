@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, MapPin, Search, Swords, TimerReset } from "lucide-react";
+import { CalendarDays, MapPin, Search, Star, Swords, TimerReset } from "lucide-react";
 
 type BoutStatus = "concept" | "bevestigd" | "onder_voorbehoud";
 
@@ -13,12 +13,14 @@ type Bout = {
   discipline: string;
   maxGewicht: string;
   status: BoutStatus;
-  red: { naam: string; sportschool: string; record: string };
-  blue: { naam: string; sportschool: string; record: string };
+  red: { inschrijvingId?: string; naam: string; sportschool: string; record: string; starred?: boolean };
+  blue: { inschrijvingId?: string; naam: string; sportschool: string; record: string; starred?: boolean };
 };
 
 type SearchingFighter = {
   id: string;
+  inschrijvingId?: string;
+  starred?: boolean;
   naam: string;
   sportschool: string;
   record: string;
@@ -87,6 +89,8 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
+  const [savingStarId, setSavingStarId] = useState("");
+  const [starError, setStarError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -115,6 +119,57 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
       window.clearInterval(timer);
     };
   }, [token]);
+
+  async function toggleStar(inschrijvingId: string, nextActive: boolean) {
+    if (!inschrijvingId || data?.audience !== "promoter" || savingStarId) return;
+
+    setSavingStarId(inschrijvingId);
+    setStarError("");
+    setData((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        bouts: current.bouts,
+        searching: current.searching.map((fighter) =>
+          (fighter.inschrijvingId || fighter.id) === inschrijvingId
+            ? { ...fighter, starred: nextActive }
+            : fighter,
+        ),
+      };
+    });
+
+    try {
+      const response = await fetch(
+        `/api/public/matchmaking/${encodeURIComponent(token)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inschrijving_id: inschrijvingId,
+            actief: nextActive,
+          }),
+        },
+      );
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Ster opslaan mislukt");
+    } catch (e: any) {
+      setData((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          bouts: current.bouts,
+          searching: current.searching.map((fighter) =>
+            (fighter.inschrijvingId || fighter.id) === inschrijvingId
+              ? { ...fighter, starred: !nextActive }
+              : fighter,
+          ),
+        };
+      });
+      setStarError(e?.message || "Ster opslaan mislukt");
+    } finally {
+      setSavingStarId("");
+    }
+  }
 
   const visibleBouts = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -255,9 +310,31 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
         </div>
 
         {isSearching ? (
-          <SearchingTable fighters={visibleSearching} />
+          <SearchingTable
+            fighters={visibleSearching}
+            canStar={data.audience === "promoter"}
+            savingStarId={savingStarId}
+            onToggleStar={toggleStar}
+          />
         ) : (
           <BoutTable bouts={visibleBouts} />
+        )}
+
+        {starError && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 12,
+              padding: "10px 12px",
+              border: "1px solid rgba(255,77,0,.45)",
+              borderRadius: 6,
+              background: "rgba(255,77,0,.1)",
+              color: "#ffd7c7",
+              fontSize: 13,
+            }}
+          >
+            Ster opslaan mislukt: {starError}
+          </div>
         )}
 
         <div className="pm-disclaimer">
@@ -293,7 +370,10 @@ function BoutTable({ bouts }: { bouts: Bout[] }) {
           {bouts.map((bout) => (
             <tr key={bout.id || String(bout.partijNr)}>
               <td className="nr">{bout.partijNr ?? "-"}</td>
-              <td className="compact">{bout.klasse}</td>
+              <td
+                  className="compact"
+                  style={{ width: 44, minWidth: 44, maxWidth: 44, padding: "0 4px", textAlign: "center" }}
+                >{bout.klasse}</td>
               <td className="compact">{bout.geslacht}</td>
               <td>
                 <Fighter side="red" fighter={bout.red} />
@@ -323,12 +403,31 @@ function BoutTable({ bouts }: { bouts: Bout[] }) {
   );
 }
 
-function SearchingTable({ fighters }: { fighters: SearchingFighter[] }) {
+function SearchingTable({
+  fighters,
+  canStar,
+  savingStarId,
+  onToggleStar,
+}: {
+  fighters: SearchingFighter[];
+  canStar: boolean;
+  savingStarId: string;
+  onToggleStar: (inschrijvingId: string, nextActive: boolean) => void;
+}) {
   return (
     <div className="pm-tableWrap pm-searchingWrap">
       <table className="pm-searchingTable">
         <thead>
           <tr>
+            {canStar && (
+              <th
+                className="col-star"
+                aria-label="Prioriteit"
+                style={{ width: 44, minWidth: 44, maxWidth: 44, padding: 0 }}
+              >
+                ⭐
+              </th>
+            )}
             <th>Naam</th>
             <th>Sportschool</th>
             <th>Record</th>
@@ -339,8 +438,20 @@ function SearchingTable({ fighters }: { fighters: SearchingFighter[] }) {
           </tr>
         </thead>
         <tbody>
-          {fighters.map((fighter) => (
+          {fighters.map((fighter) => {
+            const inschrijvingId = fighter.inschrijvingId || fighter.id;
+            return (
             <tr key={fighter.id}>
+              {canStar && (
+                <td className="compact">
+                  <StarButton
+                    active={fighter.starred === true}
+                    disabled={!inschrijvingId || savingStarId === inschrijvingId}
+                    label={`${fighter.naam} als prioriteit markeren`}
+                    onClick={() => onToggleStar(inschrijvingId, fighter.starred !== true)}
+                  />
+                </td>
+              )}
               <td className="search-name">{fighter.naam}</td>
               <td>{fighter.sportschool}</td>
               <td className="search-record">{fighter.record}</td>
@@ -349,10 +460,11 @@ function SearchingTable({ fighters }: { fighters: SearchingFighter[] }) {
               <td className="compact">{fighter.leeftijd ?? "—"}</td>
               <td className="compact search-weight">{fighter.gewicht}</td>
             </tr>
-          ))}
+            );
+          })}
           {!fighters.length && (
             <tr>
-              <td colSpan={7} className="empty">
+              <td colSpan={canStar ? 8 : 7} className="empty">
                 Geen vechters binnen deze selectie.
               </td>
             </tr>
@@ -363,16 +475,61 @@ function SearchingTable({ fighters }: { fighters: SearchingFighter[] }) {
   );
 }
 
-function Fighter({ side, fighter }: { side: "red" | "blue"; fighter: Bout["red"] }) {
+function Fighter({
+  side,
+  fighter,
+}: {
+  side: "red" | "blue";
+  fighter: Bout["red"];
+}) {
   return (
     <div className={`fighter ${side}`}>
-      <strong>{fighter.naam}</strong>
-      <span>
-        {fighter.sportschool}
-        <i>•</i>
-        {fighter.record}
-      </span>
+      <div>
+        <strong>{fighter.naam}</strong>
+        <span>
+          {fighter.sportschool}
+          <i>•</i>
+          {fighter.record}
+        </span>
+      </div>
     </div>
+  );
+}
+
+function StarButton({
+  active,
+  disabled,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  disabled: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={active}
+      title={active ? "Prioriteit verwijderen" : "Als prioriteit markeren"}
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        width: 28,
+        height: 28,
+        display: "inline-grid",
+        placeItems: "center",
+        border: "1px solid rgba(255,255,255,.18)",
+        borderRadius: 5,
+        background: active ? "rgba(255,184,0,.16)" : "rgba(255,255,255,.04)",
+        color: active ? "#ffb800" : "rgba(255,255,255,.45)",
+        cursor: disabled ? "wait" : "pointer",
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      <Star size={18} fill={active ? "currentColor" : "none"} />
+    </button>
   );
 }
 
