@@ -71,4 +71,41 @@ describe("matchmaker API boundaries", () => {
     expect(centralProfile).toContain("full_name:");
     expect(centralProfile).toContain("email:");
   });
+
+  test("the shared weighstation mutation authorizer still excludes matchmakers", () => {
+    const source = read("lib/weegstation/routeAuth.ts");
+    const roleList = source.slice(source.indexOf("requireAnyRole(req"), source.indexOf("]);", source.indexOf("requireAnyRole(req")));
+    expect(roleList).not.toContain('"matchmaker"');
+  });
+
+  test.each([
+    "app/api/officials/weegstation/update/route.ts",
+    "app/api/officials/weegstation/dispensatie/route.ts",
+    "app/api/officials/weegstation/finalize/route.ts",
+  ])("%s keeps matchmakers behind the unchanged official mutation guard", (file) => {
+    const source = read(file);
+    expect(source).toContain("getWeegstationAuthContext(req, matchmakingId)");
+    expect(source).not.toContain('"matchmaker"');
+  });
+
+  test.each([
+    ["app/api/officials/weegstation/build/route.ts", "POST"],
+    ["app/api/officials/weegstation/data/route.ts", "GET"],
+  ])("%s admits matchmakers only after scoped matchmaking authorization", (file, method) => {
+    const source = read(file);
+    const handler = source.indexOf(`export async function ${method}`);
+    const role = source.indexOf("requireUserWithRole(req", handler);
+    const object = source.indexOf("assertCanAccessMatchmaking", role);
+    const query = source.indexOf(".from(", object);
+    expect(source).toContain('"matchmaker"');
+    expect(role).toBeGreaterThan(handler);
+    expect(role).toBeLessThan(object);
+    expect(object).toBeLessThan(query);
+  });
+
+  test("matchmaker upload posts to the existing role-scoped upload route", () => {
+    const source = read("app/dashboard/matchmaker/upload/page.tsx");
+    expect(source).toContain('/api/matchmaker/submit-matchmaking');
+    expect(source).not.toContain('/api/submit_matchmaking/start');
+  });
 });

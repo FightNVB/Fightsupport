@@ -559,6 +559,23 @@ export async function POST(req: Request) {
       matchmakingId,
     );
 
+    return refreshAuthorizedWeegstation(req, matchmakingId, admin, userId);
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message ?? "Verversen van weegstation mislukt." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function refreshAuthorizedWeegstation(
+  req: Request,
+  matchmakingId: string,
+  admin: any,
+  userId: string,
+) {
+  try {
+
     const { data: mmRow, error: mmErr } = await admin
       .from("matchmakings")
       .select("id, bondteam")

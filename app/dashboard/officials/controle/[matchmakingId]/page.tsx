@@ -2732,7 +2732,7 @@ export default function ControleMatchmakingPage() {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
 
-      const resp = await authedFetch("/api/matchmaker/send-to-admin", {
+      const resp = await authedFetch("/api/officials/send-to-admin", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -42,7 +42,7 @@ export default function FighterDossierPage(){
   <header style={s.hero}>
     <div style={s.heroGlow}/>
     <div style={s.heroTop}>
-      <button style={s.silver} onClick={()=>router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`)}><ArrowLeft size={16}/>Terug</button>
+      <button style={s.silver} onClick={()=>router.push(`/dashboard/officials/controle/${matchmakingId}`)}><ArrowLeft size={16}/>Terug</button>
       <div style={s.logoWrap}>
         <img src="/branding/fightsupport/excel-logo.png" alt="FightSupport" style={s.logo}/>
       </div>

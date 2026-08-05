@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   try {
     const matchmakingId = String(req.nextUrl.searchParams.get("matchmaking_id") ?? "").trim();
     if (!matchmakingId) return privateJson({ error: "Matchmaking ontbreekt." }, 400);
-    const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin", "matchmaker"]);
     await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId: auth.userId, role: auth.role });
 
     const [bouts, results] = await Promise.all([

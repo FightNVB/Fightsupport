@@ -67,4 +67,43 @@ describe("official API boundaries", () => {
     const handler = source.indexOf("export async function POST");
     expect(source.indexOf("assertCanAccessMatchmaking({ matchmaking_id", handler)).toBeLessThan(source.indexOf("assertMatchmakingInState", handler));
   });
+
+  test("official send-to-admin keeps the lifecycle action behind role and object guards", () => {
+    const source = read("app/api/officials/send-to-admin/route.ts");
+    const handler = source.indexOf("export async function POST");
+    const role = source.indexOf("requireUserWithRole(req", handler);
+    const object = source.indexOf("assertCanAccessMatchmaking", role);
+    const query = source.indexOf('.from("matchmakings")', object);
+    const mutation = source.indexOf("transferLifecycle", query);
+    expect(role).toBeGreaterThan(handler);
+    expect(role).toBeLessThan(object);
+    expect(object).toBeLessThan(query);
+    expect(query).toBeLessThan(mutation);
+    expect(source).toContain('"official"');
+    expect(source).toContain('"hoofdofficial"');
+    expect(source).toContain("privateJson");
+    expect(source).toContain("secureError");
+  });
+
+  test("official pages do not navigate back into the matchmaker dashboard", () => {
+    const fighter = read("app/dashboard/officials/controle/[matchmakingId]/fighter/[fighterId]/page.tsx");
+    expect(fighter).not.toContain("/dashboard/matchmaker/");
+    expect(fighter).toContain("/dashboard/officials/controle/${matchmakingId}");
+  });
+
+  test("weegstation build authorizes role and matchmaking before cleanup, refresh and lifecycle writes", () => {
+    const source = read("app/api/officials/weegstation/build/route.ts");
+    const handler = source.indexOf("export async function POST");
+    const role = source.indexOf("requireUserWithRole(req", handler);
+    const guard = source.indexOf("assertCanAccessMatchmaking", role);
+    const readQuery = source.indexOf('.from("matchmakings")', guard);
+    const cleanup = source.indexOf("cleanupOldWeegstationData(admin, matchmakingId)", readQuery);
+    const refresh = source.indexOf("refreshAuthorizedWeegstation(", cleanup);
+    expect(role).toBeGreaterThan(handler);
+    expect(role).toBeLessThan(guard);
+    expect(guard).toBeLessThan(readQuery);
+    expect(readQuery).toBeLessThan(cleanup);
+    expect(cleanup).toBeLessThan(refresh);
+    expect(source).toContain('"matchmaker"');
+  });
 });
