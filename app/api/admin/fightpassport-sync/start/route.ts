@@ -249,6 +249,7 @@ export async function POST(req: Request) {
       { status: 202 }
     );
   } catch (err: any) {
+    if (err instanceof Response) return err;
     console.error(
       "[fightpassport-sync/start] ❌ totaal robot mislukt:",
       err
