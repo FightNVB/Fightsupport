@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PRIVATE_NO_STORE, requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ async function countRows(
 }
 
 export async function GET(req: NextRequest, { params }: Params) {
+  try { await requireAdminAccess(req); } catch (error) { return secureError(error); }
   const { yocId } = await params;
   const supabase = adminClient();
   const runId = req.nextUrl.searchParams.get("run_id");
@@ -52,7 +54,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { data, error } = await q;
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "YOC-status kon niet worden geladen." }, { status: 500 });
   }
 
   const run = Array.isArray(data) ? data[0] : data;
@@ -87,5 +89,5 @@ export async function GET(req: NextRequest, { params }: Params) {
       context_count,
       results_count,
     },
-  });
+  }, { headers: { "Cache-Control": PRIVATE_NO_STORE } });
 }

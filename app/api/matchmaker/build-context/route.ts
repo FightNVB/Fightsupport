@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { processMatchmakingFighters } from "@/lib/matchmaker/processMatchmakingFighters";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import { secureError } from "@/lib/api/secureRoute";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,6 +29,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
     }
 
+    const auth = await requireUserWithRole(req, ["matchmaker", "admin", "superadmin"]);
+    await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId: auth.userId, role: auth.role });
+
     const result = await processMatchmakingFighters({
       supabase: supabaseAdmin,
       matchmakingId,
@@ -52,9 +57,6 @@ export async function POST(req: Request) {
       startverbod_bron: "startverbod",
     });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Context opbouwen mislukt" },
-      { status: 500 },
-    );
+    return secureError(err, "Context opbouwen mislukt");
   }
 }

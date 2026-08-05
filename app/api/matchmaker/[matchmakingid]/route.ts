@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -227,7 +228,7 @@ function mergeFighter(context: AnyRow, aanmelding: AnyRow | null) {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ matchmakingid: string }> },
 ) {
   try {
@@ -248,6 +249,7 @@ export async function GET(
         { status: 400 },
       );
     }
+    await requireMatchmakingAccess(req, mmId);
     
     const [mmRes, aanmeldingenRes, contextRes, matchesRes, runsRes] =
       await Promise.all([
@@ -273,7 +275,7 @@ export async function GET(
 
         supabaseAdmin
           .from("controle_runs")
-          .select("*")
+          .select("id, matchmaking_id, status, gestart_op, afgerond_op, run_type, created_at")
           .eq("matchmaking_id", mmId)
           .order("created_at", { ascending: false })
           .limit(5),
@@ -337,11 +339,8 @@ export async function GET(
         matches: matchesRes.error?.message ?? null,
         runs: runsRes.error?.message ?? null,
       },
-    });
+    }, { headers: { "Cache-Control": PRIVATE_NO_STORE } });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Onbekende fout" },
-      { status: 500 },
-    );
+    return secureError(err, "Matchmaking kon niet worden geladen.");
   }
 }

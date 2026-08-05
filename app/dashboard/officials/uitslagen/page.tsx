@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, ShieldCheck } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 import { useAuth } from "@/context/AuthContext";
 
@@ -119,35 +118,14 @@ export default function OfficialsUitslagenPage() {
         return;
       }
 
-      const [
-        { data: runRows, error: runError },
-        { data: boutRows, error: boutError },
-        { data: resultRows, error: resultError },
-        { data: uploadRows, error: uploadError },
-        { data: mmRows, error: mmError },
-      ] = await Promise.all([
-        supabase.from("uitslagen_runs").select("id, matchmaking_id, status"),
-        supabase
-          .from("uitslagen_bouts")
-          .select("uitslagen_run_id, matchmaking_id, partij_nr"),
-        supabase
-          .from("uitslagen_resultaten")
-          .select("uitslagen_run_id, matchmaking_id, uitslag_status"),
-        supabase
-          .from("matchmaking_uploads")
-          .select("matchmaking_id, bondteam, evenement_naam, evenement_datum"),
-        supabase
-          .from("matchmakings")
-          .select(
-            "id, naam, datum, bondteam, huidige_eigenaar_bondteam, stadium, status",
-          ),
-      ]);
-
-      if (runError) throw runError;
-      if (boutError) throw boutError;
-      if (resultError) throw resultError;
-      if (uploadError) throw uploadError;
-      if (mmError) throw mmError;
+      const response = await authedFetch("/api/officials/uitslagen", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Uitslagen laden mislukt.");
+      const runRows = payload?.runs ?? [];
+      const boutRows = payload?.bouts ?? [];
+      const resultRows = payload?.results ?? [];
+      const uploadRows = payload?.uploads ?? [];
+      const mmRows = payload?.matchmakings ?? [];
 
       const uploadById = new Map(
         (uploadRows ?? []).map((r: any) => [String(r.matchmaking_id), r]),

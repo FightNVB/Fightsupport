@@ -23,6 +23,7 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { authedDownload } from "@/lib/api/authedDownload";
 
 import NvbDarkButton from "@/components/NvbDarkButton";
 import NvbLightButton from "@/components/NvbLightButton";
@@ -2340,11 +2341,8 @@ export default function ControleMatchmakingPage() {
     [],
   );
 
-  function openExcel() {
-    window.open(
-      `/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
-      "_blank",
-    );
+  async function openExcel() {
+    await authedDownload(`/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "controle.xlsx");
   }
 
   function openRapport() {
@@ -2353,32 +2351,20 @@ export default function ControleMatchmakingPage() {
     );
   }
 
-  function openLineupExcel() {
-    window.open(
-      `/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
-      "_blank",
-    );
+  async function openLineupExcel() {
+    await authedDownload(`/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "jury-lineup.xlsx");
   }
 
-  function openVoorlopigeLineupExcel() {
-    window.open(
-      `/api/rapport/voorlopige-lineup-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
-      "_blank",
-    );
+  async function openVoorlopigeLineupExcel() {
+    await authedDownload(`/api/rapport/voorlopige-lineup-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "voorlopige-lineup.xlsx");
   }
 
-  function openOfficialExcel() {
-    window.open(
-      `/api/rapport/official-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
-      "_blank",
-    );
+  async function openOfficialExcel() {
+    await authedDownload(`/api/rapport/official-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "official.xlsx");
   }
 
-  function openSportdataCsv() {
-    window.open(
-      `/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
-      "_blank",
-    );
+  async function openSportdataCsv() {
+    await authedDownload(`/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "sportdata.csv");
   }
 
   function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
@@ -2773,7 +2759,7 @@ export default function ControleMatchmakingPage() {
       if (!token) throw new Error("Niet ingelogd.");
 
       const resp = await authedFetch(
-        "/api/admin/controle/return-to-matchmaker",
+        "/api/officials/return-to-matchmaker",
         {
           method: "POST",
           headers: {

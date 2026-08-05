@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -37,48 +38,10 @@ function normBondteam(v: unknown): string {
 
 export async function GET(req: Request) {
   try {
-    const token = bearerToken(req);
-    if (!token) {
-      return NextResponse.json(
-        { ok: false, error: "Geen geldige sessie gevonden. Log opnieuw in." },
-        { status: 401 },
-      );
-    }
-
-    const { data: authData, error: authError } = await supabase.auth.getUser(token);
-    if (authError) throw authError;
-
-    const userId = asText(authData?.user?.id);
-    if (!isUuid(userId)) {
-      return NextResponse.json(
-        { ok: false, error: "Gebruiker niet herkend. Log opnieuw in." },
-        { status: 401 },
-      );
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from("user_profiles")
-      .select("id, full_name, email, role, bondteam")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profileError) throw profileError;
-    if (!profile) {
-      return NextResponse.json(
-        { ok: false, error: "Gebruikersprofiel niet gevonden in user_profiles." },
-        { status: 403 },
-      );
-    }
-
-    const role = normRole((profile as any).role);
-    const bondteam = normBondteam((profile as any).bondteam);
-
-    if (!ALLOWED_ROLES.includes(role)) {
-      return NextResponse.json(
-        { ok: false, error: "Niet toegestaan voor deze rol." },
-        { status: 403 },
-      );
-    }
+    const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    const userId = auth.userId;
+    const role = auth.role;
+    const bondteam = normBondteam(auth.bondteam);
 
     if (!bondteam) {
       return NextResponse.json(
@@ -93,15 +56,8 @@ export async function GET(req: Request) {
       .in("status", REQUEST_STATUSES)
       .order("datum", { ascending: true });
 
-    // Superadmin van NVB mag alles zien. Iedereen anders alleen eigen bondteam.
-    if (!(role === "superadmin" && bondteam === "NVB")) {
+    if (role !== "superadmin" && role !== "admin") {
       query = query.eq("bondteam", bondteam);
-    }
-
-    // Officials/hoofdofficials zien alleen verzoeken die aan hun user_id zijn toegewezen.
-    // Admin/superadmin zien de verzoeken van hun bondteam, zodat bondteam-overzicht werkt.
-    if (role === "official" || role === "hoofdofficial") {
-      query = query.eq("toegewezen_hoofdofficial_user_id", userId);
     }
 
     const { data, error } = await query;
@@ -113,7 +69,7 @@ export async function GET(req: Request) {
         id: userId,
         role,
         bondteam,
-        name: asText((profile as any).full_name) || asText((profile as any).email) || "Gebruiker",
+        name: asText(auth.profile?.full_name) || asText(auth.email) || "Gebruiker",
       },
       rows: data ?? [],
     });

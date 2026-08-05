@@ -384,38 +384,14 @@ export default function OfficialsUitslagenDetailPage() {
     try {
       setSendMsg(null);
 
-      const [
-        { data: bouts },
-        { data: resultRows },
-        { data: matchmaking },
-        { data: upload },
-        { data: controleContextRows },
-      ] = await Promise.all([
-        supabase
-          .from("uitslagen_bouts")
-          .select("*")
-          .eq("matchmaking_id", matchmakingId)
-          .order("partij_nr", { ascending: true }),
-        supabase
-          .from("uitslagen_resultaten")
-          .select("uitslagen_bout_id, winnaar_hoek, methode, opmerkingen, uitslag_status, klasse")
-          .eq("matchmaking_id", matchmakingId),
-        supabase
-          .from("matchmakings")
-          .select("*")
-          .eq("id", matchmakingId)
-          .maybeSingle(),
-        supabase
-          .from("matchmaking_uploads")
-          .select("*")
-          .eq("matchmaking_id", matchmakingId)
-          .maybeSingle(),
-        supabase
-          .from("controle_bout_context")
-          .select("*")
-          .eq("matchmaking_id", matchmakingId)
-          .order("created_at", { ascending: false }),
-      ]);
+      const response = await authedFetch(`/api/officials/uitslagen/${encodeURIComponent(matchmakingId)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Uitslagen laden mislukt.");
+      const bouts = payload?.bouts ?? [];
+      const resultRows = payload?.results ?? [];
+      const matchmaking = payload?.matchmaking ?? null;
+      const upload = payload?.upload ?? null;
+      const controleContextRows = payload?.contextRows ?? [];
 
       const resultByBoutId = new Map(
         (resultRows ?? []).map((r: any) => [String(r.uitslagen_bout_id), r])
@@ -437,7 +413,7 @@ export default function OfficialsUitslagenDetailPage() {
         }
       }
 
-      const nextRows = (bouts ?? []).map((b: any) => {
+      const nextRows: Row[] = (bouts ?? []).map((b: any) => {
         const ctx =
           contextByBoutId.get(String(b.bout_id ?? b.bron_bout_id ?? "").trim()) ??
           contextByPartijNr.get(String(b.partij_nr ?? "").trim()) ??

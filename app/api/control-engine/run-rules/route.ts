@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { rulesEngine } from "@/lib/rulesEngine";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import { secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 
@@ -25,6 +27,9 @@ export async function POST(req: Request) {
       );
     }
 
+    const auth = await requireUserWithRole(req, ["matchmaker", "official", "hoofdofficial", "admin", "superadmin"]);
+    await assertCanAccessMatchmaking({ matchmaking_id, userId: auth.userId, role: auth.role });
+
     const { data: ctxRows, error: ctxErr } = await supabaseAdmin
       .from("controle_bout_context")
       .select("*")
@@ -46,7 +51,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, matchmaking_id, controle_run_id, inserted: hits.length });
   } catch (e: any) {
-    console.error("run-rules error:", e);
-    return NextResponse.json({ error: e?.message ?? "Onbekende fout" }, { status: 500 });
+    return secureError(e, "Controle kon niet worden uitgevoerd.");
   }
 }

@@ -22,7 +22,7 @@ export async function GET(req: Request) {
 
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("user_profiles")
-      .select("role,active_role,bondteam")
+      .select("role,active_role,bondteam,full_name,email")
       .eq("id", userId)
       .maybeSingle();
 
@@ -84,6 +84,8 @@ export async function GET(req: Request) {
       default_role,
       available_roles,
       bondteam: normalizeBondteam((profile as any).bondteam),
+      full_name: String((profile as any).full_name ?? "").trim(),
+      email: String((profile as any).email ?? "").trim(),
     });
   } catch (err) {
     if (err instanceof NextResponse) throw err;

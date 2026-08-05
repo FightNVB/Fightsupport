@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { authedFetch } from "@/lib/api/authedFetch";
 import { useAuth } from "@/context/AuthContext";
 import Image from "next/image";
 import {
@@ -283,34 +284,11 @@ export default function MatchmakersOvertredingenOverzichtPage() {
   const isSuperadmin = authIsSuperadmin || lower(myRole) === "superadmin";
   const canSeeAllBonds = isSuperadmin && norm(myBondteam) === "NVB";
 
-  async function loadMyProfile(userId: string, email?: string | null) {
-    const byId = await supabase
-      .from("user_profiles")
-      .select("bondteam, role, email")
-      .eq("id", userId)
-      .maybeSingle<UserProfile>();
-
-    if (byId.error)
-      throw new Error(
-        `Profiel ophalen uit user_profiles mislukt: ${byId.error.message}`,
-      );
-    if (byId.data?.bondteam || byId.data?.role) return byId.data;
-
-    if (email) {
-      const byEmail = await supabase
-        .from("user_profiles")
-        .select("bondteam, role, email")
-        .eq("email", email)
-        .maybeSingle<UserProfile>();
-
-      if (byEmail.error)
-        throw new Error(
-          `Profiel ophalen op e-mail mislukt: ${byEmail.error.message}`,
-        );
-      if (byEmail.data) return byEmail.data;
-    }
-
-    return byId.data ?? null;
+  async function loadMyProfile() {
+    const response = await authedFetch("/api/me/profile", { method: "GET", cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || "Profiel ophalen mislukt.");
+    return data as UserProfile;
   }
 
   async function getSessionToken() {
@@ -325,7 +303,7 @@ export default function MatchmakersOvertredingenOverzichtPage() {
     setError("");
 
     try {
-      const profile = await loadMyProfile(user.id, user.email);
+      const profile = await loadMyProfile();
       const profileBondteam = norm(profile?.bondteam);
       const profileRole = clean(profile?.role);
 
@@ -340,19 +318,11 @@ export default function MatchmakersOvertredingenOverzichtPage() {
       const profileCanSeeAllBonds =
         profileIsSuperadmin && profileBondteam === "NVB";
 
-      const adminEndpoints = [
-        "/api/admin/algemeen/overtredingen?bron=matchmaker",
-        "/api/admin/overtredingen?bron=matchmaker",
-      ];
       const matchmakerEndpoints = [
         "/api/matchmaker/overtredingen?naar_admin=1&include_admin=1",
         "/api/matchmaker/overtredingen",
       ];
-      const endpoints =
-        profileIsSuperadmin ||
-        roles?.some((r) => ["admin", "superadmin"].includes(lower(r)))
-          ? [...adminEndpoints, ...matchmakerEndpoints]
-          : [...matchmakerEndpoints, ...adminEndpoints];
+      const endpoints = matchmakerEndpoints;
 
       let loaded: Melding[] = [];
       let warning = "";

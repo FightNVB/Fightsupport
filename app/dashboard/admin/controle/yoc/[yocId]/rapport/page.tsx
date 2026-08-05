@@ -2,6 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { authedDownload } from "@/lib/api/authedDownload";
 
 const EXCLUDED_AFKEUR_RULES = new Set([
   "YOC_GEEN_LICENTIE",
@@ -565,7 +566,7 @@ export default function YocRapportPage({
               <OrangeButton onClick={() => window.print()}>
                 Print / PDF
               </OrangeButton>
-              <SilverButton href={excelPath}>Download Excel</SilverButton>
+              <SilverButton onClick={() => void authedDownload(excelPath, `yoc-controle-${yocId}.xlsx`)}>Download Excel</SilverButton>
               <SilverButton href={backPath}>Terug</SilverButton>
             </div>
           </div>

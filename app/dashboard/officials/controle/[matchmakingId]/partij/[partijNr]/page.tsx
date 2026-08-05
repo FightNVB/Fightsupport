@@ -1553,11 +1553,13 @@ export default function PartijDetailPage() {
     setError(null);
 
     try {
-      const { error: updErr } = await supabase
-        .from("controle_resultaten")
-        .update({ aantekeningen: text })
-        .eq("id", resultaatId);
-      if (updErr) throw updErr;
+      const response = await authedFetch("/api/officials/control-results", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: resultaatId, matchmaking_id: matchmakingId, aantekeningen: text }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Aantekening opslaan mislukt.");
 
       setRegels((prev) =>
         prev.map((r) =>
@@ -1632,51 +1634,11 @@ export default function PartijDetailPage() {
     const boutId = asUuid(ctxRow?.bout_id);
     const mmId = String(matchmakingId ?? "").trim();
 
-    const queries = [
-      supabase
-        .from("controle_resultaten")
-        .select("*")
-        .eq("controle_run_id", runId)
-        .eq("partij_nr", partijNr),
-      supabase
-        .from("controle_resultaten")
-        .select("*")
-        .eq("run_id", runId)
-        .eq("partij_nr", partijNr),
-    ];
-
-    // Weegstation-meldingen staan ook in controle_resultaten, maar kunnen
-    // vanuit een andere flow met alleen matchmaking_id/partij_nr of bout_id zijn opgeslagen.
-    // Daarom halen we die bewust mee, zonder de rest van deze goed werkende pagina te veranderen.
-    if (mmId) {
-      queries.push(
-        supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("matchmaking_id", mmId)
-          .eq("partij_nr", partijNr),
-      );
-    }
-
-    if (mmId && boutId) {
-      queries.push(
-        supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("matchmaking_id", mmId)
-          .eq("bout_id", boutId),
-      );
-    }
-
-    const results = await Promise.all(queries);
-    const allRows: ControleResultaatRow[] = [];
-
-    for (const res of results) {
-      if (res.error) throw res.error;
-      allRows.push(...((res.data ?? []) as unknown as ControleResultaatRow[]));
-    }
-
-    return dedupeControleResultatenRows(allRows);
+    if (!mmId) return [];
+    const response = await authedFetch(`/api/officials/control-results?matchmaking_id=${encodeURIComponent(mmId)}&partij_nr=${encodeURIComponent(String(partijNr))}`, { cache: "no-store" });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json?.error || "Controleresultaten laden mislukt.");
+    return dedupeControleResultatenRows((json?.rows ?? []) as ControleResultaatRow[]);
   }
 
   async function reloadRegels() {
@@ -1730,11 +1692,13 @@ export default function PartijDetailPage() {
         hoek: null,
       };
 
-      const { error: insErr } = await supabase
-        .from("controle_resultaten")
-        .insert(payload);
-
-      if (insErr) throw insErr;
+      const response = await authedFetch("/api/officials/control-results", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Handmatige melding toevoegen mislukt.");
 
       closeCustomMelding();
       await reloadRegels();

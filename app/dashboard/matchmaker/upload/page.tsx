@@ -202,17 +202,10 @@ export default function UploadMatchmakingAdminPage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("user_profiles")
-        .select("role,bondteam,full_name")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (error) {
-        console.warn("profile load error:", error.message);
-      }
-
-      const profileData = (data ?? {}) as Profile;
+      const response = await authedFetch("/api/me/profile", { method: "GET", cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) console.warn("profile load error:", data?.error || response.statusText);
+      const profileData = (response.ok ? data : {}) as Profile;
       setProfile(profileData);
 
       const bt = norm(profileData.bondteam);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 import { spawn } from "child_process";
 import path from "path";
 import { runYocFighterContextPipeline } from "@/lib/yoc/runYocFighterContextPipeline";
@@ -215,6 +216,7 @@ async function runOneFighterInBackground(params: {
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
+  try { await requireAdminAccess(req); } catch (error) { return secureError(error); }
   const { yocId } = await params;
   const supabase = adminClient();
 
@@ -229,7 +231,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   let finalVa = va;
   if (yocFighterId) {
     const { data: fighter, error } = await supabase.from("yoc_fighters").select("*").eq("yoc_event_id", yocId).eq("id", yocFighterId).maybeSingle();
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ ok: false, error: "YOC-vechter kon niet worden geladen." }, { status: 500 });
     finalVa = normalizeVa(body?.va_nummer ?? fighter?.va_nummer_mm ?? fighter?.va_nummer ?? fighter?.va ?? fighter?.fighter_id);
   }
 

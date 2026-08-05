@@ -1,5 +1,6 @@
 // app/api/rapport/matchmaker-gecontroleerde-aanmeldingen-excel/route.ts
 import { NextResponse } from "next/server";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 import ExcelJS from "exceljs";
 import { createClient } from "@supabase/supabase-js";
 import path from "path";
@@ -2221,6 +2222,7 @@ export async function GET(req: Request) {
         { status: 400 },
       );
     }
+    await requireMatchmakingAccess(req, matchmakingId, ["matchmaker", "admin", "superadmin"]);
 
     const [
       { data: matchmaking },
@@ -2286,13 +2288,10 @@ export async function GET(req: Request) {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
-        "Cache-Control": "no-store",
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || "Excel export maken mislukt" },
-      { status: 500 },
-    );
+    return secureError(e, "Excel-export kon niet worden gemaakt.");
   }
 }

@@ -93,4 +93,7 @@ screenshots/
 *.pem
 *.key
 *.crt
-*.p12
+*.p12 
+
+ControlEngine/scrapers/sportscholen/downloads/*
+ControlEngine/scrapers/startverbod/downloads/*

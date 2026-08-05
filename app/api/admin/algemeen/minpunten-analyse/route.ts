@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "node:fs";
 import path from "node:path";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -110,9 +111,10 @@ function makePdf(rows: Row[]) {
 }
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   try {
     const url = new URL(req.url); const format = s(url.searchParams.get("format") || "xlsx").toLowerCase(); const q = s(url.searchParams.get("q")); const rows = await loadRows(q);
     if (format === "pdf") return new NextResponse(makePdf(rows), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="fightsupport-minpunten-analyse.pdf"` } });
     return new NextResponse(await makeExcel(rows), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="fightsupport-minpunten-analyse.xlsx"` } });
-  } catch (e:any) { return NextResponse.json({ ok:false, error:e?.message ?? String(e) }, { status:500 }); }
+  } catch (e:any) { return NextResponse.json({ ok:false, error: "De aanvraag kon niet worden verwerkt." }, { status:500 }); }
 }

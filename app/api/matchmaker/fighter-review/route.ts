@@ -2,6 +2,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireUserWithRole, resolveAndAssertFighterReviewAccess } from "@/app/api/_utils/authz";
+import { privateJson, secureError } from "@/lib/api/secureRoute";
 
 type ReviewAction = "approve" | "reject" | "dismiss";
 
@@ -9,36 +11,22 @@ function s(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-async function getReviewer(req: NextRequest) {
-  const authorization = req.headers.get("authorization") ?? "";
-  const token = authorization.replace(/^Bearer\s+/i, "").trim();
-  if (!token) return { user: null, error: "Niet ingelogd." };
-
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user) return { user: null, error: "Sessie is ongeldig of verlopen." };
-
-  return { user: data.user, error: null };
-}
-
 export async function PATCH(req: NextRequest) {
   try {
-    const { user, error: authError } = await getReviewer(req);
-    if (authError || !user) {
-      return NextResponse.json({ error: authError ?? "Niet ingelogd." }, { status: 401 });
-    }
-
     const body = await req.json().catch(() => ({}));
     const id = s(body?.id);
-    const matchmakingId = s(body?.matchmaking_id);
     const action = s(body?.action) as ReviewAction;
     const note = s(body?.note) || null;
 
-    if (!id || !matchmakingId) {
+    if (!id) {
       return NextResponse.json(
-        { error: "Melding-ID en matchmaking-ID zijn verplicht." },
+        { error: "Melding-ID is verplicht." },
         { status: 400 },
       );
     }
+
+    const auth = await requireUserWithRole(req, ["matchmaker", "admin", "superadmin"]);
+    const matchmakingId = await resolveAndAssertFighterReviewAccess({ reviewId: id, userId: auth.userId, role: auth.role });
 
     if (!["approve", "reject", "dismiss"].includes(action)) {
       return NextResponse.json({ error: "Ongeldige reviewactie." }, { status: 400 });
@@ -46,13 +34,13 @@ export async function PATCH(req: NextRequest) {
 
     const { data: current, error: readError } = await supabaseAdmin
       .from("matchmaker_fighter_resultaten")
-      .select("*")
+      .select("id,matchmaking_id,original_resultaat,resultaat,review_status,review_note")
       .eq("id", id)
       .eq("matchmaking_id", matchmakingId)
       .maybeSingle();
 
     if (readError) {
-      return NextResponse.json({ error: readError.message }, { status: 500 });
+      return privateJson({ error: "Melding kon niet worden geladen." }, 500);
     }
 
     if (!current) {
@@ -71,7 +59,7 @@ export async function PATCH(req: NextRequest) {
             ? "afgewezen"
             : "gesloten",
       review_note: note,
-      reviewed_by: user.id,
+      reviewed_by: auth.userId,
       reviewed_at: new Date().toISOString(),
       resultaat:
         action === "approve" || action === "dismiss"
@@ -87,19 +75,15 @@ export async function PATCH(req: NextRequest) {
       .update(update)
       .eq("id", id)
       .eq("matchmaking_id", matchmakingId)
-      .select("*")
+      .select("id,matchmaking_id,resultaat,original_resultaat,review_status,review_note,reviewed_by,reviewed_at,updated_at")
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return privateJson({ error: "Melding kon niet worden bijgewerkt." }, 500);
     }
 
-    return NextResponse.json({ ok: true, result: data });
+    return privateJson({ ok: true, result: data });
   } catch (error: any) {
-    console.error("[fighter-review] onverwachte fout:", error);
-    return NextResponse.json(
-      { error: error?.message || "Melding beoordelen mislukt." },
-      { status: 500 },
-    );
+    return secureError(error, "Melding beoordelen mislukt.");
   }
 }

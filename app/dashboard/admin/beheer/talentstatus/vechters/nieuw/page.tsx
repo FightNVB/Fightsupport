@@ -1,5 +1,7 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -14,7 +16,7 @@ export default function NieuweTalentstatusVechterPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setSaving(true); setError("");
-    const res = await fetch("/api/admin/beheer/talentstatus/vechters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const res = await authedFetch("/api/admin/beheer/talentstatus/vechters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
     const json = await res.json(); setSaving(false);
     if (!json.ok) return setError(json.error || "Opslaan mislukt");
     router.push("/dashboard/admin/beheer/talentstatus");

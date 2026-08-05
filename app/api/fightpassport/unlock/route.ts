@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { readJsonFile, resolveScraperUtilsPath, writeJsonFile } from "../_utils";
+import { requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
+    await requireAdminAccess(req);
     const body = await req.json().catch(() => ({}));
     const code = String(body?.code ?? "").trim();
 
@@ -34,9 +36,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message ?? "Onbekende fout" },
-      { status: 500 }
-    );
+    return secureError(err, "Unlockcode kon niet worden verwerkt.");
   }
 }

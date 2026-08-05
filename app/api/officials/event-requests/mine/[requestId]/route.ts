@@ -13,15 +13,14 @@ const supabase = createClient(
 export async function GET(req: Request, ctx: { params: Promise<{ requestId: string }> }) {
   try {
     const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
-    const userId = String((auth as any)?.user?.id ?? "").trim();
     const { requestId } = await ctx.params;
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("event_requests")
       .select("id, naam, datum, locatie, bondteam, disciplines, promotor_name, promotor_email, opmerking_promotor, opmerking_admin, status")
-      .eq("id", requestId)
-      .eq("toegewezen_hoofdofficial_user_id", userId)
-      .maybeSingle();
+      .eq("id", requestId);
+    if (auth.role !== "admin" && auth.role !== "superadmin") query = query.eq("bondteam", String(auth.bondteam ?? ""));
+    const { data, error } = await query.maybeSingle();
 
     if (error) throw error;
     if (!data) return NextResponse.json({ error: "Verzoek niet gevonden" }, { status: 404 });

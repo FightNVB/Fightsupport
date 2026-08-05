@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cleanVa, normLand, supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,7 @@ function isJPlus(value: unknown) {
 }
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") || "";
   const status = searchParams.get("status") || "alles";
@@ -64,7 +66,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
 
   const fighters = (data ?? []) as TalentFighter[];
 
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
     .select("id, bout_id, vechter_id, tegenstander_id, vechter_va, tegenstander_va");
 
   if (partijenError) {
-    return NextResponse.json({ ok: false, error: partijenError.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 
   const partijenList = (partijen ?? []) as TalentPartij[];
@@ -94,7 +96,7 @@ export async function GET(req: NextRequest) {
     .not("uitslagen_bout_id", "is", null);
 
   if (uitslagenError) {
-    return NextResponse.json({ ok: false, error: uitslagenError.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 
   const uitslagenList = ((uitslagen ?? []) as UitslagenResultaat[]).filter(
@@ -114,7 +116,7 @@ export async function GET(req: NextRequest) {
       .eq("klasse", "J+");
 
     if (boutsError) {
-      return NextResponse.json({ ok: false, error: boutsError.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
     }
 
     uitslagenBoutsList = ((uitslagenBouts ?? []) as UitslagenBout[]).filter((bout) => isJPlus(bout.klasse));
@@ -166,6 +168,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  await requireAdmin(req);
   const body = await req.json();
   const va_nummer = cleanVa(body.va_nummer);
   const naam = String(body.naam || body.vechter_naam || "").trim();
@@ -233,6 +236,6 @@ export async function POST(req: NextRequest) {
     error = inserted.error;
   }
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   return NextResponse.json({ ok: true, item: data });
 }

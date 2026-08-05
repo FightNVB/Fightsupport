@@ -258,17 +258,13 @@ export default function OfficialsOvertredingenOverzichtPage() {
       const profileIsSuperadmin = lower(profileRole) === "superadmin" || roles?.some((r) => lower(r) === "superadmin");
       const profileCanSeeAllBonds = profileIsSuperadmin && profileBondteam === "NVB";
 
-      const adminEndpoints = [
-        "/api/admin/algemeen/overtredingen?bron=official",
-        "/api/admin/overtredingen?bron=official",
-      ];
       const officialEndpoints = [
         "/api/officials/overtredingen?naar_admin=1&include_admin=1",
         "/api/officials/overtredingen",
       ];
       const endpoints = profileIsSuperadmin || roles?.some((r) => ["admin", "superadmin"].includes(lower(r)))
-        ? [...adminEndpoints, ...officialEndpoints]
-        : [...officialEndpoints, ...adminEndpoints];
+          ? officialEndpoints
+          : officialEndpoints;
 
       let loaded: Melding[] = [];
       let warning = "";

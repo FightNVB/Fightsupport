@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { authedFetch } from "@/lib/api/authedFetch";
 
 const LOGO = "/branding/fightsupport/excel-logo.png";
 const BETROKKENEN = [
@@ -149,22 +150,8 @@ export default function OvertredingMeldenPage() {
           patch.melder_user_id = user.id;
           patch.melder_email = user.email || "";
 
-          let profile: any = null;
-          const byId = await supabase
-            .from("user_profiles")
-            .select("full_name, email, bondteam")
-            .eq("id", user.id)
-            .maybeSingle();
-          profile = byId.data;
-
-          if (!profile && user.email) {
-            const byEmail = await supabase
-              .from("user_profiles")
-              .select("full_name, email, bondteam")
-              .eq("email", user.email)
-              .maybeSingle();
-            profile = byEmail.data;
-          }
+          const profileResponse = await authedFetch("/api/me/profile", { method: "GET", cache: "no-store" });
+          const profile = profileResponse.ok ? await profileResponse.json().catch(() => ({})) : null;
 
           patch.melder_naam = profile?.full_name || user.email || "Matchmaker";
           patch.melder_email = profile?.email || user.email || "";

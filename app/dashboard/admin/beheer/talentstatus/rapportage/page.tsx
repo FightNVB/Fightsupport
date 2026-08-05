@@ -1,5 +1,8 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+import { AuthenticatedDownloadButton } from "@/app/dashboard/_components/AuthenticatedDownloadButton";
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -23,8 +26,8 @@ export default function TalentstatusRapportagePage() {
   async function load() {
     setLoading(true); setError("");
     const [p, v] = await Promise.all([
-      fetch(`/api/admin/beheer/talentstatus/partijen?q=${encodeURIComponent(q)}&va=${encodeURIComponent(va)}`, { cache: "no-store" }).then(r => r.json()),
-      fetch("/api/admin/beheer/talentstatus/vechters?status=alles", { cache: "no-store" }).then(r => r.json()),
+      authedFetch(`/api/admin/beheer/talentstatus/partijen?q=${encodeURIComponent(q)}&va=${encodeURIComponent(va)}`, { cache: "no-store" }).then(r => r.json()),
+      authedFetch("/api/admin/beheer/talentstatus/vechters?status=alles", { cache: "no-store" }).then(r => r.json()),
     ]);
     setLoading(false);
     if (!p.ok) setError(p.error || "Partijen laden mislukt"); else setPartijen(p.items || []);
@@ -42,7 +45,7 @@ export default function TalentstatusRapportagePage() {
       </div>
     </header>
 
-    <form onSubmit={(e) => { e.preventDefault(); load(); }} className="flex flex-wrap gap-2 border-b border-zinc-700 p-4"><input value={q} onChange={e => setQ(e.target.value)} placeholder="Zoek event of naam" className="border border-zinc-600 bg-[#111] px-3 py-2 text-sm text-white outline-none" /><select value={va} onChange={e => setVa(e.target.value)} className="border border-zinc-600 bg-[#111] px-3 py-2 text-sm text-white"><option value="">Alle vechters</option>{vechters.map(v => <option key={v.id} value={v.va_nummer || ""}>{v.naam} {v.va_nummer ? `VA ${v.va_nummer}` : ""}</option>)}</select><button className={silverBtn}>Filter</button><a href={pdfHref} className={silverBtn}>Maak PDF</a></form>
+    <form onSubmit={(e) => { e.preventDefault(); load(); }} className="flex flex-wrap gap-2 border-b border-zinc-700 p-4"><input value={q} onChange={e => setQ(e.target.value)} placeholder="Zoek event of naam" className="border border-zinc-600 bg-[#111] px-3 py-2 text-sm text-white outline-none" /><select value={va} onChange={e => setVa(e.target.value)} className="border border-zinc-600 bg-[#111] px-3 py-2 text-sm text-white"><option value="">Alle vechters</option>{vechters.map(v => <option key={v.id} value={v.va_nummer || ""}>{v.naam} {v.va_nummer ? `VA ${v.va_nummer}` : ""}</option>)}</select><button className={silverBtn}>Filter</button><AuthenticatedDownloadButton href={pdfHref} filename="talentstatus-rapport.pdf" className={silverBtn}>Maak PDF</AuthenticatedDownloadButton></form>
     {error && <p className="mx-4 mt-4 border border-red-500 bg-red-950 p-3 text-sm">{error}</p>}
 
     <div className="grid gap-4 border-b border-zinc-700 p-4 md:grid-cols-3"><Stat value={partijen.length} label="Partijen in rapport" /><Stat value={partijen.filter(p => p.klasse === "J+").length} label="Ingeboekte J+ uitslagen" /><Stat value={vechters.length} label="Talentstatus vechters" /></div>

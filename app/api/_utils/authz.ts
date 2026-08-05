@@ -272,4 +272,34 @@ export async function assertCanAccessMatchmaking(opts: {
   throw new Response("Forbidden", { status: 403 });
 }
 
+export async function resolveAndAssertFighterReviewAccess(opts: {
+  reviewId: string;
+  userId: string;
+  role: RoleName;
+}): Promise<string> {
+  const { data: review, error } = await supabaseAdmin
+    .from("matchmaker_fighter_resultaten")
+    .select("id,matchmaking_id,inschrijving_id")
+    .eq("id", opts.reviewId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!review) throw new Response("Not Found", { status: 404 });
+
+  let matchmakingId = String((review as any).matchmaking_id ?? "").trim();
+  if (!matchmakingId && (review as any).inschrijving_id != null) {
+    const { data: registration, error: registrationError } = await supabaseAdmin
+      .from("aanmeldingen")
+      .select("matchmaking_id")
+      .eq("id", (review as any).inschrijving_id)
+      .maybeSingle();
+    if (registrationError) throw registrationError;
+    matchmakingId = String((registration as any)?.matchmaking_id ?? "").trim();
+  }
+
+  if (!matchmakingId) throw new Response("Forbidden", { status: 403 });
+  await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId: opts.userId, role: opts.role });
+  return matchmakingId;
+}
+
 export { supabaseAdmin };

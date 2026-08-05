@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ function cleanText(value: unknown) {
 }
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   try {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") || "";
@@ -38,11 +40,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ ok: true, cases: data ?? [] });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error?.message ?? "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  await requireAdmin(req);
   try {
     const body = await req.json();
 
@@ -78,6 +81,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, case: data });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error?.message ?? "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }

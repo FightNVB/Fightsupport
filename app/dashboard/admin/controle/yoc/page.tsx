@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { authedFetch } from "@/lib/api/authedFetch";
 
 type YocEvent = {
   id: string;
@@ -90,7 +91,7 @@ export default function YocOverviewPage() {
       setDeletingId(yocEventId);
       setError("");
 
-      const res = await fetch("/api/yoc/delete-event", {
+      const res = await authedFetch("/api/yoc/delete-event", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ yoc_event_id: yocEventId }),

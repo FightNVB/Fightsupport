@@ -1,8 +1,10 @@
 // app/api/admin/yoc/delete-event/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 
 export async function DELETE(req: NextRequest) {
+  try { await requireAdminAccess(req); } catch (error) { return secureError(error); }
   const { yoc_event_id } = await req.json();
 
   if (!yoc_event_id) {
@@ -30,10 +32,7 @@ export async function DELETE(req: NextRequest) {
       .eq("yoc_event_id", yoc_event_id);
 
     if (error) {
-      return NextResponse.json(
-        { ok: false, table, error: error.message },
-        { status: 500 }
-      );
+      return secureError(error, "YOC-event kon niet worden verwijderd.");
     }
   }
 
@@ -43,10 +42,7 @@ export async function DELETE(req: NextRequest) {
     .eq("id", yoc_event_id);
 
   if (eventError) {
-    return NextResponse.json(
-      { ok: false, table: "yoc_events", error: eventError.message },
-      { status: 500 }
-    );
+    return secureError(eventError, "YOC-event kon niet worden verwijderd.");
   }
 
   return NextResponse.json({ ok: true });

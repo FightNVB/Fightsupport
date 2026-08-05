@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import { secureError } from "@/lib/api/secureRoute";
 
 type Fighter = Record<string, any>;
 type EngineHit = Record<string, any>;
@@ -431,6 +433,9 @@ export async function POST(
       return NextResponse.json({ error: "matchmakingId ontbreekt" }, { status: 400 });
     }
 
+    const auth = await requireUserWithRole(req, ["matchmaker", "official", "hoofdofficial", "admin", "superadmin"]);
+    await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId: auth.userId, role: auth.role });
+
     const rood =
       body?.rood ??
       (await loadFighterFromDb(
@@ -481,10 +486,6 @@ export async function POST(
 
     return NextResponse.json({ ok: true, hits, ctx });
   } catch (e: any) {
-    console.error("[match-check] MatchEngine controle mislukt", e);
-    return NextResponse.json(
-      { error: e?.message || "MatchEngine controle mislukt" },
-      { status: 500 },
-    );
+    return secureError(e, "MatchEngine controle mislukt");
   }
 }

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ talentId: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ talentId: string }> }) {
+  await requireAdmin(req);
   const { talentId } = await ctx.params;
   const { data, error } = await supabaseAdmin
     .from("v_talentstatus_vechters_overzicht")
@@ -11,7 +13,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ talentId: 
     .eq("id", talentId)
     .single();
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 404 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 404 });
 
   const { data: partijen, error: pErr } = await supabaseAdmin
     .from("v_talentstatus_partijen_overzicht")
@@ -19,11 +21,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ talentId: 
     .or(`vechter_id.eq.${talentId},tegenstander_id.eq.${talentId}`)
     .order("event_datum", { ascending: false, nullsFirst: false });
 
-  if (pErr) return NextResponse.json({ ok: false, error: pErr.message }, { status: 500 });
+  if (pErr) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   return NextResponse.json({ ok: true, item: data, partijen: partijen ?? [] });
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ talentId: string }> }) {
+  await requireAdmin(req);
   const { talentId } = await ctx.params;
   const body = await req.json();
 
@@ -37,6 +40,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ talentId:
   }
 
   const { data, error } = await supabaseAdmin.from("talentstatus_vechters").update(patch).eq("id", talentId).select("*").single();
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   return NextResponse.json({ ok: true, item: data });
 }

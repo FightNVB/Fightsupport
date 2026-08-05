@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { esc, formatDate, reportHtml } from "../../_helpers";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,8 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+  await requireAdmin(req);
   try {
     const { caseId } = await ctx.params;
 
@@ -59,6 +61,6 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ caseId: st
 
     return new NextResponse(reportHtml(`Rapport dossier ${dossier.naam}`, body), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error?.message ?? "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }

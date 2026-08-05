@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -70,6 +71,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const matchmaking_id = searchParams.get("matchmaking_id");
     if (!matchmaking_id) return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
+    await requireMatchmakingAccess(req, matchmaking_id);
 
     // pak nieuwste run via context (zelfde aanpak als je page)
     const { data: lastCtxRows, error: lastErr } = await supabaseAdmin
@@ -168,9 +170,10 @@ export async function GET(req: Request) {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="sportdata_${matchmaking_id}.csv"`,
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
+    return secureError(e, "CSV-export kon niet worden gemaakt.");
   }
 }

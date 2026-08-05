@@ -1,5 +1,7 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -189,7 +191,7 @@ export default function AdminMatchmakingsPage() {
       archived,
     });
 
-    const res = await fetch(
+    const res = await authedFetch(
       `/api/admin/algemeen/matchmakings?${params.toString()}`,
       {
         cache: "no-store",
@@ -211,7 +213,7 @@ export default function AdminMatchmakingsPage() {
     setSavingId(id);
     setError("");
 
-    const res = await fetch("/api/admin/algemeen/matchmakings", {
+    const res = await authedFetch("/api/admin/algemeen/matchmakings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, [field]: value }),

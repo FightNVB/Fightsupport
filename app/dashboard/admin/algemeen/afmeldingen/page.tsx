@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { AuthenticatedDownloadButton } from "@/app/dashboard/_components/AuthenticatedDownloadButton";
 
 export const dynamic = "force-dynamic";
 
@@ -444,13 +445,14 @@ function ExportButtons({
         </p>
       </div>
       {links.map((link) => (
-        <a
+        <AuthenticatedDownloadButton
           key={link.href}
           href={link.href}
+          filename={link.href.includes("format=pdf") ? "rapport.pdf" : "rapport.xlsx"}
           className="inline-flex items-center justify-center border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110"
         >
           {link.label}
-        </a>
+        </AuthenticatedDownloadButton>
       ))}
     </div>
   );

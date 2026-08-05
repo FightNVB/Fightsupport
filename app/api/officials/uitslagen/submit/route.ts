@@ -44,6 +44,9 @@ export async function POST(req: Request) {
       );
     }
 
+    // Bondteam-/objectautorisatie gaat vóór de eerste status- of boutquery.
+    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+
     // Uitslagen kunnen worden ingevoerd zodra de matchmaking in lineup of
     // uitslagenfase staat. Oudere flows gebruiken "lineup", nieuwe flows
     // gebruiken "klaar_voor_uitslagen" / "uitslagen_in_bewerking".
@@ -59,9 +62,6 @@ export async function POST(req: Request) {
         { status: 422 }
       );
     }
-
-    // Ensure the user can access this matchmaking (bondteam check for officials)
-    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
     // Validate uitslag input
     const inputValidation = validateUitslagInput({ uitslag_rood, winnaar });

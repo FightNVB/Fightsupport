@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { authedFetch } from '@/lib/api/authedFetch';
 
 export default function YocUploadPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -23,7 +24,7 @@ export default function YocUploadPage() {
       fd.append('event_datum', eventDate);
       fd.append('locatie', locatie);
 
-      const res = await fetch('/api/yoc/upload', { method: 'POST', body: fd });
+      const res = await authedFetch('/api/yoc/upload', { method: 'POST', body: fd });
       const json = await res.json();
 
       setBusy(false);

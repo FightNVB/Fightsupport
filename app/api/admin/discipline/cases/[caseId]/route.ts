@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +32,8 @@ function normalizeNullable(value: unknown) {
   return value;
 }
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+  await requireAdmin(req);
   try {
     const { caseId } = await ctx.params;
 
@@ -92,13 +94,14 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ caseId: st
     });
   } catch (error: any) {
     return NextResponse.json(
-      { ok: false, error: error?.message ?? "Onbekende fout" },
+      { ok: false, error: "De aanvraag kon niet worden verwerkt." },
       { status: 500 }
     );
   }
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+  await requireAdmin(req);
   try {
     const { caseId } = await ctx.params;
     const body = await req.json();
@@ -147,13 +150,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ caseId: s
     });
   } catch (error: any) {
     return NextResponse.json(
-      { ok: false, error: error?.message ?? "Onbekende fout" },
+      { ok: false, error: "De aanvraag kon niet worden verwerkt." },
       { status: 500 }
     );
   }
 }
 
-export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+  await requireAdmin(req);
   try {
     const { caseId } = await ctx.params;
 
@@ -167,7 +171,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ caseId:
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     return NextResponse.json(
-      { ok: false, error: error?.message ?? "Onbekende fout" },
+      { ok: false, error: "De aanvraag kon niet worden verwerkt." },
       { status: 500 }
     );
   }

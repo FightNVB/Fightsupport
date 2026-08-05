@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 
 export const dynamic = "force-dynamic";
 
@@ -22,30 +23,18 @@ function isUuid(value: unknown) {
 
 export async function POST(req: NextRequest, ctx: Params) {
   try {
+    const auth = await requireAdminAccess(req);
     const { yocId, resultaatId } = await ctx.params;
 
     if (!isUuid(yocId)) return json(400, { ok: false, error: "Ongeldig YOC-id." });
     if (!isUuid(resultaatId)) return json(400, { ok: false, error: "Ongeldig resultaat-id." });
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !anonKey || !serviceKey) {
+    if (!supabaseUrl || !serviceKey) {
       return json(500, { ok: false, error: "Supabase env mist." });
     }
-
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return json(401, { ok: false, error: "Niet ingelogd." });
-
-    const supabaseAuth = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false },
-    });
-
-    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(token);
-    if (authError || !authData?.user) return json(401, { ok: false, error: "Sessie ongeldig." });
 
     const body = await req.json().catch(() => ({}));
     const reviewStatusRaw = String(body?.review_status ?? "approved").trim().toLowerCase();
@@ -68,7 +57,7 @@ export async function POST(req: NextRequest, ctx: Params) {
 
     const patch: Record<string, unknown> = {
       review_status,
-      reviewed_by: authData.user.id,
+      reviewed_by: auth.authUserId,
       reviewed_at: new Date().toISOString(),
       review_note,
     };
@@ -91,7 +80,6 @@ export async function POST(req: NextRequest, ctx: Params) {
 
     return json(200, { ok: true, resultaat: updated });
   } catch (e: any) {
-    console.error("[yoc-resultaten-review] failed:", e);
-    return json(500, { ok: false, error: e?.message || "Review opslaan mislukt." });
+    return secureError(e, "Review opslaan mislukt.");
   }
 }

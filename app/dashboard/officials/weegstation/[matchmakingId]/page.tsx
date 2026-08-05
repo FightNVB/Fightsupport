@@ -1451,15 +1451,10 @@ export default function WeegstationDetailPage() {
   }
 
   async function fetchRows(mmId: string) {
-    const { data, error } = await supabase
-      .from("weigh_in_bouts")
-      .select("*")
-      .eq("matchmaking_id", mmId)
-      .order("partij_nr", { ascending: true });
-
-    if (error) throw error;
-
-    const baseRows = dedupeRows((data ?? []) as WeighInBout[]);
+    const response = await authedFetch(`/api/officials/weegstation/data?matchmaking_id=${encodeURIComponent(mmId)}`, { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error || "Weegstationgegevens laden mislukt.");
+    const baseRows = dedupeRows((payload?.bouts ?? []) as WeighInBout[]);
 
     if (baseRows.length === 0) return baseRows;
 
@@ -1471,32 +1466,11 @@ export default function WeegstationDetailPage() {
       ),
     );
 
-    let resultatenQuery = supabase
-      .from("controle_resultaten")
-      .select(
-        "id, controle_run_id, run_id, bout_id, partij_nr, rule, rule_code, resultaat, original_resultaat, boodschap, hoek, review_status, actie_status, created_at",
-      )
-      .eq("matchmaking_id", mmId)
-      .order("created_at", { ascending: false });
-
-    // Gebruik dezelfde controlerun als de weeglijst wanneer die bekend is.
-    // Zonder run-id vallen we terug op alle controle_resultaten van deze matchmaking.
-    if (controleRunIds.length > 0) {
-      resultatenQuery = resultatenQuery.or(
-        `controle_run_id.in.(${controleRunIds.join(",")}),run_id.in.(${controleRunIds.join(",")})`,
-      );
-    }
-
-    const { data: controleResultaten, error: resultatenErr } =
-      await resultatenQuery;
-
-    if (resultatenErr) {
-      console.warn(
-        "Controle resultaten voor weegstation badges konden niet geladen worden:",
-        resultatenErr.message,
-      );
-      return baseRows;
-    }
+    const controleResultaten = (payload?.results ?? []).filter((result: any) =>
+      controleRunIds.length === 0 ||
+      controleRunIds.includes(String(result?.controle_run_id ?? "")) ||
+      controleRunIds.includes(String(result?.run_id ?? "")),
+    );
 
     const openComplianceIssues = (controleResultaten ?? [])
       .filter((result: any) => isOpenControleResult(result))
@@ -1515,13 +1489,13 @@ export default function WeegstationDetailPage() {
           kind,
         };
       })
-      .filter((issue): issue is ComplianceIssue => !!issue);
+      .filter((issue: ComplianceIssue | null): issue is ComplianceIssue => !!issue);
 
     return baseRows.map((row) => {
       const rowBoutId = String((row as any)?.bout_id ?? "").trim();
       const rowPartijNr = Number(row.partij_nr);
 
-      const rowIssues = openComplianceIssues.filter((issue) => {
+      const rowIssues = openComplianceIssues.filter((issue: ComplianceIssue) => {
         const sameBout =
           rowBoutId && issue.bout_id && String(issue.bout_id).trim() === rowBoutId;
         const samePartij =
@@ -1970,6 +1944,7 @@ export default function WeegstationDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: selectedRow.id,
+          matchmaking_id: matchmakingId,
           rood_gewogen_gewicht: toNum(selectedDraft.rood),
           blauw_gewogen_gewicht: selectedIsToernooi
             ? null
@@ -2053,6 +2028,7 @@ export default function WeegstationDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: rowId,
+          matchmaking_id: matchmakingId,
           decision,
         }),
       });

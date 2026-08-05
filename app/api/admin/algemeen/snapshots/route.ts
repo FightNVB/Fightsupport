@@ -1,43 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextRequest } from "next/server";
+import { requireAdmin, supabaseAdmin } from "@/app/api/_utils/authz";
+import { privateJson, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 
-function getSupabaseFromAuthHeader(authHeader: string) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error("Supabase env vars ontbreken.");
-  }
-
-  return createClient(url, anonKey, {
-    global: {
-      headers: {
-        Authorization: authHeader,
-      },
-    },
-  });
-}
-
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader) {
-      return NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
-    }
-
-    const supabase = getSupabaseFromAuthHeader(authHeader);
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return NextResponse.json({ error: "Niet ingelogd." }, { status: 401 });
-    }
-
     const { searchParams } = new URL(req.url);
 
     const q = String(searchParams.get("q") ?? "").trim();
@@ -50,7 +19,7 @@ export async function GET(req: NextRequest) {
       200
     );
 
-    let query = supabase
+    let query = supabaseAdmin
       .from("admin_beheer_matchmaking_snapshots")
       .select(
         `
@@ -115,21 +84,17 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error("snapshots list error:", error);
-      return NextResponse.json(
+      return privateJson(
         { error: "Kon snapshots niet laden." },
-        { status: 500 }
+        500
       );
     }
 
-    return NextResponse.json({
+    return privateJson({
       ok: true,
       items: Array.isArray(data) ? data : [],
     });
   } catch (error: any) {
-    console.error("snapshots GET fatal:", error);
-    return NextResponse.json(
-      { error: error?.message ?? "Onbekende fout." },
-      { status: 500 }
-    );
+    return secureError(error, "Kon snapshots niet laden.");
   }
 }

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cleanVa, supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   const { searchParams } = new URL(req.url);
   const type = searchParams.get("type") || "partijen";
   const va = cleanVa(searchParams.get("va"));
@@ -14,7 +16,7 @@ export async function GET(req: NextRequest) {
       .select("*")
       .eq("va_nummer", va)
       .maybeSingle();
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
     return NextResponse.json({ ok: true, item: data });
   }
 
@@ -23,6 +25,6 @@ export async function GET(req: NextRequest) {
     .select("*")
     .order(type === "vechters" ? "naam" : "event_datum", { ascending: type === "vechters", nullsFirst: false });
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   return NextResponse.json({ ok: true, items: data ?? [] });
 }

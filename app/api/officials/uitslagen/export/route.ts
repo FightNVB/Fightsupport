@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 import { createClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
 import fs from "fs";
@@ -134,6 +135,7 @@ async function handleExport(req: NextRequest) {
     if (!matchmakingId) {
       return NextResponse.json({ ok: false, error: "matchmaking_id ontbreekt" }, { status: 400 });
     }
+    await requireMatchmakingAccess(req, matchmakingId, ["official", "hoofdofficial", "admin", "superadmin"]);
 
     const templatePath = path.join(
       process.cwd(),
@@ -266,12 +268,11 @@ async function handleExport(req: NextRequest) {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${safeName}_FightPassport_uitslagen.xlsx"`,
-        "Cache-Control": "no-store",
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
-    console.error("[officials/uitslagen/export]", e);
-    return NextResponse.json({ ok: false, error: e?.message ?? "Export mislukt" }, { status: 500 });
+    return secureError(e, "Export kon niet worden gemaakt.");
   }
 }
 

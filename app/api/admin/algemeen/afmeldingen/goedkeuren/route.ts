@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
+import { privateJson, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 
@@ -31,7 +33,7 @@ function isValidId(v: unknown) {
 }
 
 function bad(msg: string, status = 400, extra?: unknown) {
-  return NextResponse.json({ ok: false, error: msg, extra }, { status });
+  return privateJson({ ok: false, error: msg, ...(extra === undefined ? {} : { extra }) }, status);
 }
 
 function isMissingColumnError(error: any) {
@@ -86,14 +88,6 @@ async function readBody(req: Request) {
   try { return JSON.parse(text); } catch { return {}; }
 }
 
-async function getUserId(req: Request) {
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
-  const { data } = await supabase.auth.getUser(token);
-  return data.user?.id ?? null;
-}
-
 async function setAanmeldingStatus(row: AnyRow, status: string, extraPatch: AnyRow = {}) {
   if (!row?.inschrijving_id || !row?.matchmaking_id) return null;
   const result = await safeUpdate(
@@ -133,24 +127,23 @@ async function setContextStatus(row: AnyRow, status: string, extraPatch: AnyRow 
 }
 
 export async function POST(req: Request) {
+  const auth = await requireAdmin(req);
   try {
     const body = await readBody(req);
     const id = asString(body.afmelding_id ?? body.afmeldingId ?? body.id);
     if (!id || !isValidId(id)) return bad("Geldige afmelding_id ontbreekt");
 
     const { data: current, error: loadError } = await supabase.from("afmeldingen").select("*").eq("id", id).maybeSingle();
-    if (loadError) return bad("Afmelding laden mislukt", 500, loadError.message);
+    if (loadError) return bad("Afmelding laden mislukt", 500);
     if (!current) return bad("Afmelding niet gevonden", 404);
 
     const now = new Date().toISOString();
-    const userId = await getUserId(req);
-
     const { data, error } = await supabase
       .from("afmeldingen")
       .update({
         status: "goedgekeurd",
         beoordeeld_at: now,
-        beoordeeld_door: userId,
+        beoordeeld_door: auth.userId,
         beoordelings_opmerking: asString(body.beoordelings_opmerking ?? body.opmerking ?? body.reason),
         updated_at: now,
       })
@@ -158,19 +151,19 @@ export async function POST(req: Request) {
       .select("*")
       .maybeSingle();
 
-    if (error) return bad("Afmelding goedkeuren mislukt", 500, error.message);
+    if (error) return bad("Afmelding goedkeuren mislukt", 500);
 
     // Bij goedkeuren blijft de aanmelding/context afgemeld.
     const statusPatch = { afmelding_id: id, afmelding_status: "goedgekeurd", afgemeld: true };
     const statusError = await setAanmeldingStatus(current, "afgemeld", statusPatch);
-    if (statusError) return bad("Aanmeldingstatus bijwerken mislukt", 500, statusError.message);
+    if (statusError) return bad("Aanmeldingstatus bijwerken mislukt", 500);
 
     const contextError = await setContextStatus(current, "afgemeld", statusPatch);
-    if (contextError) return bad("Fighter context bijwerken mislukt", 500, contextError.message);
+    if (contextError) return bad("Fighter context bijwerken mislukt", 500);
 
-    return NextResponse.json({ ok: true, afmelding: data });
+    return privateJson({ ok: true, afmelding: data });
   } catch (e: any) {
-    return bad(e?.message || "Server fout", 500);
+    return secureError(e, "Afmelding kon niet worden goedgekeurd.");
   }
 }
 

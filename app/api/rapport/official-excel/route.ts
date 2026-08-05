@@ -1,5 +1,6 @@
 // app/api/rapport/official-excel/route.ts
 import { NextResponse } from "next/server";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 import ExcelJS from "exceljs";
 import { createClient } from "@supabase/supabase-js";
 
@@ -1815,6 +1816,7 @@ export async function GET(req: Request) {
         { status: 400 },
       );
     }
+    await requireMatchmakingAccess(req, matchmaking_id);
 
     const run = await getLatestRun(matchmaking_id);
     if (!run?.id) {
@@ -1972,15 +1974,12 @@ export async function GET(req: Request) {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-store",
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
     console.error("❌ official excel export error:", e);
-    return NextResponse.json(
-      { error: e?.message ?? "Onbekende fout" },
-      { status: 500 },
-    );
+    return secureError(e, "Official-export kon niet worden gemaakt.");
   }
 }
 

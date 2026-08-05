@@ -1,5 +1,7 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -21,7 +23,7 @@ export default function NieuweTalentstatusPartijPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { fetch("/api/admin/beheer/talentstatus/vechters?status=alles", { cache: "no-store" }).then(r => r.json()).then(j => setFighters(j.items || [])); }, []);
+  useEffect(() => { authedFetch("/api/admin/beheer/talentstatus/vechters?status=alles", { cache: "no-store" }).then(r => r.json()).then(j => setFighters(j.items || [])); }, []);
   function set<K extends keyof typeof form>(key: K, value: string) { setForm(f => ({ ...f, [key]: value })); }
   function choose(side: "vechter" | "tegenstander", id: string) {
     const f = fighters.find(x => x.id === id);
@@ -75,7 +77,7 @@ export default function NieuweTalentstatusPartijPage() {
       winnaar: winnerName || null,
       uitslag: buildUitslag(),
     };
-    const res = await fetch("/api/admin/beheer/talentstatus/partijen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const res = await authedFetch("/api/admin/beheer/talentstatus/partijen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const json = await res.json(); setSaving(false);
     if (!json.ok) return setError(json.error || "Opslaan mislukt");
     router.push("/dashboard/admin/beheer/talentstatus/rapportage");

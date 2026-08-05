@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Check, Pencil, RefreshCw, Save, X, XCircle } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { supabase } from "@/lib/supabaseClient";
 
 export default function FighterDossierPage() {
   const params = useParams<{ matchmakingId?: string; fighterId?: string }>();
@@ -46,8 +45,13 @@ export default function FighterDossierPage() {
       return;
     }
 
+    if (!matchmakingId) {
+      setError("Matchmaking ontbreekt.");
+      return;
+    }
+
     const response = await authedFetch(
-      `/api/admin/fightpassport-beheer/fighters/${resolvedVa}`,
+      `/api/matchmaker/matchmaking/${encodeURIComponent(matchmakingId)}/fighter/${encodeURIComponent(resolvedVa)}`,
       { cache: "no-store" },
     );
     const json = await response.json().catch(() => ({}));
@@ -56,32 +60,8 @@ export default function FighterDossierPage() {
       return;
     }
     setData(json);
-
-    if (!matchmakingId) {
-      setAanmelding(null);
-      setFighterRuleMeldingen([]);
-      return;
-    }
-
-    const [{ data: matchRows }, { data: aanRows }, { data: ruleRows, error: ruleError }] =
-      await Promise.all([
-        supabase.from("matchmakings").select("datum").eq("id", matchmakingId).limit(1),
-        supabase
-          .from("aanmeldingen")
-          .select("*")
-          .eq("matchmaking_id", matchmakingId)
-          .eq("va_nummer", resolvedVa)
-          .limit(1),
-        supabase
-          .from("matchmaker_fighter_resultaten")
-          .select("*")
-          .eq("matchmaking_id", matchmakingId)
-          .eq("va_nummer", resolvedVa)
-          .order("created_at", { ascending: false }),
-      ]);
-
-    setEventDate(matchRows?.[0]?.datum ?? null);
-    const currentAanmelding = aanRows?.[0] ?? null;
+    setEventDate(json?.eventDate ?? null);
+    const currentAanmelding = json?.aanmelding ?? null;
     setAanmelding(currentAanmelding);
     setEditForm({
       naam: String(currentAanmelding?.naam ?? currentAanmelding?.fighter_naam ?? ""),
@@ -95,12 +75,8 @@ export default function FighterDossierPage() {
       telefoon: String(currentAanmelding?.telefoon ?? currentAanmelding?.phone ?? ""),
     });
 
-    if (ruleError) {
-      console.warn("[fighter-dossier] fighter rules laden mislukt:", ruleError.message);
-      setFighterRuleMeldingen([]);
-    } else {
-      setFighterRuleMeldingen(
-        (ruleRows ?? []).map((row: any) => ({
+    setFighterRuleMeldingen(
+        (json?.fighterRuleMeldingen ?? []).map((row: any) => ({
           ...row,
           soort: row?.rule ?? row?.rule_code ?? "Matchmakerregel",
           type: row?.regel_type ?? "matchmaker_fighter",
@@ -110,7 +86,6 @@ export default function FighterDossierPage() {
           bron_melding: "fighter_rules",
         })),
       );
-    }
   }
 
   useEffect(() => {

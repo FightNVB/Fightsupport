@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildYocResults } from '@/lib/yoc/yocRules';
+import { requireAdminAccess, secureError } from '@/lib/api/secureRoute';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,7 +10,8 @@ function adminClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
 }
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ yocId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ yocId: string }> }) {
+  try { await requireAdminAccess(req); } catch (error) { return secureError(error); }
   const { yocId } = await params;
   const supabase = adminClient();
 
@@ -17,7 +19,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ yo
     const { data: run, error: runErr } = await supabase
       .from('yoc_runs')
       .insert({ yoc_event_id: yocId, run_type: 'rules', status: 'running' })
-      .select('*')
+      .select('id')
       .single();
     if (runErr) throw runErr;
 
@@ -25,7 +27,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ yo
 
     const { data: contexts, error } = await supabase
       .from('yoc_fighter_context')
-      .select('*')
+      .select('fighter_raw_id,va_nummer,naam_mm,naam_fp,geslacht_mm,geslacht_fp,licentie,heeft_startverbod,sportschool_mm,keurmerk_ok,keurmerk_reden,created_at')
       .eq('yoc_event_id', yocId)
       .order('created_at', { ascending: true });
     if (error) throw error;
@@ -56,6 +58,6 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ yo
 
     return NextResponse.json({ ok: true, total_results: results.length });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+    return secureError(e, 'YOC-regels konden niet worden uitgevoerd.');
   }
 }

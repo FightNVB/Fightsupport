@@ -18,7 +18,6 @@ function asText(v: unknown) {
 export async function PATCH(req: Request) {
   try {
     const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
-    const userId = String((auth as any)?.user?.id ?? "").trim();
     const body = await req.json();
 
     const requestId = asText(body?.request_id);
@@ -30,17 +29,15 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "response moet accepted of declined zijn" }, { status: 400 });
     }
 
-    const { data: existing, error: existingError } = await supabase
+    let existingQuery = supabase
       .from("event_requests")
-      .select("id, toegewezen_hoofdofficial_user_id")
-      .eq("id", requestId)
-      .maybeSingle();
+      .select("id,bondteam")
+      .eq("id", requestId);
+    if (auth.role !== "admin" && auth.role !== "superadmin") existingQuery = existingQuery.eq("bondteam", String(auth.bondteam ?? ""));
+    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
 
     if (existingError) throw existingError;
     if (!existing) return NextResponse.json({ error: "Verzoek niet gevonden" }, { status: 404 });
-    if (String(existing.toegewezen_hoofdofficial_user_id ?? "") !== userId) {
-      return NextResponse.json({ error: "Niet toegestaan voor dit verzoek" }, { status: 403 });
-    }
 
     const patch: Record<string, unknown> = {
       reactie_official: reason,
@@ -57,10 +54,12 @@ export async function PATCH(req: Request) {
       patch.accepted_at = null;
     }
 
-    const { error } = await supabase
+    let updateQuery = supabase
       .from("event_requests")
       .update(patch)
       .eq("id", requestId);
+    if (auth.role !== "admin" && auth.role !== "superadmin") updateQuery = updateQuery.eq("bondteam", String(auth.bondteam ?? ""));
+    const { error } = await updateQuery;
 
     if (error) throw error;
 

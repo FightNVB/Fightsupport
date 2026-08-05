@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ function normalizeVa(v: unknown) {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ matchmakingid: string }> },
 ) {
   try {
@@ -24,6 +25,7 @@ export async function GET(
     if (!matchmakingId) {
       return NextResponse.json({ error: "Ongeldige matchmaking id" }, { status: 400 });
     }
+    await requireMatchmakingAccess(req, matchmakingId);
 
     const { data, error } = await supabase
       .from("matchmaker_uitslagen_raw")
@@ -32,7 +34,7 @@ export async function GET(
       .order("datum", { ascending: false, nullsFirst: false });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Uitslagen laden mislukt." }, { status: 500 });
     }
 
     const rows = (data ?? []).map((r: any) => ({
@@ -44,11 +46,8 @@ export async function GET(
       matchmaker_uitslagen_raw: rows,
       uitslagen: rows,
       count: rows.length,
-    });
+    }, { headers: { "Cache-Control": PRIVATE_NO_STORE } });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Uitslagen laden mislukt" },
-      { status: 500 },
-    );
+    return secureError(e, "Uitslagen laden mislukt.");
   }
 }

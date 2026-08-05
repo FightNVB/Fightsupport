@@ -71,6 +71,7 @@ const sections: ListSection[] = [
     description: "Matchmakings, afmeldingen, archief, sancties en historische gegevens.",
     items: [
       { title: "Matchmakingoverzicht", description: "Eigenaar, bondteam, stadium en status van matchmakings controleren.", href: "/dashboard/admin/algemeen/matchmakings", icon: GitBranch },
+      { title: "FightPassport evenementen", description: "Evenementen uit FightPassport synchroniseren, beheren en bekijken.", href: "/dashboard/admin/evenementen", icon: CalendarDays },
       { title: "Afmeldingen", description: "Afmeldingen van vechters bekijken en administratief verwerken.", href: "/dashboard/admin/algemeen/afmeldingen", icon: UserMinus },
       { title: "Archief", description: "Afgeronde evenementen, partijen, rapporten en dossiers openen.", href: "/dashboard/admin/algemeen/archief", icon: Archive },
       { title: "Sancties & waarschuwingen", description: "Overtredingen, sancties, waarschuwingen en minpunten beheren.", href: "/dashboard/admin/algemeen/overtredingen", icon: ShieldAlert },

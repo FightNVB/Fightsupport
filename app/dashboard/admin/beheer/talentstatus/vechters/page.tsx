@@ -1,5 +1,7 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -39,7 +41,7 @@ export default function TalentstatusVechtersOverzichtPage() {
   async function load() {
     setLoading(true);
     setError("");
-    const res = await fetch(`/api/admin/beheer/talentstatus/vechters?status=${status}&q=${encodeURIComponent(q)}`, { cache: "no-store" });
+    const res = await authedFetch(`/api/admin/beheer/talentstatus/vechters?status=${status}&q=${encodeURIComponent(q)}`, { cache: "no-store" });
     const json = await res.json();
     setLoading(false);
     if (!json.ok) return setError(json.error || "Laden mislukt");

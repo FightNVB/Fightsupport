@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { authedDownload } from "@/lib/api/authedDownload";
 
 const ORANGE = "#ff4d00";
 
@@ -398,6 +399,10 @@ export default function AdminReadyToUploadPage() {
                                   <div className="flex flex-wrap justify-end gap-1">
                                     <a
                                       href={`/api/officials/uitslagen/export?matchmaking_id=${encodeURIComponent(row.matchmaking_id)}`}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        void authedDownload(`/api/officials/uitslagen/export?matchmaking_id=${encodeURIComponent(row.matchmaking_id)}`, "uitslagen.xlsx");
+                                      }}
                                       className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-2 py-1 text-[10px] font-black uppercase !text-black"
                                     >
                                       Excel

@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { supabase } from "@/lib/supabaseClient";
 
 export default function FighterDossierPage(){
  const params=useParams<{matchmakingId?:string;fighterId?:string}>();
@@ -16,43 +15,18 @@ export default function FighterDossierPage(){
  async function load(){
   if(!matchmakingId||!fighterId){setError("Matchmaking of vechter ontbreekt.");return;}
 
-  let contextQuery=supabase
-   .from("matchmaker_fighter_context")
-   .select("va_nummer")
-   .eq("matchmaking_id",matchmakingId);
-
-  if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(fighterId)){
-   contextQuery=contextQuery.eq("fighter_id",fighterId);
-  }else{
-   contextQuery=contextQuery.or(`inschrijving_id.eq.${fighterId},id.eq.${fighterId}`);
-  }
-
-  const {data:contextRows}=await contextQuery.limit(1);
-  let resolvedVa=String(contextRows?.[0]?.va_nummer??"").replace(/\D/g,"");
-
-  if(!resolvedVa&&/^\d+$/.test(fighterId)){
-   const {data:aanRows}=await supabase
-    .from("aanmeldingen")
-    .select("va_nummer")
-    .eq("matchmaking_id",matchmakingId)
-    .eq("id",fighterId)
-    .limit(1);
-   resolvedVa=String(aanRows?.[0]?.va_nummer??"").replace(/\D/g,"");
-  }
+  const resolveResponse=await authedFetch(`/api/officials/matchmaking/${encodeURIComponent(matchmakingId)}/fighter-ref/${encodeURIComponent(fighterId)}`);
+  const resolveJson=await resolveResponse.json().catch(()=>({}));
+  if(!resolveResponse.ok){setError(resolveJson.error||"Vechter opzoeken mislukt");return;}
+  const resolvedVa=String(resolveJson?.va??"").replace(/\D/g,"");
 
   if(!resolvedVa){setError("Geen VA-nummer gevonden voor deze vechter in deze matchmaking.");return;}
 
-  const r=await authedFetch(`/api/admin/fightpassport-beheer/fighters/${resolvedVa}`);
+  const r=await authedFetch(`/api/officials/matchmaking/${encodeURIComponent(matchmakingId)}/fighter/${encodeURIComponent(resolvedVa)}`);
   const j=await r.json().catch(()=>({}));
   if(!r.ok){setError(j.error||"Laden mislukt");return;}
   setData(j);
-
-  const {data:matchRows}=await supabase
-   .from("matchmakings")
-   .select("datum")
-   .eq("id",matchmakingId)
-   .limit(1);
-  setEventDate(matchRows?.[0]?.datum??null);
+  setEventDate(j?.eventDate??null);
  }
  useEffect(()=>{load()},[fighterId,matchmakingId]); if(error)return <main style={s.page}><button style={s.silver} onClick={()=>router.back()}>Terug</button><p>{error}</p></main>; if(!data)return <main style={s.page}>Dossier laden...</main>;
  const f=data.fighter;

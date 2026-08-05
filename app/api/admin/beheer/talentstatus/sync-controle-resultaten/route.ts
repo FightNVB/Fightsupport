@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { cleanVa, supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(req: Request) {
+  await requireAdmin(req);
   const { data: regels, error } = await supabaseAdmin
     .from("controle_resultaten")
     .select("*")
@@ -12,7 +14,7 @@ export async function POST() {
     .order("created_at", { ascending: false })
     .limit(250);
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
 
   let inserted = 0;
   for (const r of regels ?? []) {

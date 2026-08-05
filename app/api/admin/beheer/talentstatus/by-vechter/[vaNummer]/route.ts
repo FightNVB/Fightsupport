@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,8 @@ function cleanVa(value: unknown) {
     .replace(/^0+/, "");
 }
 
-export async function GET(_: Request, ctx: { params: Promise<{ vaNummer: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ vaNummer: string }> }) {
+  await requireAdmin(req);
   const { vaNummer } = await ctx.params;
   const va = cleanVa(vaNummer);
 
@@ -26,7 +28,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ vaNummer: string 
     .eq("va_nummer", va)
     .order("created_at", { ascending: false });
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
 
   const { data: partijen, error: partijenError } = await supabaseAdmin
     .from("jeugd_talentstatus_partijen")
@@ -36,7 +38,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ vaNummer: string 
     .order("created_at", { ascending: false });
 
   if (partijenError) {
-    return NextResponse.json({ ok: false, error: partijenError.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, dossiers: dossiers ?? [], partijen: partijen ?? [] });

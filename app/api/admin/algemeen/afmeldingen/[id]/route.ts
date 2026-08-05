@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserWithRole } from "@/app/api/_utils/authz";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -200,7 +200,8 @@ async function restoreContextAfterDelete(row: AnyRow, userId: string | null) {
   return result.error;
 }
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> | { id: string } }) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> | { id: string } }) {
+  await requireAdmin(req);
   try {
     const params = await ctx.params;
     const id = params.id;
@@ -225,8 +226,8 @@ export async function DELETE(
   req: Request,
   ctx: { params: Promise<{ id: string }> | { id: string } },
 ) {
+  const { userId } = await requireAdmin(req);
   try {
-    const { userId } = await requireUserWithRole(req, ["admin", "superadmin"]);
     const params = await ctx.params;
     const id = params.id;
 

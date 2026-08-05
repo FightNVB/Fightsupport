@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { rulesEngine } from "@/lib/rulesEngine";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import { secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 
@@ -54,6 +56,9 @@ export async function POST(req: Request) {
     if (!matchmaking_id || !controle_run_id || !bout_id || !hoek) {
       return NextResponse.json({ ok: false, error: "matchmaking_id, controle_run_id, bout_id en hoek zijn verplicht" }, { status: 400 });
     }
+
+    const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    await assertCanAccessMatchmaking({ matchmaking_id, userId: auth.userId, role: auth.role });
 
     // 1) bestaande ctx ophalen
     const { data: ctx, error: ctxErr } = await supabaseAdmin
@@ -134,6 +139,6 @@ export async function POST(req: Request) {
       inserted: hits.length,
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Onbekende fout" }, { status: 500 });
+    return secureError(e, "Sportschool kon niet worden bijgewerkt.");
   }
 }

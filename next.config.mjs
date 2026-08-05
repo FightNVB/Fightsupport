@@ -8,6 +8,34 @@ const nextConfig = {
   async headers() {
     return [
       {
+        source: "/api/admin/discipline/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      {
+        source: "/api/admin/beheer/talentstatus/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      {
+        source: "/api/admin/algemeen/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      {
+        source: "/api/admin/sportscholen/fightcrew",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      {
         // Apply security headers to all routes
         source: "/(.*)",
         headers: [

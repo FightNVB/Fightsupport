@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PRIVATE_NO_STORE, requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,8 +97,9 @@ function makePdf(lines: string[]) {
   return Buffer.from(pdf, "latin1");
 }
 
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   try {
+    await requireAdminAccess(req);
     const { yocId } = await params;
     const supabase = adminClient();
     const [{ data: event }, { data: fighters, error: fErr }, { data: contexts }, { data: results }] = await Promise.all([
@@ -147,10 +149,10 @@ export async function GET(_req: Request, { params }: Params) {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="yoc-rapport-${yocId}.pdf"`,
-        "Cache-Control": "no-store",
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+    return secureError(e, "YOC-rapport kon niet worden gemaakt.");
   }
 }

@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireUserWithRole, supabaseAdmin } from "@/app/api/_utils/authz";
+import { privateJson, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function supabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE;
-  if (!url || !key) throw new Error("Supabase service role configuratie ontbreekt.");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-}
 
 function getNoteValue(note: unknown, key: string) {
   const text = String(note ?? "");
@@ -79,23 +73,23 @@ async function getLoggedInProfile(supabase: any, req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = supabaseAdmin();
-    const { profile, error: authError } = await getLoggedInProfile(supabase, req);
-
-    if (authError || !profile?.bondteam) {
-      return NextResponse.json({ ok: true, items: [], bondteam: null, warning: authError });
+    const auth = await requireUserWithRole(req, ["official", "hoofdofficial", "admin", "superadmin"]);
+    const bondteam = String(auth.bondteam ?? "").trim();
+    if ((auth.role === "official" || auth.role === "hoofdofficial") && !bondteam) {
+      return privateJson({ error: "Geen bondteam gekoppeld." }, 403);
     }
 
-    const bondteam = String(profile.bondteam).trim();
-
-    const { data, error } = await supabase
+    let query = supabaseAdmin
       .from("discipline_cases")
       .select("*")
       .eq("bron_type", "official")
-      .eq("gemeld_door_bondteam", bondteam)
       .order("datum_overtreding", { ascending: false, nullsFirst: false })
       .order("aangemaakt_op", { ascending: false, nullsFirst: false })
       .limit(500);
+    if (auth.role === "official" || auth.role === "hoofdofficial") {
+      query = query.eq("gemeld_door_bondteam", bondteam);
+    }
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -104,7 +98,7 @@ export async function GET(req: NextRequest) {
     const profileById = new Map<string, any>();
 
     if (creatorIds.length) {
-      const { data: profiles } = await supabase
+      const { data: profiles } = await supabaseAdmin
         .from("user_profiles")
         .select("id, full_name, email, bondteam, role")
         .in("id", creatorIds);
@@ -112,8 +106,8 @@ export async function GET(req: NextRequest) {
       for (const profile of profiles || []) profileById.set(String(profile.id), profile);
     }
 
-    return NextResponse.json({ ok: true, bondteam, items: rows.map((row: any) => normalize(row, profileById)) });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Meldingen ophalen mislukt." }, { status: 500 });
+    return privateJson({ ok: true, bondteam: auth.role === "superadmin" ? null : bondteam, items: rows.map((row: any) => normalize(row, profileById)) });
+  } catch (error) {
+    return secureError(error, "Meldingen ophalen mislukt.");
   }
 }

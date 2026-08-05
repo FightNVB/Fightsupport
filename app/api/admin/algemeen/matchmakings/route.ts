@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ function uniq(values: Array<string | null | undefined>) {
 }
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   try {
     const sp = req.nextUrl.searchParams;
     const q = cleanText(sp.get("q")).toLowerCase();
@@ -52,7 +54,7 @@ export async function GET(req: NextRequest) {
     const { data: rows, error } = await query;
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
     }
 
     const userIds = uniq(
@@ -78,7 +80,7 @@ export async function GET(req: NextRequest) {
         .in("id", userIds);
 
       if (profileError) {
-        return NextResponse.json({ ok: false, error: profileError.message }, { status: 500 });
+        return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
       }
 
       profilesById = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
@@ -129,11 +131,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ ok: true, items });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest) {
+  await requireAdmin(req);
   try {
     const body = await req.json();
     const id = cleanText(body.id);
@@ -160,11 +163,11 @@ export async function PATCH(req: NextRequest) {
       .single();
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, item: data });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Opslaan mislukt" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }

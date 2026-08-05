@@ -692,16 +692,12 @@ function MatchmakingPageContent() {
       return [];
     }
 
-    const { data: profileData, error: profileError } = await supabase
-      .from("user_profiles")
-      .select("id, full_name, bondteam")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profileError) console.error("Fout bij laden profiel:", profileError);
+    const profileResponse = await authedFetch("/api/me/profile", { method: "GET", cache: "no-store" });
+    const profileData = await profileResponse.json().catch(() => ({}));
+    if (!profileResponse.ok) console.error("Fout bij laden profiel:", profileData?.error || profileResponse.statusText);
 
     const normalizedProfile: Profile = {
-      id: profileData?.id ?? user.id,
+      id: user.id,
       full_name: profileData?.full_name ?? "",
       bondteam: normalizeBondteam(profileData?.bondteam ?? ""),
     };

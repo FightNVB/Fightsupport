@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cleanVa, supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -56,7 +57,8 @@ async function updateEvaluatieStatusForFighter(fighterId: string | null) {
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ partijId: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ partijId: string }> }) {
+  await requireAdmin(req);
   const { partijId } = await params;
 
   if (!partijId) {
@@ -69,7 +71,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     .eq("id", partijId)
     .maybeSingle();
 
-  if (getError) return NextResponse.json({ ok: false, error: getError.message }, { status: 500 });
+  if (getError) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   if (!partij) return NextResponse.json({ ok: false, error: "Partij niet gevonden." }, { status: 404 });
 
   const { error } = await supabaseAdmin
@@ -77,7 +79,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     .delete()
     .eq("id", partijId);
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
 
   await updateEvaluatieStatusForFighter(partij.vechter_id);
   await updateEvaluatieStatusForFighter(partij.tegenstander_id);

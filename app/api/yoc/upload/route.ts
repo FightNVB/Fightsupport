@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { parseYocExcel } from '@/lib/yoc/parseYocExcel';
+import { requireAdminAccess, secureError } from '@/lib/api/secureRoute';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,7 @@ async function safeInsertRows(supabase: any, table: string, rows: Record<string,
   const dropped: string[] = [];
 
   for (let attempt = 0; attempt < 40; attempt++) {
-    const { data, error } = await supabase.from(table).insert(body).select('*');
+    const { data, error } = await supabase.from(table).insert(body).select('id');
     if (!error) return { data: data ?? [], error: null, dropped };
 
     const col = missingColumnName(error);
@@ -55,6 +56,7 @@ async function safeInsertRows(supabase: any, table: string, rows: Record<string,
 
 export async function POST(req: NextRequest) {
   try {
+    await requireAdminAccess(req);
     const form = await req.formData();
     const file = form.get('file');
     const eventName = String(form.get('event_name') || 'YOC');
@@ -72,7 +74,7 @@ export async function POST(req: NextRequest) {
     const { data: event, error: eventErr } = await supabase
       .from('yoc_events')
       .insert({ naam: eventName, event_datum: eventDate || null, locatie: locatie || null, status: 'uploaded' })
-      .select('*')
+      .select('id')
       .single();
 
     if (eventErr) throw eventErr;
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest) {
     const { data: upload, error: uploadErr } = await supabase
       .from('yoc_uploads')
       .insert({ yoc_event_id: event.id, raw_filename: file.name, total_rows: fighters.length })
-      .select('*')
+      .select('id')
       .single();
 
     if (uploadErr) throw uploadErr;
@@ -106,6 +108,6 @@ export async function POST(req: NextRequest) {
       dropped_columns: rowsSave.dropped,
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+    return secureError(e, 'YOC-upload kon niet worden verwerkt.');
   }
 }

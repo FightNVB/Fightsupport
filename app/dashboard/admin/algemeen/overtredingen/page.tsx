@@ -1,5 +1,7 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode, type FormEvent } from "react";
 import {
@@ -272,7 +274,7 @@ export default function OvertredingenPage() {
 
   async function enrichCaseDetail(item: DisciplineCase): Promise<DisciplineCase> {
     try {
-      const res = await fetch(`/api/admin/discipline/cases/${item.id}`, { cache: "no-store" });
+      const res = await authedFetch(`/api/admin/discipline/cases/${item.id}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
       if (!res.ok || json?.ok === false) return item;
       const detail = json?.case || json?.item || json?.data || json?.dossier || null;
@@ -291,7 +293,7 @@ export default function OvertredingenPage() {
     if (q.trim()) params.set("q", q.trim());
 
     try {
-      const res = await fetch(`/api/admin/discipline/cases?${params.toString()}`, { cache: "no-store" });
+      const res = await authedFetch(`/api/admin/discipline/cases?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!json.ok) setError(json.error || "Kon dossiers niet laden.");
       const baseCases: DisciplineCase[] = json.cases || [];
@@ -332,7 +334,7 @@ export default function OvertredingenPage() {
     setSaving(true);
     setError("");
     try {
-      const res = await fetch("/api/admin/discipline/cases", {
+      const res = await authedFetch("/api/admin/discipline/cases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -141,23 +141,23 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
 
     const rowId = String((body as any)?.id ?? "").trim();
-    if (!rowId) {
-      return NextResponse.json({ error: "id ontbreekt." }, { status: 400 });
+    const matchmakingId = String((body as any)?.matchmaking_id ?? "").trim();
+    if (!rowId || !matchmakingId) {
+      return NextResponse.json({ error: "id of matchmaking_id ontbreekt." }, { status: 400 });
     }
 
     const { admin, userId, isHoofdofficialLike } =
-      await getWeegstationAuthContext(req);
+      await getWeegstationAuthContext(req, matchmakingId);
 
     const { data: row, error: rowErr } = await admin
       .from("weigh_in_bouts")
       .select("*")
       .eq("id", rowId)
+      .eq("matchmaking_id", matchmakingId)
       .single();
 
     if (rowErr || !row)
       throw new Error(rowErr?.message ?? "Partij niet gevonden.");
-
-    await getWeegstationAuthContext(req, row.matchmaking_id);
 
     const isToernooi = !!row.is_toernooi || !!cleanText(row.toernooi_code);
     const nextRood = toNum((body as any)?.rood_gewogen_gewicht);

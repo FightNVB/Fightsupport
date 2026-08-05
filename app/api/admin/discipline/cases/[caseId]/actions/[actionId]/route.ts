@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ function normalizeNullable(value: unknown) {
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ caseId: string; actionId: string }> }) {
+  await requireAdmin(req);
   try {
     const { caseId, actionId } = await ctx.params;
     const body = await req.json();
@@ -62,11 +64,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ caseId: s
     // Bewerkingen aan een vervolgstap mogen het dossier niet automatisch sluiten.
     return NextResponse.json({ ok: true, action: data });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error?.message ?? "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }
 
-export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ caseId: string; actionId: string }> }) {
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ caseId: string; actionId: string }> }) {
+  await requireAdmin(req);
   try {
     const { caseId, actionId } = await ctx.params;
     const { error } = await supabase
@@ -78,6 +81,6 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ caseId:
     if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error?.message ?? "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }

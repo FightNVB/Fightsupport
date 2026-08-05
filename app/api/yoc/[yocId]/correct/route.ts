@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,6 +82,7 @@ async function cleanupOldContext(params: {
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
+  try { await requireAdminAccess(req); } catch (error) { return secureError(error); }
   const { yocId } = await params;
   const supabase = adminClient();
 
@@ -165,6 +167,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       message: "Correctie opgeslagen. Herscrape deze vechter om FightPassport-data opnieuw op te halen.",
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+    return secureError(e, "YOC-correctie kon niet worden opgeslagen.");
   }
 }

@@ -1,5 +1,6 @@
 // app/api/rapport/voorlopige-lineup-excel/route.ts
 import { NextResponse } from "next/server";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 import ExcelJS from "exceljs";
 import path from "path";
 import { existsSync } from "fs";
@@ -776,6 +777,7 @@ export async function GET(req: Request) {
       { status: 400 },
     );
   }
+  try { await requireMatchmakingAccess(req, matchmaking_id); } catch (error) { return secureError(error); }
 
   const { data: rawBouts, error } = await supabase
     .from("matchmaking_bouts_raw")
@@ -785,7 +787,7 @@ export async function GET(req: Request) {
     .order("partij_nr", { ascending: true });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: "Lineup kon niet worden geladen." }, { status: 500 });
   }
 
   const { data: controleRows, error: controleErr } = await supabase
@@ -975,6 +977,7 @@ export async function GET(req: Request) {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename=voorlopige-lineup.xlsx`,
+      "Cache-Control": PRIVATE_NO_STORE,
     },
   });
 }

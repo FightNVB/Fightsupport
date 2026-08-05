@@ -1,5 +1,8 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+import { AuthenticatedDownloadButton } from "@/app/dashboard/_components/AuthenticatedDownloadButton";
+
 import Link from "next/link";
 import { use, useEffect, useState, type ReactNode, type FormEvent } from "react";
 import {
@@ -161,7 +164,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/discipline/cases/${caseId}`, { cache: "no-store" });
+      const res = await authedFetch(`/api/admin/discipline/cases/${caseId}`, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!json.ok) setError(json.error || "Kon dossier niet laden.");
       setDossier(json.dossier || null);
@@ -188,7 +191,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     setSavingEdit(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/discipline/cases/${caseId}`, {
+      const res = await authedFetch(`/api/admin/discipline/cases/${caseId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -220,7 +223,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     setSaving(true);
     setError("");
 
-    const res = await fetch(`/api/admin/discipline/cases/${caseId}/actions`, {
+    const res = await authedFetch(`/api/admin/discipline/cases/${caseId}/actions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -243,7 +246,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     }
 
     if (huidigeDossierStatus !== "afgerond") {
-      const herstelRes = await fetch(`/api/admin/discipline/cases/${caseId}`, {
+      const herstelRes = await authedFetch(`/api/admin/discipline/cases/${caseId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: huidigeDossierStatus, afgerond_op: null }),
@@ -281,7 +284,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     setSaving(true);
     setError("");
     const huidigeDossierStatus = dossier?.status || "in_behandeling";
-    const res = await fetch(`/api/admin/discipline/cases/${caseId}/actions/${editingActionId}`, {
+    const res = await authedFetch(`/api/admin/discipline/cases/${caseId}/actions/${editingActionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...editAction, punten: Number(editAction.punten || 0) }),
@@ -289,7 +292,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
     const json = await res.json().catch(() => ({}));
 
     if (json.ok && huidigeDossierStatus !== "afgerond") {
-      await fetch(`/api/admin/discipline/cases/${caseId}`, {
+      await authedFetch(`/api/admin/discipline/cases/${caseId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: huidigeDossierStatus }),
@@ -307,7 +310,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
 
   async function closeCase() {
     if (!confirm("Dossier afronden?")) return;
-    const res = await fetch(`/api/admin/discipline/cases/${caseId}/close`, { method: "POST" });
+    const res = await authedFetch(`/api/admin/discipline/cases/${caseId}/close`, { method: "POST" });
     const json = await res.json().catch(() => ({}));
     if (!json.ok) setError(json.error || "Afronden mislukt.");
     await load();
@@ -315,7 +318,7 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
 
   async function deleteCase() {
     if (!confirm("Dossier verwijderen? Dit kan niet ongedaan gemaakt worden.")) return;
-    const res = await fetch(`/api/admin/discipline/cases/${caseId}`, { method: "DELETE" });
+    const res = await authedFetch(`/api/admin/discipline/cases/${caseId}`, { method: "DELETE" });
     const json = await res.json().catch(() => ({}));
     if (!json.ok) {
       setError(json.error || "Verwijderen mislukt.");
@@ -346,8 +349,8 @@ export default function DossierDetailPage({ params }: { params: Promise<{ caseId
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href="/dashboard/admin/algemeen/overtredingen" className={silverButton}><ArrowLeft size={16} /> Terug</Link>
-              <a href={`/api/admin/discipline/reports/case/${caseId}`} target="_blank" rel="noreferrer" className={silverButton}><FileText size={16} /> Rapport dossier</a>
-              <a href={`/api/admin/discipline/reports/offender?betrokkene_type=${encodeURIComponent(dossier.betrokkene_type || "")}&naam=${encodeURIComponent(dossier.naam || "")}&va_nummer=${encodeURIComponent(dossier.va_nummer || "")}`} target="_blank" rel="noreferrer" className={silverButton}><FileText size={16} /> Rapport overtreder</a>
+              <AuthenticatedDownloadButton href={`/api/admin/discipline/reports/case/${caseId}`} filename="discipline-dossier.html" className={silverButton}><FileText size={16} /> Rapport dossier</AuthenticatedDownloadButton>
+              <AuthenticatedDownloadButton href={`/api/admin/discipline/reports/offender?betrokkene_type=${encodeURIComponent(dossier.betrokkene_type || "")}&naam=${encodeURIComponent(dossier.naam || "")}&va_nummer=${encodeURIComponent(dossier.va_nummer || "")}`} filename="discipline-overtreder.html" className={silverButton}><FileText size={16} /> Rapport overtreder</AuthenticatedDownloadButton>
               <button onClick={() => { fillEditForm(dossier); setEditing((v) => !v); }} className={silverButton}>{editing ? <X size={16} /> : <Pencil size={16} />} {editing ? "Sluiten" : "Bewerk"}</button>
               <button onClick={() => setShowAction((v) => !v)} className={orangeButton}><Plus size={16} /> Vervolgstap</button>
               <button onClick={closeCase} className={silverButton}><CheckCircle2 size={16} /> Afronden</button>

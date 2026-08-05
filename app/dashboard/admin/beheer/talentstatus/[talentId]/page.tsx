@@ -1,5 +1,7 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
@@ -11,7 +13,7 @@ export default function TalentstatusDetailPage({ params }: { params: Promise<{ t
   const [error, setError] = useState("");
 
   async function load() {
-    const json = await fetch(`/api/admin/beheer/talentstatus/${talentId}`, { cache: "no-store" }).then(r => r.json());
+    const json = await authedFetch(`/api/admin/beheer/talentstatus/${talentId}`, { cache: "no-store" }).then(r => r.json());
     if (!json.ok) return setError(json.error || "Laden mislukt");
     setItem(json.item); setPartijen(json.partijen || []);
     setEvaluatie({ talent_status: json.item.talent_status || "voorlopig", evaluatie_resultaat: json.item.evaluatie_resultaat || "", evaluatie_opmerking: json.item.evaluatie_opmerking || "" });
@@ -19,7 +21,7 @@ export default function TalentstatusDetailPage({ params }: { params: Promise<{ t
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [talentId]);
 
   async function save(status: string) {
-    const json = await fetch(`/api/admin/beheer/talentstatus/${talentId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...evaluatie, talent_status: status }) }).then(r => r.json());
+    const json = await authedFetch(`/api/admin/beheer/talentstatus/${talentId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...evaluatie, talent_status: status }) }).then(r => r.json());
     if (!json.ok) return setError(json.error || "Opslaan mislukt");
     await load();
   }
@@ -27,7 +29,7 @@ export default function TalentstatusDetailPage({ params }: { params: Promise<{ t
   async function deletePartij(partijId: string) {
     if (!confirm("Weet je zeker dat je deze talentstatus-partij wilt verwijderen?")) return;
     setError("");
-    const json = await fetch(`/api/admin/beheer/talentstatus/partijen/${partijId}`, { method: "DELETE" }).then(r => r.json());
+    const json = await authedFetch(`/api/admin/beheer/talentstatus/partijen/${partijId}`, { method: "DELETE" }).then(r => r.json());
     if (!json.ok) return setError(json.error || "Verwijderen mislukt");
     await load();
   }

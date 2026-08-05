@@ -1690,22 +1690,17 @@ async function fetchMatchmakingTournamentBouts(matchmakingId: string) {
   });
 }
 
-async function fetchFightPassportResults(vaNumbers: string[]) {
+async function fetchFightPassportResults(matchmakingId: string, vaNumbers: string[]) {
   if (!vaNumbers.length) return [] as ResultRow[];
 
-  const { data, error } = await supabase
-    .from("fightpassport_results")
-    .select(
-      "id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,last_seen_at,created_at",
-    )
-    .in("va_nummer", vaNumbers)
-    .order("datum", { ascending: false });
-
-  if (error) {
-    throw new Error(`fightpassport_results laden mislukt: ${error.message}`);
-  }
-
-  return (data || []) as ResultRow[];
+  const query = vaNumbers.map((va) => `va=${encodeURIComponent(va)}`).join("&");
+  const response = await authedFetch(
+    `/api/matchmaker/${encodeURIComponent(matchmakingId)}/fightpassport?${query}`,
+    { cache: "no-store" },
+  );
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(json?.error || "FightPassport-uitslagen laden mislukt.");
+  return (json?.results || []) as ResultRow[];
 }
 
 export default function FightersPage() {
@@ -1930,7 +1925,7 @@ export default function FightersPage() {
       const vaNumbers = Array.from(
         new Set(fightersWithEventDate.map(vaOf).filter(Boolean)),
       );
-      const fightPassportResults = await fetchFightPassportResults(vaNumbers);
+      const fightPassportResults = await fetchFightPassportResults(matchmakingId, vaNumbers);
       setUitslagenRows(fightPassportResults);
       setExistingTournaments(loadedTournaments);
       setTournamentCode(nextTournamentCode(loadedTournaments));
@@ -4016,5 +4011,4 @@ const globalCss = `
 .fs-back-btn,.fs-dark-btn,.fs-orange-btn,.fs-filter,.fs-tab,.fs-icon-btn,.fs-clear-btn,.fs-tournament-btn,.fs-party-detail{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;text-decoration:none;font-weight:950;cursor:pointer;transition:.15s ease;border:1px solid rgba(255,255,255,.22);white-space:nowrap}.fs-back-btn {
   color: #000 !important;justify-self:end;color:#101114;padding:9px 13px;max-width:max-content;background:linear-gradient(180deg,#ffffff,#c5c8ce 55%,#f2f3f5);border-color:rgba(255,255,255,.85);box-shadow:inset 0 1px 0 #fff,0 7px 18px rgba(0,0,0,.35)}.fs-dark-btn{color:#fff;padding:10px 14px;background:linear-gradient(180deg,#2c2e35,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 8px 16px rgba(0,0,0,.24)}.fs-strong-btn{border-color:rgba(255,77,0,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 0 0 1px rgba(255,77,0,.22),0 10px 22px rgba(255,77,0,.18)}.fs-locked{color:#f9c7b7;border-color:rgba(255,77,0,.55);background:linear-gradient(180deg,#3a1d14,#151515)}.fs-orange-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.85);background:linear-gradient(180deg,#ff5c15,#a22b00);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 22px rgba(255,77,0,.28)}.fs-tournament-btn{color:#fff;padding:10px 14px;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff6a21,#822100);box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 0 24px rgba(255,77,0,.32)}.fs-star-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;background:transparent;color:#777;cursor:pointer}.fs-star-btn:hover:not(:disabled){color:#ffd43b;border-color:#6b5b16;background:#2b2713}.fs-star-btn.active{color:#ffd43b;border-color:#8a7416;background:#312b12}.fs-star-btn:disabled{opacity:.35;cursor:not-allowed}.fs-icon-btn{width:34px;height:34px;padding:0;color:#fff;border-radius:9px;background:linear-gradient(180deg,#2b2d34,#111217);box-shadow:inset 0 1px 0 rgba(255,255,255,.16);margin-right:5px}.fs-icon-btn.orange{background:linear-gradient(180deg,#ff5c15,#a22b00);border-color:rgba(255,77,0,.8)}.fs-icon-btn.red{background:linear-gradient(180deg,#ef4444,#991b1b);border-color:rgba(220,38,38,.9)}.fs-icon-btn.blue{background:linear-gradient(180deg,#3b82f6,#1d4ed8);border-color:rgba(37,99,235,.9)}.fs-clear-btn{margin-left:12px;padding:6px 10px;color:#111;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter{color:#111;padding:10px 13px;background:linear-gradient(180deg,#fff,#d7d9de);border-color:rgba(0,0,0,.2)}.fs-filter.active{color:#fff;border-color:rgba(255,77,0,.9);background:linear-gradient(180deg,#ff5c15,#b32f00)}.fs-tab{color:#fff;padding:9px 12px;background:linear-gradient(180deg,#ff6a21,#b43300);border-color:rgba(255,77,0,.95);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 8px 18px rgba(255,77,0,.16)}.fs-tab span{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;padding:0 7px;border-radius:999px;color:#111;background:linear-gradient(180deg,#ffffff,#d8dbe0);font-size:12px}.fs-tab.active{color:#fff;background:linear-gradient(180deg,#ff4d00,#7f2200);border-color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 2px rgba(255,77,0,.38),0 0 26px rgba(255,77,0,.34)}.fs-tab:disabled{opacity:.45;cursor:not-allowed}.fs-name-select{border:0;padding:0;margin:0;background:transparent;color:#ff4d00;font-size:15px;font-weight:950;cursor:default;text-align:left}.fs-name-select:not(:disabled){cursor:pointer;text-decoration:underline;text-underline-offset:3px}.fs-name-select.active{display:inline-flex;padding:6px 9px;border-radius:999px;color:#fff;background:linear-gradient(180deg,#ff5c15,#9a2800);box-shadow:0 0 0 1px rgba(255,77,0,.75),0 0 18px rgba(255,77,0,.24)}.fs-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 8px;background:#eef0f3;border:1px solid #c9ccd1;color:#111;font-weight:950;font-size:11px}.fs-badge.ok{background:#dcfce7;border-color:#16a34a;color:#166534}.fs-badge.bad{background:#fee2e2;border-color:#dc2626;color:#991b1b}.fs-party-detail{height:28px;padding:0 9px;color:#fff;border-radius:4px;border:1px solid rgba(0,0,0,.45);background:linear-gradient(180deg,#3d434d 0%,#22262d 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.10);font-size:11px;font-weight:950}.fs-party-detail:hover{border-color:#ff4d00;color:#fff}button:disabled{opacity:.55;cursor:not-allowed}@media (max-width: 900px){.fs-back-btn{justify-self:start}}
 `;
-
 

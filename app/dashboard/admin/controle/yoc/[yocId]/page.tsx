@@ -3,6 +3,8 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { authedFetch } from "@/lib/api/authedFetch";
+import { authedDownload } from "@/lib/api/authedDownload";
 
 type FilterTab = "all" | "actie" | "afkeur" | "geen_licentie" | "geen_keurmerk" | "startverbod";
 
@@ -175,7 +177,7 @@ export default function YocDetailPage({
     if (pollRef.current) window.clearInterval(pollRef.current);
 
     const tick = async () => {
-      const res = await fetch(
+      const res = await authedFetch(
         `/api/yoc/${yocId}/scrape/status?run_id=${runId}&t=${Date.now()}`,
       );
       const json = await res.json().catch(() => null);
@@ -285,7 +287,7 @@ export default function YocDetailPage({
 
   async function runScrape() {
     setBusy("YOC autocheck wordt gestart...");
-    const res = await fetch(`/api/yoc/${yocId}/scrape/start`, {
+    const res = await authedFetch(`/api/yoc/${yocId}/scrape/start`, {
       method: "POST",
     });
     const json = await res.json().catch(() => null);
@@ -309,7 +311,7 @@ export default function YocDetailPage({
     setBusyFighterId(String(f.id));
     setBusy(`Herscrape gestart voor ${f.naam_mm || f.naam || va}...`);
 
-    const res = await fetch(`/api/yoc/${yocId}/scrape/fighter`, {
+    const res = await authedFetch(`/api/yoc/${yocId}/scrape/fighter`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ yoc_fighter_id: f.id, va_nummer: va }),
@@ -330,8 +332,8 @@ export default function YocDetailPage({
     window.open(`/dashboard/admin/controle/yoc/${yocId}/rapport`, "_blank");
   }
 
-  function downloadExcel() {
-    window.location.href = `/api/yoc/${yocId}/excel`;
+  async function downloadExcel() {
+    await authedDownload(`/api/yoc/${yocId}/excel`, `yoc-controle-${yocId}.xlsx`);
   }
 
   function hasLicentieOk(f: any) {

@@ -798,7 +798,7 @@ function FighterMetalCard({
           type="button"
           onClick={onEdit}
           aria-label={`${label} vechter bewerken`}
-          className="relative z-[9999] inline-flex shrink-0 items-center justify-center rounded-md border px-3 py-1.5 text-xs font-black uppercase tracking-wide shadow-lg"
+          className="inline-flex shrink-0 items-center justify-center rounded-md border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide transition hover:opacity-90"
           style={{
             borderColor: "rgba(0,0,0,0.55)",
             background: "linear-gradient(180deg, #ffffff 0%, #d4d4d8 55%, #a1a1aa 100%)",
@@ -1527,59 +1527,14 @@ export default function PartijDetailPage() {
       return { uid: null as string | null, roles: [] as string[] };
     }
 
-    const names: string[] = [];
-
-    // Nieuwe accounts staan soms alleen in user_profiles.role / active_role
-    // en hebben nog geen rij in user_roles. Dan moet de matchmaker nog steeds
-    // de bewerkknop krijgen.
-    const { data: profile, error: profileErr } = await supabase
-      .from("user_profiles")
-      .select("role, active_role")
-      .eq("id", uid)
-      .maybeSingle();
-
-    if (profileErr) {
-      console.error("Fout bij laden user_profiles:", profileErr);
-    }
-
-    for (const value of [profile?.role, profile?.active_role]) {
-      const name = String(value ?? "").trim();
-      if (name && !names.some((x) => x.toLowerCase() === name.toLowerCase())) {
-        names.push(name);
-      }
-    }
-
-    const { data: ur, error: urErr } = await supabase
-      .from("user_roles")
-      .select("role_id")
-      .eq("user_id", uid);
-    if (urErr) {
-      console.error("Fout bij laden user_roles:", urErr);
-    }
-
-    const roleIds = (ur ?? [])
-      .map((x: any) => x.role_id)
-      .filter(Boolean) as string[];
-
-    if (roleIds.length > 0) {
-      const { data: rr, error: rrErr } = await supabase
-        .from("roles")
-        .select("id, name")
-        .in("id", roleIds);
-      if (rrErr) {
-        console.error("Fout bij laden roles:", rrErr);
-      } else {
-        for (const r of rr ?? []) {
-          const name = String((r as any)?.name ?? "").trim();
-          if (
-            name &&
-            !names.some((x) => x.toLowerCase() === name.toLowerCase())
-          ) {
-            names.push(name);
-          }
-        }
-      }
-    }
+    const response = await authedFetch("/api/me/profile", { method: "GET", cache: "no-store" });
+    const profile = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(profile?.error || "Rollen laden mislukt.");
+    const names = Array.from(new Set([
+      profile?.role,
+      profile?.active_role,
+      ...(Array.isArray(profile?.available_roles) ? profile.available_roles : []),
+    ].map((value) => String(value ?? "").trim()).filter(Boolean)));
 
     setRoleNames(names);
     return { uid, roles: names };
@@ -2026,20 +1981,21 @@ export default function PartijDetailPage() {
             ) ?? "",
           ).trim() || null;
         const vas = Array.from(new Set([vaR, vaB].filter(Boolean))) as string[];
+        let scopedFightPassportResults: UitslagRow[] = [];
 
         if (vas.length > 0) {
-          const { data: fighters, error: fightersErr } = await supabase
-            .from("fightpassport_fighters")
-            .select("*")
-            .in(
-              "va_nummer",
-              vas.map((v) => Number(v)).filter((v) => Number.isFinite(v)),
-            );
-
-          if (fightersErr) throw fightersErr;
+          const fpQuery = vas.map((va) => `va=${encodeURIComponent(va)}`).join("&");
+          const fpResponse = await authedFetch(
+            `/api/matchmaker/${encodeURIComponent(matchmakingId)}/fightpassport?${fpQuery}`,
+            { cache: "no-store" },
+          );
+          const fpJson = await fpResponse.json().catch(() => ({}));
+          if (!fpResponse.ok) throw new Error(fpJson?.error || "FightPassport-gegevens laden mislukt.");
+          const fighters = Array.isArray(fpJson?.fighters) ? fpJson.fighters : [];
+          scopedFightPassportResults = Array.isArray(fpJson?.results) ? fpJson.results : [];
 
           const byVa = new Map(
-            (fighters ?? []).map((f: any) => [String(f?.va_nummer ?? "").trim(), f]),
+            fighters.map((f: any) => [String(f?.va_nummer ?? "").trim(), f]),
           );
 
           const fillSide = (side: "rood" | "blauw", va: string | null) => {
@@ -2160,18 +2116,9 @@ export default function PartijDetailPage() {
             }
 
             // Fallback voor oudere of onvolledig gebouwde controles.
-            const vaNumber = Number(va);
-            const { data: liveRows, error: liveErr } = await supabase
-              .from("fightpassport_results")
-              .select("datum, discipline, klasse, uitslag")
-              .eq(
-                "va_nummer",
-                Number.isFinite(vaNumber) ? vaNumber : va,
-              )
-              .order("datum", { ascending: false });
-
-            if (liveErr) throw liveErr;
-            return (liveRows ?? []) as UitslagRow[];
+            return scopedFightPassportResults.filter(
+              (result: any) => String(result?.va_nummer ?? "").replace(/\D/g, "") === va.replace(/\D/g, ""),
+            );
           };
 
           const [roodRows, blauwRows] = await Promise.all([
@@ -3552,7 +3499,7 @@ export default function PartijDetailPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <div
               key={editMountKey}
-              className="w-full max-w-lg rounded-xl border-2 border-zinc-400 bg-white p-4 shadow-xl"
+              className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border-2 border-zinc-400 bg-white p-4 shadow-xl"
             >
               <div className="flex items-center justify-between">
                 <div className="font-extrabold text-zinc-900">
@@ -3705,8 +3652,8 @@ export default function PartijDetailPage() {
                 </div>
 
                 <div className="text-xs text-zinc-600">
-                  Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan +
-                  Autocheck” haalt daarna data Fightpaspoort opnieuw op.
+                  “Opslaan” werkt de gematchte partij én de gekoppelde aanmelding bij. “Opslaan +
+                  Autocheck” voert daarna ook de Fightpaspoortcontrole opnieuw uit.
                 </div>
               </div>
             </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { esc, formatDate, reportHtml } from "../_helpers";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ const supabase = createClient(
 );
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   try {
     const url = new URL(req.url);
     const betrokkeneType = url.searchParams.get("betrokkene_type") || "";
@@ -61,6 +63,6 @@ export async function GET(req: NextRequest) {
 
     return new NextResponse(reportHtml(`Rapport overtreder ${naam || vaNummer}`, body), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error?.message ?? "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }

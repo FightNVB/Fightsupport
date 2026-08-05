@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cleanVa, supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -114,6 +115,7 @@ function buildPdf(partijen: Row[], vechters: Row[]) {
 }
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   const { searchParams } = new URL(req.url);
   const type = searchParams.get("type") || "rapport";
   const va = cleanVa(searchParams.get("va"));
@@ -141,6 +143,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "PDF maken mislukt." }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }

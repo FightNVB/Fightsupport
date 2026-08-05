@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ function cleanText(value: unknown) {
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ caseId: string }> }) {
+  await requireAdmin(req);
   try {
     const { caseId } = await ctx.params;
     const body = await req.json();
@@ -54,6 +56,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ caseId: st
 
     return NextResponse.json({ ok: true, action: data });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error?.message ?? "Onbekende fout" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 }

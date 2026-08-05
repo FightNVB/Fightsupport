@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cleanVa, needsTalentstatus, normLand, supabaseAdmin } from "@/lib/talentstatusAdmin";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 
@@ -112,6 +113,7 @@ function matchesSearch(p: AnyRow, q: string) {
 }
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") || "";
   const va = cleanVa(searchParams.get("va"));
@@ -126,7 +128,7 @@ export async function GET(req: NextRequest) {
 
   const { data: manualRows, error: manualError } = await manualQuery;
   if (manualError) {
-    return NextResponse.json({ ok: false, error: manualError.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 
   const manualItems = (manualRows ?? []).map(normalizeManualPartij);
@@ -151,7 +153,7 @@ export async function GET(req: NextRequest) {
 
   const { data: boutRows, error: boutsError } = await boutsQuery;
   if (boutsError) {
-    return NextResponse.json({ ok: false, error: boutsError.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
   }
 
   const boutIds = (boutRows ?? []).map((b) => b.id).filter(Boolean);
@@ -169,7 +171,7 @@ export async function GET(req: NextRequest) {
       .in("uitslagen_bout_id", boutIds);
 
     if (resultatenError) {
-      return NextResponse.json({ ok: false, error: resultatenError.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
     }
 
     resultatenByBoutId = new Map(
@@ -186,7 +188,7 @@ export async function GET(req: NextRequest) {
       .in("id", matchmakingIds);
 
     if (matchmakingsError) {
-      return NextResponse.json({ ok: false, error: matchmakingsError.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
     }
 
     matchmakingsById = new Map(
@@ -224,6 +226,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  await requireAdmin(req);
   const body = await req.json();
 
   const vechterVa = cleanVa(body.vechter_va);
@@ -296,7 +299,7 @@ export async function POST(req: NextRequest) {
     .select("*")
     .single();
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
 
   for (const fighter of [v1, v2]) {
     if (!fighter) continue;

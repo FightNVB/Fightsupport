@@ -788,7 +788,7 @@ export default function FightPaspoortBeheerPage() {
         return <tr key={r.id}>
           <Td>{fmt(r.started_at)}</Td>
           <Td>{finishedAt ? fmt(finishedAt) : isDone ? "-" : "Nog bezig"}</Td>
-          <Td>{formatDuration(r.started_at, finishedAt)}</Td>
+          <Td>{formatDuration(r.started_at, finishedAt, status==="paused" ? r.meta?.last_stopped_at : undefined)}</Td>
           <Td>{isTeam ? `${totalTeamSchools} sportscholen` : isStartverbod ? `${r.meta?.excel_rijen ?? r.processed_count ?? 0} Excel-rijen` : isRetry ? `${totalRunItems} retry-VA's` : `${r.start_va}–${r.end_va}`}</Td>
           <Td>{isTeam || isStartverbod ? "—" : (r.last_processed_va ?? "—")}</Td>
           <Td>{isStartverbod ? (r.processed_count ?? 0) : `${r.processed_count ?? 0}/${isTeam ? totalTeamSchools : totalRunItems}`}</Td>
@@ -854,7 +854,7 @@ export default function FightPaspoortBeheerPage() {
               <Td>{selectedRunData.meta?.fighter_links ?? selectedRunData.licensed_count ?? 0}</Td>
               <Td>{fmt(selectedRunData.started_at)}</Td>
               <Td>{fmt(selectedRunData.finished_at ?? selectedRunData.completed_at ?? selectedRunData.ended_at)}</Td>
-              <Td>{formatDuration(selectedRunData.started_at, selectedRunData.finished_at ?? selectedRunData.completed_at ?? selectedRunData.ended_at)}</Td>
+              <Td>{formatDuration(selectedRunData.started_at, selectedRunData.finished_at ?? selectedRunData.completed_at ?? selectedRunData.ended_at, selectedRunData.status==="paused" ? selectedRunData.meta?.last_stopped_at : undefined)}</Td>
             </tr></tbody>
           </Table>
         ) : (
@@ -1073,10 +1073,14 @@ function fmtDate(v:any){
   return Number.isNaN(d.getTime())?"-":d.toLocaleDateString("nl-NL");
 }
 
-function formatDuration(start:any,end?:any){
+function formatDuration(start:any,end?:any,pauseAt?:any){
   if(!start)return "-";
   const startMs=new Date(start).getTime();
-  const endMs=end?new Date(end).getTime():Date.now();
+  const endMs=end
+    ? new Date(end).getTime()
+    : pauseAt
+      ? new Date(pauseAt).getTime()
+      : Date.now();
   if(Number.isNaN(startMs)||Number.isNaN(endMs)||endMs<startMs)return "-";
   const totalSeconds=Math.floor((endMs-startMs)/1000);
   const days=Math.floor(totalSeconds/86400);

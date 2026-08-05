@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +51,7 @@ function sortFighters(rows: AnyRow[]) {
 }
 
 export async function GET(req: NextRequest) {
+  await requireAdmin(req);
   try {
     const url = new URL(req.url);
 
@@ -96,7 +98,7 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
 
     if (schoolErr) {
-      return NextResponse.json({ error: schoolErr.message }, { status: 500 });
+      return NextResponse.json({ error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
     }
 
     if (!school) {
@@ -121,7 +123,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (e: any) {
     return NextResponse.json(
-      { error: e?.message ?? "Fightcrew ophalen mislukt" },
+      { error: "De aanvraag kon niet worden verwerkt." },
       { status: 500 }
     );
   }

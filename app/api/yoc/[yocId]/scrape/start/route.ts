@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { spawn } from "child_process";
 import path from "path";
 import { runYocFighterContextPipeline } from "@/lib/yoc/runYocFighterContextPipeline";
+import { requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -198,7 +199,8 @@ async function runYocAutocheckInBackground(yocId: string, yocRunId: string) {
   }
 }
 
-export async function POST(_req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
+  try { await requireAdminAccess(req); } catch (error) { return secureError(error); }
   const { yocId } = await params;
   const supabase = adminClient();
 

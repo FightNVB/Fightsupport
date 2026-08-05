@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 import { createClient } from "@supabase/supabase-js";
 import path from "path";
 import ExcelJS from "exceljs";
@@ -27,6 +28,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const matchmaking_id = String(url.searchParams.get("matchmaking_id") ?? "").trim();
     if (!matchmaking_id) return bad("matchmaking_id ontbreekt");
+    await requireMatchmakingAccess(req, matchmaking_id, ["admin", "superadmin"]);
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -134,9 +136,10 @@ export async function GET(req: Request) {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
-    return bad(e?.message ?? String(e), 500);
+    return secureError(e, "Export kon niet worden gemaakt.");
   }
 }

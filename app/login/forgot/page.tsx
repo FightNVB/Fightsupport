@@ -24,7 +24,7 @@ export default function ForgotPasswordPage() {
     setMessage("");
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login/reset`,
+      redirectTo: "https://fightsupport.nl/login/reset",
     });
 
     setBusy(false);

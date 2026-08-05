@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import { secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 
@@ -81,6 +83,9 @@ export async function POST(req: Request) {
     if (fighterContextId == null && inschrijvingIdFromBody == null) {
       return bad("inschrijving_id of fighter_context_id ontbreekt");
     }
+
+    const auth = await requireUserWithRole(req, ["matchmaker", "admin", "superadmin"]);
+    await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId: auth.userId, role: auth.role });
 
     let ctxRow: AnyRow | null = null;
 
@@ -262,6 +267,6 @@ export async function POST(req: Request) {
       status: "afgemeld",
     });
   } catch (e: any) {
-    return bad(e?.message || "Server fout", 500);
+    return secureError(e, "Afmelding kon niet worden verwerkt.");
   }
 }

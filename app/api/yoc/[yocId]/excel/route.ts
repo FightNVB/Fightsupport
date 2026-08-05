@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PRIVATE_NO_STORE, requireAdminAccess, secureError } from "@/lib/api/secureRoute";
 import * as XLSX from "xlsx";
 
 export const runtime = "nodejs";
@@ -72,8 +73,9 @@ function getChecks(c: any) {
   };
 }
 
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   try {
+    await requireAdminAccess(req);
     const { yocId } = await params;
     if (!yocId || yocId === "undefined") {
       return NextResponse.json({ ok: false, error: "Ongeldig YOC-id." }, { status: 400 });
@@ -151,10 +153,10 @@ export async function GET(_req: Request, { params }: Params) {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="yoc-controle-${yocId}.xlsx"`,
-        "Cache-Control": "no-store",
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+    return secureError(e, "YOC-export kon niet worden gemaakt.");
   }
 }

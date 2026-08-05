@@ -18,10 +18,11 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const rowId = String((body as any)?.id ?? "").trim();
+    const matchmakingId = String((body as any)?.matchmaking_id ?? "").trim();
     const decision = String((body as any)?.decision ?? "").trim().toLowerCase();
 
-    if (!rowId) {
-      return NextResponse.json({ error: "id ontbreekt." }, { status: 400 });
+    if (!rowId || !matchmakingId) {
+      return NextResponse.json({ error: "id of matchmaking_id ontbreekt." }, { status: 400 });
     }
 
     if (!["approved", "rejected"].includes(decision)) {
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const auth = await getWeegstationAuthContext(req);
+    const auth = await getWeegstationAuthContext(req, matchmakingId);
     const { admin, userId } = auth;
 
     if (!canDecideDispensation(auth)) {
@@ -48,13 +49,12 @@ export async function POST(req: Request) {
       .from("weigh_in_bouts")
       .select("*")
       .eq("id", rowId)
+      .eq("matchmaking_id", matchmakingId)
       .single();
 
     if (rowErr || !row) {
       throw new Error(rowErr?.message ?? "Partij niet gevonden.");
     }
-
-    await getWeegstationAuthContext(req, row.matchmaking_id);
 
     const evalResult = evaluateWeighInBout({
       discipline: row.discipline,

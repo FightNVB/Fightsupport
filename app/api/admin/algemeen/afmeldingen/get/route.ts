@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +47,7 @@ function normalize(row: AnyRow) {
 }
 
 export async function GET(req: Request) {
+  await requireAdmin(req);
   try {
     const url = new URL(req.url);
     const status = asString(url.searchParams.get("status"));

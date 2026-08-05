@@ -123,7 +123,7 @@ async function listAllAuthUsers() {
 }
 
 async function sendResetLoginMail(req: Request, email: string) {
-  const redirectTo = `${getBaseUrl(req)}/login/reset`;
+  const redirectTo = "https://fightsupport.nl/login/reset";
 
   const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
     redirectTo,

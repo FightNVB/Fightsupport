@@ -1,5 +1,7 @@
 "use client";
 
+import { authedFetch } from "@/lib/api/authedFetch";
+
 import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -507,7 +509,7 @@ export default function ContactpersonenFightcrewPage() {
   }
 
   async function loadMeekijkSportschool() {
-    const res = await fetch(`/api/admin/sportscholen/meekijken`, {
+    const res = await authedFetch(`/api/admin/sportscholen/meekijken`, {
       headers: await tokenHeaders(),
       cache: "no-store",
     });
@@ -517,7 +519,7 @@ export default function ContactpersonenFightcrewPage() {
   }
 
   async function loadExistingTrainerUsers() {
-    const res = await fetch(`/api/admin/users`, {
+    const res = await authedFetch(`/api/admin/users`, {
       headers: await tokenHeaders(),
       cache: "no-store",
     });
@@ -545,7 +547,7 @@ export default function ContactpersonenFightcrewPage() {
 
     try {
       const nextId = meekijkSportschoolId === id ? null : id;
-      const res = await fetch(`/api/admin/sportscholen/meekijken`, {
+      const res = await authedFetch(`/api/admin/sportscholen/meekijken`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -571,7 +573,7 @@ export default function ContactpersonenFightcrewPage() {
 
   async function searchSchools(nextQ = schoolQ) {
     setMelding("");
-    const res = await fetch(
+    const res = await authedFetch(
       `/api/admin/sportscholen?q=${encodeURIComponent(nextQ)}`,
       {
         headers: await tokenHeaders(),
@@ -601,7 +603,7 @@ export default function ContactpersonenFightcrewPage() {
     params.set("sportschool_id", activeId);
     if (nextQ.trim()) params.set("q", nextQ.trim());
 
-    const res = await fetch(
+    const res = await authedFetch(
       `/api/admin/sportscholen/contactpersonen?${params.toString()}`,
       {
         headers: await tokenHeaders(),
@@ -627,7 +629,7 @@ export default function ContactpersonenFightcrewPage() {
   }
 
   async function loadFighters(sportschoolId: string | number) {
-    const res = await fetch(
+    const res = await authedFetch(
       `/api/admin/sportscholen/fightcrew?sportschool_id=${encodeURIComponent(String(sportschoolId))}`,
       {
         headers: await tokenHeaders(),
@@ -707,7 +709,7 @@ export default function ContactpersonenFightcrewPage() {
     });
 
     try {
-      const res = await fetch(`/api/admin/sportscholen/fightcrew/start`, {
+      const res = await authedFetch(`/api/admin/sportscholen/fightcrew/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -743,7 +745,7 @@ export default function ContactpersonenFightcrewPage() {
     });
 
     try {
-      const res = await fetch(`/api/admin/sportscholen/fightcrew/enrich`, {
+      const res = await authedFetch(`/api/admin/sportscholen/fightcrew/enrich`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -770,7 +772,7 @@ export default function ContactpersonenFightcrewPage() {
   async function sendTrainerLogin(contact: Contact) {
     setLoginKey(contact.sportschool_id ?? null);
     try {
-      const res = await fetch(
+      const res = await authedFetch(
         `/api/admin/sportscholen/contactpersonen/login-versturen`,
         {
           method: "POST",
@@ -804,7 +806,7 @@ export default function ContactpersonenFightcrewPage() {
 
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/sportscholen/contactpersonen`, {
+      const res = await authedFetch(`/api/admin/sportscholen/contactpersonen`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -848,7 +850,7 @@ export default function ContactpersonenFightcrewPage() {
 
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/sportscholen/contactpersonen`, {
+      const res = await authedFetch(`/api/admin/sportscholen/contactpersonen`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -867,7 +869,7 @@ export default function ContactpersonenFightcrewPage() {
       if (!res.ok)
         throw new Error(json.error ?? "Bestaande gebruiker koppelen mislukt");
 
-      const profileRes = await fetch(`/api/admin/users`, {
+      const profileRes = await authedFetch(`/api/admin/users`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -916,7 +918,7 @@ export default function ContactpersonenFightcrewPage() {
     setEditBusy(true);
     setMelding("");
     try {
-      const res = await fetch(`/api/admin/sportscholen/contactpersonen/${editContact.id}`, {
+      const res = await authedFetch(`/api/admin/sportscholen/contactpersonen/${editContact.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -944,7 +946,7 @@ export default function ContactpersonenFightcrewPage() {
 
   async function removeContact(id: string) {
     setMelding("");
-    const res = await fetch(`/api/admin/sportscholen/contactpersonen/${id}`, {
+    const res = await authedFetch(`/api/admin/sportscholen/contactpersonen/${id}`, {
       method: "DELETE",
       headers: await tokenHeaders(),
     });

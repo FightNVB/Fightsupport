@@ -21,7 +21,7 @@ const API_OVERVIEW = "/api/officials/matchmakings-overzicht";
 const API_START_CONTROLE = "/api/control-engine/officials/start";
 const API_DELETE_MATCHMAKING = "/api/control-engine/delete-matchmaking";
 const API_NAAR_UITSLAGEN = "/api/matchmaking/naar-uitslagen";
-const API_VERPLAATS_NAAR_ADMIN_ARCHIEF = "/api/admin/archief/verplaats";
+const API_VERPLAATS_NAAR_ADMIN_ARCHIEF = "/api/officials/archive";
 
 const silverBackplate: CSSProperties = {
   background:

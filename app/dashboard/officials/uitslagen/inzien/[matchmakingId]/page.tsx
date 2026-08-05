@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { Eye, ShieldCheck } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
+import { authedFetch } from "@/lib/api/authedFetch";
 
 type BoutRow = {
   id: string;
@@ -78,27 +78,17 @@ export default function OfficialsUitslagenInzienPage() {
     if (!user?.id || !matchmakingId) return;
     setLoading(true); setError("");
     try {
-      const { data: profile, error: profileErr } = await supabase.from("user_profiles").select("bondteam").eq("id", user.id).maybeSingle();
-      if (profileErr) throw profileErr;
-      const profileBond = norm((profile as any)?.bondteam);
+      const response = await authedFetch(`/api/officials/uitslagen/${encodeURIComponent(matchmakingId)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Uitslagen laden mislukt.");
+      const profileBond = norm(payload?.viewerBondteam);
       setMyBondteam(profileBond);
-
-      const [{ data: mm, error: mmErr }, { data: upload, error: uploadErr }, { data: boutRows, error: boutErr }, { data: resultRows, error: resErr }] = await Promise.all([
-        supabase.from("matchmakings").select("id, naam, datum, bondteam, huidige_eigenaar_bondteam").eq("id", matchmakingId).maybeSingle(),
-        supabase.from("matchmaking_uploads").select("matchmaking_id, evenement_naam, evenement_datum, bondteam").eq("matchmaking_id", matchmakingId).maybeSingle(),
-        supabase.from("uitslagen_bouts").select("*").eq("matchmaking_id", matchmakingId).order("partij_nr", { ascending: true }),
-        supabase.from("uitslagen_resultaten").select("*").eq("matchmaking_id", matchmakingId),
-      ]);
-      if (mmErr) throw mmErr;
-      if (uploadErr) throw uploadErr;
-      if (boutErr) throw boutErr;
-      if (resErr) throw resErr;
+      const mm = payload?.matchmaking ?? null;
+      const upload = payload?.upload ?? null;
+      const boutRows = payload?.bouts ?? [];
+      const resultRows = payload?.results ?? [];
 
       const bond = norm((upload as any)?.bondteam || (mm as any)?.huidige_eigenaar_bondteam || (mm as any)?.bondteam);
-      if (!isSuperadmin || profileBond !== "NVB") {
-        if (bond && profileBond && bond !== profileBond) throw new Error("Je mag deze uitslagen niet inzien voor dit bondteam.");
-      }
-
       setMeta({
         naam: (upload as any)?.evenement_naam ?? (mm as any)?.naam ?? null,
         datum: (upload as any)?.evenement_datum ?? (mm as any)?.datum ?? null,

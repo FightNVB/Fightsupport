@@ -1,5 +1,6 @@
 // app/api/rapport/excel/route.ts
 import { NextResponse } from "next/server";
+import { PRIVATE_NO_STORE, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 import path from "path";
 import fs from "fs/promises";
 import ExcelJS from "exceljs";
@@ -1509,6 +1510,7 @@ export async function GET(req: Request) {
     if (!matchmaking_id) {
       return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
     }
+    await requireMatchmakingAccess(req, matchmaking_id);
 
     const run = await getLatestRun(matchmaking_id);
     if (!run?.id) {
@@ -2205,11 +2207,11 @@ export async function GET(req: Request) {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-store",
+        "Cache-Control": PRIVATE_NO_STORE,
       },
     });
   } catch (e: any) {
     console.error("❌ excel export error:", e);
-    return NextResponse.json({ error: e?.message ?? "Onbekende fout" }, { status: 500 });
+    return secureError(e, "Excel-export kon niet worden gemaakt.");
   }
 }
