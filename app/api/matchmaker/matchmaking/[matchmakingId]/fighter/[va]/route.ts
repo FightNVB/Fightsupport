@@ -151,13 +151,13 @@ export async function GET(
         .maybeSingle(),
       supabaseAdmin
         .from("aanmeldingen")
-        .select("id,naam,fighter_naam,sportschool,gym,discipline,sport,klasse,klasse_mm,geslacht,gender,gewicht,gewicht_kg,va_nummer,va,email,trainer_email,telefoon,phone")
+        .select("id,naam,gym,discipline,klasse,geslacht,gewicht,va_nummer,email,telefoon,source_type,upload_batch_id")
         .eq("matchmaking_id", matchmaking_id)
         .eq("va_nummer", va)
         .maybeSingle(),
       supabaseAdmin
         .from("matchmaker_fighter_resultaten")
-        .select("id,rule,rule_code,regel_type,boodschap,melding,omschrijving,resultaat,status,evenement,event_naam,created_at,review_status,actie_status,aantekeningen")
+        .select("id,matchmaking_id,inschrijving_id,va_nummer,rule,rule_code,resultaat,severity,boodschap,created_at,review_status,review_note,reviewed_by,reviewed_at,actie_status,aantekeningen,event_id,bondteam")
         .eq("matchmaking_id", matchmaking_id)
         .eq("va_nummer", va)
         .order("created_at", { ascending: false }),

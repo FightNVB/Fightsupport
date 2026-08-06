@@ -64,25 +64,25 @@ export default function FighterDossierPage() {
     const currentAanmelding = json?.aanmelding ?? null;
     setAanmelding(currentAanmelding);
     setEditForm({
-      naam: String(currentAanmelding?.naam ?? currentAanmelding?.fighter_naam ?? ""),
-      sportschool: String(currentAanmelding?.sportschool ?? currentAanmelding?.gym ?? ""),
-      discipline: String(currentAanmelding?.discipline ?? currentAanmelding?.sport ?? ""),
-      klasse: String(currentAanmelding?.klasse ?? currentAanmelding?.klasse_mm ?? ""),
-      geslacht: String(currentAanmelding?.geslacht ?? currentAanmelding?.gender ?? ""),
-      gewicht: String(currentAanmelding?.gewicht ?? currentAanmelding?.gewicht_kg ?? ""),
-      va_nummer: String(currentAanmelding?.va_nummer ?? currentAanmelding?.va ?? ""),
-      email: String(currentAanmelding?.email ?? currentAanmelding?.trainer_email ?? ""),
-      telefoon: String(currentAanmelding?.telefoon ?? currentAanmelding?.phone ?? ""),
+      naam: String(currentAanmelding?.naam ?? ""),
+      sportschool: String(currentAanmelding?.gym ?? ""),
+      discipline: String(currentAanmelding?.discipline ?? ""),
+      klasse: String(currentAanmelding?.klasse ?? ""),
+      geslacht: String(currentAanmelding?.geslacht ?? ""),
+      gewicht: String(currentAanmelding?.gewicht ?? ""),
+      va_nummer: String(currentAanmelding?.va_nummer ?? ""),
+      email: String(currentAanmelding?.email ?? ""),
+      telefoon: String(currentAanmelding?.telefoon ?? ""),
     });
 
     setFighterRuleMeldingen(
         (json?.fighterRuleMeldingen ?? []).map((row: any) => ({
           ...row,
           soort: row?.rule ?? row?.rule_code ?? "Matchmakerregel",
-          type: row?.regel_type ?? "matchmaker_fighter",
-          melding: row?.boodschap ?? row?.melding ?? row?.omschrijving,
-          status: row?.resultaat ?? row?.status ?? "-",
-          evenement: row?.evenement ?? row?.event_naam ?? null,
+          type: "matchmaker_fighter",
+          melding: row?.boodschap,
+          status: row?.resultaat ?? "-",
+          evenement: row?.event_id ?? null,
           bron_melding: "fighter_rules",
         })),
       );
@@ -301,13 +301,13 @@ export default function FighterDossierPage() {
             )}
           </div>
           <Grid rows={[
-            ["Naam opgegeven", aanmelding?.naam ?? aanmelding?.fighter_naam],
-            ["Sportschool opgegeven", aanmelding?.sportschool ?? aanmelding?.gym ?? aanmelding?.sportschool_naam],
-            ["Discipline opgegeven", aanmelding?.discipline ?? aanmelding?.sport],
-            ["Klasse opgegeven", aanmelding?.klasse ?? aanmelding?.klasse_mm],
-            ["Geslacht opgegeven", aanmelding?.geslacht ?? aanmelding?.gender],
-            ["Gewicht opgegeven", aanmelding?.gewicht ?? aanmelding?.gewicht_kg],
-            ["VA-nummer", aanmelding?.va_nummer ?? aanmelding?.va],
+            ["Naam opgegeven", aanmelding?.naam],
+            ["Sportschool opgegeven", aanmelding?.gym],
+            ["Discipline opgegeven", aanmelding?.discipline],
+            ["Klasse opgegeven", aanmelding?.klasse],
+            ["Geslacht opgegeven", aanmelding?.geslacht],
+            ["Gewicht opgegeven", aanmelding?.gewicht],
+            ["VA-nummer", aanmelding?.va_nummer],
             ["Bron", isExcel ? "Excel-upload" : "Database"],
           ]} />
         </Section>
