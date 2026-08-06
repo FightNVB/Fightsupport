@@ -35,6 +35,24 @@ function isClosedStatus(value: unknown) {
   );
 }
 
+function accumulatedRuntimeBeforeResume(
+  run: { started_at?: unknown; finished_at?: unknown },
+  meta: Record<string, unknown>
+) {
+  const stored = Number(meta.accumulated_runtime_ms);
+  if (Number.isFinite(stored) && stored >= 0) return stored;
+
+  const segmentStart = new Date(
+    String(meta.resumed_at ?? meta.cycle_started_at ?? run.started_at ?? "")
+  ).getTime();
+  const segmentEnd = new Date(
+    String(meta.last_stopped_at ?? run.finished_at ?? "")
+  ).getTime();
+  return Number.isFinite(segmentStart) && Number.isFinite(segmentEnd) && segmentEnd >= segmentStart
+    ? segmentEnd - segmentStart
+    : 0;
+}
+
 export async function POST(req: Request) {
   try {
     await requireRole(req, ["admin", "superadmin"]);
@@ -124,6 +142,8 @@ export async function POST(req: Request) {
       ...meta,
       workers,
       pid: null,
+      accumulated_runtime_ms: accumulatedRuntimeBeforeResume(run, meta),
+      resumed_at: resumedAt,
       resume_requested_at: resumedAt,
       resume_requested_by_api: true,
     };

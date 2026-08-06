@@ -1796,6 +1796,8 @@ async function main() {
       .update({ status: "running", finished_at: null, error_message: null, meta })
       .eq("id", run.id);
     if (resumeErr) throw resumeErr;
+    run.meta = meta;
+    activeRun = run;
 
     console.log(`[fp-total] ▶️ hervat run ${run.id} voor VA ${effectiveStartVa}-${effectiveEndVa}`);
   } else {
@@ -2193,7 +2195,21 @@ async function main() {
 
     const allDone = processed >= requestedVaNumbers.length;
     const now = new Date().toISOString();
-    const currentMeta = { ...(run.meta || {}), pid: null, last_stopped_at: stopRequested ? now : undefined, last_stop_signal: stopSignal || undefined };
+    const segmentStartedAt = new Date(run.meta?.resumed_at || run.meta?.cycle_started_at || run.started_at).getTime();
+    const segmentEndedAt = new Date(now).getTime();
+    const previousRuntimeMs = Number(run.meta?.accumulated_runtime_ms);
+    const accumulatedRuntimeMs =
+      (Number.isFinite(previousRuntimeMs) && previousRuntimeMs >= 0 ? previousRuntimeMs : 0) +
+      (Number.isFinite(segmentStartedAt) && segmentEndedAt >= segmentStartedAt
+        ? segmentEndedAt - segmentStartedAt
+        : 0);
+    const currentMeta = {
+      ...(run.meta || {}),
+      pid: null,
+      accumulated_runtime_ms: accumulatedRuntimeMs,
+      last_stopped_at: stopRequested ? now : undefined,
+      last_stop_signal: stopSignal || undefined,
+    };
 
     const finalPatch = allDone ? {
       status: "completed",
@@ -2243,9 +2259,23 @@ async function main() {
       });
     }
   } catch (e) {
+    const failedAt = new Date().toISOString();
+    const segmentStartedAt = new Date(run.meta?.resumed_at || run.meta?.cycle_started_at || run.started_at).getTime();
+    const failedAtMs = new Date(failedAt).getTime();
+    const previousRuntimeMs = Number(run.meta?.accumulated_runtime_ms);
+    const accumulatedRuntimeMs =
+      (Number.isFinite(previousRuntimeMs) && previousRuntimeMs >= 0 ? previousRuntimeMs : 0) +
+      (Number.isFinite(segmentStartedAt) && failedAtMs >= segmentStartedAt
+        ? failedAtMs - segmentStartedAt
+        : 0);
     await supabase
       .from("fightpassport_sync_runs")
-      .update({ status: "failed", error_message: e?.message ?? String(e), finished_at: new Date().toISOString() })
+      .update({
+        status: "failed",
+        error_message: e?.message ?? String(e),
+        finished_at: failedAt,
+        meta: { ...(run.meta || {}), pid: null, accumulated_runtime_ms: accumulatedRuntimeMs },
+      })
       .eq("id", run.id);
     throw e;
   } finally {

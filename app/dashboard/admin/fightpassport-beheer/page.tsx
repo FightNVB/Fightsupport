@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, BrainCircuit, Bug, CheckCircle2, Database, Play, RefreshCw, RotateCcw, Search, ShieldCheck, StopCircle, Trash2, Users } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { formatActiveRuntime, formatRuntimeMs, getBatchActiveRuntimeMs } from "@/lib/fightpassport/activeRuntime";
 
 type Fighter = any;
 type Run = any;
@@ -358,6 +359,7 @@ export default function FightPaspoortBeheerPage() {
       processed: grouped.reduce((sum: number, run: any) => sum + Number(run?.processed_count ?? 0), 0),
       total: grouped.reduce((sum: number, run: any) => sum + runTotalCount(run), 0),
       startedAt: grouped.map((run: any) => run?.started_at).filter(Boolean).sort()[0] ?? null,
+      activeRuntimeMs: getBatchActiveRuntimeMs(grouped),
       workers: grouped.reduce((sum: number, run: any) => sum + Number(run?.meta?.workers_per_process ?? run?.meta?.workers ?? 0), 0),
     };
   }, [activeTotalRuns, runTotalCount]);
@@ -693,7 +695,7 @@ export default function FightPaspoortBeheerPage() {
             <span>1 proces · {activeTotalBatch.workers || 20} workers</span>
             <span>{activeTotalBatch.processed}/{activeTotalBatch.total} verwerkt</span>
             <span>Gestart {fmt(activeTotalBatch.startedAt)}</span>
-            <span>Loopt {formatDuration(activeTotalBatch.startedAt)}</span>
+            <span>Loopt {formatRuntimeMs(activeTotalBatch.activeRuntimeMs)}</span>
           </div>
           <button
             style={styles.stop}
@@ -717,7 +719,7 @@ export default function FightPaspoortBeheerPage() {
             <span>{activeRetryRun.processed_count ?? 0}/{runTotalCount(activeRetryRun)} verwerkt</span>
             <span>Laatste VA {activeRetryRun.last_processed_va ?? "—"}</span>
             <span>Gestart {fmt(activeRetryRun.started_at)}</span>
-            <span>Loopt {formatDuration(activeRetryRun.started_at)}</span>
+            <span>Loopt {formatActiveRuntime(activeRetryRun)}</span>
           </div>
           <button
             style={styles.stop}
@@ -788,7 +790,7 @@ export default function FightPaspoortBeheerPage() {
         return <tr key={r.id}>
           <Td>{fmt(r.started_at)}</Td>
           <Td>{finishedAt ? fmt(finishedAt) : isDone ? "-" : "Nog bezig"}</Td>
-          <Td>{formatDuration(r.started_at, finishedAt, status==="paused" ? r.meta?.last_stopped_at : undefined)}</Td>
+          <Td>{isFull ? formatActiveRuntime(r) : formatDuration(r.started_at, finishedAt, status==="paused" ? r.meta?.last_stopped_at : undefined)}</Td>
           <Td>{isTeam ? `${totalTeamSchools} sportscholen` : isStartverbod ? `${r.meta?.excel_rijen ?? r.processed_count ?? 0} Excel-rijen` : isRetry ? `${totalRunItems} retry-VA's` : `${r.start_va}–${r.end_va}`}</Td>
           <Td>{isTeam || isStartverbod ? "—" : (r.last_processed_va ?? "—")}</Td>
           <Td>{isStartverbod ? (r.processed_count ?? 0) : `${r.processed_count ?? 0}/${isTeam ? totalTeamSchools : totalRunItems}`}</Td>
