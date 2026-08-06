@@ -2,28 +2,68 @@
 
 import React, {
   useEffect,
+  useMemo,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
-import { Scale, Trophy, ArrowLeft, Building2, UsersRound, FileText, ShieldCheck, BrainCircuit } from "lucide-react";
+import {
+  Activity,
+  Archive,
+  ArrowLeft,
+  BarChart3,
+  BrainCircuit,
+  Building2,
+  CalendarDays,
+  Camera,
+  ChevronDown,
+  ChevronRight,
+  ClipboardCheck,
+  Cog,
+  FileText,
+  GitBranch,
+  Home,
+  Link2,
+  Menu,
+  MessageSquare,
+  Scale,
+  School,
+  Settings,
+  ShieldAlert,
+  ShieldCheck,
+  Trophy,
+  UserMinus,
+  UserPlus,
+  UsersRound,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 
-type MenuAction = {
-  label: string;
-  subtitle: string;
-  href?: string;
-  external?: string;
-  icon: any;
-  rootAdminOnly?: boolean;
-};
+const logoSrc = "/branding/fightsupport/excel-logo.png";
+const iconSrc = "/branding/fightsupport/icon.png";
+const NVB_ORANGE = "#ff4d00";
 
 type UserProfileRow = {
   role: string | null;
   bondteam: string | null;
+};
+
+type PortalLink = {
+  title: string;
+  description: string;
+  href?: string;
+  external?: string;
+  icon: LucideIcon;
+  rootAdminOnly?: boolean;
+};
+
+type PortalSection = {
+  title: string;
+  subtitle: string;
+  items: PortalLink[];
 };
 
 function normalizeRole(value: unknown): string {
@@ -40,9 +80,7 @@ function normalizeBondteam(value: unknown): string {
 async function fetchUserProfile(): Promise<UserProfileRow | null> {
   const response = await authedFetch("/api/me/profile", {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
+    headers: { Accept: "application/json" },
   });
 
   if (!response.ok) {
@@ -54,143 +92,179 @@ async function fetchUserProfile(): Promise<UserProfileRow | null> {
   return (await response.json()) as UserProfileRow;
 }
 
-const logoSrc = "/branding/fightsupport/excel-logo.png";
-const NVB_ORANGE = "#ff4d00";
+const primaryModules: PortalLink[] = [
+  {
+    title: "FightPaspoort Beheer",
+    description: "Beheer FightPaspoort, synchronisatie en controles.",
+    href: "/dashboard/admin/fightpassport-beheer",
+    icon: Building2,
+    rootAdminOnly: true,
+  },
+  {
+    title: "Controle",
+    description: "Matchmaking, rapportages en controleoverzicht.",
+    href: "/dashboard/admin/controle",
+    icon: Scale,
+  },
+  {
+    title: "Uitslagen verwerken",
+    description: "Uitslagen beheren en uploaden naar FightPassport.",
+    href: "/dashboard/admin/uitslagen/ready-to-upload",
+    icon: Trophy,
+    rootAdminOnly: true,
+  },
+  {
+    title: "Formulieren",
+    description: "Open het NVB-formulierenportaal.",
+    external: "https://nvbformulieren.nl",
+    icon: FileText,
+    rootAdminOnly: true,
+  },
+  {
+    title: "Doping Autoriteit",
+    description: "Vechters, mailingen en certificaten beheren.",
+    href: "/dashboard/admin/doping",
+    icon: ShieldCheck,
+    rootAdminOnly: true,
+  },
+];
 
-const pageBackground: CSSProperties = {
-  minHeight: "100vh",
-  color: "#fff",
-  background: `
-    radial-gradient(circle at 50% 0%, rgba(255,104,20,0.11) 0%, rgba(255,104,20,0.03) 10%, rgba(0,0,0,0) 22%),
-    radial-gradient(circle at 50% 100%, rgba(255,104,20,0.09) 0%, rgba(255,104,20,0.02) 12%, rgba(0,0,0,0) 24%),
-    radial-gradient(circle at 16% 20%, rgba(255,120,20,0.06) 0%, rgba(255,120,20,0) 16%),
-    radial-gradient(circle at 84% 22%, rgba(255,120,20,0.06) 0%, rgba(255,120,20,0) 16%),
-    linear-gradient(180deg, #030405 0%, #06080b 18%, #010203 100%)
-  `,
-};
+const portalSections: PortalSection[] = [
+  {
+    title: "Beheer",
+    subtitle: "Accounts, sportscholen, planning en interne administratie",
+    items: [
+      {
+        title: "Gebruikersbeheer",
+        description: "Accounts aanvragen, gebruikers toevoegen en toegang beheren.",
+        href: "/dashboard/admin/beheer/accounts-beheer",
+        icon: Settings,
+      },
+      {
+        title: "Agenda",
+        description: "Evenementen en geplande activiteiten bekijken en beheren.",
+        href: "/dashboard/admin/beheer/agenda",
+        icon: CalendarDays,
+      },
+      {
+        title: "Sportschoolmeldingen",
+        description: "Wijzigingsverzoeken en meldingen van trainers verwerken.",
+        href: "/dashboard/admin/beheer/sportschool-meldingen",
+        icon: MessageSquare,
+      },
+      {
+        title: "Talentstatus",
+        description: "Talentstatusdossiers, vechters, partijen en rapportages beheren.",
+        href: "/dashboard/admin/beheer/talentstatus",
+        icon: Link2,
+      },
+      {
+        title: "Contactpersonen",
+        description: "Trainer-logins koppelen en Fightcrew-toegang klaarzetten.",
+        href: "/dashboard/admin/beheer/sportscholen/contactpersonen",
+        icon: UsersRound,
+      },
+      {
+        title: "Sportschooldatabase",
+        description: "Sportschoolnamen, aliassen en databasekoppelingen beheren.",
+        href: "/dashboard/admin/beheer/sportscholen/aliases",
+        icon: School,
+      },
+      {
+        title: "Logboek / Audit",
+        description: "Belangrijke acties, wijzigingen en systeemgebeurtenissen terugvinden.",
+        href: "/dashboard/admin/audit",
+        icon: Cog,
+      },
+    ],
+  },
+  {
+    title: "Algemeen",
+    subtitle: "Matchmakings, afmeldingen, archief, sancties en historie",
+    items: [
+      {
+        title: "Matchmakingoverzicht",
+        description: "Eigenaar, bondteam, stadium en status van matchmakings controleren.",
+        href: "/dashboard/admin/algemeen/matchmakings",
+        icon: GitBranch,
+      },
+      {
+        title: "FightPassport evenementen",
+        description: "Evenementen synchroniseren, beheren en bekijken.",
+        href: "/dashboard/admin/evenementen",
+        icon: CalendarDays,
+      },
+      {
+        title: "Afmeldingen",
+        description: "Afmeldingen van vechters bekijken en administratief verwerken.",
+        href: "/dashboard/admin/algemeen/afmeldingen",
+        icon: UserMinus,
+      },
+      {
+        title: "Archief",
+        description: "Afgeronde evenementen, partijen, rapporten en dossiers openen.",
+        href: "/dashboard/admin/algemeen/archief",
+        icon: Archive,
+      },
+      {
+        title: "Sancties & waarschuwingen",
+        description: "Overtredingen, sancties, waarschuwingen en minpunten beheren.",
+        href: "/dashboard/admin/algemeen/overtredingen",
+        icon: ShieldAlert,
+      },
+      {
+        title: "Matchmaking-snapshots",
+        description: "Opgeslagen versies terugzoeken en vergelijken.",
+        href: "/dashboard/admin/algemeen/snapshots",
+        icon: Camera,
+      },
+    ],
+  },
+];
 
-const sectionRule = (top = false): CSSProperties => ({
-  position: "relative",
-  borderTop: top ? "1px solid rgba(255,255,255,0.05)" : undefined,
-  borderBottom: "1px solid rgba(255,255,255,0.04)",
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.04),
-    inset 0 -1px 0 rgba(0,0,0,0.82)
-  `,
-});
-
-const steelFrameOuter: CSSProperties = {
-  position: "relative",
-  padding: 8,
-  background: `
-    linear-gradient(145deg,
-      #ffffff 0%,
-      #cfcfcf 6%,
-      #6a6a6a 12%,
-      #fafafa 19%,
-      #8d8d8d 27%,
-      #3f3f3f 36%,
-      #ededed 47%,
-      #9f9f9f 58%,
-      #4b4b4b 69%,
-      #ffffff 80%,
-      #b8b8b8 90%,
-      #f7f7f7 100%)
-  `,
-  border: "1px solid rgba(255,255,255,0.60)",
-  boxShadow: `
-    0 12px 22px rgba(0,0,0,0.60),
-    inset 0 2px 1px rgba(255,255,255,0.96),
-    inset 0 -2px 2px rgba(0,0,0,0.82),
-    inset 2px 0 2px rgba(255,255,255,0.44),
-    inset -2px 0 2px rgba(0,0,0,0.54)
-  `,
-};
-
-const steelFrameMid: CSSProperties = {
-  position: "relative",
-  padding: 3,
-  background: `
-    linear-gradient(135deg,
-      rgba(255,255,255,0.95) 0%,
-      rgba(216,216,216,0.95) 14%,
-      rgba(64,64,64,0.96) 28%,
-      rgba(248,248,248,0.94) 48%,
-      rgba(98,98,98,0.96) 68%,
-      rgba(236,236,236,0.96) 100%)
-  `,
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.78),
-    inset 0 -1px 0 rgba(0,0,0,0.58)
-  `,
-};
-
-const steelFrameChannel: CSSProperties = {
-  position: "relative",
-  padding: 4,
-  background: `
-    linear-gradient(180deg,
-      #2a2a2a 0%,
-      #080808 18%,
-      #505050 34%,
-      #0c0c0c 52%,
-      #424242 72%,
-      #090909 100%)
-  `,
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.16),
-    inset 0 -1px 0 rgba(0,0,0,0.84)
-  `,
-};
-
-const steelFrameInner: CSSProperties = {
-  position: "relative",
-  padding: 2,
-  background: `
-    linear-gradient(135deg,
-      #fbfbfb 0%,
-      #d2d2d2 10%,
-      #6f6f6f 22%,
-      #f3f3f3 34%,
-      #b4b4b4 46%,
-      #545454 60%,
-      #fafafa 78%,
-      #b2b2b2 100%)
-  `,
-  border: "1px solid rgba(255,255,255,0.18)",
-  boxShadow: `
-    inset 0 1px 0 rgba(255,255,255,0.66),
-    inset 0 -1px 0 rgba(0,0,0,0.50)
-  `,
-};
-
-const darkPlate: CSSProperties = {
-  position: "relative",
-  overflow: "hidden",
-  border: "1px solid #080808",
-  background: `
-    radial-gradient(circle at 14% 84%, rgba(255,110,0,0.09), transparent 16%),
-    radial-gradient(circle at 86% 14%, rgba(255,255,255,0.05), transparent 14%),
-    linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 15%, rgba(0,0,0,0.16) 100%),
-    linear-gradient(135deg, #1a1d22 0%, #070a0f 46%, #15181d 100%)
-  `,
-  boxShadow: `
-    inset 0 2px 4px rgba(0,0,0,0.92),
-    inset 0 -2px 6px rgba(255,255,255,0.05),
-    inset 0 0 30px rgba(255,120,0,0.05)
-  `,
-};
+const quickActions: PortalLink[] = [
+  {
+    title: "Gebruiker toevoegen",
+    description: "",
+    href: "/dashboard/admin/beheer/accounts-beheer",
+    icon: UserPlus,
+  },
+  {
+    title: "Evenementen",
+    description: "",
+    href: "/dashboard/admin/evenementen",
+    icon: CalendarDays,
+  },
+  {
+    title: "Sportschoolmelding",
+    description: "",
+    href: "/dashboard/admin/beheer/sportschool-meldingen",
+    icon: MessageSquare,
+  },
+  {
+    title: "Talentstatus",
+    description: "",
+    href: "/dashboard/admin/beheer/talentstatus",
+    icon: Link2,
+  },
+  {
+    title: "Archief openen",
+    description: "",
+    href: "/dashboard/admin/algemeen/archief",
+    icon: Archive,
+  },
+];
 
 export default function AdminDashboardPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [profile, setProfile] = useState<UserProfileRow | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
-    }
+    if (!loading && !user) router.replace("/login");
   }, [loading, router, user]);
 
   useEffect(() => {
@@ -198,7 +272,6 @@ export default function AdminDashboardPage() {
 
     async function loadUserProfile() {
       if (loading) return;
-
       if (!user?.id) {
         setProfile(null);
         setProfileLoading(false);
@@ -206,820 +279,840 @@ export default function AdminDashboardPage() {
       }
 
       setProfileLoading(true);
+      setProfileError(null);
 
-      const data = await fetchUserProfile();
+      try {
+        const data = await Promise.race([
+          fetchUserProfile(),
+          new Promise<never>((_, reject) =>
+            window.setTimeout(() => reject(new Error("Profiel laden duurde te lang.")), 12000),
+          ),
+        ]);
 
-      if (!cancelled) {
-        setProfile(data);
-        setProfileLoading(false);
+        if (!cancelled) {
+          setProfile(data);
+        }
+      } catch (error) {
+        console.error("Adminprofiel laden mislukt", error);
+        if (!cancelled) {
+          setProfile(null);
+          setProfileError(
+            error instanceof Error ? error.message : "Adminprofiel kon niet worden geladen.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setProfileLoading(false);
+        }
       }
     }
 
-    loadUserProfile();
-
+    void loadUserProfile();
     return () => {
       cancelled = true;
     };
   }, [loading, user?.id]);
 
-  if (loading || profileLoading) {
-    return (
-      <main style={pageBackground}>
-        <CenteredMessage text="Bezig met laden..." />
-      </main>
-    );
-  }
-
-  if (!user) return null;
-
   const normalizedRole = normalizeRole(profile?.role);
   const normalizedBondteam = normalizeBondteam(profile?.bondteam);
   const isAdmin = normalizedRole === "admin";
   const isSuperadmin = normalizedRole === "superadmin";
-  const isNvbOrNoBondteam =
-    normalizedBondteam === "" || normalizedBondteam === "NVB";
+  const isNvbOrNoBondteam = normalizedBondteam === "" || normalizedBondteam === "NVB";
 
-  // Toegang tot /dashboard/admin:
-  // - Superadmin mag altijd het admin-portaal openen, ook bij NKF/WPKL/andere bond.
-  // - Admin mag alleen openen als bondteam leeg of NVB is.
+  // Bestaande toegangscontrole behouden:
+  // - superadmin mag altijd het admin-portaal openen;
+  // - admin alleen als bondteam leeg of NVB is.
   const mayOpenAdminPortal = isSuperadmin || (isAdmin && isNvbOrNoBondteam);
 
-  // Root-admin tegels zijn alleen voor NVB/leeg:
-  // Algemeen, Beheer en Uitslagen verwerken.
-  // Superadmin van NKF/WPKL/andere bond ziet die dus NIET.
+  // Root-adminonderdelen blijven uitsluitend beschikbaar voor NVB/leeg.
   const mayOpenRootAdminTiles = (isAdmin || isSuperadmin) && isNvbOrNoBondteam;
 
-  if (!mayOpenAdminPortal) {
+  const visiblePrimaryModules = useMemo(
+    () => primaryModules.filter((item) => !item.rootAdminOnly || mayOpenRootAdminTiles),
+    [mayOpenRootAdminTiles],
+  );
+
+  if (loading || profileLoading) {
+    return <CenteredMessage text="Bezig met laden..." />;
+  }
+
+  if (!user) return null;
+
+  if (profileError) {
     return (
-      <main style={pageBackground}>
-        <SharedStyles />
-        <TopLogoBand />
-        <TitleBand
-          title="Geen toegang"
-          subtitle="Dit admin-portaal is niet beschikbaar voor dit profiel"
-          actionLabel="Dashboard"
-          actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
-          onAction={() => router.push("/dashboard")}
-        />
-        <CenteredMessage text="Je profiel heeft geen toegang tot het admin-portaal." />
+      <main className="fs-page fs-centered-page">
+        <GlobalStyles />
+        <div className="fs-access-card">
+          <ShieldAlert size={42} />
+          <h1>Profiel laden mislukt</h1>
+          <p>{profileError}</p>
+          <button
+            type="button"
+            className="fs-silver-button"
+            onClick={() => window.location.reload()}
+          >
+            Opnieuw proberen
+          </button>
+        </div>
       </main>
     );
   }
 
-  const actions: MenuAction[] = [
-    {
-      label: "FightPaspoort Beheer",
-      subtitle: "Beheer FightPaspoort, synchronisatie en controles",
-      href: "/dashboard/admin/fightpassport-beheer",
-      icon: Building2,
-      rootAdminOnly: true,
-    },
-    {
-      label: "Controle",
-      subtitle: "Matchmaking, rapportages en controleoverzicht",
-      href: "/dashboard/admin/controle",
-      icon: Scale,
-    },
-    {
-      label: "Administratie",
-      subtitle: "Beheer en algemene administratie",
-      href: "/dashboard/admin/administratie",
-      icon: UsersRound,
-      rootAdminOnly: true,
-    },
+  if (!mayOpenAdminPortal) {
+    return (
+      <main className="fs-page fs-centered-page">
+        <GlobalStyles />
+        <div className="fs-access-card">
+          <ShieldAlert size={42} />
+          <h1>Geen toegang</h1>
+          <p>Dit admin-portaal is niet beschikbaar voor dit profiel.</p>
+          <button type="button" className="fs-silver-button" onClick={() => router.push("/dashboard")}>
+            <ArrowLeft size={16} /> Dashboard
+          </button>
+        </div>
+      </main>
+    );
+  }
 
-    {
-      label: "Uitslagen verwerken",
-      subtitle: "Uitslagen beheren en uploadn naar FP",
-      href: "/dashboard/admin/uitslagen/ready-to-upload",
-      icon: Trophy,
-      rootAdminOnly: true,
-    },
-    {
-      label: "Formulieren",
-      subtitle: "Open het NVB formulierenportaal",
-      external: "https://nvbformulieren.nl",
-      icon: FileText,
-      rootAdminOnly: true,
-    },
-    {
-      label: "Doping Autoriteit",
-      subtitle: "Vechters, mailingen en certificaten beheren",
-      href: "/dashboard/admin/doping",
-      icon: ShieldCheck,
-      rootAdminOnly: true,
-    },
-  ].filter((action) => !action.rootAdminOnly || mayOpenRootAdminTiles);
+  function openItem(item: PortalLink) {
+    if (item.href) router.push(item.href);
+    if (item.external) window.open(item.external, "_blank", "noopener,noreferrer");
+  }
 
   return (
-    <main style={pageBackground}>
-      <SharedStyles />
-      <TopLogoBand />
-      <TitleBand
-        title="Admin Portaal"
-        subtitle="Beheer, controle en systeemfuncties"
-        leftActionLabel="Slim dashboard"
-        leftActionIcon={<BrainCircuit size={15} />}
-        onLeftAction={() => router.push("/dashboard/admin/aandacht")}
-        actionLabel="Dashboard"
-        actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
-        onAction={() => router.push("/dashboard")}
+    <main className="fs-page">
+      <GlobalStyles />
+
+      <button
+        type="button"
+        className="fs-mobile-menu-button"
+        onClick={() => setMobileNavOpen((value) => !value)}
+        aria-label="Navigatie openen"
+      >
+        {mobileNavOpen ? <X size={22} /> : <Menu size={22} />}
+      </button>
+
+      <Sidebar
+        open={mobileNavOpen}
+        onNavigate={(href) => {
+          setMobileNavOpen(false);
+          router.push(href);
+        }}
       />
 
-      <div
-        className="dashboard-main-wrap"
-        style={{
-          maxWidth: 1240,
-          margin: "0 auto",
-          padding: "22px 24px 14px",
-        }}
-      >
-        <div
-          className="dashboard-grid"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: 20,
-          }}
-        >
-          {actions.map((action) => (
-            <PortalCard
-              key={action.label}
-              icon={<action.icon size={36} strokeWidth={2.55} />}
-              title={action.label}
-              subtitle={action.subtitle}
-              buttonLabel="Openen"
-              onClick={() => {
-                if (action.href) router.push(action.href);
-                if (action.external)
-                  window.open(action.external, "_blank", "noopener,noreferrer");
-              }}
-            />
-          ))}
-        </div>
+      {mobileNavOpen ? (
+        <button
+          type="button"
+          aria-label="Navigatie sluiten"
+          className="fs-mobile-overlay"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      ) : null}
 
-        <div
-          style={{
-            marginTop: 18,
-            textAlign: "center",
-            fontSize: 9,
-            letterSpacing: 2,
-            color: "rgba(255,255,255,0.30)",
-          }}
-        >
-          © FIGHTSUPPORT
+      <div className="fs-shell">
+        <Header
+          onDashboard={() => router.push("/dashboard")}
+          onSmartDashboard={() => router.push("/dashboard/admin/aandacht")}
+        />
+
+        <div className="fs-content">
+          <section className="fs-status-strip" aria-label="Portaaloverzicht">
+            <StatusItem icon={UsersRound} value="6" label="Hoofdmodules" sublabel="Adminfuncties" />
+            <StatusItem icon={Settings} value="7" label="Beheer" sublabel="Interne modules" />
+            <StatusItem icon={Archive} value="6" label="Algemeen" sublabel="Dossiers & historie" />
+            <StatusItem icon={Activity} value="19" label="Totaal" sublabel="Direct bereikbaar" />
+            <StatusItem icon={ShieldCheck} value={isSuperadmin ? "Super" : "Admin"} label="Toegang" sublabel={normalizedBondteam || "NVB"} />
+          </section>
+
+          <section className="fs-section">
+            <SectionHeading title="Snelle acties" />
+            <div className="fs-quick-grid">
+              {quickActions.map((item) => (
+                <button key={item.title} type="button" className="fs-quick-action" onClick={() => openItem(item)}>
+                  <item.icon size={20} strokeWidth={2.1} />
+                  <span>{item.title}</span>
+                  <ChevronRight size={17} className="fs-quick-chevron" />
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="fs-section">
+            <SectionHeading title="Hoofdmodules" subtitle="Beheer, controle en systeemfuncties" />
+            <div className="fs-primary-grid">
+              {visiblePrimaryModules.map((item) => (
+                <ModuleCard key={item.title} item={item} compact onOpen={() => openItem(item)} />
+              ))}
+            </div>
+          </section>
+
+          {portalSections.map((section) => (
+            <section key={section.title} className="fs-section">
+              <SectionHeading title={section.title} subtitle={section.subtitle} />
+              <div className="fs-card-grid">
+                {section.items.map((item) => (
+                  <ModuleCard key={item.title} item={item} onOpen={() => openItem(item)} />
+                ))}
+              </div>
+            </section>
+          ))}
+
+          <footer className="fs-footer">© FIGHTSUPPORT · ADMIN PORTAAL</footer>
         </div>
       </div>
     </main>
   );
 }
 
-function SharedStyles() {
-  return (
-    <style jsx>{`
-      @keyframes fsPulseGlow {
-        0%,
-        100% {
-          opacity: 0.78;
-          transform: scaleX(1) scaleY(1);
-        }
-        50% {
-          opacity: 1;
-          transform: scaleX(1.08) scaleY(1.12);
-        }
-      }
-
-      .fs-card-hover {
-        transition:
-          transform 180ms ease,
-          filter 180ms ease,
-          box-shadow 180ms ease;
-      }
-
-      .fs-card-hover:hover {
-        transform: translateY(-2px);
-        filter: drop-shadow(0 0 12px rgba(255, 77, 0, 0.08));
-      }
-
-      .fs-card-hover:hover .fs-card-glow {
-        opacity: 1;
-      }
-
-      .fs-card-hover:hover .fs-card-outer {
-        box-shadow:
-          0 16px 28px rgba(0, 0, 0, 0.68),
-          0 0 18px rgba(255, 77, 0, 0.08),
-          inset 0 2px 1px rgba(255, 255, 255, 0.96),
-          inset 0 -2px 2px rgba(0, 0, 0, 0.82),
-          inset 2px 0 2px rgba(255, 255, 255, 0.44),
-          inset -2px 0 2px rgba(0, 0, 0, 0.54);
-      }
-
-      .fs-hotspot {
-        animation: fsPulseGlow 2.8s ease-in-out infinite;
-        transform-origin: center center;
-      }
-
-      .fs-hotspot-2 {
-        animation-delay: 0.7s;
-      }
-
-      .fs-hotspot-3 {
-        animation-delay: 1.3s;
-      }
-
-      .fs-metal-button {
-        transition:
-          transform 90ms ease,
-          box-shadow 120ms ease,
-          filter 120ms ease;
-      }
-
-      .fs-metal-button:hover {
-        filter: brightness(1.02);
-        box-shadow:
-          inset 0 2px 1px rgba(255, 255, 255, 1),
-          inset 0 -3px 2px rgba(0, 0, 0, 0.6),
-          0 8px 18px rgba(0, 0, 0, 0.46),
-          0 0 10px rgba(255, 77, 0, 0.08);
-      }
-
-      .fs-metal-button:active {
-        transform: translateY(2px);
-        box-shadow:
-          inset 0 2px 2px rgba(0, 0, 0, 0.18),
-          inset 0 -1px 1px rgba(255, 255, 255, 0.28),
-          0 2px 6px rgba(0, 0, 0, 0.35);
-      }
-
-      @media (max-height: 900px) and (min-width: 1080px) {
-        .dashboard-main-wrap {
-          padding-top: 18px !important;
-          padding-bottom: 14px !important;
-        }
-
-        .dashboard-grid {
-          gap: 18px !important;
-        }
-      }
-
-      @media (max-width: 980px) {
-        .dashboard-grid {
-          grid-template-columns: 1fr !important;
-        }
-      }
-
-      @media (max-width: 860px) {
-        .title-row {
-          padding-top: 12px !important;
-          padding-bottom: 12px !important;
-          padding-left: 14px !important;
-          padding-right: 14px !important;
-        }
-
-        .title-left-actions-wrap,
-        .title-actions-wrap {
-          position: static !important;
-          transform: none !important;
-          display: flex !important;
-          justify-content: center !important;
-          margin-bottom: 10px !important;
-        }
-
-        .title-center {
-          padding-top: 0 !important;
-        }
-      }
-    `}</style>
-  );
-}
-
-function TopLogoBand() {
-  return (
-    <div
-      style={{
-        ...sectionRule(true),
-        position: "relative",
-        display: "flex",
-        justifyContent: "center",
-        paddingTop: 0,
-        paddingBottom: 0,
-        background: `
-          radial-gradient(circle at 50% 50%, rgba(255,115,20,0.10) 0%, rgba(255,115,20,0.03) 16%, rgba(0,0,0,0) 34%),
-          linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%)
-        `,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          pointerEvents: "none",
-          background: `
-            radial-gradient(circle at 50% 96%, rgba(255,95,0,0.30), transparent 8%),
-            radial-gradient(circle at 18% 26%, rgba(255,110,20,0.05), transparent 15%),
-            radial-gradient(circle at 82% 24%, rgba(255,110,20,0.05), transparent 15%)
-          `,
-        }}
-      />
-
-      <div
-        style={{
-          position: "relative",
-          width: 1160,
-          height: 96,
-          maxWidth: "96vw",
-          filter:
-            "drop-shadow(0 10px 18px rgba(0,0,0,0.70)) drop-shadow(0 0 16px rgba(255,95,0,0.12))",
-          boxShadow: `
-            inset 0 -10px 24px rgba(0,0,0,0.42),
-            inset 0 5px 14px rgba(255,255,255,0.04)
-          `,
-        }}
-      >
-        <Image
-          src={logoSrc}
-          alt="FightSupport"
-          fill
-          priority
-          className="object-contain"
-          style={{
-            objectFit: "contain",
-            transform: "scaleX(1.34)",
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TitleBand({
-  title,
-  subtitle,
-  leftActionLabel,
-  leftActionIcon,
-  onLeftAction,
-  actionLabel,
-  actionIcon,
-  onAction,
+function Sidebar({
+  open,
+  onNavigate,
 }: {
-  title: string;
-  subtitle: string;
-  leftActionLabel?: string;
-  leftActionIcon?: ReactNode;
-  onLeftAction?: () => void | Promise<void>;
-  actionLabel: string;
-  actionIcon?: ReactNode;
-  onAction: () => void | Promise<void>;
+  open: boolean;
+  onNavigate: (href: string) => void;
+}) {
+  const items: Array<{ label: string; href: string; icon: LucideIcon; active?: boolean }> = [
+    { label: "Admin", href: "/dashboard/admin", icon: Home, active: true },
+    { label: "Controle", href: "/dashboard/admin/controle", icon: Scale },
+    { label: "Uitslagen", href: "/dashboard/admin/uitslagen/ready-to-upload", icon: Trophy },
+    { label: "Rapporten", href: "/dashboard/admin/controle", icon: BarChart3 },
+    { label: "Doping", href: "/dashboard/admin/doping", icon: ShieldCheck },
+    { label: "Instellingen", href: "/dashboard/admin/beheer/accounts-beheer", icon: Cog },
+  ];
+
+  return (
+    <aside className={`fs-sidebar${open ? " fs-sidebar-open" : ""}`}>
+      <button type="button" className="fs-brand-mark" onClick={() => onNavigate("/dashboard/admin")} aria-label="FightSupport admin">
+        <span className="fs-brand-icon-wrap">
+          <Image src={iconSrc} alt="FightSupport" fill priority sizes="72px" style={{ objectFit: "contain" }} />
+        </span>
+      </button>
+
+      <nav className="fs-sidebar-nav" aria-label="Admin navigatie">
+        {items.map((item) => (
+          <button
+            type="button"
+            key={item.label}
+            className={`fs-nav-item${item.active ? " fs-nav-active" : ""}`}
+            onClick={() => onNavigate(item.href)}
+          >
+            <item.icon size={25} strokeWidth={2.1} />
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <div className="fs-sidebar-bottom">
+        <ChevronDown size={19} />
+      </div>
+    </aside>
+  );
+}
+
+function Header({
+  onDashboard,
+  onSmartDashboard,
+}: {
+  onDashboard: () => void;
+  onSmartDashboard: () => void;
 }) {
   return (
-    <div
-      style={{
-        ...sectionRule(),
-        position: "relative",
-        background: `
-          linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.015) 10%, rgba(0,0,0,0.04) 100%),
-          linear-gradient(180deg, #171b21 0%, #0a0d12 50%, #161a20 100%)
-        `,
-        boxShadow: `
-          inset 0 1px 0 rgba(255,255,255,0.06),
-          inset 0 -1px 0 rgba(255,255,255,0.03),
-          0 8px 14px rgba(0,0,0,0.34)
-        `,
-      }}
-    >
-      <div
-        className="fs-hotspot"
-        style={{
-          position: "absolute",
-          left: "50%",
-          transform: "translateX(-50%)",
-          bottom: -4,
-          width: 160,
-          height: 8,
-          background:
-            "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
-          filter: "blur(2px)",
-          pointerEvents: "none",
-        }}
-      />
-
-      <div
-        className="title-row"
-        style={{
-          position: "relative",
-          maxWidth: 1400,
-          margin: "0 auto",
-          padding: "11px 18px 10px",
-          minHeight: 92,
-        }}
-      >
-        {leftActionLabel && onLeftAction ? (
-          <div
-            className="title-left-actions-wrap"
-            style={{
-              position: "absolute",
-              left: 18,
-              top: "50%",
-              transform: "translateY(-50%)",
-              zIndex: 2,
-            }}
-          >
-            <HeaderSilverButton
-              label={leftActionLabel}
-              icon={leftActionIcon}
-              onClick={onLeftAction}
-            />
-          </div>
-        ) : null}
-
-        <div
-          className="title-actions-wrap"
-          style={{
-            position: "absolute",
-            right: 18,
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 2,
-          }}
-        >
-          <HeaderSilverButton
-            label={actionLabel}
-            icon={actionIcon}
-            onClick={onAction}
-          />
-        </div>
-
-        <div
-          className="title-center"
-          style={{
-            textAlign: "center",
-            paddingTop: 0,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 900,
-              letterSpacing: 1,
-              lineHeight: 1,
-              color: "#ececec",
-              textTransform: "uppercase",
-              textShadow:
-                "0 1px 0 rgba(255,255,255,0.18), 0 4px 10px rgba(0,0,0,0.82)",
-            }}
-          >
-            {title}
-          </div>
-
-          <div
-            style={{
-              marginTop: 7,
-              fontSize: 9,
-              letterSpacing: 2.5,
-              color: NVB_ORANGE,
-              textTransform: "uppercase",
-              textShadow: "0 0 8px rgba(255,106,0,0.28)",
-            }}
-          >
-            {subtitle}
-          </div>
-        </div>
+    <header className="fs-header">
+      <div className="fs-header-metal" aria-hidden="true" />
+      <div className="fs-logo-wrap">
+        <Image src={logoSrc} alt="FightSupport" fill priority style={{ objectFit: "contain" }} />
       </div>
-    </div>
-  );
-}
 
-function SteelFrame({
-  children,
-  hover = false,
-}: {
-  children: ReactNode;
-  hover?: boolean;
-}) {
-  return (
-    <div className={hover ? "fs-card-hover" : undefined}>
-      <div
-        style={steelFrameOuter}
-        className={hover ? "fs-card-outer" : undefined}
-      >
-        <div
-          className={hover ? "fs-card-glow" : undefined}
-          style={{
-            position: "absolute",
-            inset: -2,
-            opacity: 0,
-            pointerEvents: "none",
-            background:
-              "radial-gradient(circle at 50% 50%, rgba(255,77,0,0.10) 0%, rgba(255,77,0,0.04) 34%, rgba(255,77,0,0) 70%)",
-            transition: "opacity 180ms ease",
-            filter: "blur(8px)",
-          }}
-        />
+      <div className="fs-title-band">
+        <button type="button" className="fs-dark-header-button fs-header-left" onClick={onSmartDashboard}>
+          <BrainCircuit size={18} />
+          <span>Slim dashboard</span>
+        </button>
 
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            background: `
-              linear-gradient(120deg, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0.10) 12%, transparent 23%),
-              linear-gradient(300deg, rgba(255,255,255,0.20) 0%, transparent 22%),
-              linear-gradient(180deg, rgba(0,0,0,0.26), transparent 40%)
-            `,
-            mixBlendMode: "screen",
-          }}
-        />
-
-        <div style={steelFrameMid}>
-          <div style={steelFrameChannel}>
-            <div style={steelFrameInner}>{children}</div>
-          </div>
+        <div className="fs-title-center">
+          <h1>Admin Portaal</h1>
+          <p>Beheer, controle en systeemfuncties</p>
         </div>
+
+        <button type="button" className="fs-dark-header-button fs-header-right" onClick={onDashboard}>
+          <ArrowLeft size={18} />
+          <span>Terug naar dashboard</span>
+        </button>
       </div>
-    </div>
+    </header>
   );
 }
 
-function PortalCard({
-  icon,
-  title,
-  subtitle,
-  buttonLabel,
-  onClick,
-}: {
-  icon: ReactNode;
-  title: string;
-  subtitle: string;
-  buttonLabel: string;
-  onClick: () => void;
-}) {
-  return (
-    <SteelFrame hover>
-      <div
-        style={{
-          ...darkPlate,
-          minHeight: 126,
-          padding: "11px 11px 10px",
-        }}
-      >
-        <OrangeHotspot left={16} bottom={8} width={58} />
-        <OrangeHotspot right={36} top={10} width={38} small variant={2} />
-        <CardChromeOverlay />
-
-        <div
-          style={{
-            display: "flex",
-            gap: 14,
-            alignItems: "flex-start",
-          }}
-        >
-          <IconPlate>{icon}</IconPlate>
-
-          <div style={{ minWidth: 0, flex: 1, paddingTop: 1 }}>
-            <div
-              style={{
-                fontSize: 17,
-                fontWeight: 900,
-                lineHeight: 1,
-                color: "#f1f1f1",
-                textShadow: "0 3px 5px rgba(0,0,0,0.8)",
-              }}
-            >
-              {title}
-            </div>
-
-            <div
-              style={{
-                width: "100%",
-                height: 1,
-                marginTop: 9,
-                background:
-                  "linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08), transparent)",
-              }}
-            />
-
-            <div
-              style={{
-                marginTop: 9,
-                fontSize: 11.5,
-                color: "#d7d7d7",
-                lineHeight: 1.2,
-              }}
-            >
-              {subtitle}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 14, padding: "0 4px" }}>
-          <SteelButton label={buttonLabel} onClick={onClick} />
-        </div>
-      </div>
-    </SteelFrame>
-  );
-}
-
-function IconPlate({ children }: { children: ReactNode }) {
-  return (
-    <div
-      style={{
-        width: 68,
-        height: 58,
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "#fff",
-        border: "1px solid #7b2500",
-        background:
-          "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function SteelButton({
+function StatusItem({
+  icon: Icon,
+  value,
   label,
-  onClick,
+  sublabel,
 }: {
+  icon: LucideIcon;
+  value: string;
   label: string;
-  onClick: () => void;
+  sublabel: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="fs-metal-button"
-      style={{
-        width: "100%",
-        height: 34,
-        border: "1px solid #8f8f8f",
-        background: `
-          linear-gradient(180deg,
-            #ffffff 0%,
-            #eaeaea 12%,
-            #cfcfcf 25%,
-            #ffffff 40%,
-            #9a9a9a 70%,
-            #f0f0f0 100%)
-        `,
-        color: "#131313",
-        fontSize: 14,
-        fontWeight: 900,
-        boxShadow: `
-          inset 0 2px 1px rgba(255,255,255,1),
-          inset 0 -3px 2px rgba(0,0,0,0.6),
-          0 5px 12px rgba(0,0,0,0.38)
-        `,
-        cursor: "pointer",
-        textShadow: "0 1px 0 rgba(255,255,255,0.34)",
-      }}
-    >
-      {label}
-    </button>
+    <div className="fs-status-item">
+      <div className="fs-status-icon"><Icon size={26} strokeWidth={2.05} /></div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+        <small>{sublabel}</small>
+      </div>
+    </div>
   );
 }
 
-function HeaderSilverButton({
-  label,
-  onClick,
-  icon,
+function SectionHeading({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div className="fs-section-heading">
+      <h2>{title}</h2>
+      {subtitle ? <span>{subtitle}</span> : null}
+    </div>
+  );
+}
+
+function ModuleCard({
+  item,
+  onOpen,
+  compact = false,
 }: {
-  label: string;
-  onClick: () => void | Promise<void>;
-  icon?: ReactNode;
+  item: PortalLink;
+  onOpen: () => void;
+  compact?: boolean;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="fs-metal-button"
-      style={{
-        minWidth: 162,
-        height: 42,
-        border: "1px solid rgba(185,185,185,0.95)",
-        background: `
-          linear-gradient(180deg,
-            #ffffff 0%,
-            #f3f3f3 10%,
-            #d7d7d7 24%,
-            #fcfcfc 42%,
-            #bcbcbc 72%,
-            #efefef 100%)
-        `,
-        color: "#121212",
-        fontSize: 15,
-        fontWeight: 900,
-        boxShadow: `
-          inset 0 1px 0 rgba(255,255,255,1),
-          inset 0 -2px 2px rgba(0,0,0,0.40),
-          0 4px 10px rgba(0,0,0,0.28)
-        `,
-        cursor: "pointer",
-        textShadow: "0 1px 0 rgba(255,255,255,0.55)",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        padding: "0 18px",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function OrangeHotspot({
-  left,
-  right,
-  top,
-  bottom,
-  width,
-  small = false,
-  variant = 1,
-}: {
-  left?: number;
-  right?: number;
-  top?: number;
-  bottom?: number;
-  width: number;
-  small?: boolean;
-  variant?: 1 | 2 | 3;
-}) {
-  const extraClass =
-    variant === 2
-      ? "fs-hotspot fs-hotspot-2"
-      : variant === 3
-        ? "fs-hotspot fs-hotspot-3"
-        : "fs-hotspot";
+  const Icon = item.icon;
 
   return (
-    <div
-      className={extraClass}
-      style={{
-        position: "absolute",
-        left,
-        right,
-        top,
-        bottom,
-        width,
-        height: small ? 8 : 10,
-        background:
-          "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
-        filter: "blur(1.5px)",
-        pointerEvents: "none",
-      }}
-    />
-  );
-}
-
-function CardChromeOverlay() {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        pointerEvents: "none",
-        background: `
-          linear-gradient(125deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 15%, transparent 26%),
-          linear-gradient(315deg, rgba(255,255,255,0.03) 0%, transparent 22%)
-        `,
-      }}
-    />
+    <article className={`fs-module-card${compact ? " fs-module-card-compact" : ""}`}>
+      <button type="button" className="fs-module-click" onClick={onOpen} aria-label={`${item.title} openen`}>
+        <span className="fs-card-top-glow" aria-hidden="true" />
+        <div className="fs-silver-icon">
+          <Icon size={compact ? 25 : 27} strokeWidth={2.05} />
+        </div>
+        <h3>{item.title}</h3>
+        <p>{item.description}</p>
+        <span className="fs-card-open">
+          Openen <ChevronRight size={16} />
+        </span>
+      </button>
+    </article>
   );
 }
 
 function CenteredMessage({ text }: { text: string }) {
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <SteelFrame>
-        <div
-          style={{
-            ...darkPlate,
-            padding: "24px 30px",
-            fontSize: 18,
-            fontWeight: 800,
-            color: "#f1f1f1",
-          }}
-        >
-          {text}
-        </div>
-      </SteelFrame>
-    </div>
+    <main className="fs-page fs-centered-page">
+      <GlobalStyles />
+      <div className="fs-loading-card">{text}</div>
+    </main>
+  );
+}
+
+function GlobalStyles() {
+  return (
+    <style dangerouslySetInnerHTML={{ __html: `
+      :root {
+        --fs-orange: ${NVB_ORANGE};
+        --fs-sidebar-width: 118px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { margin: 0; background: #020304; }
+
+      button, input, select, textarea { font: inherit; }
+
+      .fs-page {
+        min-height: 100vh;
+        color: #f4f4f4;
+        background:
+          radial-gradient(circle at 52% 0%, rgba(214,220,228,.12), transparent 24%),
+          radial-gradient(circle at 50% 100%, rgba(160,168,178,.08), transparent 32%),
+          linear-gradient(180deg, #0b0d10 0%, #030405 54%, #090b0d 100%);
+      }
+
+      .fs-shell { margin-left: var(--fs-sidebar-width); min-height: 100vh; }
+
+      .fs-sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 40;
+        width: var(--fs-sidebar-width);
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid rgba(225,228,232,.34);
+        background:
+          linear-gradient(90deg, rgba(255,255,255,.025), transparent 35%),
+          linear-gradient(180deg, #0b0e12, #030507 70%, #07090b);
+        box-shadow: 10px 0 28px rgba(0,0,0,.48), inset -1px 0 rgba(255,255,255,.08), inset -3px 0 10px rgba(190,196,204,.05);
+      }
+
+      .fs-brand-mark {
+        height: 122px;
+        border: 0;
+        border-bottom: 1px solid rgba(255,255,255,.13);
+        background: transparent;
+        color: #ff5a0a;
+        cursor: pointer;
+        display: grid;
+        place-items: center;
+      }
+
+      .fs-brand-icon-wrap {
+        position: relative;
+        width: 76px;
+        height: 76px;
+        display: block;
+        filter: drop-shadow(0 8px 14px rgba(0,0,0,.62)) drop-shadow(0 0 8px rgba(255,255,255,.08));
+      }
+
+      .fs-sidebar-nav { flex: 1; }
+
+      .fs-nav-item {
+        position: relative;
+        width: 100%;
+        min-height: 92px;
+        border: 0;
+        border-bottom: 1px solid rgba(255,255,255,.055);
+        background: transparent;
+        color: #ddd;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: .2px;
+        transition: background 160ms ease, color 160ms ease;
+      }
+
+      .fs-nav-item:hover { background: rgba(255,255,255,.045); color: #fff; }
+
+      .fs-nav-active {
+        color: var(--fs-orange);
+        background: linear-gradient(90deg, rgba(255,77,0,.12), rgba(255,255,255,.025));
+      }
+
+      .fs-nav-active::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--fs-orange);
+        box-shadow: 0 0 14px rgba(255,77,0,.7);
+      }
+
+      .fs-sidebar-bottom {
+        height: 76px;
+        display: grid;
+        place-items: center;
+        color: #ddd;
+      }
+
+      .fs-sidebar-bottom svg {
+        width: 38px;
+        height: 38px;
+        padding: 9px;
+        border: 1px solid rgba(255,255,255,.28);
+        border-radius: 50%;
+        background: #090b0e;
+      }
+
+      .fs-header {
+        position: relative;
+        border-bottom: 1px solid rgba(255,255,255,.11);
+        background: #07090b;
+        box-shadow: 0 14px 30px rgba(0,0,0,.42);
+      }
+
+      .fs-header-metal {
+        position: absolute;
+        inset: 0 0 auto;
+        height: 128px;
+        pointer-events: none;
+        background:
+          linear-gradient(118deg, transparent 0 7%, rgba(255,255,255,.16) 8%, rgba(255,255,255,.04) 20%, transparent 34%),
+          linear-gradient(242deg, transparent 0 7%, rgba(255,255,255,.14) 8%, rgba(255,255,255,.035) 20%, transparent 34%),
+          repeating-linear-gradient(103deg, rgba(255,255,255,.025) 0 1px, transparent 1px 5px),
+          linear-gradient(180deg, #24282e 0%, #0b0d10 48%, #1a1e23 100%);
+        border-bottom: 1px solid rgba(255,255,255,.12);
+        box-shadow: inset 0 1px rgba(255,255,255,.08), inset 0 -16px 26px rgba(0,0,0,.5);
+      }
+
+
+      .fs-header-metal::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(132deg, transparent 0 20%, rgba(255,255,255,.10) 20.5%, transparent 21.5% 78%, rgba(255,255,255,.08) 78.5%, transparent 79.5%),
+          radial-gradient(circle at 50% 22%, rgba(255,255,255,.16), transparent 18%);
+        opacity: .7;
+      }
+
+      .fs-header-metal::after {
+        content: "";
+        position: absolute;
+        left: 5%;
+        right: 5%;
+        bottom: 20px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, #ff5a00 15%, rgba(255,255,255,.8) 50%, #ff5a00 85%, transparent);
+        box-shadow: 0 0 8px rgba(255,77,0,.8);
+      }
+
+      .fs-logo-wrap {
+        position: relative;
+        z-index: 2;
+        width: min(980px, 78vw);
+        height: 124px;
+        margin: 0 auto;
+        filter: drop-shadow(0 10px 15px rgba(0,0,0,.75)) drop-shadow(0 0 12px rgba(255,77,0,.18));
+      }
+
+      .fs-title-band {
+        position: relative;
+        z-index: 3;
+        min-height: 82px;
+        display: grid;
+        place-items: center;
+        padding: 10px 210px 12px;
+        background:
+          radial-gradient(circle at 50% 100%, rgba(255,77,0,.26), transparent 11%),
+          linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.008)),
+          linear-gradient(180deg,#14181e,#080b0f 55%,#12161b);
+        border-top: 1px solid rgba(255,255,255,.04);
+      }
+
+      .fs-title-center { text-align: center; }
+      .fs-title-center h1 {
+        margin: 0;
+        font-size: clamp(27px, 2.4vw, 38px);
+        line-height: 1;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #e8e8e8;
+        text-shadow: 0 1px rgba(255,255,255,.24), 0 5px 12px rgba(0,0,0,.88);
+      }
+      .fs-title-center p {
+        margin: 8px 0 0;
+        color: var(--fs-orange);
+        text-transform: uppercase;
+        letter-spacing: 3.2px;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .fs-dark-header-button {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        height: 44px;
+        min-width: 184px;
+        border: 1px solid rgba(205,205,205,.5);
+        background: linear-gradient(180deg,#191d22,#080a0d 65%,#15181c);
+        color: #f0f0f0;
+        box-shadow: inset 0 1px rgba(255,255,255,.08), 0 5px 12px rgba(0,0,0,.38);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        text-transform: uppercase;
+        font-size: 10px;
+        font-weight: 900;
+        transition: border-color 150ms ease, box-shadow 150ms ease, transform 120ms ease;
+      }
+      .fs-dark-header-button:hover { border-color: var(--fs-orange); box-shadow: 0 0 14px rgba(255,77,0,.15); }
+      .fs-dark-header-button:active { transform: translateY(calc(-50% + 2px)); }
+      .fs-header-left { left: 28px; }
+      .fs-header-right { right: 28px; }
+
+      .fs-content {
+        width: min(1440px, calc(100% - 34px));
+        margin: 0 auto;
+        padding: 24px 0 22px;
+      }
+
+      .fs-status-strip {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0,1fr));
+        border: 1px solid rgba(220,224,229,.48);
+        border-left-color: rgba(226,230,235,.72);
+        border-right-color: rgba(226,230,235,.72);
+        background:
+          linear-gradient(90deg, rgba(255,255,255,.07), transparent 16%, transparent 84%, rgba(255,255,255,.07)),
+          linear-gradient(180deg,#161a1f,#080a0d 70%,#111419);
+        box-shadow: inset 0 1px rgba(255,255,255,.08), inset 0 -1px rgba(0,0,0,.8), 0 12px 28px rgba(0,0,0,.35);
+      }
+
+      .fs-status-item {
+        min-width: 0;
+        min-height: 72px;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 10px 14px;
+        border-right: 1px solid rgba(255,255,255,.10);
+      }
+      .fs-status-item:last-child { border-right: 0; }
+
+      .fs-status-icon {
+        width: 44px;
+        height: 44px;
+        flex: 0 0 44px;
+        display: grid;
+        place-items: center;
+        color: #e6e6e6;
+        border: 1px solid rgba(255,255,255,.23);
+        clip-path: polygon(50% 0, 91% 22%, 91% 78%, 50% 100%, 9% 78%, 9% 22%);
+        background: linear-gradient(145deg,#1b1f24,#07090c 72%,#1a1d22);
+        box-shadow: inset 0 1px rgba(255,255,255,.10), 0 0 0 1px rgba(255,77,0,.16);
+      }
+
+      .fs-status-item strong { display: block; font-size: 22px; line-height: 1; color: #ededed; }
+      .fs-status-item span { display: block; margin-top: 4px; font-size: 10px; text-transform: uppercase; font-weight: 900; }
+      .fs-status-item small { display: block; margin-top: 3px; color: #bfc1c4; font-size: 10px; }
+
+      .fs-section { margin-top: 16px; }
+      .fs-section-heading { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 9px; padding-bottom: 7px; border-bottom: 1px solid rgba(214,219,225,.22); }
+      .fs-section-heading h2 { margin: 0; color: #f2f3f5; text-transform: uppercase; font-size: 19px; letter-spacing: .6px; text-shadow: 0 1px rgba(255,255,255,.18); }
+      .fs-section-heading span { color: var(--fs-orange); text-transform: uppercase; font-size: 10px; letter-spacing: 1.4px; font-weight: 800; }
+
+      .fs-quick-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
+      .fs-quick-action {
+        min-height: 44px;
+        padding: 0 15px;
+        border: 1px solid rgba(220,224,230,.42);
+        background: linear-gradient(180deg,#252a31,#0d1014 70%,#1c2026);
+        color: #eee;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        cursor: pointer;
+        box-shadow: inset 0 1px rgba(255,255,255,.14), inset 0 -1px rgba(0,0,0,.72), 0 6px 12px rgba(0,0,0,.28);
+        transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+      }
+      .fs-quick-action:hover { border-color: var(--fs-orange); transform: translateY(-2px); box-shadow: 0 0 14px rgba(255,77,0,.10); }
+      .fs-quick-action svg { color: #d9d9d9; }
+      .fs-quick-action span { min-width: 0; font-size: 12px; font-weight: 750; }
+      .fs-quick-chevron { margin-left: auto; color: var(--fs-orange) !important; }
+
+      .fs-primary-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
+      .fs-card-grid { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 10px; }
+
+      .fs-module-card {
+        position: relative;
+        min-width: 0;
+        min-height: 164px;
+        border: 1px solid rgba(226,230,235,.62);
+        background:
+          linear-gradient(120deg, rgba(255,255,255,.14), transparent 22%),
+          linear-gradient(180deg,#242930,#0b0e12 65%,#191d22);
+        box-shadow: inset 0 1px rgba(255,255,255,.24), inset 0 -1px rgba(0,0,0,.85), inset 1px 0 rgba(255,255,255,.10), 0 10px 18px rgba(0,0,0,.34);
+        transition: transform 170ms ease, border-color 170ms ease, box-shadow 170ms ease;
+      }
+      .fs-module-card::before,
+      .fs-module-card::after {
+        content: "";
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        pointer-events: none;
+      }
+      .fs-module-card::before { left: -1px; top: -1px; border-left: 2px solid #d8dde3; border-top: 2px solid #d8dde3; }
+      .fs-module-card::after { right: -1px; bottom: -1px; border-right: 2px solid #d8dde3; border-bottom: 2px solid #d8dde3; }
+      .fs-module-card:hover { transform: translateY(-3px); border-color: rgba(255,90,10,.72); box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 0 16px rgba(255,77,0,.10), 0 15px 25px rgba(0,0,0,.48); }
+      .fs-module-card-compact { min-height: 158px; }
+
+      .fs-module-click {
+        width: 100%;
+        height: 100%;
+        min-height: inherit;
+        padding: 13px 12px 11px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .fs-card-top-glow {
+        position: absolute;
+        top: -3px;
+        left: 30%;
+        right: 30%;
+        height: 8px;
+        background: radial-gradient(circle,rgba(240,243,247,.95),rgba(188,195,204,.30) 40%,transparent 75%);
+        filter: blur(1.5px);
+        opacity: .52;
+      }
+
+      .fs-silver-icon {
+        width: 50px;
+        height: 50px;
+        display: grid;
+        place-items: center;
+        margin-bottom: 8px;
+        color: #e7e7e7;
+        clip-path: polygon(50% 0, 89% 21%, 89% 79%, 50% 100%, 11% 79%, 11% 21%);
+        border: 1px solid rgba(235,238,242,.42);
+        background:
+          linear-gradient(145deg, rgba(255,255,255,.34), transparent 30%),
+          linear-gradient(160deg,#8d949d 0%,#3b4149 32%,#0c0f13 68%,#4d545d 100%);
+        box-shadow: inset 0 1px rgba(255,255,255,.28), inset 0 -1px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.08), 0 0 10px rgba(255,77,0,.05);
+        text-shadow: 0 2px 3px #000;
+      }
+
+      .fs-module-card h3 {
+        margin: 0;
+        min-height: 30px;
+        display: grid;
+        place-items: center;
+        color: #ededed;
+        font-size: 12px;
+        line-height: 1.18;
+        text-transform: uppercase;
+        font-weight: 900;
+      }
+
+      .fs-module-card p {
+        margin: 6px 0 9px;
+        color: #c7c9cc;
+        font-size: 9.5px;
+        line-height: 1.42;
+        flex: 1;
+      }
+
+      .fs-card-open {
+        width: 100%;
+        min-height: 30px;
+        border: 1px solid rgba(220,224,230,.38);
+        background: linear-gradient(180deg,#252a31,#090c10 68%,#1b2026);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        color: var(--fs-orange);
+        text-transform: uppercase;
+        font-size: 10px;
+        font-weight: 900;
+        transition: background 150ms ease, border-color 150ms ease;
+      }
+      .fs-module-card:hover .fs-card-open { border-color: rgba(255,77,0,.75); background: linear-gradient(180deg,#2b3037,#0d1014 68%,#20252b); }
+
+      .fs-footer {
+        margin-top: 20px;
+        padding: 12px;
+        text-align: center;
+        border-top: 1px solid rgba(255,255,255,.11);
+        color: rgba(255,255,255,.42);
+        font-size: 9px;
+        letter-spacing: 2px;
+      }
+
+      .fs-mobile-menu-button,
+      .fs-mobile-overlay { display: none; }
+
+      .fs-centered-page { display: grid; place-items: center; padding: 24px; }
+      .fs-loading-card,
+      .fs-access-card {
+        border: 1px solid rgba(255,77,0,.65);
+        background: linear-gradient(180deg,#171a1e,#07090b);
+        box-shadow: 0 18px 36px rgba(0,0,0,.55);
+        padding: 28px 34px;
+        text-align: center;
+      }
+      .fs-access-card h1 { margin: 12px 0 4px; }
+      .fs-access-card p { color: #c8c8c8; }
+      .fs-silver-button {
+        height: 40px;
+        padding: 0 18px;
+        border: 1px solid #aaa;
+        background: linear-gradient(180deg,#fff,#cfcfcf 32%,#fafafa 50%,#9d9d9d 78%,#eee);
+        color: #111;
+        font-weight: 900;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      @media (max-width: 1320px) {
+        .fs-card-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+        .fs-primary-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+        .fs-status-strip { grid-template-columns: repeat(3, minmax(0,1fr)); }
+        .fs-status-item:nth-child(3) { border-right: 0; }
+        .fs-status-item:nth-child(n+4) { border-top: 1px solid rgba(255,255,255,.10); }
+      }
+
+      @media (max-width: 980px) {
+        :root { --fs-sidebar-width: 92px; }
+        .fs-title-band { padding-left: 170px; padding-right: 170px; }
+        .fs-dark-header-button { min-width: 150px; }
+        .fs-dark-header-button span { display: none; }
+        .fs-quick-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+        .fs-primary-grid, .fs-card-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      }
+
+      @media (max-width: 720px) {
+        :root { --fs-sidebar-width: 0px; }
+        .fs-shell { margin-left: 0; }
+        .fs-sidebar {
+          width: 112px;
+          transform: translateX(-102%);
+          transition: transform 180ms ease;
+        }
+        .fs-sidebar-open { transform: translateX(0); }
+        .fs-mobile-menu-button {
+          display: grid;
+          place-items: center;
+          position: fixed;
+          z-index: 60;
+          left: 12px;
+          top: 12px;
+          width: 42px;
+          height: 42px;
+          border: 1px solid rgba(255,77,0,.7);
+          background: #0b0d10;
+          color: #fff;
+          cursor: pointer;
+        }
+        .fs-mobile-overlay {
+          display: block;
+          position: fixed;
+          z-index: 30;
+          inset: 0;
+          border: 0;
+          background: rgba(0,0,0,.68);
+        }
+        .fs-logo-wrap { width: 92vw; height: 82px; }
+        .fs-header-metal { height: 84px; }
+        .fs-title-band { padding: 72px 12px 16px; }
+        .fs-dark-header-button { top: 15px; transform: none; min-width: 0; width: 44px; padding: 0; }
+        .fs-dark-header-button:active { transform: translateY(2px); }
+        .fs-header-left { left: 64px; }
+        .fs-header-right { right: 12px; }
+        .fs-content { width: calc(100% - 20px); padding-top: 12px; }
+        .fs-status-strip { grid-template-columns: 1fr; }
+        .fs-status-item { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.10); min-height: 82px; }
+        .fs-status-item:nth-child(n+4) { border-top: 0; }
+        .fs-status-item:last-child { border-bottom: 0; }
+        .fs-quick-grid, .fs-primary-grid, .fs-card-grid { grid-template-columns: 1fr; }
+        .fs-module-card, .fs-module-card-compact { min-height: 178px; }
+      }
+    ` }} />
   );
 }

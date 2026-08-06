@@ -350,11 +350,16 @@ async function readOverviewTiles(page, eventId) {
 
       if (!tile) return { found: false, values: {}, raw: [] };
 
-      // Gebruik alleen de p-regels uit get_tile_content. Geen click(), geen modal,
-      // geen tabel laden en geen action van deze tegel uitvoeren.
-      const lines = [...tile.querySelectorAll("ul.get_tile_content p")]
-        .map((el) => clean(el.textContent))
-        .filter(Boolean);
+      // FightPassport gebruikt per tegel zowel li- als p-regels. Lees uitsluitend
+      // zichtbare inhoud en dedupliceer een p die dezelfde tekst als zijn li bevat.
+      const lines = [...new Set([...tile.querySelectorAll("ul.get_tile_content li, ul.get_tile_content p")]
+        .filter((el) => {
+          const style = getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+        })
+        .map((el) => clean(el.innerText || el.textContent))
+        .filter(Boolean))];
 
       const values = {};
       for (const line of lines) {
@@ -377,7 +382,12 @@ async function readOverviewTiles(page, eventId) {
       // OFFICIALS staat net als de andere gegevens al op de tegel.
       // Ook deze tegel wordt dus NIET aangeklikt.
       const lines = [...tile.querySelectorAll("ul.get_tile_content li")]
-        .map((el) => clean(el.textContent))
+        .filter((el) => {
+          const style = getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+        })
+        .map((el) => clean(el.innerText || el.textContent))
         .filter(Boolean);
 
       const rows = lines.map((line, index) => {
@@ -405,11 +415,56 @@ async function readOverviewTiles(page, eventId) {
   }, String(eventId));
 }
 
+async function waitForStableOverviewTiles(page, eventId) {
+  const startedAt = Date.now();
+  const timeoutMs = 15000;
+  let previousSnapshot = null;
+  let latest = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    latest = await readOverviewTiles(page, eventId);
+    const completeTileSet = latest && [
+      latest.officials,
+      latest.matchmaking,
+      latest.results,
+      latest.suspensions,
+      latest.startbans,
+    ].every((tile) => tile?.found);
+    const snapshot = completeTileSet ? JSON.stringify(latest) : null;
+
+    if (snapshot !== null && snapshot === previousSnapshot) {
+      const waitedMs = Date.now() - startedAt;
+      console.log(`[fp-events] event ${eventId}: overzichtstegels stabiel`, {
+        waited_ms: waitedMs,
+        official_regels: latest.officials.rows.length,
+      });
+      return latest;
+    }
+
+    previousSnapshot = snapshot;
+    await sleep(1000);
+  }
+
+  // Bij timeout nog eenmaal definitief lezen. Zo blijft de scrape bruikbaar als
+  // FightPassport blijft muteren, zonder gegevens uit een andere eventtab te lezen.
+  latest = await readOverviewTiles(page, eventId);
+  console.log(`[fp-events] event ${eventId}: stabiliteitswachttijd verlopen; definitieve tegelread gebruikt`, {
+    waited_ms: Date.now() - startedAt,
+    official_regels: latest?.officials?.rows?.length ?? 0,
+  });
+  return latest;
+}
+
 async function scrapeEvent(page, eventId) {
+  // Verifieer direct vóór de snapshot opnieuw de exacte event-URL en interne tab.
+  const exact = await forceExactEventUrl(page, eventId, 15000);
+  if (exact.status === "not_found") return { scrape_status: "not_found" };
+  if (exact.status !== "found") throw new Error("Evenement kon niet op de exacte event-URL worden vastgezet");
+
   // Stap 1: eerst ALLE informatie uitlezen die al op de tegels staat.
   // OFFICIALS, MATCHMAKING, UITSLAGEN, SCHORSINGEN en STARTVERBODEN
   // worden niet geopend. Alleen DETAILS wordt later aangeklikt.
-  const summary = await readOverviewTiles(page, eventId);
+  const summary = await waitForStableOverviewTiles(page, eventId);
   if (!summary) throw new Error("Evenementtab verdween vóór uitlezen van de overzichtstegels");
 
   console.log(`[fp-events] event ${eventId}: overzichtstegels uitgelezen zonder openen`, {
@@ -651,6 +706,19 @@ async function main() {
         if (opened.status !== "found" || !page) throw new Error("Evenement kon niet hard en geverifieerd worden geopend");
 
         const event = await scrapeEvent(page, eventId);
+        if (event.scrape_status === "not_found") {
+          processed++; notFound++; consecutiveMissing++;
+          await upsertRunItem(run.id, eventId, {
+            status: "not_found",
+            exists_in_fightpassport: false,
+            error_code: "705",
+            error_message: "FightPassport toont onbekende code (705).",
+            finished_at: new Date().toISOString(),
+          });
+          console.log(`[fp-events] â€” ${label} event ${eventId}: bestaat niet (705)`);
+          if (MAX_CONSECUTIVE_MISSING > 0 && consecutiveMissing >= MAX_CONSECUTIVE_MISSING) stopRequested = true;
+          continue;
+        }
         await saveEvent(event, run.id);
         processed++; found++; consecutiveMissing = 0;
         await upsertRunItem(run.id, eventId, {
