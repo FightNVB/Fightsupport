@@ -783,7 +783,7 @@ export async function GET(req: Request) {
           alle: schoolRows,
         },
         bonds: bondRows,
-        officials: officialRows.slice(0, 50),
+        officials: officialRows.slice(0, 10),
         events: {
           grootste: biggest,
           kleinste: smallest,

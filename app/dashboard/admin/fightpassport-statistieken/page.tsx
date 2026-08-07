@@ -713,8 +713,8 @@ export default function FightPassportStatistiekenPage() {
 
         <Section title="Officials">
           <Ranking
-            title="Meest actief"
-            rows={data?.officials ?? []}
+            title="Top 10 meest actieve officials"
+            rows={(data?.officials ?? []).slice(0, 10)}
             columns={[
               ["Official", (r: any) => r.naam],
               ["Functie(s)", (r: any) => (r.functies ?? []).join(", ") || "-"],
@@ -782,7 +782,7 @@ function DirectorPrintReport({
   const topSchoolFights = (data?.schools?.meeste_partijen ?? []).slice(0, 10);
   const topSchoolPct = (data?.schools?.hoogste_winstpercentage ?? []).slice(0, 10);
   const bonds = (data?.bonds ?? []).slice(0, 10);
-  const officials = (data?.officials ?? []).slice(0, 12);
+  const officials = (data?.officials ?? []).slice(0, 10);
   const events = (data?.events?.alle ?? []).slice(0, 20);
 
   const periodLabel =
