@@ -783,7 +783,7 @@ function DirectorPrintReport({
   const topSchoolPct = (data?.schools?.hoogste_winstpercentage ?? []).slice(0, 10);
   const bonds = (data?.bonds ?? []).slice(0, 10);
   const officials = (data?.officials ?? []).slice(0, 10);
-  const events = (data?.events?.alle ?? []).slice(0, 20);
+  const events = data?.events?.alle ?? [];
 
   const periodLabel =
     from || to ? `${dateNl(from)} — ${dateNl(to)}` : "Volledige FightPassport-historie";
@@ -791,6 +791,21 @@ function DirectorPrintReport({
   const authoritativeEvents =
     Number(quality.events_met_uitslagen_aantal ?? 0) +
     Number(quality.events_met_matchmaking_aantal ?? 0);
+
+  // Het PDF-rapport moet exact dezelfde evenementenset gebruiken als de pagina.
+  // We verdelen de volledige lijst over meerdere vaste A4-landscape pagina's,
+  // zodat niets wordt afgekapt.
+  const EVENTS_PER_REPORT_PAGE = 20;
+  const eventPages = Array.from(
+    { length: Math.max(1, Math.ceil(events.length / EVENTS_PER_REPORT_PAGE)) },
+    (_, index) =>
+      events.slice(
+        index * EVENTS_PER_REPORT_PAGE,
+        (index + 1) * EVENTS_PER_REPORT_PAGE,
+      ),
+  );
+
+  const totalReportPages = 5 + eventPages.length;
 
   return (
     <div className="director-print">
@@ -957,31 +972,11 @@ function DirectorPrintReport({
         </div>
       </ReportPage>
 
-      <ReportPage pageNo="05" title="Evenementen" subtitle="Grootste gala's en activiteit per evenement">
-        <PrintRanking
-          title="Top 20 gala's op aantal partijen"
-          rows={events}
-          columns={[
-            ["Datum", (x: any) => dateNl(x.evenement_datum)],
-            ["Evenement", (x: any) => x.evenement_naam],
-            ["Plaats", (x: any) => x.plaats || "-"],
-            ["Bondteam", (x: any) => x.bond_naam || "-"],
-            ["Partijen", (x: any) => fmt(x.partijen)],
-            [
-              "Bron",
-              (x: any) =>
-                x.partijen_bron === "uitslagen"
-                  ? "Uitslagen"
-                  : x.partijen_bron === "matchmaking"
-                    ? "Matchmaking"
-                    : "Resultaten",
-            ],
-          ]}
-          dense
-        />
-      </ReportPage>
-
-      <ReportPage pageNo="06" title="Officials" subtitle="Meest actieve officials in de geselecteerde periode">
+      <ReportPage
+        pageNo="05"
+        title="Officials"
+        subtitle="Top 10 meest actieve officials in de geselecteerde periode"
+      >
         <PrintRanking
           title="Officialactiviteit"
           rows={officials}
@@ -1002,6 +997,42 @@ function DirectorPrintReport({
               : "-"}
           </strong>
         </div>
+      </ReportPage>
+
+      {eventPages.map((pageRows: any[], pageIndex: number) => (
+        <ReportPage
+          key={`events-${pageIndex}`}
+          pageNo={String(6 + pageIndex).padStart(2, "0")}
+          title="Evenementen"
+          subtitle={`Alle gala's in geselecteerde periode · ${events.length} totaal · pagina ${pageIndex + 1} van ${eventPages.length}`}
+        >
+          <PrintRanking
+            title={`Evenementen ${pageIndex * EVENTS_PER_REPORT_PAGE + 1}–${Math.min(
+              (pageIndex + 1) * EVENTS_PER_REPORT_PAGE,
+              events.length,
+            )}`}
+            rows={pageRows}
+            columns={[
+              ["Datum", (x: any) => dateNl(x.evenement_datum)],
+              ["Evenement", (x: any) => x.evenement_naam],
+              ["Plaats", (x: any) => x.plaats || "-"],
+              ["Bondteam", (x: any) => x.bond_naam || "-"],
+              ["Partijen", (x: any) => fmt(x.partijen)],
+              [
+                "Bron",
+                (x: any) =>
+                  x.partijen_bron === "uitslagen"
+                    ? "Uitslagen"
+                    : x.partijen_bron === "matchmaking"
+                      ? "Matchmaking"
+                      : "Resultaten",
+              ],
+            ]}
+            dense
+          />
+        </ReportPage>
+      ))}
+
       </ReportPage>
     </div>
   );
