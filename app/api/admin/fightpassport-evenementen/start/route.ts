@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     // Linux is hoofdlettergevoelig: dit sluit exact aan op jouw map controlEngine.
     const scraperPath = path.join(
       process.cwd(),
-      "controlEngine",
+      "ControlEngine",
       "scrapers",
       "evenementen",
       "scraper_fp_evenementen.js",
