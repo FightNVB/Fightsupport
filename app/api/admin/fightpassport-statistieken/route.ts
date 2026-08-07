@@ -192,7 +192,7 @@ export async function GET(req: Request) {
       return q;
     };
 
-    const [results, events, fighters, schoolsMaster] = await Promise.all([
+    const [results, events, fighters, schoolsMaster, allResults, allEvents, allOfficials] = await Promise.all([
       fetchAll(
         "fightpassport_results",
         "id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag",
@@ -210,6 +210,20 @@ export async function GET(req: Request) {
       fetchAll(
         "sportscholen",
         "sportschool_id,naam,plaats,land",
+      ),
+      fetchAll(
+        "fightpassport_results",
+        "id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag",
+        (q) => q.order("datum", { ascending: true }),
+      ),
+      fetchAll(
+        "fightpassport_events",
+        "event_id,bond_naam,evenement_naam,evenement_datum,plaats,promotor,exists_in_fightpassport,matchmaking_aantal_vechters,matchmaking_aantal_partijen,uitslagen_aantal,uitslagen_nog_in_te_voeren,officials_count,last_scraped_at",
+        (q) => q.eq("exists_in_fightpassport", true).order("evenement_datum", { ascending: true }),
+      ),
+      fetchAll(
+        "fightpassport_event_officials",
+        "id,event_id,functie,naam,volgorde,last_seen_at",
       ),
     ]);
 
@@ -230,6 +244,7 @@ export async function GET(req: Request) {
 
     const uniqueFightKeys = new Set<string>();
     const eventFightKeys = new Map<string, Set<string>>();
+    const eventResultRows = new Map<string, number>();
 
     const fighterStats = new Map<string, any>();
     const schoolStats = new Map<string, any>();
@@ -244,6 +259,8 @@ export async function GET(req: Request) {
       const kind = resultKind(row.uitslag);
       const key = fightKey(row, fighterName, fighterVaByName);
       const eKey = eventKey(row.datum, row.evenement);
+
+      eventResultRows.set(eKey, Number(eventResultRows.get(eKey) ?? 0) + 1);
 
       if (key) {
         uniqueFightKeys.add(key);
@@ -355,7 +372,14 @@ export async function GET(req: Request) {
 
     const eventRows = events.map((event) => {
       const key = eventKey(event.evenement_datum, event.evenement_naam);
-      const fallbackPartijen = eventFightKeys.get(key)?.size ?? 0;
+
+      // In FightPassport staat dezelfde partij als uitslag bij beide vechters:
+      // A -> B en B -> A. Als de event-scrape nog geen aantallen heeft, is de
+      // betrouwbaarste structurele fallback daarom het aantal resultaatregels / 2.
+      //
+      // Math.ceil houdt een incidenteel onvolledig paar overeind als één partij.
+      const resultaatRegels = Number(eventResultRows.get(key) ?? 0);
+      const fallbackPartijen = Math.ceil(resultaatRegels / 2);
 
       const uitslagenAantal =
         event.uitslagen_aantal === null || event.uitslagen_aantal === undefined
@@ -371,9 +395,9 @@ export async function GET(req: Request) {
       // Waarheid en volgorde:
       // 1. UITSLAGEN -> Aantal (FightPassport event-tegel)
       // 2. MATCHMAKING -> Aantal partijen
-      // 3. Alleen als de event-scrape nog geen aantallen bevat: gededupliceerde
-      //    fightpassport_results. Twee resultaatregels van dezelfde partij vormen
-      //    daarbij één canonieke partij.
+      // 3. Alleen als de event-scrape nog geen aantallen bevat: fightpassport_results.
+      //    FightPassport registreert één partij bij beide vechters, dus twee resultaatregels
+      //    zijn structureel één partij.
       const partijen =
         uitslagenAantal !== null && Number.isFinite(uitslagenAantal)
           ? uitslagenAantal
@@ -402,6 +426,7 @@ export async function GET(req: Request) {
             : Number(event.matchmaking_aantal_vechters),
         partijen,
         partijen_bron: partijenBron,
+        resultaat_regels: resultaatRegels,
         fallback_partijen: fallbackPartijen,
         officials_count: Number(event.officials_count ?? 0),
       };
@@ -512,6 +537,172 @@ export async function GET(req: Request) {
       .sort()
       .at(-1) ?? null;
 
+
+    // ---------------- Hall of Fame · aller tijden ----------------
+    // Deze records staan los van het actieve datumfilter op de pagina.
+    const allFighterStats = new Map<string, any>();
+    const allSchoolStats = new Map<string, any>();
+    const allEventResultRows = new Map<string, number>();
+
+    for (const row of allResults) {
+      const va = digits(row.va_nummer);
+      if (!va) continue;
+
+      const fighter = fighterByVa.get(va);
+      const naam = text(fighter?.naam) || `VA ${va}`;
+      const kind = resultKind(row.uitslag);
+      const datum = ymd(row.datum);
+
+      let fs = allFighterStats.get(va);
+      if (!fs) {
+        fs = {
+          va_nummer: va,
+          naam,
+          partijen: 0,
+          winst: 0,
+          ko_tko_winst: 0,
+          huidige_winreeks: 0,
+          langste_winreeks: 0,
+          laatste_partij: "",
+          geboortedatum: ymd(fighter?.geboortedatum),
+        };
+        allFighterStats.set(va, fs);
+      }
+
+      fs.partijen += 1;
+      if (kind === "win") {
+        fs.winst += 1;
+        fs.huidige_winreeks += 1;
+        fs.langste_winreeks = Math.max(fs.langste_winreeks, fs.huidige_winreeks);
+      } else {
+        fs.huidige_winreeks = 0;
+      }
+
+      if (isKoTkoWin(row.uitslag)) fs.ko_tko_winst += 1;
+      if (datum && datum > fs.laatste_partij) fs.laatste_partij = datum;
+
+      const school = text(row.sportschool);
+      if (school) {
+        const schoolKey = school.toLocaleLowerCase("nl-NL");
+        let ss = allSchoolStats.get(schoolKey);
+        if (!ss) {
+          ss = {
+            sportschool: school,
+            partijdeelnames: 0,
+            fighters: new Set<string>(),
+          };
+          allSchoolStats.set(schoolKey, ss);
+        }
+        ss.partijdeelnames += 1;
+        ss.fighters.add(va);
+      }
+
+      const eKey = eventKey(row.datum, row.evenement);
+      allEventResultRows.set(eKey, Number(allEventResultRows.get(eKey) ?? 0) + 1);
+    }
+
+    const allFighterRows = [...allFighterStats.values()];
+
+    const meestePartijenOoit = [...allFighterRows]
+      .sort((a, b) => b.partijen - a.partijen || b.winst - a.winst || a.naam.localeCompare(b.naam, "nl"))[0] ?? null;
+
+    const meesteOverwinningenOoit = [...allFighterRows]
+      .sort((a, b) => b.winst - a.winst || b.partijen - a.partijen || a.naam.localeCompare(b.naam, "nl"))[0] ?? null;
+
+    const meesteKoTkoOoit = [...allFighterRows]
+      .sort((a, b) => b.ko_tko_winst - a.ko_tko_winst || b.winst - a.winst || a.naam.localeCompare(b.naam, "nl"))[0] ?? null;
+
+    const langsteWinreeksOoit = [...allFighterRows]
+      .sort((a, b) => b.langste_winreeks - a.langste_winreeks || b.winst - a.winst || a.naam.localeCompare(b.naam, "nl"))[0] ?? null;
+
+    const actiefsteSportschoolOoitRaw = [...allSchoolStats.values()]
+      .sort((a, b) =>
+        b.partijdeelnames - a.partijdeelnames ||
+        b.fighters.size - a.fighters.size ||
+        a.sportschool.localeCompare(b.sportschool, "nl")
+      )[0] ?? null;
+
+    const allEventRows = allEvents.map((event) => {
+      const key = eventKey(event.evenement_datum, event.evenement_naam);
+      const resultRows = Number(allEventResultRows.get(key) ?? 0);
+      const fallbackPartijen = Math.ceil(resultRows / 2);
+
+      const uitslagenAantal =
+        event.uitslagen_aantal === null || event.uitslagen_aantal === undefined
+          ? null
+          : Number(event.uitslagen_aantal);
+
+      const matchmakingAantal =
+        event.matchmaking_aantal_partijen === null || event.matchmaking_aantal_partijen === undefined
+          ? null
+          : Number(event.matchmaking_aantal_partijen);
+
+      const partijen =
+        uitslagenAantal !== null && Number.isFinite(uitslagenAantal)
+          ? uitslagenAantal
+          : matchmakingAantal !== null && Number.isFinite(matchmakingAantal)
+            ? matchmakingAantal
+            : fallbackPartijen;
+
+      return {
+        event_id: event.event_id,
+        evenement_naam: event.evenement_naam,
+        evenement_datum: event.evenement_datum,
+        plaats: event.plaats,
+        bond_naam: text(event.bond_naam) || "Onbekend",
+        partijen,
+      };
+    });
+
+    const grootsteGalaOoit = [...allEventRows]
+      .filter((row) => row.partijen > 0)
+      .sort((a, b) => b.partijen - a.partijen || String(a.evenement_datum).localeCompare(String(b.evenement_datum)))[0] ?? null;
+
+    const activeSince = new Date();
+    activeSince.setUTCFullYear(activeSince.getUTCFullYear() - 1);
+    const activeSinceYmd = activeSince.toISOString().slice(0, 10);
+
+    const activeWithBirth = allFighterRows
+      .filter((row) => row.laatste_partij >= activeSinceYmd && row.geboortedatum)
+      .map((row) => ({
+        ...row,
+        leeftijd: calcAge(row.geboortedatum, new Date().toISOString().slice(0, 10)),
+      }));
+
+    const oudsteActieveVechter = [...activeWithBirth]
+      .sort((a, b) => a.geboortedatum.localeCompare(b.geboortedatum))[0] ?? null;
+
+    const jongsteActieveVechter = [...activeWithBirth]
+      .sort((a, b) => b.geboortedatum.localeCompare(a.geboortedatum))[0] ?? null;
+
+    const officialMapAllTime = new Map<string, any>();
+    for (const official of allOfficials) {
+      const naam = text(official.naam);
+      if (!naam) continue;
+      const key = naam.toLocaleLowerCase("nl-NL");
+
+      let os = officialMapAllTime.get(key);
+      if (!os) {
+        os = {
+          naam,
+          functies: new Set<string>(),
+          events: new Set<number>(),
+        };
+        officialMapAllTime.set(key, os);
+      }
+
+      os.events.add(Number(official.event_id));
+      if (text(official.functie)) os.functies.add(text(official.functie));
+    }
+
+    const officialMeesteGalas = [...officialMapAllTime.values()]
+      .map((row) => ({
+        naam: row.naam,
+        evenementen: row.events.size,
+        functies: [...row.functies].sort((a, b) => a.localeCompare(b, "nl")),
+      }))
+      .sort((a, b) => b.evenementen - a.evenementen || a.naam.localeCompare(b.naam, "nl"))[0] ?? null;
+
     const partijenUitUitslagen = eventRows.filter((row) => row.partijen_bron === "uitslagen").length;
     const partijenUitMatchmaking = eventRows.filter((row) => row.partijen_bron === "matchmaking").length;
     const partijenUitFallback = eventRows.filter((row) => row.partijen_bron === "resultaten_fallback").length;
@@ -540,6 +731,24 @@ export async function GET(req: Request) {
             events_met_resultaten_fallback: partijenUitFallback,
             totaal_events: eventRows.length,
           },
+        },
+        hall_of_fame: {
+          meeste_partijen_ooit: meestePartijenOoit,
+          meeste_overwinningen_ooit: meesteOverwinningenOoit,
+          meeste_ko_tko_ooit: meesteKoTkoOoit,
+          langste_winreeks_ooit: langsteWinreeksOoit,
+          actiefste_sportschool_ooit: actiefsteSportschoolOoitRaw
+            ? {
+                sportschool: actiefsteSportschoolOoitRaw.sportschool,
+                partijdeelnames: actiefsteSportschoolOoitRaw.partijdeelnames,
+                unieke_vechters: actiefsteSportschoolOoitRaw.fighters.size,
+              }
+            : null,
+          grootste_gala_ooit: grootsteGalaOoit,
+          oudste_actieve_vechter: oudsteActieveVechter,
+          jongste_actieve_vechter: jongsteActieveVechter,
+          official_meeste_galas: officialMeesteGalas,
+          actief_definitie: `Minimaal één geregistreerde partij sinds ${activeSinceYmd}`,
         },
         fighters: {
           meeste_partijen: top(fighterRows, "partijen"),
