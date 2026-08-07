@@ -1,1012 +1,890 @@
 "use client";
 
-import React, { useEffect, useState, type ReactNode } from "react";
+import React, { useEffect, type CSSProperties, type ReactNode } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { authedFetch } from "@/lib/api/authedFetch";
 import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronRight,
   ClipboardList,
-  Home,
-  Menu,
   Scale,
-  ShieldAlert,
-  Trophy,
   Users,
-  X,
-  type LucideIcon,
+  Trophy,
+  ArrowLeft,
 } from "lucide-react";
 
+type MenuAction = {
+  label: string;
+  subtitle: string;
+  href?: string;
+  external?: string;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+};
+
 const logoSrc = "/branding/fightsupport/excel-logo.png";
-const iconSrc = "/branding/fightsupport/icon.png";
 const NVB_ORANGE = "#ff4d00";
 
-type MenuAction = {
-  title: string;
-  description: string;
-  href: string;
-  icon: LucideIcon;
+const pageBackground: CSSProperties = {
+  minHeight: "100vh",
+  color: "#fff",
+  background: `
+    radial-gradient(circle at 50% 0%, rgba(255,104,20,0.11) 0%, rgba(255,104,20,0.03) 10%, rgba(0,0,0,0) 22%),
+    radial-gradient(circle at 50% 100%, rgba(255,104,20,0.09) 0%, rgba(255,104,20,0.02) 12%, rgba(0,0,0,0) 24%),
+    radial-gradient(circle at 16% 20%, rgba(255,120,20,0.06) 0%, rgba(255,120,20,0) 16%),
+    radial-gradient(circle at 84% 22%, rgba(255,120,20,0.06) 0%, rgba(255,120,20,0) 16%),
+    linear-gradient(180deg, #030405 0%, #06080b 18%, #010203 100%)
+  `,
 };
 
-const ALLOWED_MENU_ROLES = ["official", "hoofdofficial", "admin", "superadmin"] as const;
+const sectionRule = (top = false): CSSProperties => ({
+  position: "relative",
+  borderTop: top ? "1px solid rgba(255,255,255,0.05)" : undefined,
+  borderBottom: "1px solid rgba(255,255,255,0.04)",
+  boxShadow: `
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    inset 0 -1px 0 rgba(0,0,0,0.82)
+  `,
+});
 
-type UserProfileRow = {
-  role: string | null;
-  active_role?: string | null;
-  default_role?: string | null;
-  available_roles?: string[] | null;
+const steelFrameOuter: CSSProperties = {
+  position: "relative",
+  padding: 8,
+  background: `
+    linear-gradient(145deg,
+      #ffffff 0%,
+      #cfcfcf 6%,
+      #6a6a6a 12%,
+      #fafafa 19%,
+      #8d8d8d 27%,
+      #3f3f3f 36%,
+      #ededed 47%,
+      #9f9f9f 58%,
+      #4b4b4b 69%,
+      #ffffff 80%,
+      #b8b8b8 90%,
+      #f7f7f7 100%)
+  `,
+  border: "1px solid rgba(255,255,255,0.60)",
+  boxShadow: `
+    0 12px 22px rgba(0,0,0,0.60),
+    inset 0 2px 1px rgba(255,255,255,0.96),
+    inset 0 -2px 2px rgba(0,0,0,0.82),
+    inset 2px 0 2px rgba(255,255,255,0.44),
+    inset -2px 0 2px rgba(0,0,0,0.54)
+  `,
 };
 
-function normalizeRole(value: unknown): string {
-  return String(value ?? "").trim().toLowerCase();
-}
+const steelFrameMid: CSSProperties = {
+  position: "relative",
+  padding: 3,
+  background: `
+    linear-gradient(135deg,
+      rgba(255,255,255,0.95) 0%,
+      rgba(216,216,216,0.95) 14%,
+      rgba(64,64,64,0.96) 28%,
+      rgba(248,248,248,0.94) 48%,
+      rgba(98,98,98,0.96) 68%,
+      rgba(236,236,236,0.96) 100%)
+  `,
+  boxShadow: `
+    inset 0 1px 0 rgba(255,255,255,0.78),
+    inset 0 -1px 0 rgba(0,0,0,0.58)
+  `,
+};
 
-function getProfileRoles(profile: UserProfileRow | null): Set<string> {
-  return new Set(
-    [
-      profile?.active_role,
-      profile?.role,
-      profile?.default_role,
-      ...(profile?.available_roles ?? []),
-    ]
-      .map(normalizeRole)
-      .filter(Boolean),
-  );
-}
+const steelFrameChannel: CSSProperties = {
+  position: "relative",
+  padding: 4,
+  background: `
+    linear-gradient(180deg,
+      #2a2a2a 0%,
+      #080808 18%,
+      #505050 34%,
+      #0c0c0c 52%,
+      #424242 72%,
+      #090909 100%)
+  `,
+  boxShadow: `
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -1px 0 rgba(0,0,0,0.84)
+  `,
+};
 
-function canOpenOfficialsPortal(profile: UserProfileRow | null): boolean {
-  const roles = getProfileRoles(profile);
-  return ALLOWED_MENU_ROLES.some((role) => roles.has(role));
-}
+const steelFrameInner: CSSProperties = {
+  position: "relative",
+  padding: 2,
+  background: `
+    linear-gradient(135deg,
+      #fbfbfb 0%,
+      #d2d2d2 10%,
+      #6f6f6f 22%,
+      #f3f3f3 34%,
+      #b4b4b4 46%,
+      #545454 60%,
+      #fafafa 78%,
+      #b2b2b2 100%)
+  `,
+  border: "1px solid rgba(255,255,255,0.18)",
+  boxShadow: `
+    inset 0 1px 0 rgba(255,255,255,0.66),
+    inset 0 -1px 0 rgba(0,0,0,0.50)
+  `,
+};
 
-async function fetchUserProfile(): Promise<UserProfileRow | null> {
-  const response = await authedFetch("/api/me/profile", {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    console.error("Officialprofiel laden mislukt", response.status, message);
-    return null;
-  }
-
-  return (await response.json()) as UserProfileRow;
-}
+const darkPlate: CSSProperties = {
+  position: "relative",
+  overflow: "hidden",
+  border: "1px solid #080808",
+  background: `
+    radial-gradient(circle at 14% 84%, rgba(255,110,0,0.09), transparent 16%),
+    radial-gradient(circle at 86% 14%, rgba(255,255,255,0.05), transparent 14%),
+    linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 15%, rgba(0,0,0,0.16) 100%),
+    linear-gradient(135deg, #1a1d22 0%, #070a0f 46%, #15181d 100%)
+  `,
+  boxShadow: `
+    inset 0 2px 4px rgba(0,0,0,0.92),
+    inset 0 -2px 6px rgba(255,255,255,0.05),
+    inset 0 0 30px rgba(255,120,0,0.05)
+  `,
+};
 
 export default function OfficialsDashboardPage() {
   const router = useRouter();
-  const { user, loading } = useAuth();
-  const [profile, setProfile] = useState<UserProfileRow | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const { user, roles, loading } = useAuth();
 
   useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, router, user]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadProfile() {
-      if (loading) return;
-
-      if (!user?.id) {
-        setProfile(null);
-        setProfileLoading(false);
-        return;
-      }
-
-      setProfileLoading(true);
-      setProfileError(null);
-
-      try {
-        const data = await fetchUserProfile();
-        if (!cancelled) setProfile(data);
-      } catch (error) {
-        console.error("Officialprofiel laden mislukt", error);
-        if (!cancelled) {
-          setProfile(null);
-          setProfileError(
-            error instanceof Error ? error.message : "Officialprofiel kon niet worden geladen.",
-          );
-        }
-      } finally {
-        if (!cancelled) setProfileLoading(false);
-      }
+    if (!loading && !user) {
+      router.replace("/login");
+      return;
     }
 
-    void loadProfile();
+    const roleList = roles ?? [];
+    const allowed =
+      roleList.includes("official") ||
+      roleList.includes("hoofdofficial") ||
+      roleList.includes("admin") ||
+      roleList.includes("superadmin");
 
-    return () => {
-      cancelled = true;
-    };
-  }, [loading, user?.id]);
-
-  const mayOpenOfficialsPortal = canOpenOfficialsPortal(profile);
-  const profileRoles = getProfileRoles(profile);
-  const isSuperadmin = profileRoles.has("superadmin");
-  const isAdmin = profileRoles.has("admin");
-  const isHoofdofficial = profileRoles.has("hoofdofficial");
-  const activeRole =
-    normalizeRole(profile?.active_role) ||
-    normalizeRole(profile?.role) ||
-    normalizeRole(profile?.default_role);
-
-  useEffect(() => {
-    if (!loading && !profileLoading && user && !mayOpenOfficialsPortal) {
+    if (!loading && user && !allowed) {
       router.replace("/dashboard");
     }
-  }, [loading, mayOpenOfficialsPortal, profileLoading, router, user]);
+  }, [loading, roles, router, user]);
 
-  const actions: MenuAction[] = [
-    {
-      title: "Matchmaking overzicht",
-      description: "Controleoverzicht openen en partijen inhoudelijk valideren.",
-      href: "/dashboard/officials/controle",
-      icon: ClipboardList,
-    },
-    {
-      title: "Weegstation",
-      description: "Gewichten registreren, controles uitvoeren en weegstatussen verwerken.",
-      href: "/dashboard/officials/weegstation",
-      icon: Scale,
-    },
-    {
-      title: "Overtredingen",
-      description: "Overtredingen en incidenten melden, beheren en verwerken.",
-      href: "/dashboard/officials/overtreding-melden",
-      icon: Users,
-    },
-    {
-      title: "Uitslagen invoeren",
-      description: "Wedstrijdresultaten vastleggen, controleren en definitief afronden.",
-      href: "/dashboard/officials/uitslagen",
-      icon: Trophy,
-    },
-  ];
-
-  if (loading || profileLoading) {
-    return <CenteredMessage text="Bezig met laden..." />;
-  }
-
-  if (!user || !mayOpenOfficialsPortal) return null;
-
-  if (profileError) {
+  if (loading) {
     return (
-      <main className="fs-page fs-centered-page">
-        <GlobalStyles />
-        <div className="fs-loading-card">
-          <ShieldAlert size={38} />
-          <div>Officialprofiel laden mislukt</div>
-          <small>{profileError}</small>
-        </div>
+      <main style={pageBackground}>
+        <CenteredMessage text="Bezig met laden..." />
       </main>
     );
   }
 
+  if (!user) return null;
+
+  const roleList = roles ?? [];
+  const allowed =
+    roleList.includes("official") ||
+    roleList.includes("hoofdofficial") ||
+    roleList.includes("admin") ||
+    roleList.includes("superadmin");
+
+  if (!allowed) return null;
+
+  const actions: MenuAction[] = [
+    {
+      label: "Matchmaking overzicht",
+      subtitle: "Controleoverzicht openen en partijen inhoudelijk valideren",
+      href: "/dashboard/officials/controle",
+      icon: ClipboardList as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
+    },
+    {
+      label: "Weegstation",
+      subtitle: "Gewichten registreren, controles uitvoeren en weegstatussen verwerken",
+      href: "/dashboard/officials/weegstation",
+      icon: Scale as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
+    },
+    {
+      label: "Overtredingen",
+      subtitle: "Overtredingen en incidenten melden, beheren en verwerken",
+      href: "/dashboard/officials/overtreding-melden",
+      icon: Users as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
+    },
+    {
+      label: "Uitslagen invoeren",
+      subtitle: "Wedstrijdresultaten vastleggen, controleren en definitief afronden",
+      href: "/dashboard/officials/uitslagen",
+      icon: Trophy as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
+    },
+  ];
+
   return (
-    <main className="fs-page">
-      <GlobalStyles />
-
-      <button
-        type="button"
-        className="fs-mobile-menu-button"
-        onClick={() => setMobileNavOpen((value) => !value)}
-        aria-label="Navigatie openen"
-      >
-        {mobileNavOpen ? <X size={22} /> : <Menu size={22} />}
-      </button>
-
-      <Sidebar
-        open={mobileNavOpen}
-        onNavigate={(href) => {
-          setMobileNavOpen(false);
-          router.push(href);
-        }}
+    <main style={pageBackground}>
+      <SharedStyles />
+      <TopLogoBand />
+      <TitleBand
+        title="Official Portaal"
+        subtitle="Controle, weegstation en uitslagen"
+        actionLabel="Dashboard"
+        actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
+        onAction={() => router.push("/dashboard")}
       />
 
-      {mobileNavOpen ? (
-        <button
-          type="button"
-          aria-label="Navigatie sluiten"
-          className="fs-mobile-overlay"
-          onClick={() => setMobileNavOpen(false)}
-        />
-      ) : null}
-
-      <div className="fs-shell">
-        <Header onDashboard={() => router.push("/dashboard")} />
-
-        <div className="fs-content">
-          <section className="fs-status-strip" aria-label="Officialportaal overzicht">
-            <StatusItem icon={ClipboardList} value="4" label="Onderdelen" sublabel="Officialfuncties" />
-            <StatusItem icon={Scale} value="Live" label="Weegstation" sublabel="Wegen en controle" />
-            <StatusItem icon={Trophy} value="Actief" label="Uitslagen" sublabel="Invoeren en afronden" />
-            <StatusItem
-              icon={ShieldAlert}
-              value={isSuperadmin ? "Super" : isAdmin ? "Admin" : isHoofdofficial ? "Hoofd" : "Official"}
-              label="Toegang"
-              sublabel={activeRole || "official"}
+      <div
+        className="dashboard-main-wrap"
+        style={{
+          maxWidth: 1240,
+          margin: "0 auto",
+          padding: "22px 24px 14px",
+        }}
+      >
+        <div
+          className="dashboard-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 20,
+          }}
+        >
+          {actions.map((action) => (
+            <PortalCard
+              key={action.label}
+              icon={<action.icon size={36} strokeWidth={2.55} />}
+              title={action.label}
+              subtitle={action.subtitle}
+              buttonLabel="Openen"
+              onClick={() => {
+                if (action.href) router.push(action.href);
+                if (action.external) window.open(action.external, "_blank", "noopener,noreferrer");
+              }}
             />
-          </section>
+          ))}
+        </div>
 
-          <section className="fs-section">
-            <SectionHeading
-              title="Officials"
-              subtitle="Controle, weegstation, overtredingen en uitslagen"
-            />
-
-            <div className="fs-card-grid fs-official-grid">
-              {actions.map((item) => (
-                <ModuleCard
-                  key={item.title}
-                  item={item}
-                  onOpen={() => router.push(item.href)}
-                />
-              ))}
-            </div>
-          </section>
-
-          <footer className="fs-footer">© FIGHTSUPPORT · OFFICIAL PORTAAL</footer>
+        <div
+          style={{
+            marginTop: 18,
+            textAlign: "center",
+            fontSize: 9,
+            letterSpacing: 2,
+            color: "rgba(255,255,255,0.30)",
+          }}
+        >
+          © FIGHTSUPPORT
         </div>
       </div>
     </main>
   );
 }
 
-function Sidebar({
-  open,
-  onNavigate,
-}: {
-  open: boolean;
-  onNavigate: (href: string) => void;
-}) {
-  const items: Array<{ label: string; href: string; icon: LucideIcon; active?: boolean }> = [
-    { label: "Officials", href: "/dashboard/officials", icon: Home, active: true },
-    { label: "Controle", href: "/dashboard/officials/controle", icon: ClipboardList },
-    { label: "Weegstation", href: "/dashboard/officials/weegstation", icon: Scale },
-    { label: "Uitslagen", href: "/dashboard/officials/uitslagen", icon: Trophy },
-    { label: "Overtredingen", href: "/dashboard/officials/overtreding-melden", icon: Users },
-  ];
-
+function SharedStyles() {
   return (
-    <aside className={`fs-sidebar${open ? " fs-sidebar-open" : ""}`}>
-      <button
-        type="button"
-        className="fs-brand-mark"
-        onClick={() => onNavigate("/dashboard/officials")}
-        aria-label="FightSupport officials"
+    <style jsx global>{`
+      @keyframes fsPulseGlow {
+        0%,
+        100% {
+          opacity: 0.78;
+          transform: scaleX(1) scaleY(1);
+        }
+        50% {
+          opacity: 1;
+          transform: scaleX(1.08) scaleY(1.12);
+        }
+      }
+
+      .fs-card-hover {
+        transition: transform 180ms ease, filter 180ms ease, box-shadow 180ms ease;
+      }
+
+      .fs-card-hover:hover {
+        transform: translateY(-2px);
+        filter: drop-shadow(0 0 12px rgba(255, 77, 0, 0.08));
+      }
+
+      .fs-card-hover:hover .fs-card-glow {
+        opacity: 1;
+      }
+
+      .fs-card-hover:hover .fs-card-outer {
+        box-shadow:
+          0 16px 28px rgba(0, 0, 0, 0.68),
+          0 0 18px rgba(255, 77, 0, 0.08),
+          inset 0 2px 1px rgba(255, 255, 255, 0.96),
+          inset 0 -2px 2px rgba(0, 0, 0, 0.82),
+          inset 2px 0 2px rgba(255, 255, 255, 0.44),
+          inset -2px 0 2px rgba(0, 0, 0, 0.54);
+      }
+
+      .fs-hotspot {
+        animation: fsPulseGlow 2.8s ease-in-out infinite;
+        transform-origin: center center;
+      }
+
+      .fs-hotspot-2 {
+        animation-delay: 0.7s;
+      }
+
+      .fs-hotspot-3 {
+        animation-delay: 1.3s;
+      }
+
+      .fs-metal-button {
+        transition: transform 90ms ease, box-shadow 120ms ease, filter 120ms ease;
+      }
+
+      .fs-metal-button:hover {
+        filter: brightness(1.02);
+        box-shadow:
+          inset 0 2px 1px rgba(255, 255, 255, 1),
+          inset 0 -3px 2px rgba(0, 0, 0, 0.6),
+          0 8px 18px rgba(0, 0, 0, 0.46),
+          0 0 10px rgba(255, 77, 0, 0.08);
+      }
+
+      .fs-metal-button:active {
+        transform: translateY(2px);
+        box-shadow:
+          inset 0 2px 2px rgba(0, 0, 0, 0.18),
+          inset 0 -1px 1px rgba(255, 255, 255, 0.28),
+          0 2px 6px rgba(0, 0, 0, 0.35);
+      }
+
+      @media (max-height: 900px) and (min-width: 1080px) {
+        .dashboard-main-wrap {
+          padding-top: 18px !important;
+          padding-bottom: 14px !important;
+        }
+
+        .dashboard-grid {
+          gap: 18px !important;
+        }
+      }
+
+      @media (max-width: 1180px) {
+        .dashboard-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .dashboard-main-wrap {
+          padding-left: 12px !important;
+          padding-right: 12px !important;
+        }
+
+        .dashboard-grid {
+          grid-template-columns: 1fr !important;
+          gap: 14px !important;
+        }
+
+        .fs-card-hover,
+        .fs-card-outer {
+          min-width: 0 !important;
+          width: 100% !important;
+        }
+      }
+
+      @media (max-width: 860px) {
+        .title-row {
+          padding-top: 12px !important;
+          padding-bottom: 12px !important;
+          padding-left: 14px !important;
+          padding-right: 14px !important;
+        }
+
+        .title-actions-wrap {
+          position: static !important;
+          transform: none !important;
+          justify-content: center !important;
+          margin-bottom: 10px !important;
+        }
+
+        .title-center {
+          padding-top: 0 !important;
+        }
+      }
+    `}</style>
+  );
+}
+
+function TopLogoBand() {
+  return (
+    <div
+      style={{
+        ...sectionRule(true),
+        position: "relative",
+        display: "flex",
+        justifyContent: "center",
+        paddingTop: 0,
+        paddingBottom: 0,
+        background: `
+          radial-gradient(circle at 50% 50%, rgba(255,115,20,0.10) 0%, rgba(255,115,20,0.03) 16%, rgba(0,0,0,0) 34%),
+          linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%)
+        `,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background: `
+            radial-gradient(circle at 50% 96%, rgba(255,95,0,0.30), transparent 8%),
+            radial-gradient(circle at 18% 26%, rgba(255,110,20,0.05), transparent 15%),
+            radial-gradient(circle at 82% 24%, rgba(255,110,20,0.05), transparent 15%)
+          `,
+        }}
+      />
+
+      <div
+        style={{
+          position: "relative",
+          width: 1160,
+          height: 96,
+          maxWidth: "96vw",
+          filter:
+            "drop-shadow(0 10px 18px rgba(0,0,0,0.70)) drop-shadow(0 0 16px rgba(255,95,0,0.12))",
+          boxShadow: `
+            inset 0 -10px 24px rgba(0,0,0,0.42),
+            inset 0 5px 14px rgba(255,255,255,0.04)
+          `,
+        }}
       >
-        <span className="fs-brand-icon-wrap">
-          <Image
-            src={iconSrc}
-            alt="FightSupport"
-            fill
-            priority
-            sizes="72px"
-            style={{ objectFit: "contain" }}
+        <Image
+          src={logoSrc}
+          alt="FightSupport"
+          fill
+          priority
+          className="object-contain"
+          style={{
+            objectFit: "contain",
+            transform: "scaleX(1.34)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TitleBand({
+  title,
+  subtitle,
+  actionLabel,
+  actionIcon,
+  onAction,
+}: {
+  title: string;
+  subtitle: string;
+  actionLabel: string;
+  actionIcon?: ReactNode;
+  onAction: () => void | Promise<void>;
+}) {
+  return (
+    <div
+      style={{
+        ...sectionRule(),
+        position: "relative",
+        background: `
+          linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.015) 10%, rgba(0,0,0,0.04) 100%),
+          linear-gradient(180deg, #171b21 0%, #0a0d12 50%, #161a20 100%)
+        `,
+        boxShadow: `
+          inset 0 1px 0 rgba(255,255,255,0.06),
+          inset 0 -1px 0 rgba(255,255,255,0.03),
+          0 8px 14px rgba(0,0,0,0.34)
+        `,
+      }}
+    >
+      <div
+        className="fs-hotspot"
+        style={{
+          position: "absolute",
+          left: "50%",
+          transform: "translateX(-50%)",
+          bottom: -4,
+          width: 160,
+          height: 8,
+          background:
+            "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
+          filter: "blur(2px)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <div
+        className="title-row"
+        style={{
+          position: "relative",
+          maxWidth: 1400,
+          margin: "0 auto",
+          padding: "11px 18px 10px",
+          minHeight: 92,
+        }}
+      >
+        <div
+          className="title-actions-wrap"
+          style={{
+            position: "absolute",
+            right: 18,
+            top: "50%",
+            transform: "translateY(-50%)",
+            zIndex: 2,
+          }}
+        >
+          <HeaderSilverButton
+            label={actionLabel}
+            icon={actionIcon}
+            onClick={onAction}
           />
-        </span>
-      </button>
+        </div>
 
-      <nav className="fs-sidebar-nav" aria-label="Official navigatie">
-        {items.map((item) => (
-          <button
-            type="button"
-            key={item.label}
-            className={`fs-nav-item${item.active ? " fs-nav-active" : ""}`}
-            onClick={() => onNavigate(item.href)}
+        <div
+          className="title-center"
+          style={{
+            textAlign: "center",
+            paddingTop: 0,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 28,
+              fontWeight: 900,
+              letterSpacing: 1,
+              lineHeight: 1,
+              color: "#ececec",
+              textTransform: "uppercase",
+              textShadow:
+                "0 1px 0 rgba(255,255,255,0.18), 0 4px 10px rgba(0,0,0,0.82)",
+            }}
           >
-            <item.icon size={25} strokeWidth={2.1} />
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </nav>
+            {title}
+          </div>
 
-      <div className="fs-sidebar-bottom">
-        <ChevronDown size={19} />
+          <div
+            style={{
+              marginTop: 7,
+              fontSize: 9,
+              letterSpacing: 2.5,
+              color: NVB_ORANGE,
+              textTransform: "uppercase",
+              textShadow: "0 0 8px rgba(255,106,0,0.28)",
+            }}
+          >
+            {subtitle}
+          </div>
+        </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
-function Header({ onDashboard }: { onDashboard: () => void }) {
+function SteelFrame({ children, hover = false }: { children: ReactNode; hover?: boolean }) {
   return (
-    <header className="fs-header">
-      <div className="fs-header-metal" aria-hidden="true" />
+    <div className={hover ? "fs-card-hover" : undefined}>
+      <div style={steelFrameOuter} className={hover ? "fs-card-outer" : undefined}>
+        <div
+          className={hover ? "fs-card-glow" : undefined}
+          style={{
+            position: "absolute",
+            inset: -2,
+            opacity: 0,
+            pointerEvents: "none",
+            background:
+              "radial-gradient(circle at 50% 50%, rgba(255,77,0,0.10) 0%, rgba(255,77,0,0.04) 34%, rgba(255,77,0,0) 70%)",
+            transition: "opacity 180ms ease",
+            filter: "blur(8px)",
+          }}
+        />
 
-      <div className="fs-logo-wrap">
-        <Image src={logoSrc} alt="FightSupport" fill priority style={{ objectFit: "contain" }} />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            background: `
+              linear-gradient(120deg, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0.10) 12%, transparent 23%),
+              linear-gradient(300deg, rgba(255,255,255,0.20) 0%, transparent 22%),
+              linear-gradient(180deg, rgba(0,0,0,0.26), transparent 40%)
+            `,
+            mixBlendMode: "screen",
+          }}
+        />
+
+        <div style={steelFrameMid}>
+          <div style={steelFrameChannel}>
+            <div style={steelFrameInner}>{children}</div>
+          </div>
+        </div>
       </div>
+    </div>
+  );
+}
 
-      <div className="fs-title-band">
-        <div className="fs-title-center">
-          <h1>Official Portaal</h1>
-          <p>Controles, weegstation en uitslagen</p>
+function PortalCard({
+  icon,
+  title,
+  subtitle,
+  buttonLabel,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  buttonLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <SteelFrame hover>
+      <div
+        style={{
+          ...darkPlate,
+          minHeight: 154,
+          padding: "14px 14px 12px",
+        }}
+      >
+        <OrangeHotspot left={16} bottom={8} width={58} />
+        <OrangeHotspot right={36} top={10} width={38} small variant={2} />
+        <CardChromeOverlay />
+
+        <div
+          style={{
+            display: "flex",
+            gap: 14,
+            alignItems: "flex-start",
+          }}
+        >
+          <IconPlate>{icon}</IconPlate>
+
+          <div style={{ minWidth: 0, flex: 1, paddingTop: 1 }}>
+            <div
+              style={{
+                fontSize: 20,
+                fontWeight: 900,
+                lineHeight: 1,
+                color: "#f1f1f1",
+                textShadow: "0 3px 5px rgba(0,0,0,0.8)",
+              }}
+            >
+              {title}
+            </div>
+
+            <div
+              style={{
+                width: "100%",
+                height: 1,
+                marginTop: 9,
+                background:
+                  "linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08), transparent)",
+              }}
+            />
+
+            <div
+              style={{
+                marginTop: 9,
+                fontSize: 12.5,
+                color: "#d7d7d7",
+                lineHeight: 1.2,
+              }}
+            >
+              {subtitle}
+            </div>
+          </div>
         </div>
 
-        <button type="button" className="fs-dark-header-button" onClick={onDashboard}>
-          <ArrowLeft size={18} />
-          <span>Terug naar dashboard</span>
-        </button>
+        <div style={{ marginTop: 14, padding: "0 4px" }}>
+          <SteelButton label={buttonLabel} onClick={onClick} />
+        </div>
       </div>
-    </header>
+    </SteelFrame>
   );
 }
 
-function StatusItem({
-  icon: Icon,
-  value,
+function IconPlate({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        width: 92,
+        height: 72,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#fff",
+        border: "1px solid #7b2500",
+        background: "linear-gradient(180deg, #ff4d00 0%, #e04400 50%, #8a2600 100%)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.30), 0 0 12px rgba(255,77,0,0.14)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SteelButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="fs-metal-button"
+      style={{
+        width: "100%",
+        height: 40,
+        border: "1px solid #8f8f8f",
+        background: `
+          linear-gradient(180deg,
+            #ffffff 0%,
+            #eaeaea 12%,
+            #cfcfcf 25%,
+            #ffffff 40%,
+            #9a9a9a 70%,
+            #f0f0f0 100%)
+        `,
+        color: "#131313",
+        fontSize: 16,
+        fontWeight: 900,
+        boxShadow: `
+          inset 0 2px 1px rgba(255,255,255,1),
+          inset 0 -3px 2px rgba(0,0,0,0.6),
+          0 5px 12px rgba(0,0,0,0.38)
+        `,
+        cursor: "pointer",
+        textShadow: "0 1px 0 rgba(255,255,255,0.34)",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function HeaderSilverButton({
   label,
-  sublabel,
+  onClick,
+  icon,
 }: {
-  icon: LucideIcon;
-  value: string;
   label: string;
-  sublabel: string;
+  onClick: () => void | Promise<void>;
+  icon?: ReactNode;
 }) {
   return (
-    <div className="fs-status-item">
-      <div className="fs-status-icon">
-        <Icon size={25} strokeWidth={2.05} />
-      </div>
-      <div>
-        <strong>{value}</strong>
-        <span>{label}</span>
-        <small>{sublabel}</small>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="fs-metal-button"
+      style={{
+        minWidth: 162,
+        height: 42,
+        border: "1px solid rgba(185,185,185,0.95)",
+        background: `
+          linear-gradient(180deg,
+            #ffffff 0%,
+            #f3f3f3 10%,
+            #d7d7d7 24%,
+            #fcfcfc 42%,
+            #bcbcbc 72%,
+            #efefef 100%)
+        `,
+        color: "#121212",
+        fontSize: 15,
+        fontWeight: 900,
+        boxShadow: `
+          inset 0 1px 0 rgba(255,255,255,1),
+          inset 0 -2px 2px rgba(0,0,0,0.40),
+          0 4px 10px rgba(0,0,0,0.28)
+        `,
+        cursor: "pointer",
+        textShadow: "0 1px 0 rgba(255,255,255,0.55)",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        padding: "0 18px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
-function SectionHeading({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <div className="fs-section-heading">
-      <h2>{title}</h2>
-      {subtitle ? <span>{subtitle}</span> : null}
-    </div>
-  );
-}
-
-function ModuleCard({
-  item,
-  onOpen,
+function OrangeHotspot({
+  left,
+  right,
+  top,
+  bottom,
+  width,
+  small = false,
+  variant = 1,
 }: {
-  item: MenuAction;
-  onOpen: () => void;
+  left?: number;
+  right?: number;
+  top?: number;
+  bottom?: number;
+  width: number;
+  small?: boolean;
+  variant?: 1 | 2 | 3;
 }) {
-  const Icon = item.icon;
+  const extraClass =
+    variant === 2 ? "fs-hotspot fs-hotspot-2" : variant === 3 ? "fs-hotspot fs-hotspot-3" : "fs-hotspot";
 
   return (
-    <article className="fs-module-card">
-      <button type="button" className="fs-module-click" onClick={onOpen}>
-        <span className="fs-card-top-glow" aria-hidden="true" />
-        <div className="fs-silver-icon">
-          <Icon size={27} strokeWidth={2.05} />
-        </div>
-        <h3>{item.title}</h3>
-        <p>{item.description}</p>
-        <span className="fs-card-open">
-          Openen <ChevronRight size={16} />
-        </span>
-      </button>
-    </article>
+    <div
+      className={extraClass}
+      style={{
+        position: "absolute",
+        left,
+        right,
+        top,
+        bottom,
+        width,
+        height: small ? 8 : 10,
+        background:
+          "radial-gradient(circle, rgba(255,98,0,1) 0%, rgba(255,98,0,0.55) 34%, rgba(255,98,0,0) 72%)",
+        filter: "blur(1.5px)",
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
+function CardChromeOverlay() {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+        background: `
+          linear-gradient(125deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 15%, transparent 26%),
+          linear-gradient(315deg, rgba(255,255,255,0.03) 0%, transparent 22%)
+        `,
+      }}
+    />
   );
 }
 
 function CenteredMessage({ text }: { text: string }) {
   return (
-    <main className="fs-page fs-centered-page">
-      <GlobalStyles />
-      <div className="fs-loading-card">{text}</div>
-    </main>
-  );
-}
-
-function GlobalStyles() {
-  return (
-    <style
-      dangerouslySetInnerHTML={{
-        __html: `
-        :root {
-          --fs-orange: ${NVB_ORANGE};
-          --fs-sidebar-width: 118px;
-          --fs-silver: #d9dde2;
-          --fs-silver-dark: #7d848d;
-        }
-
-        * { box-sizing: border-box; }
-        html, body { margin: 0; background: #020304; }
-        button { font: inherit; }
-
-        .fs-page {
-          min-height: 100vh;
-          color: #f4f4f4;
-          background:
-            radial-gradient(circle at 50% 0%, rgba(210,216,224,.10), transparent 25%),
-            radial-gradient(circle at 52% 100%, rgba(255,77,0,.045), transparent 28%),
-            linear-gradient(180deg, #07090b 0%, #020304 54%, #07090b 100%);
-        }
-
-        .fs-shell {
-          margin-left: var(--fs-sidebar-width);
-          min-height: 100vh;
-        }
-
-        .fs-sidebar {
-          position: fixed;
-          inset: 0 auto 0 0;
-          z-index: 40;
-          width: var(--fs-sidebar-width);
-          display: flex;
-          flex-direction: column;
-          border-right: 1px solid rgba(225,228,232,.52);
-          background:
-            linear-gradient(90deg, rgba(255,255,255,.05), transparent 36%),
-            linear-gradient(180deg, #11151a, #040608 70%, #0d1014);
-          box-shadow:
-            10px 0 28px rgba(0,0,0,.52),
-            inset -1px 0 rgba(255,255,255,.16),
-            inset -4px 0 14px rgba(190,196,204,.08);
-        }
-
-        .fs-brand-mark {
-          height: 122px;
-          border: 0;
-          border-bottom: 1px solid rgba(255,255,255,.18);
-          background: transparent;
-          cursor: pointer;
-          display: grid;
-          place-items: center;
-        }
-
-        .fs-brand-icon-wrap {
-          position: relative;
-          width: 76px;
-          height: 76px;
-          display: block;
-          filter:
-            drop-shadow(0 8px 14px rgba(0,0,0,.62))
-            drop-shadow(0 0 9px rgba(220,225,232,.16));
-        }
-
-        .fs-sidebar-nav { flex: 1; }
-
-        .fs-nav-item {
-          position: relative;
-          width: 100%;
-          min-height: 92px;
-          border: 0;
-          border-bottom: 1px solid rgba(255,255,255,.07);
-          background: transparent;
-          color: #d7dade;
-          cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          gap: 8px;
-          font-size: 10px;
-          font-weight: 850;
-          text-transform: uppercase;
-        }
-
-        .fs-nav-item:hover {
-          color: #fff;
-          background: linear-gradient(90deg, rgba(255,255,255,.07), transparent);
-        }
-
-        .fs-nav-active {
-          color: var(--fs-orange);
-          background:
-            linear-gradient(90deg, rgba(255,77,0,.11), rgba(255,255,255,.04));
-        }
-
-        .fs-nav-active::before {
-          content: "";
-          position: absolute;
-          left: 0;
-          top: 0;
-          bottom: 0;
-          width: 4px;
-          background: var(--fs-orange);
-          box-shadow: 0 0 14px rgba(255,77,0,.68);
-        }
-
-        .fs-sidebar-bottom {
-          height: 76px;
-          display: grid;
-          place-items: center;
-          color: #ddd;
-        }
-
-        .fs-sidebar-bottom svg {
-          width: 38px;
-          height: 38px;
-          padding: 9px;
-          border: 1px solid rgba(225,228,232,.44);
-          border-radius: 50%;
-          background: linear-gradient(180deg, #171b20, #080a0d);
-        }
-
-        .fs-header {
-          position: relative;
-          border-bottom: 1px solid rgba(225,228,232,.22);
-          background: #07090b;
-          box-shadow: 0 14px 30px rgba(0,0,0,.42);
-        }
-
-        .fs-header-metal {
-          position: absolute;
-          inset: 0 0 auto;
-          height: 128px;
-          pointer-events: none;
-          background:
-            linear-gradient(118deg, transparent 0 7%, rgba(255,255,255,.22) 8%, rgba(255,255,255,.06) 20%, transparent 34%),
-            linear-gradient(242deg, transparent 0 7%, rgba(255,255,255,.18) 8%, rgba(255,255,255,.05) 20%, transparent 34%),
-            repeating-linear-gradient(103deg, rgba(255,255,255,.035) 0 1px, transparent 1px 5px),
-            linear-gradient(180deg, #333941 0%, #101318 48%, #252a31 100%);
-          border-bottom: 1px solid rgba(255,255,255,.20);
-          box-shadow:
-            inset 0 1px rgba(255,255,255,.14),
-            inset 0 -16px 26px rgba(0,0,0,.52);
-        }
-
-        .fs-header-metal::after {
-          content: "";
-          position: absolute;
-          left: 5%;
-          right: 5%;
-          bottom: 20px;
-          height: 1px;
-          background:
-            linear-gradient(90deg, transparent, #aeb4bc 16%, #f7f8fa 50%, #aeb4bc 84%, transparent);
-          box-shadow:
-            0 0 8px rgba(220,225,232,.42),
-            0 0 12px rgba(255,77,0,.20);
-        }
-
-        .fs-logo-wrap {
-          position: relative;
-          z-index: 2;
-          width: min(980px, 78vw);
-          height: 124px;
-          margin: 0 auto;
-          filter:
-            drop-shadow(0 10px 15px rgba(0,0,0,.75))
-            drop-shadow(0 0 12px rgba(220,225,232,.12));
-        }
-
-        .fs-title-band {
-          position: relative;
-          z-index: 3;
-          min-height: 82px;
-          display: grid;
-          place-items: center;
-          padding: 10px 230px 12px;
-          background:
-            radial-gradient(circle at 50% 100%, rgba(255,77,0,.20), transparent 12%),
-            linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.015)),
-            linear-gradient(180deg, #20252c, #0b0e12 55%, #1b2026);
-          border-top: 1px solid rgba(255,255,255,.08);
-          border-bottom: 1px solid rgba(220,225,232,.16);
-        }
-
-        .fs-title-center { text-align: center; }
-
-        .fs-title-center h1 {
-          margin: 0;
-          font-size: clamp(27px, 2.4vw, 38px);
-          line-height: 1;
-          letter-spacing: 1.5px;
-          text-transform: uppercase;
-          color: #f1f2f4;
-          text-shadow:
-            0 1px rgba(255,255,255,.30),
-            0 5px 12px rgba(0,0,0,.88);
-        }
-
-        .fs-title-center p {
-          margin: 8px 0 0;
-          color: var(--fs-orange);
-          text-transform: uppercase;
-          letter-spacing: 3.2px;
-          font-size: 10px;
-          font-weight: 850;
-        }
-
-        .fs-dark-header-button {
-          position: absolute;
-          right: 28px;
-          top: 50%;
-          transform: translateY(-50%);
-          height: 44px;
-          min-width: 190px;
-          border: 1px solid rgba(220,225,232,.70);
-          background:
-            linear-gradient(180deg, #242a31, #090b0e 66%, #1b2026);
-          color: #f2f3f4;
-          box-shadow:
-            inset 0 1px rgba(255,255,255,.13),
-            0 5px 12px rgba(0,0,0,.40);
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 9px;
-          text-transform: uppercase;
-          font-size: 10px;
-          font-weight: 900;
-        }
-
-        .fs-dark-header-button:hover {
-          border-color: var(--fs-orange);
-          box-shadow:
-            0 0 14px rgba(255,77,0,.14),
-            inset 0 1px rgba(255,255,255,.18);
-        }
-
-        .fs-content {
-          width: min(1440px, calc(100% - 34px));
-          margin: 0 auto;
-          padding: 24px 0 22px;
-        }
-
-        .fs-status-strip {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          border: 1px solid rgba(220,224,229,.62);
-          background:
-            linear-gradient(120deg, rgba(255,255,255,.075), transparent 18%),
-            linear-gradient(180deg, #20252b, #090b0e 70%, #171b20);
-          box-shadow:
-            inset 0 1px rgba(255,255,255,.14),
-            inset 0 -1px rgba(0,0,0,.82),
-            0 12px 28px rgba(0,0,0,.36);
-        }
-
-        .fs-status-item {
-          min-height: 72px;
-          display: flex;
-          align-items: center;
-          gap: 11px;
-          padding: 10px 14px;
-          border-right: 1px solid rgba(225,228,232,.18);
-        }
-
-        .fs-status-item:last-child { border-right: 0; }
-
-        .fs-status-icon {
-          width: 44px;
-          height: 44px;
-          flex: 0 0 44px;
-          display: grid;
-          place-items: center;
-          color: #f0f1f2;
-          border: 1px solid rgba(235,238,242,.50);
-          clip-path: polygon(50% 0, 91% 22%, 91% 78%, 50% 100%, 9% 78%, 9% 22%);
-          background:
-            linear-gradient(145deg, rgba(255,255,255,.16), transparent 32%),
-            linear-gradient(160deg, #606872, #242a31 35%, #090b0e 70%, #3b424b);
-          box-shadow:
-            inset 0 1px rgba(255,255,255,.24),
-            0 0 0 1px rgba(255,255,255,.08);
-        }
-
-        .fs-status-item strong {
-          display: block;
-          font-size: 22px;
-          line-height: 1;
-          color: #f1f2f3;
-        }
-
-        .fs-status-item span {
-          display: block;
-          margin-top: 4px;
-          font-size: 10px;
-          text-transform: uppercase;
-          font-weight: 900;
-        }
-
-        .fs-status-item small {
-          display: block;
-          margin-top: 3px;
-          color: #c8cbd0;
-          font-size: 10px;
-        }
-
-        .fs-section { margin-top: 18px; }
-
-        .fs-section-heading {
-          display: flex;
-          align-items: baseline;
-          gap: 12px;
-          flex-wrap: wrap;
-          margin-bottom: 10px;
-          padding-bottom: 8px;
-          border-bottom: 1px solid rgba(220,225,232,.28);
-        }
-
-        .fs-section-heading h2 {
-          margin: 0;
-          color: #eef0f2;
-          text-transform: uppercase;
-          font-size: 20px;
-          letter-spacing: .7px;
-        }
-
-        .fs-section-heading span {
-          color: var(--fs-orange);
-          text-transform: uppercase;
-          font-size: 10px;
-          letter-spacing: 1.5px;
-          font-weight: 850;
-        }
-
-        .fs-card-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 12px;
-        }
-
-        .fs-official-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .fs-module-card {
-          position: relative;
-          min-width: 0;
-          min-height: 186px;
-          border: 1px solid rgba(225,228,232,.62);
-          background:
-            linear-gradient(120deg, rgba(255,255,255,.09), transparent 20%),
-            linear-gradient(180deg, #20242a, #090b0e 66%, #171b20);
-          box-shadow:
-            inset 0 1px rgba(255,255,255,.18),
-            inset 0 -1px rgba(0,0,0,.86),
-            inset 1px 0 rgba(255,255,255,.06),
-            0 10px 20px rgba(0,0,0,.38);
-          transition:
-            transform 170ms ease,
-            border-color 170ms ease,
-            box-shadow 170ms ease;
-        }
-
-        .fs-module-card::before,
-        .fs-module-card::after {
-          content: "";
-          position: absolute;
-          width: 20px;
-          height: 20px;
-          pointer-events: none;
-        }
-
-        .fs-module-card::before {
-          left: -1px;
-          top: -1px;
-          border-left: 2px solid #eef0f2;
-          border-top: 2px solid #eef0f2;
-          filter: drop-shadow(0 0 4px rgba(220,225,232,.28));
-        }
-
-        .fs-module-card::after {
-          right: -1px;
-          bottom: -1px;
-          border-right: 2px solid #8f969f;
-          border-bottom: 2px solid #8f969f;
-        }
-
-        .fs-module-card:hover {
-          transform: translateY(-3px);
-          border-color: rgba(255,77,0,.72);
-          box-shadow:
-            0 0 16px rgba(255,77,0,.10),
-            0 15px 25px rgba(0,0,0,.48),
-            inset 0 1px rgba(255,255,255,.22);
-        }
-
-        .fs-module-click {
-          width: 100%;
-          min-height: inherit;
-          padding: 14px 14px 12px;
-          border: 0;
-          background: transparent;
-          color: inherit;
-          cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          text-align: center;
-        }
-
-        .fs-card-top-glow {
-          position: absolute;
-          top: -3px;
-          left: 27%;
-          right: 27%;
-          height: 8px;
-          background:
-            radial-gradient(circle, rgba(244,246,248,.95), rgba(184,190,198,.30) 42%, transparent 76%);
-          filter: blur(1.5px);
-          opacity: .48;
-        }
-
-        .fs-silver-icon {
-          width: 54px;
-          height: 54px;
-          display: grid;
-          place-items: center;
-          margin-bottom: 9px;
-          color: #f5f6f7;
-          clip-path: polygon(50% 0, 89% 21%, 89% 79%, 50% 100%, 11% 79%, 11% 21%);
-          border: 1px solid rgba(240,243,246,.62);
-          background:
-            linear-gradient(145deg, rgba(255,255,255,.28), transparent 29%),
-            linear-gradient(160deg, #7c858f 0%, #30363d 33%, #0a0c0f 68%, #4a515a 100%);
-          box-shadow:
-            inset 0 1px rgba(255,255,255,.38),
-            inset 0 -1px rgba(0,0,0,.66),
-            0 0 0 1px rgba(255,255,255,.10),
-            0 0 12px rgba(220,225,232,.12);
-          text-shadow: 0 2px 3px #000;
-        }
-
-        .fs-module-card h3 {
-          margin: 0;
-          min-height: 28px;
-          display: grid;
-          place-items: center;
-          color: #f1f2f3;
-          font-size: 14px;
-          line-height: 1.15;
-          text-transform: uppercase;
-          font-weight: 900;
-        }
-
-        .fs-module-card p {
-          margin: 7px 0 10px;
-          color: #cdd0d4;
-          font-size: 10px;
-          line-height: 1.45;
-          flex: 1;
-        }
-
-        .fs-card-open {
-          width: 100%;
-          min-height: 32px;
-          border: 1px solid rgba(225,228,232,.36);
-          background:
-            linear-gradient(180deg, #22272d, #080a0d 68%, #171b20);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          color: var(--fs-orange);
-          text-transform: uppercase;
-          font-size: 10px;
-          font-weight: 900;
-          transition: border-color 150ms ease, background 150ms ease;
-        }
-
-        .fs-module-card:hover .fs-card-open {
-          border-color: rgba(255,77,0,.78);
-          background:
-            linear-gradient(180deg, #272d34, #0c0f13 68%, #1c2127);
-        }
-
-        .fs-footer {
-          margin-top: 20px;
-          padding: 12px;
-          text-align: center;
-          border-top: 1px solid rgba(225,228,232,.18);
-          color: rgba(255,255,255,.42);
-          font-size: 9px;
-          letter-spacing: 2px;
-        }
-
-        .fs-mobile-menu-button,
-        .fs-mobile-overlay { display: none; }
-
-        .fs-centered-page {
-          display: grid;
-          place-items: center;
-          padding: 24px;
-        }
-
-        .fs-loading-card {
-          border: 1px solid rgba(225,228,232,.68);
-          background:
-            linear-gradient(120deg, rgba(255,255,255,.08), transparent 25%),
-            linear-gradient(180deg, #20252b, #080a0d);
-          box-shadow: 0 18px 36px rgba(0,0,0,.55);
-          padding: 28px 34px;
-          text-align: center;
-          font-weight: 800;
-          display: grid;
-          gap: 8px;
-          justify-items: center;
-        }
-
-        .fs-loading-card small {
-          color: #c8cbd0;
-          font-weight: 500;
-        }
-
-        @media (max-width: 1080px) {
-          .fs-card-grid, .fs-official-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .fs-title-band { padding-left: 180px; padding-right: 180px; }
-          .fs-dark-header-button { min-width: 155px; }
-          .fs-dark-header-button span { display: none; }
-        }
-
-        @media (max-width: 720px) {
-          :root { --fs-sidebar-width: 0px; }
-
-          .fs-shell { margin-left: 0; }
-
-          .fs-sidebar {
-            width: 112px;
-            transform: translateX(-102%);
-            transition: transform 180ms ease;
-          }
-
-          .fs-sidebar-open { transform: translateX(0); }
-
-          .fs-mobile-menu-button {
-            display: grid;
-            place-items: center;
-            position: fixed;
-            z-index: 60;
-            left: 12px;
-            top: 12px;
-            width: 42px;
-            height: 42px;
-            border: 1px solid rgba(225,228,232,.65);
-            background: #0b0d10;
-            color: #fff;
-            cursor: pointer;
-          }
-
-          .fs-mobile-overlay {
-            display: block;
-            position: fixed;
-            z-index: 30;
-            inset: 0;
-            border: 0;
-            background: rgba(0,0,0,.68);
-          }
-
-          .fs-logo-wrap { width: 92vw; height: 82px; }
-          .fs-header-metal { height: 84px; }
-          .fs-title-band { padding: 72px 12px 16px; }
-
-          .fs-dark-header-button {
-            top: 15px;
-            right: 12px;
-            transform: none;
-            min-width: 0;
-            width: 44px;
-            padding: 0;
-          }
-
-          .fs-content { width: calc(100% - 20px); padding-top: 12px; }
-          .fs-status-strip { grid-template-columns: 1fr; }
-          .fs-status-item { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.10); }
-          .fs-status-item:last-child { border-bottom: 0; }
-          .fs-card-grid, .fs-official-grid { grid-template-columns: 1fr; }
-          .fs-official-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .fs-module-card { min-height: 178px; }
-        }
-      `,
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
       }}
-    />
+    >
+      <SteelFrame>
+        <div
+          style={{
+            ...darkPlate,
+            padding: "24px 30px",
+            fontSize: 18,
+            fontWeight: 800,
+            color: "#f1f1f1",
+          }}
+        >
+          {text}
+        </div>
+      </SteelFrame>
+    </div>
   );
 }

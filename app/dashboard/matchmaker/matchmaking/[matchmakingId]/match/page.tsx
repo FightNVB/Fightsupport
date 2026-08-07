@@ -1691,16 +1691,54 @@ async function fetchMatchmakingTournamentBouts(matchmakingId: string) {
 }
 
 async function fetchFightPassportResults(matchmakingId: string, vaNumbers: string[]) {
-  if (!vaNumbers.length) return [] as ResultRow[];
-
-  const query = vaNumbers.map((va) => `va=${encodeURIComponent(va)}`).join("&");
-  const response = await authedFetch(
-    `/api/matchmaker/${encodeURIComponent(matchmakingId)}/fightpassport?${query}`,
-    { cache: "no-store" },
+  const uniqueVas = Array.from(
+    new Set(vaNumbers.map(onlyDigits).filter(Boolean)),
   );
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(json?.error || "FightPassport-uitslagen laden mislukt.");
-  return (json?.results || []) as ResultRow[];
+  if (!matchmakingId || !uniqueVas.length) return [] as ResultRow[];
+
+  // De API accepteert maximaal 50 VA-nummers per verzoek. Een matchmaking kan
+  // veel meer vechters bevatten, dus laad de uitslagen veilig in batches.
+  const batchSize = 50;
+  const allResults: ResultRow[] = [];
+
+  for (let start = 0; start < uniqueVas.length; start += batchSize) {
+    const batch = uniqueVas.slice(start, start + batchSize);
+    const query = batch
+      .map((va) => `va=${encodeURIComponent(va)}`)
+      .join("&");
+
+    const response = await authedFetch(
+      `/api/matchmaker/${encodeURIComponent(matchmakingId)}/fightpassport?${query}`,
+      { cache: "no-store" },
+    );
+    const json = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        json?.error || `FightPassport-uitslagen laden mislukt voor batch ${Math.floor(start / batchSize) + 1}.`,
+      );
+    }
+
+    if (Array.isArray(json?.results)) allResults.push(...json.results);
+  }
+
+  // Voorkom dubbele uitslagen wanneer dezelfde rij via meerdere batches of
+  // bronkoppelingen terugkomt.
+  const seen = new Set<string>();
+  return allResults.filter((row) => {
+    const key = s(
+      pickFirst(
+        row?.id,
+        [row?.va_nummer, row?.datum, row?.evenement, row?.tegenstander, row?.uitslag, row?.klasse]
+          .map((value) => s(value).toLowerCase())
+          .join("|"),
+      ),
+    );
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export default function FightersPage() {

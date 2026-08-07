@@ -107,6 +107,13 @@ const primaryModules: PortalLink[] = [
     icon: Scale,
   },
   {
+    title: "Statistieken",
+    description: "FightPassport-statistieken voor vechters, sportscholen, bondteams, officials en evenementen.",
+    href: "/dashboard/admin/fightpassport-statistieken",
+    icon: BarChart3,
+    rootAdminOnly: true,
+  },
+  {
     title: "Uitslagen verwerken",
     description: "Uitslagen beheren en uploaden naar FightPassport.",
     href: "/dashboard/admin/uitslagen/ready-to-upload",
@@ -475,7 +482,7 @@ function Sidebar({
     { label: "Admin", href: "/dashboard/admin", icon: Home, active: true },
     { label: "Controle", href: "/dashboard/admin/controle", icon: Scale },
     { label: "Uitslagen", href: "/dashboard/admin/uitslagen/ready-to-upload", icon: Trophy },
-    { label: "Rapporten", href: "/dashboard/admin/controle", icon: BarChart3 },
+    { label: "Statistieken", href: "/dashboard/admin/fightpassport-statistieken", icon: BarChart3 },
     { label: "Doping", href: "/dashboard/admin/doping", icon: ShieldCheck },
     { label: "Instellingen", href: "/dashboard/admin/beheer/accounts-beheer", icon: Cog },
   ];
