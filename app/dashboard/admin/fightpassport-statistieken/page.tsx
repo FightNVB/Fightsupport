@@ -1032,8 +1032,6 @@ function DirectorPrintReport({
           />
         </ReportPage>
       ))}
-
-      </ReportPage>
     </div>
   );
 }
