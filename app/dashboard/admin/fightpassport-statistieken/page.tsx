@@ -727,8 +727,8 @@ export default function FightPassportStatistiekenPage() {
 
         <Section title="Evenementen">
           <Ranking
-            title="Gala's op aantal partijen"
-            rows={(data?.events?.alle ?? []).slice(0, 50)}
+            title="Alle gala's in geselecteerde periode"
+            rows={data?.events?.alle ?? []}
             columns={[
               ["Datum", (r: any) => dateNl(r.evenement_datum)],
               ["Evenement", (r: any) => r.evenement_naam],
