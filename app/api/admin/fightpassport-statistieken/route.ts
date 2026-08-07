@@ -90,10 +90,32 @@ function eventKey(date: unknown, event: unknown) {
   return `${ymd(date)}|${cleanEvent(event)}`;
 }
 
-function fightKey(row: AnyRow, fighterName: string) {
-  const left = cleanName(fighterName || row.va_nummer);
-  const right = cleanName(row.tegenstander);
-  const pair = [left, right].filter(Boolean).sort((a, b) => a.localeCompare(b, "nl")).join("::");
+function fightKey(
+  row: AnyRow,
+  fighterName: string,
+  fighterVaByName: Map<string, string>,
+) {
+  const ownVa = digits(row.va_nummer);
+  const opponentName = cleanName(row.tegenstander);
+  const opponentVa = opponentName ? fighterVaByName.get(opponentName) ?? "" : "";
+
+  // FightPassport is de interne bron. Als beide vechters in de fighter-mirror staan,
+  // gebruiken we VA-nummers als canonieke partij-identiteit. Daardoor worden:
+  //   Piet -> Henk
+  //   Henk -> Piet
+  // altijd één partij, onafhankelijk van de volgorde van de twee resultaatregels.
+  //
+  // Alleen als het VA-nummer van de tegenstander niet kan worden gekoppeld, vallen we
+  // terug op de genormaliseerde FightPassport-naam.
+  const ownIdentity = ownVa ? `va:${ownVa}` : `naam:${cleanName(fighterName)}`;
+  const opponentIdentity = opponentVa
+    ? `va:${opponentVa}`
+    : `naam:${opponentName}`;
+
+  const pair = [ownIdentity, opponentIdentity]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "nl"))
+    .join("::");
 
   return [
     ymd(row.datum),
@@ -178,7 +200,7 @@ export async function GET(req: Request) {
       ),
       fetchAll(
         "fightpassport_events",
-        "event_id,bond_naam,evenement_naam,evenement_datum,plaats,promotor,exists_in_fightpassport,officials_count,last_scraped_at",
+        "event_id,bond_naam,evenement_naam,evenement_datum,plaats,promotor,exists_in_fightpassport,matchmaking_aantal_vechters,matchmaking_aantal_partijen,uitslagen_aantal,uitslagen_nog_in_te_voeren,officials_count,last_scraped_at",
         eventFilter,
       ),
       fetchAll(
@@ -192,9 +214,18 @@ export async function GET(req: Request) {
     ]);
 
     const fighterByVa = new Map<string, AnyRow>();
+    const fighterVaByName = new Map<string, string>();
+
     for (const fighter of fighters) {
       const va = digits(fighter.va_nummer);
-      if (va) fighterByVa.set(va, fighter);
+      if (!va) continue;
+
+      fighterByVa.set(va, fighter);
+
+      const normalizedName = cleanName(fighter.naam);
+      if (normalizedName && !fighterVaByName.has(normalizedName)) {
+        fighterVaByName.set(normalizedName, va);
+      }
     }
 
     const uniqueFightKeys = new Set<string>();
@@ -211,7 +242,7 @@ export async function GET(req: Request) {
       const fighterName = text(fighter?.naam) || `VA ${va}`;
       const group = ageGroup(fighter?.geboortedatum, row.datum);
       const kind = resultKind(row.uitslag);
-      const key = fightKey(row, fighterName);
+      const key = fightKey(row, fighterName, fighterVaByName);
       const eKey = eventKey(row.datum, row.evenement);
 
       if (key) {
@@ -324,6 +355,39 @@ export async function GET(req: Request) {
 
     const eventRows = events.map((event) => {
       const key = eventKey(event.evenement_datum, event.evenement_naam);
+      const fallbackPartijen = eventFightKeys.get(key)?.size ?? 0;
+
+      const uitslagenAantal =
+        event.uitslagen_aantal === null || event.uitslagen_aantal === undefined
+          ? null
+          : Number(event.uitslagen_aantal);
+
+      const matchmakingAantalPartijen =
+        event.matchmaking_aantal_partijen === null ||
+        event.matchmaking_aantal_partijen === undefined
+          ? null
+          : Number(event.matchmaking_aantal_partijen);
+
+      // Waarheid en volgorde:
+      // 1. UITSLAGEN -> Aantal (FightPassport event-tegel)
+      // 2. MATCHMAKING -> Aantal partijen
+      // 3. Alleen als de event-scrape nog geen aantallen bevat: gededupliceerde
+      //    fightpassport_results. Twee resultaatregels van dezelfde partij vormen
+      //    daarbij één canonieke partij.
+      const partijen =
+        uitslagenAantal !== null && Number.isFinite(uitslagenAantal)
+          ? uitslagenAantal
+          : matchmakingAantalPartijen !== null && Number.isFinite(matchmakingAantalPartijen)
+            ? matchmakingAantalPartijen
+            : fallbackPartijen;
+
+      const partijenBron =
+        uitslagenAantal !== null && Number.isFinite(uitslagenAantal)
+          ? "uitslagen"
+          : matchmakingAantalPartijen !== null && Number.isFinite(matchmakingAantalPartijen)
+            ? "matchmaking"
+            : "resultaten_fallback";
+
       return {
         event_id: event.event_id,
         evenement_naam: event.evenement_naam,
@@ -331,7 +395,14 @@ export async function GET(req: Request) {
         plaats: event.plaats,
         promotor: event.promotor,
         bond_naam: text(event.bond_naam) || "Onbekend",
-        partijen: eventFightKeys.get(key)?.size ?? 0,
+        aantal_vechters:
+          event.matchmaking_aantal_vechters === null ||
+          event.matchmaking_aantal_vechters === undefined
+            ? null
+            : Number(event.matchmaking_aantal_vechters),
+        partijen,
+        partijen_bron: partijenBron,
+        fallback_partijen: fallbackPartijen,
         officials_count: Number(event.officials_count ?? 0),
       };
     });
@@ -441,12 +512,20 @@ export async function GET(req: Request) {
       .sort()
       .at(-1) ?? null;
 
+    const partijenUitUitslagen = eventRows.filter((row) => row.partijen_bron === "uitslagen").length;
+    const partijenUitMatchmaking = eventRows.filter((row) => row.partijen_bron === "matchmaking").length;
+    const partijenUitFallback = eventRows.filter((row) => row.partijen_bron === "resultaten_fallback").length;
+    const totaalEventPartijen = eventRows.reduce(
+      (sum, row) => sum + Number(row.partijen ?? 0),
+      0,
+    );
+
     return NextResponse.json(
       {
         filter: { from, to },
         totals: {
           evenementen: eventRows.length,
-          partijen: uniqueFightKeys.size,
+          partijen: totaalEventPartijen,
           wedstrijdvechters: uniqueFighterVas.size,
           sportscholen: uniqueSchools.size,
           nederlandse_sportscholen: dutchParticipatingSchools.size,
@@ -455,6 +534,12 @@ export async function GET(req: Request) {
           grootste_gala: biggest,
           kleinste_gala: smallest,
           laatste_sync: latestScrape,
+          datakwaliteit: {
+            events_met_uitslagen_aantal: partijenUitUitslagen,
+            events_met_matchmaking_aantal: partijenUitMatchmaking,
+            events_met_resultaten_fallback: partijenUitFallback,
+            totaal_events: eventRows.length,
+          },
         },
         fighters: {
           meeste_partijen: top(fighterRows, "partijen"),

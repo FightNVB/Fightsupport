@@ -5,10 +5,15 @@ import { authedFetch } from "@/lib/api/authedFetch";
 import {
   Activity,
   Award,
+  BarChart3,
   CalendarDays,
+  Download,
+  FileText,
+  Printer,
   RefreshCw,
   School,
   Shield,
+  Sparkles,
   Swords,
   Trophy,
   Users,
@@ -52,6 +57,71 @@ function dateNl(v: any) {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString("nl-NL");
 }
 
+
+function csvEscape(value: unknown) {
+  const raw = String(value ?? "");
+  return `"${raw.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(data: Stats, from: string, to: string) {
+  const lines: string[] = [];
+  const totals = data?.totals ?? {};
+
+  lines.push(["FightSupport FightPassport Statistieken"].map(csvEscape).join(";"));
+  lines.push(["Periode", from || "alles", to || "alles"].map(csvEscape).join(";"));
+  lines.push("");
+
+  lines.push(["Kerncijfer", "Waarde"].map(csvEscape).join(";"));
+  lines.push(["Evenementen", totals.evenementen].map(csvEscape).join(";"));
+  lines.push(["Partijen", totals.partijen].map(csvEscape).join(";"));
+  lines.push(["Wedstrijdvechters", totals.wedstrijdvechters].map(csvEscape).join(";"));
+  lines.push(["Nederlandse sportscholen", totals.nederlandse_sportscholen].map(csvEscape).join(";"));
+  lines.push(["Bondteams", totals.bondteams].map(csvEscape).join(";"));
+  lines.push(["Officials", totals.officials].map(csvEscape).join(";"));
+  lines.push("");
+
+  lines.push(["Top vechters", "VA", "Partijen", "Winst", "KO/TKO"].map(csvEscape).join(";"));
+  for (const row of data?.fighters?.meeste_partijen ?? []) {
+    lines.push(
+      [row.naam, row.va_nummer, row.partijen, row.winst, row.ko_tko_winst]
+        .map(csvEscape)
+        .join(";"),
+    );
+  }
+  lines.push("");
+
+  lines.push(["Sportschool", "Actieve vechters", "Partijen", "Winst", "Verlies", "Winst %"].map(csvEscape).join(";"));
+  for (const row of data?.schools?.meeste_partijen ?? []) {
+    lines.push(
+      [row.sportschool, row.actieve_vechters, row.partijen, row.winst, row.verlies, row.winstpercentage]
+        .map(csvEscape)
+        .join(";"),
+    );
+  }
+  lines.push("");
+
+  lines.push(["Bondteam", "Evenementen", "Partijen", "Officials"].map(csvEscape).join(";"));
+  for (const row of data?.bonds ?? []) {
+    lines.push(
+      [row.bondteam, row.evenementen, row.partijen, row.officials]
+        .map(csvEscape)
+        .join(";"),
+    );
+  }
+
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], {
+    type: "text/csv;charset=utf-8",
+  });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = `fightsupport-statistieken-${from || "alles"}-${to || "alles"}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(href);
+}
+
 export default function FightPassportStatistiekenPage() {
   const now = new Date();
   const thisYear = now.getFullYear();
@@ -62,6 +132,7 @@ export default function FightPassportStatistiekenPage() {
   const [data, setData] = useState<Stats | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [reportMode, setReportMode] = useState(false);
 
   const quickYears = useMemo(
     () => [thisYear - 2, thisYear - 1, thisYear],
@@ -101,21 +172,83 @@ export default function FightPassportStatistiekenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const done = () => setReportMode(false);
+    window.addEventListener("afterprint", done);
+    return () => window.removeEventListener("afterprint", done);
+  }, []);
+
   const totals = data?.totals ?? {};
+  const quality = totals?.datakwaliteit ?? {};
+  const totalEventsForQuality = Number(quality.totaal_events ?? 0);
+  const authoritativeEvents =
+    Number(quality.events_met_uitslagen_aantal ?? 0) +
+    Number(quality.events_met_matchmaking_aantal ?? 0);
+  const authoritativePct =
+    totalEventsForQuality > 0
+      ? Math.round((authoritativeEvents / totalEventsForQuality) * 100)
+      : 0;
+
+  const topFighter = data?.fighters?.meeste_partijen?.[0] ?? null;
+  const topSchool = data?.schools?.meeste_actieve_vechters?.[0] ?? null;
+  const topBond = data?.bonds?.[0] ?? null;
 
   return (
-    <main style={s.page}>
+    <main className={`stats-master-page${reportMode ? " report-mode" : ""}`} style={s.page}>
+      <style jsx global>{`
+        @media print {
+          @page { size: A4 landscape; margin: 10mm; }
+          html, body { background: #fff !important; }
+          .stats-master-page {
+            background: #fff !important;
+            color: #111 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .stats-no-print { display: none !important; }
+          .stats-master-page section,
+          .stats-master-page table,
+          .stats-master-page .stats-report-card {
+            break-inside: avoid;
+          }
+          .stats-master-page .stats-print-hero {
+            border: 2px solid #222 !important;
+            box-shadow: none !important;
+          }
+        }
+
+        @media (max-width: 1100px) {
+          .stats-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+          .stats-grid3 { grid-template-columns: 1fr !important; }
+          .stats-grid2 { grid-template-columns: 1fr !important; }
+          .stats-executive-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+        }
+
+        @media (max-width: 680px) {
+          .stats-master-page { padding: 8px !important; }
+          .stats-hero-top { flex-direction: column !important; align-items: flex-start !important; }
+          .stats-logo { width: min(100%, 330px) !important; max-width: 100% !important; }
+          .stats-kpis,
+          .stats-executive-grid,
+          .stats-highlights { grid-template-columns: 1fr !important; }
+          .stats-filterbar { align-items: stretch !important; }
+          .stats-date-filters { width: 100% !important; }
+          .stats-date-filters label { flex: 1 1 130px !important; }
+          .stats-date-filters input { width: 100% !important; }
+        }
+      `}</style>
       <div style={s.wrap}>
-        <header style={s.hero}>
-          <div style={s.heroTop}>
+        <header className="stats-print-hero" style={s.hero}>
+          <div className="stats-hero-top" style={s.heroTop}>
             <div>
-              <div style={s.eyebrow}>FIGHTPASSPORT ANALYTICS</div>
-              <h1 style={s.title}>Statistieken</h1>
+              <div style={s.eyebrow}>FIGHTSUPPORT · FIGHTPASSPORT INTELLIGENCE</div>
+              <h1 style={s.title}>Nationaal Statistiekoverzicht</h1>
               <div style={s.sub}>
-                Rechtstreeks berekend uit de gescrapete FightPassport-data.
+                Wedstrijdsport in cijfers · vechters, sportscholen, evenementen, bondteams en officials.
               </div>
             </div>
-            <img src={LOGO} alt="FightSupport" style={s.logo} />
+            <img className="stats-logo" src={LOGO} alt="FightSupport" style={s.logo} />
           </div>
 
           <div style={s.filterbar}>
@@ -149,7 +282,29 @@ export default function FightPassportStatistiekenPage() {
               </button>
             </div>
 
-            <div style={s.dateFilters}>
+            <div className="stats-no-print" style={s.reportActions}>
+              <button
+                style={s.reportButton}
+                disabled={!data || busy}
+                onClick={() => {
+                  setReportMode(true);
+                  window.setTimeout(() => window.print(), 80);
+                }}
+              >
+                <Printer size={16} />
+                Rapport / PDF
+              </button>
+              <button
+                style={s.silver}
+                disabled={!data || busy}
+                onClick={() => data && downloadCsv(data, from, to)}
+              >
+                <Download size={16} />
+                Download CSV
+              </button>
+            </div>
+
+            <div className="stats-date-filters" style={s.dateFilters}>
               <label style={s.label}>
                 Van datum
                 <input
@@ -178,7 +333,48 @@ export default function FightPassportStatistiekenPage() {
 
         {error && <div style={s.error}>{error}</div>}
 
-        <div style={s.kpis}>
+        <section className="stats-report-card" style={s.executive}>
+          <div style={s.executiveHeader}>
+            <div>
+              <div style={s.executiveEyebrow}><Sparkles size={15} /> MANAGEMENT SUMMARY</div>
+              <h2 style={s.executiveTitle}>
+                {from || to ? `${dateNl(from)} — ${dateNl(to)}` : "Volledige FightPassport-historie"}
+              </h2>
+            </div>
+            <div style={s.qualityBadge}>
+              <BarChart3 size={18} />
+              <div>
+                <strong>{authoritativePct}%</strong>
+                <span>eventtelling direct uit FightPassport</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="stats-executive-grid" style={s.executiveGrid}>
+            <ExecutiveFact
+              label="Actiefste vechter"
+              value={topFighter ? topFighter.naam : "-"}
+              sub={topFighter ? `${fmt(topFighter.partijen)} partijen` : "Geen data"}
+            />
+            <ExecutiveFact
+              label="Grootste wedstrijdploeg"
+              value={topSchool ? topSchool.sportschool : "-"}
+              sub={topSchool ? `${fmt(topSchool.actieve_vechters)} actieve vechters` : "Geen data"}
+            />
+            <ExecutiveFact
+              label="Meest actieve bondteam"
+              value={topBond ? topBond.bondteam : "-"}
+              sub={topBond ? `${fmt(topBond.partijen)} partijen · ${fmt(topBond.evenementen)} events` : "Geen data"}
+            />
+            <ExecutiveFact
+              label="Datadekking"
+              value={`${fmt(authoritativeEvents)} / ${fmt(totalEventsForQuality)}`}
+              sub={`${fmt(quality.events_met_resultaten_fallback ?? 0)} events via resultaten-fallback`}
+            />
+          </div>
+        </section>
+
+        <div className="stats-kpis" style={s.kpis}>
           <Kpi icon={<CalendarDays size={20} />} label="Evenementen" value={fmt(totals.evenementen)} />
           <Kpi icon={<Swords size={20} />} label="Partijen" value={fmt(totals.partijen)} />
           <Kpi icon={<Users size={20} />} label="Wedstrijdvechters" value={fmt(totals.wedstrijdvechters)} />
@@ -187,7 +383,7 @@ export default function FightPassportStatistiekenPage() {
           <Kpi icon={<Award size={20} />} label="Officials" value={fmt(totals.officials)} />
         </div>
 
-        <div style={s.highlights}>
+        <div className="stats-highlights" style={s.highlights}>
           <Highlight
             icon={<Trophy size={18} />}
             title="Grootste gala"
@@ -201,7 +397,7 @@ export default function FightPassportStatistiekenPage() {
         </div>
 
         <Section title="Wedstrijdvechters">
-          <div style={s.grid3}>
+          <div className="stats-grid3" style={s.grid3}>
             <Ranking
               title="Top 10 meeste partijen"
               rows={data?.fighters?.meeste_partijen ?? []}
@@ -228,7 +424,7 @@ export default function FightPassportStatistiekenPage() {
             />
           </div>
 
-          <div style={s.grid2}>
+          <div className="stats-grid2" style={s.grid2}>
             <div style={s.ageBox}>
               <h3 style={s.ageTitle}>Jeugd</h3>
               <Ranking
@@ -301,7 +497,7 @@ export default function FightPassportStatistiekenPage() {
         </Section>
 
         <Section title="Sportscholen">
-          <div style={s.grid3}>
+          <div className="stats-grid3" style={s.grid3}>
             <Ranking
               title="Meeste actieve wedstrijdvechters"
               rows={data?.schools?.meeste_actieve_vechters ?? []}
@@ -370,6 +566,15 @@ export default function FightPassportStatistiekenPage() {
               ["Plaats", (r: any) => r.plaats || "-"],
               ["Bondteam", (r: any) => r.bond_naam || "-"],
               ["Partijen", (r: any) => fmt(r.partijen)],
+              [
+                "Bron",
+                (r: any) =>
+                  r.partijen_bron === "uitslagen"
+                    ? "Uitslagen"
+                    : r.partijen_bron === "matchmaking"
+                      ? "Matchmaking"
+                      : "Resultaten (fallback)",
+              ],
             ]}
           />
         </Section>
@@ -384,6 +589,16 @@ export default function FightPassportStatistiekenPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function ExecutiveFact({ label, value, sub }: any) {
+  return (
+    <div style={s.executiveFact}>
+      <div style={s.executiveFactLabel}>{label}</div>
+      <div style={s.executiveFactValue}>{value}</div>
+      <div style={s.executiveFactSub}>{sub}</div>
+    </div>
   );
 }
 
@@ -423,7 +638,7 @@ function Highlight({ icon, title, row }: any) {
 
 function Section({ title, children }: any) {
   return (
-    <section style={s.section}>
+    <section className="stats-report-card" style={s.section}>
       <h2 style={s.sectionTitle}>{title}</h2>
       {children}
     </section>
@@ -569,6 +784,99 @@ const s: Record<string, CSSProperties> = {
     border: "1px solid #a84c42",
     background: "#2b1110",
     color: "#ffd6d0",
+    fontWeight: 800,
+  },
+  reportActions: {
+    display: "flex",
+    gap: 7,
+    flexWrap: "wrap",
+    alignItems: "end",
+  },
+  reportButton: {
+    display: "inline-flex",
+    gap: 7,
+    alignItems: "center",
+    height: 36,
+    padding: "0 13px",
+    background: "linear-gradient(180deg,#ff7a3f,#d63e00)",
+    color: "#fff",
+    border: "1px solid #ff9869",
+    boxShadow: "0 0 16px rgba(255,77,0,.16)",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
+  executive: {
+    marginBottom: 11,
+    padding: 14,
+    border: "1px solid #757d86",
+    borderTop: `3px solid ${ORANGE}`,
+    background:
+      "radial-gradient(circle at 85% 10%,rgba(255,77,0,.12),transparent 28%),linear-gradient(135deg,#20262d,#090d11 58%,#171c22)",
+    boxShadow: "0 12px 28px rgba(0,0,0,.36), inset 0 1px rgba(255,255,255,.06)",
+  },
+  executiveHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 14,
+    flexWrap: "wrap",
+    marginBottom: 12,
+  },
+  executiveEyebrow: {
+    display: "flex",
+    gap: 7,
+    alignItems: "center",
+    color: "#ff7a43",
+    fontSize: 10,
+    fontWeight: 950,
+    letterSpacing: 1.8,
+  },
+  executiveTitle: {
+    margin: "5px 0 0",
+    fontSize: 22,
+    color: "#f4f4f4",
+    letterSpacing: .4,
+  },
+  qualityBadge: {
+    display: "flex",
+    gap: 9,
+    alignItems: "center",
+    minWidth: 250,
+    padding: "9px 11px",
+    border: "1px solid rgba(225,228,232,.45)",
+    background: "linear-gradient(#1e242a,#090c10)",
+  },
+  executiveGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4,minmax(0,1fr))",
+    gap: 8,
+  },
+  executiveFact: {
+    minWidth: 0,
+    padding: "11px 12px",
+    border: "1px solid #4b535b",
+    background: "linear-gradient(180deg,#161b20,#090c10)",
+  },
+  executiveFactLabel: {
+    color: "#9ea6ae",
+    fontSize: 9,
+    fontWeight: 900,
+    textTransform: "uppercase",
+    letterSpacing: .9,
+  },
+  executiveFactValue: {
+    marginTop: 5,
+    color: "#f4f4f4",
+    fontSize: 16,
+    fontWeight: 950,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  executiveFactSub: {
+    marginTop: 4,
+    color: "#ff7941",
+    fontSize: 10,
     fontWeight: 800,
   },
   kpis: {

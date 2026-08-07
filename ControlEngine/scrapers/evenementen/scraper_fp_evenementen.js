@@ -423,13 +423,31 @@ async function waitForStableOverviewTiles(page, eventId) {
 
   while (Date.now() - startedAt < timeoutMs) {
     latest = await readOverviewTiles(page, eventId);
-    const completeTileSet = latest && [
-      latest.officials,
-      latest.matchmaking,
-      latest.results,
-      latest.suspensions,
-      latest.startbans,
-    ].every((tile) => tile?.found);
+    // Alleen het bestaan van de tegels is niet genoeg. FightPassport tekent eerst
+    // de tile-shell en vult de inhoud daarna asynchroon. De oude controle kon daardoor
+    // twee keer achter elkaar een lege maar "stabiele" snapshot zien en nullen opslaan.
+    //
+    // Wacht daarom totdat de waarden die daadwerkelijk op de tegels horen te staan
+    // ook aanwezig zijn. OFFICIALS mag wel 0 regels bevatten.
+    const mmValues = latest?.matchmaking?.values ?? {};
+    const resultValues = latest?.results?.values ?? {};
+    const suspensionValues = latest?.suspensions?.values ?? {};
+    const startbanValues = latest?.startbans?.values ?? {};
+
+    const completeTileSet =
+      !!latest?.officials?.found &&
+      !!latest?.matchmaking?.found &&
+      !!latest?.results?.found &&
+      !!latest?.suspensions?.found &&
+      !!latest?.startbans?.found &&
+      (
+        Object.prototype.hasOwnProperty.call(mmValues, "aantal vechters") ||
+        Object.prototype.hasOwnProperty.call(mmValues, "aantal partijen")
+      ) &&
+      Object.prototype.hasOwnProperty.call(resultValues, "aantal") &&
+      Object.prototype.hasOwnProperty.call(suspensionValues, "aantal") &&
+      Object.prototype.hasOwnProperty.call(startbanValues, "aantal");
+
     const snapshot = completeTileSet ? JSON.stringify(latest) : null;
 
     if (snapshot !== null && snapshot === previousSnapshot) {
@@ -448,10 +466,33 @@ async function waitForStableOverviewTiles(page, eventId) {
   // Bij timeout nog eenmaal definitief lezen. Zo blijft de scrape bruikbaar als
   // FightPassport blijft muteren, zonder gegevens uit een andere eventtab te lezen.
   latest = await readOverviewTiles(page, eventId);
+
+  const finalMm = latest?.matchmaking?.values ?? {};
+  const finalResults = latest?.results?.values ?? {};
+  const finalSuspensions = latest?.suspensions?.values ?? {};
+  const finalStartbans = latest?.startbans?.values ?? {};
+  const finalHasRequiredValues =
+    (
+      Object.prototype.hasOwnProperty.call(finalMm, "aantal vechters") ||
+      Object.prototype.hasOwnProperty.call(finalMm, "aantal partijen")
+    ) &&
+    Object.prototype.hasOwnProperty.call(finalResults, "aantal") &&
+    Object.prototype.hasOwnProperty.call(finalSuspensions, "aantal") &&
+    Object.prototype.hasOwnProperty.call(finalStartbans, "aantal");
+
   console.log(`[fp-events] event ${eventId}: stabiliteitswachttijd verlopen; definitieve tegelread gebruikt`, {
     waited_ms: Date.now() - startedAt,
     official_regels: latest?.officials?.rows?.length ?? 0,
+    matchmaking: latest?.matchmaking?.raw ?? [],
+    uitslagen: latest?.results?.raw ?? [],
   });
+
+  if (!finalHasRequiredValues) {
+    throw new Error(
+      `Overzichtstegels van event ${eventId} zijn zichtbaar maar nog niet inhoudelijk geladen`
+    );
+  }
+
   return latest;
 }
 
