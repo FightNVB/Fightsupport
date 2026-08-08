@@ -17,6 +17,13 @@ export default function FightPaspoortBeheerPage() {
   const [fighters, setFighters] = useState<Fighter[]>([]);
   const [totalFighters, setTotalFighters] = useState(0);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [historicalRuns, setHistoricalRuns] = useState<any[]>([]);
+  const [historicalItems, setHistoricalItems] = useState<any[]>([]);
+  const [historicalStartVa, setHistoricalStartVa] = useState("775");
+  const [historicalEndVa, setHistoricalEndVa] = useState("33150");
+  const [historicalWorkers, setHistoricalWorkers] = useState("4");
+  const [historicalBusy, setHistoricalBusy] = useState(false);
+  const [selectedHistoricalRun, setSelectedHistoricalRun] = useState("");
   const [items, setItems] = useState<SyncItem[]>([]);
   const [teamErrors, setTeamErrors] = useState<any[]>([]);
   const [startverbodErrors, setStartverbodErrors] = useState<any[]>([]);
@@ -128,6 +135,16 @@ export default function FightPaspoortBeheerPage() {
     const res = await authedFetch(`/api/admin/fightpassport-beheer/runs/${runId}/items`);
     const json = await res.json().catch(() => ({}));
     if (res.ok) setItems(json.items ?? []);
+  }, []);
+
+  const loadHistoricalRuns = useCallback(async (runId = "") => {
+    const suffix = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+    const res = await authedFetch(`/api/admin/fightpassport-sync/historical-startverbod${suffix}`);
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setHistoricalRuns(json.runs ?? []);
+      if (runId) setHistoricalItems(json.items ?? []);
+    }
   }, []);
 
 
@@ -274,10 +291,12 @@ export default function FightPaspoortBeheerPage() {
 
   useEffect(() => {
     void loadRuns();
+    void loadHistoricalRuns();
 
     const refreshRuns = () => {
       if (document.visibilityState === "visible") {
         void loadRuns();
+        void loadHistoricalRuns(selectedHistoricalRun);
       }
     };
 
@@ -288,7 +307,7 @@ export default function FightPaspoortBeheerPage() {
       window.clearInterval(t);
       document.removeEventListener("visibilitychange", refreshRuns);
     };
-  }, [loadRuns]);
+  }, [loadRuns, loadHistoricalRuns, selectedHistoricalRun]);
 
   const allErrors = useMemo(
     () =>
@@ -446,6 +465,30 @@ export default function FightPaspoortBeheerPage() {
         ? (json.message || "Startverboden Sync gestart.")
         : json.error || "Startverboden Sync starten mislukt."
     );
+  }
+
+  async function historicalAction(action: "start"|"resume"|"pause"|"stop", runId?: string, full = false) {
+    setHistoricalBusy(true); setMessage("");
+    const method = action === "pause" || action === "stop" ? "PATCH" : "POST";
+    const res = await authedFetch("/api/admin/fightpassport-sync/historical-startverbod", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(action === "start" ? {
+        action,
+        start_va: full ? 775 : Number(historicalStartVa),
+        end_va: full ? 33150 : Number(historicalEndVa),
+        workers: Number(historicalWorkers),
+      } : { action, run_id: runId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setHistoricalBusy(false);
+    setMessage(res.ok ? (json.message || "Historische synchronisatie bijgewerkt.") : (json.error || "Historische synchronisatie mislukt."));
+    await loadHistoricalRuns(selectedHistoricalRun);
+  }
+
+  async function openHistoricalDetails(runId: string) {
+    setSelectedHistoricalRun(runId);
+    await loadHistoricalRuns(runId);
   }
 
 
@@ -763,7 +806,7 @@ export default function FightPaspoortBeheerPage() {
             <Users size={16}/>{busyTeam||activeTeamRun?"Sportscholen draaien...":"Start Sportscholen Sync"}
           </button>
           <button style={styles.silver} disabled={busyStartverbod} onClick={startStartverbodRobot}>
-            <ShieldCheck size={16}/>{busyStartverbod?"Startverboden starten...":"Start Startverboden Sync"}
+            <ShieldCheck size={16}/>{busyStartverbod?"Actuele sync starten...":"Actuele startverboden & schorsingen"}
           </button>
           <button style={styles.danger} disabled={busyDeleteTotal} onClick={deleteTotalData}>
             <Trash2 size={16}/>{busyDeleteTotal?"Verwijderen...":"Verwijder Total data"}
@@ -773,6 +816,43 @@ export default function FightPaspoortBeheerPage() {
           </button>
         </div>
         {message&&<p style={{color:"#ff8a52"}}>{message}</p>}
+      </section>
+      <section style={{...styles.panel,marginTop:16,borderColor:"#7b5bc7"}}>
+        <h2 style={{marginTop:0}}>Historische startverboden &amp; schorsingen</h2>
+        <p style={{color:"#bbb"}}>Volledige historische profieldata per VA. Dit staat los van de actuele gala-controle.</p>
+        <div style={styles.filters}>
+          <label style={styles.label}>Van VA<input style={styles.input} value={historicalStartVa} onChange={e=>setHistoricalStartVa(e.target.value)}/></label>
+          <label style={styles.label}>Tot VA<input style={styles.input} value={historicalEndVa} onChange={e=>setHistoricalEndVa(e.target.value)}/></label>
+          <label style={styles.label}>Workers<input style={styles.input} value={historicalWorkers} onChange={e=>setHistoricalWorkers(e.target.value)}/></label>
+          <button style={styles.orange} disabled={historicalBusy||historicalRuns.some(r=>r.status==="running")} onClick={()=>historicalAction("start")}><Play size={16}/>Start bereik</button>
+          <button style={styles.silver} disabled={historicalBusy||historicalRuns.some(r=>r.status==="running")} onClick={()=>historicalAction("start",undefined,true)}><Database size={16}/>Volledige historische synchronisatie</button>
+        </div>
+        {historicalRuns[0]&&<div style={{...styles.statGrid,marginBottom:16}}>
+          <div style={styles.statCard}><small>Status</small><b>{historicalRuns[0].status}</b></div>
+          <div style={styles.statCard}><small>Bereik</small><b>VA {historicalRuns[0].start_va}–{historicalRuns[0].end_va}</b></div>
+          <div style={styles.statCard}><small>Verwerkt</small><b>{historicalRuns[0].processed_count}</b></div>
+          <div style={styles.statCard}><small>Blokkades gevonden</small><b>{historicalRuns[0].found_count}</b></div>
+          <div style={styles.statCard}><small>Opgeslagen / bijgewerkt</small><b>{historicalRuns[0].inserted_count} / {historicalRuns[0].updated_count}</b></div>
+          <div style={styles.statCard}><small>Zonder STARTVERBODEN</small><b>{historicalRuns[0].skipped_count}</b></div>
+          <div style={styles.statCard}><small>Fouten</small><b>{historicalRuns[0].error_count}</b></div>
+          <div style={styles.statCard}><small>Duur</small><b>{formatDuration(historicalRuns[0].started_at,historicalRuns[0].finished_at)}</b></div>
+        </div>}
+        {historicalRuns[0]?.last_error&&<p style={{color:"#ff8a52"}}>Laatste fout: {historicalRuns[0].last_error}</p>}
+        <Table><thead><tr><Th>Run-id</Th><Th>Start</Th><Th>Einde</Th><Th>Duur</Th><Th>Bereik</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Nieuw / bijgewerkt</Th><Th>Fouten</Th><Th>Status</Th><Th>Acties</Th></tr></thead>
+          <tbody>{historicalRuns.map(run=><tr key={run.id}>
+            <Td>{String(run.id).slice(0,8)}</Td><Td>{fmt(run.started_at)}</Td><Td>{fmt(run.finished_at)}</Td>
+            <Td>{formatDuration(run.started_at,run.finished_at)}</Td><Td>{run.start_va}–{run.end_va}</Td>
+            <Td>{run.processed_count}</Td><Td>{run.found_count}</Td><Td>{run.inserted_count} / {run.updated_count}</Td>
+            <Td>{run.error_count}</Td><Td>{run.status}</Td><Td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {run.status==="running"&&<><button style={styles.stop} onClick={()=>historicalAction("pause",run.id)}>Pauze</button><button style={styles.dangerMini} onClick={()=>historicalAction("stop",run.id)}>Stop</button></>}
+              {run.status==="paused"&&<button style={styles.mini} onClick={()=>historicalAction("resume",run.id)}>Hervatten</button>}
+              <button style={styles.mini} onClick={()=>openHistoricalDetails(run.id)}>Details</button>
+            </div></Td>
+          </tr>)}</tbody></Table>
+        {selectedHistoricalRun&&<div style={{marginTop:16}}><h3>Foutdetails historische synchronisatie</h3>
+          <Table><thead><tr><Th>VA</Th><Th>Naam</Th><Th>Status</Th><Th>Fouttype</Th><Th>Stap</Th><Th>Melding</Th><Th>Retry</Th></tr></thead>
+            <tbody>{historicalItems.filter(item=>item.status==="failed"||item.error_message).map(item=><tr key={item.id}><Td>{item.va_nummer}</Td><Td>{item.naam_fp||"-"}</Td><Td>{item.status}</Td><Td>{item.error_type||"-"}</Td><Td>{item.error_step||"-"}</Td><Td>{item.error_message||"-"}</Td><Td>{item.retry_status||"-"}</Td></tr>)}</tbody>
+          </Table></div>}
       </section>
       <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Laatste VA</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{
         const finishedAt = r.finished_at ?? r.completed_at ?? r.ended_at ?? null;
