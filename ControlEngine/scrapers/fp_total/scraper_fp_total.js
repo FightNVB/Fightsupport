@@ -6,6 +6,7 @@ import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.
 import supabase from "../utils/supabaseClient.js";
 import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
 import { terminateSyncRun } from "../../Terminator/terminator.js";
+import { openFighterPageVerified } from "../utils/fightPassportFighterNavigation.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2035,7 +2036,7 @@ async function main() {
 
       let page = null;
       try {
-        page = await openTabToFighterVerified(browser, ctx, cookies, va, {
+        page = await openFighterPageVerified(browser, ctx, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
           softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
@@ -2059,7 +2060,7 @@ async function main() {
           continue;
         }
 
-        const openFreshPage = async (stepName = "") => openTabToFighterVerified(browser, ctx, cookies, va, {
+        const openFreshPage = async (stepName = "") => openFighterPageVerified(browser, ctx, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
           softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),

@@ -10,7 +10,7 @@
 // - bewaart historie en markeert de laatste volledige rapportset met is_actueel=true;
 // - verwijdert het Excelbestand pas na succesvolle verwerking.
 
-import { loginFightPassport } from "../utils/loginFightPassport.js";
+import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
 import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
 import fs from "fs";
@@ -18,10 +18,16 @@ import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 import startverbodMatcher from "./startverbodMatcher.cjs";
+import { verifyStartverbodCandidate } from "./startverbodVerification.js";
+import {
+  hardCloseFightPassportPage,
+  openFighterPageVerified,
+} from "../utils/fightPassportFighterNavigation.js";
 
 const {
   buildFighterIndexes: buildSafeFighterIndexes,
-  matchFighter: matchFighterSafely,
+  findCandidateFighters,
+  resolveVerifiedCandidates,
 } = startverbodMatcher;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -513,6 +519,16 @@ async function saveSnapshot(runId, matchedRows, hasMatchErrors) {
     laatst_gezien_op: now,
     laatste_run_id: runId,
     raw_json: row.raw_json,
+    reden: row.reden ?? null,
+    opmerkingen: row.opmerkingen ?? null,
+    aangemaakt_op: row.aangemaakt_op ?? null,
+    aangemaakt_door: row.aangemaakt_door ?? null,
+    gewijzigd_op: row.gewijzigd_op ?? null,
+    gewijzigd_door: row.gewijzigd_door ?? null,
+    naam_fp: row.naam_fp ?? row.naam ?? null,
+    verified_in_fightpassport: row.verified_in_fightpassport ?? false,
+    verified_at: row.verified_at ?? null,
+    verification_method: row.verification_method ?? null,
   }));
 
   // PostgreSQL kan dezelfde conflict-sleutel niet tweemaal binnen één
@@ -561,28 +577,75 @@ export async function scraperStartverbod() {
       loadConfirmedDeletedVaNumbers(),
     ]);
     const indexes = buildSafeFighterIndexes(fighters);
+    let cookies = await page.cookies().catch(() => []);
 
     const matched = [];
     const errors = [];
 
     for (const row of parsed) {
-      const match = matchFighterSafely(
-        row.naam_bron,
-        indexes,
-        confirmedDeletedVaNumbers
-      );
+      const candidates = findCandidateFighters(row.naam_bron, indexes, confirmedDeletedVaNumbers);
+      const verifications = [];
+
+      for (const fighter of candidates) {
+        let fighterPage = null;
+        try {
+          fighterPage = await openFighterPageVerified(browser, null, cookies, fighter.va_nummer, {
+            maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
+            softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
+            betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+            workerLabel: `[startverbod VA ${fighter.va_nummer}]`,
+          });
+          if (!fighterPage) {
+            verifications.push({ verified: false, fighter, reason: "navigation_timeout" });
+            continue;
+          }
+          verifications.push(await verifyStartverbodCandidate(fighterPage, fighter, row));
+        } catch (error) {
+          if (error?.message === "LOGIN_PAGE") {
+            await ensureLoggedIn(page, { force: true });
+            cookies = await page.cookies().catch(() => cookies);
+          }
+          verifications.push({
+            verified: false,
+            fighter,
+            reason: error?.message === "LOGIN_PAGE" ? "login_refresh_required" : "verification_error",
+            error: error?.message ?? String(error),
+          });
+        } finally {
+          await hardCloseFightPassportPage(fighterPage).catch(() => {});
+        }
+      }
+
+      const match = resolveVerifiedCandidates(candidates, verifications);
 
       if (match.status !== "matched" || !Array.isArray(match.fighters)) {
-        errors.push({ ...row, match });
+        errors.push({
+          ...row,
+          match,
+          raw_json: { ...row.raw_json, fightpassport_verifications: verifications },
+        });
         continue;
       }
 
       for (const fighter of match.fighters) {
+        const verification = match.verification;
+        const verifiedAt = new Date().toISOString();
         matched.push({
           ...row,
           va_nummer: String(fighter.va_nummer),
           naam: fighter.naam,
+          naam_fp: verification.profileName || fighter.naam,
           koppel_methode: match.method,
+          reden: verification.detail?.reden ?? null,
+          opmerkingen: verification.detail?.opmerkingen ?? null,
+          aangemaakt_op: parseExcelDate(verification.detail?.aangemaakt_op),
+          aangemaakt_door: verification.detail?.aangemaakt_door ?? null,
+          gewijzigd_op: parseExcelDate(verification.detail?.gewijzigd_op),
+          gewijzigd_door: verification.detail?.gewijzigd_door ?? null,
+          verified_in_fightpassport: true,
+          verified_at: verifiedAt,
+          verification_method: "startverboden_tegel_details",
+          raw_json: { ...row.raw_json, fightpassport_verification: verification },
         });
       }
     }
