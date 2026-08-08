@@ -17,6 +17,12 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import startverbodMatcher from "./startverbodMatcher.cjs";
+
+const {
+  buildFighterIndexes: buildSafeFighterIndexes,
+  matchFighter: matchFighterSafely,
+} = startverbodMatcher;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -554,13 +560,13 @@ export async function scraperStartverbod() {
       loadAllFighters(),
       loadConfirmedDeletedVaNumbers(),
     ]);
-    const indexes = buildFighterIndexes(fighters);
+    const indexes = buildSafeFighterIndexes(fighters);
 
     const matched = [];
     const errors = [];
 
     for (const row of parsed) {
-      const match = matchFighter(
+      const match = matchFighterSafely(
         row.naam_bron,
         indexes,
         confirmedDeletedVaNumbers
@@ -576,7 +582,7 @@ export async function scraperStartverbod() {
           ...row,
           va_nummer: String(fighter.va_nummer),
           naam: fighter.naam,
-          koppel_methode: "exact",
+          koppel_methode: match.method,
         });
       }
     }
