@@ -59,11 +59,38 @@ const benefits = [
   "Rapportages en uitslagen veilig vastleggen",
 ];
 
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": ["Organization", "SportsOrganization"],
+      "@id": "https://fightsupport.nl/#organization",
+      name: "FightSupport",
+      url: "https://fightsupport.nl/",
+      logo: "https://fightsupport.nl/icon.png",
+      email: "info@fightsupport.nl",
+      description: "Digitaal wedstrijdbeheer voor de vechtsport.",
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://fightsupport.nl/#website",
+      url: "https://fightsupport.nl/",
+      name: "FightSupport",
+      inLanguage: "nl-NL",
+      publisher: { "@id": "https://fightsupport.nl/#organization" },
+    },
+  ],
+};
+
 export default function HomePage() {
   const router = useRouter();
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-black text-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
       {/* HERO */}
       <section className="relative min-h-[100svh] w-full overflow-hidden bg-black">
         <Image

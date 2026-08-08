@@ -435,11 +435,13 @@ async function waitForStableOverviewTiles(page, eventId) {
     const startbanValues = latest?.startbans?.values ?? {};
 
     const completeTileSet =
-      !!latest?.officials?.found &&
-      !!latest?.matchmaking?.found &&
-      !!latest?.results?.found &&
-      !!latest?.suspensions?.found &&
-      !!latest?.startbans?.found &&
+      [
+        latest?.officials,
+        latest?.matchmaking,
+        latest?.results,
+        latest?.suspensions,
+        latest?.startbans,
+      ].every((tile) => tile?.found) &&
       (
         Object.prototype.hasOwnProperty.call(mmValues, "aantal vechters") ||
         Object.prototype.hasOwnProperty.call(mmValues, "aantal partijen")

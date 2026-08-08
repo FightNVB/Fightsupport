@@ -1,9 +1,12 @@
 {
   "name": "FightSupport",
   "short_name": "FightSupport",
-  "description": "FightSupport, Vechtsport ondersteuning",
+  "description": "Digitaal wedstrijdbeheer voor de vechtsport.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
+  "lang": "nl-NL",
+  "categories": ["sports", "business", "productivity"],
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#ff7a00",
