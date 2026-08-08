@@ -6,6 +6,9 @@ import {
 } from "../utils/fightPassportFighterNavigation.js";
 import { scrapeHistoricalStartverbodPage } from "./scrapeHistoricalStartverbodPage.js";
 
+// Dossierhistorie-only: deze scraper mag nooit fightpassport_fighters,
+// heeft_startverbod, actuele blokkadestatus of gala-controledata schrijven.
+
 const startVa = Number(process.argv[2] || process.env.HISTORY_START_VA || 775);
 const endVa = Number(process.argv[3] || process.env.HISTORY_END_VA || startVa);
 const workers = Math.max(1, Math.min(20, Number(process.env.HISTORY_WORKERS || 4)));

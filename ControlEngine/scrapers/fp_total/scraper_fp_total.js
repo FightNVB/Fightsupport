@@ -1286,12 +1286,29 @@ async function saveFighter(all) {
   const dob = headerInfo.match(/\b\d{2}-\d{2}-\d{4}\b/)?.[0] || null;
   const gender = /\bvrouw\b/i.test(headerInfo) ? "vrouw" : /\bman\b/i.test(headerInfo) ? "man" : null;
   const classification = deriveCurrentClassification(all.results, n);
+  const totalStartverbod = !!all.summary.heeft_startverbod;
+  const { data: existingStatus, error: existingStatusError } = await supabase
+    .from("fightpassport_fighters")
+    .select("heeft_startverbod_actuele_sync,startverbod_actuele_sync_at")
+    .eq("va_nummer", String(all.va))
+    .maybeSingle();
+  if (existingStatusError) throw existingStatusError;
+  const actualSyncAt = existingStatus?.startverbod_actuele_sync_at
+    ? new Date(existingStatus.startverbod_actuele_sync_at).getTime()
+    : 0;
+  const actualSyncIsRecent = actualSyncAt > 0 && Date.now() - actualSyncAt <= 7 * 24 * 60 * 60 * 1000;
+  const effectiveStartverbod = actualSyncIsRecent
+    ? existingStatus.heeft_startverbod_actuele_sync === true
+    : totalStartverbod;
   const payload = {
     va_nummer: String(all.va), naam: all.summary.naam,
     geboortedatum: parseNlDate(dob), geslacht: gender, email: d.email,
     fit_to_fight: !!all.summary.fit_to_fight,
     licentie_actief: boolFromJaNee(all.summary.licentie),
-    heeft_startverbod: !!all.summary.heeft_startverbod,
+    heeft_startverbod: effectiveStartverbod,
+    heeft_startverbod_total: totalStartverbod,
+    startverbod_total_at: now,
+    startverbod_status_source: actualSyncIsRecent ? "actuele_excel_sync" : "total_profielsamenvatting",
     totaal_wedstrijden: intFrom(all.summary.wedstrijden), gewonnen: intFrom(all.summary.gewonnen), kos: intFrom(all.summary.kos),
     nulmeting_gewicht: numFrom(n.gewicht), nulmeting_discipline: n.discipline || null, nulmeting_klasse: n.klasse || null,
     nulmeting_totaal: intFrom(n.totaal), nulmeting_gewonnen: intFrom(n.gewonnen), nulmeting_verloren: intFrom(n.verloren), nulmeting_onbeslist: intFrom(n.onbeslist), nulmeting_kos: intFrom(n.kos),

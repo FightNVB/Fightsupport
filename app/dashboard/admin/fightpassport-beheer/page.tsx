@@ -819,7 +819,7 @@ export default function FightPaspoortBeheerPage() {
       </section>
       <section style={{...styles.panel,marginTop:16,borderColor:"#7b5bc7"}}>
         <h2 style={{marginTop:0}}>Historische startverboden &amp; schorsingen</h2>
-        <p style={{color:"#bbb"}}>Volledige historische profieldata per VA. Dit staat los van de actuele gala-controle.</p>
+        <p style={{color:"#bbb"}}>Uitsluitend dossierhistorie per VA. Deze records zetten nooit een actuele blokkade, rode badge of VERBOD-melding en staan volledig los van de gala-controle.</p>
         <div style={styles.filters}>
           <label style={styles.label}>Van VA<input style={styles.input} value={historicalStartVa} onChange={e=>setHistoricalStartVa(e.target.value)}/></label>
           <label style={styles.label}>Tot VA<input style={styles.input} value={historicalEndVa} onChange={e=>setHistoricalEndVa(e.target.value)}/></label>

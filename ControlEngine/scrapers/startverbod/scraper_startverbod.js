@@ -6,7 +6,7 @@
 // - downloadt het Excelrapport;
 // - koppelt Naam veilig aan fightpassport_fighters.va_nummer;
 // - schrijft uitsluitend naar startverbod / startverbod_koppelfouten / startverbod_runs;
-// - wijzigt fightpassport_fighters NIET;
+// - schrijft de leidende actuele Excel-status zonder Total-brondata te wissen;
 // - bewaart historie en markeert de laatste volledige rapportset met is_actueel=true;
 // - verwijdert het Excelbestand pas na succesvolle verwerking.
 
@@ -556,6 +556,37 @@ async function saveSnapshot(runId, matchedRows, hasMatchErrors) {
   if (error) throw error;
 }
 
+async function syncOperationalStartverbodStatus(matchedRows) {
+  const activeVaNumbers = [...new Set(matchedRows.map((row) => String(row.va_nummer)))];
+  const now = new Date().toISOString();
+
+  // Alleen na een volledig foutloze officiële rapportset mag de operationele
+  // status opnieuw worden opgebouwd. Historische dossierregels spelen hierin
+  // bewust geen enkele rol.
+  const { error: clearError } = await supabase
+    .from("fightpassport_fighters")
+    .update({
+      heeft_startverbod: false,
+      heeft_startverbod_actuele_sync: false,
+      startverbod_actuele_sync_at: now,
+      startverbod_status_source: "actuele_excel_sync",
+    })
+    .not("va_nummer", "is", null);
+  if (clearError) throw clearError;
+
+  if (!activeVaNumbers.length) return;
+  const { error: activateError } = await supabase
+    .from("fightpassport_fighters")
+    .update({
+      heeft_startverbod: true,
+      heeft_startverbod_actuele_sync: true,
+      startverbod_actuele_sync_at: now,
+      startverbod_status_source: "actuele_excel_sync",
+    })
+    .in("va_nummer", activeVaNumbers);
+  if (activateError) throw activateError;
+}
+
 export async function scraperStartverbod() {
   console.log("🏁 START: startverbod-scraper");
   const runId = await createRun();
@@ -652,6 +683,9 @@ export async function scraperStartverbod() {
 
     await saveMatchErrors(runId, errors);
     await saveSnapshot(runId, matched, errors.length > 0);
+    if (errors.length === 0) {
+      await syncOperationalStartverbodStatus(matched);
+    }
 
     await finishRun(runId, {
       status: errors.length ? "completed_with_errors" : "success",

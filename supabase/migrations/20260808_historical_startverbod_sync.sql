@@ -24,6 +24,9 @@ create table if not exists public.fighter_startverbod_history (
 create index if not exists fighter_startverbod_history_va_idx
   on public.fighter_startverbod_history (va_nummer, ingang desc);
 
+comment on table public.fighter_startverbod_history is
+  'Uitsluitend dossierhistorie. Records uit deze tabel zijn nooit bewijs van een actuele operationele blokkade.';
+
 create table if not exists public.fighter_startverbod_history_runs (
   id uuid primary key default gen_random_uuid(),
   status text not null default 'idle' check (status in ('idle','running','paused','completed','completed_with_errors','failed')),
