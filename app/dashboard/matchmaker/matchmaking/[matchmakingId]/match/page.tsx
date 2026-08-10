@@ -403,24 +403,53 @@ function rowMatchesFighter(row: ResultRow, f?: Fighter | null) {
   return !!va && onlyDigits(row.va_nummer) === va;
 }
 
-function getResultKind(v: unknown): "win" | "loss" | "draw" | "other" {
+function getPathAny(obj: any, path: string) {
+  return path.split(".").reduce((cur: any, key: string) => cur?.[key], obj);
+}
+
+function resultField(row: ResultRow, ...paths: string[]) {
+  for (const path of paths) {
+    const value = getPathAny(row, path);
+    if (value !== null && value !== undefined && s(value)) return value;
+  }
+  return "";
+}
+
+function getResultKind(v: unknown): "win" | "loss" | "draw" | "demo" | "other" {
   const x = lower(v)
     .replace(/\s+/g, " ")
     .trim();
 
-  // matchmaker_uitslagen_raw.uitslag is leidend.
-  // Exacte betekenis:
-  // - alles met "wint" = winst
-  // - alles met "verliest" of "verlies" = verlies
-  // - onbeslist/gelijk/draw = onbeslist
-  // - demo/no contest = overige
   if (!x) return "other";
-  if (x.includes("demo") || x.includes("no contest") || x.includes("nocontest") || x === "nc") return "other";
+  if (x.includes("demo") || x.includes("demonstr")) return "demo";
+  if (x.includes("no contest") || x.includes("nocontest") || x === "nc") return "other";
   if (x.includes("onbeslist") || x.includes("gelijk") || x.includes("draw")) return "draw";
-  if (x.includes("verliest") || x.includes("verlies") || x.includes("verloren") || x.includes("loss") || x === "l") return "loss";
+  if (x.includes("verliest") || x.includes("verlies") || x.includes("verloren") || x.includes("loss") || x.includes("lost") || x === "l") return "loss";
   if (x.includes("wint") || x.includes("winst") || x.includes("gewonnen") || x === "win" || x === "w") return "win";
 
   return "other";
+}
+
+function rowResultKind(row: ResultRow) {
+  return getResultKind(
+    resultField(
+      row,
+      "uitslag",
+      "resultaat",
+      "outcome",
+      "result",
+      "raw.uitslag",
+      "raw.resultaat",
+      "raw.outcome",
+      "raw_json.uitslag",
+      "raw_json.resultaat",
+      "raw_json.outcome",
+      "extra.uitslag",
+      "extra.resultaat",
+      "extra.raw.uitslag",
+      "extra.raw.resultaat",
+    ),
+  );
 }
 
 function normalizeClassToken(v: unknown) {
@@ -433,28 +462,51 @@ function normalizeClassToken(v: unknown) {
 
   if (!compact || compact === "-") return "";
 
-  // Bronnen kunnen dezelfde klasse tweetalig teruggeven, bijvoorbeeld:
-  // "C-klasse/C-class", "B-klasse/B-class" of "A-klasse/A-class".
-  // Na opschonen wordt dat respectievelijk "cc", "bb" of "aa".
-  // Normaliseer dit altijd terug naar exact één klasseletter.
   const repeatedClass = compact.match(/^([jrncba])\1$/i);
   if (repeatedClass) return repeatedClass[1].toLowerCase();
 
-  if (
-    compact === "j+" ||
-    compact.includes("j+") ||
-    compact.includes("talentstatus")
-  ) return "j+";
-  if (compact === "j" || compact.startsWith("jeugd") || compact.includes("youth")) return "j";
-  if (compact === "r" || compact.startsWith("rclas") || compact.startsWith("rclass") || compact.includes("recreant")) return "r";
-  if (compact === "n" || compact.startsWith("nclas") || compact.startsWith("nclass") || compact.includes("nieuweling")) return "n";
+  // Amateur/AMA hoort bij MMA en mag nooit per ongeluk A-klasse worden.
+  if (compact.includes("amateur") || compact === "ama" || compact.includes("mmaama")) return "amateur";
+  if (compact.includes("pro")) return "pro";
+  if (compact === "j+" || compact.includes("j+") || compact.includes("talentstatus")) return "j+";
+  if (compact === "j" || compact.startsWith("jeugd") || compact.includes("youth") || compact.includes("junior")) return "j";
+  if (compact === "r" || compact.includes("recreant")) return "r";
+  if (compact === "n" || compact.includes("nieuweling") || compact.includes("newcomer") || compact.includes("novice")) return "n";
   if (compact === "c" || compact.startsWith("cclas") || compact.startsWith("cclass")) return "c";
   if (compact === "b" || compact.startsWith("bclas") || compact.startsWith("bclass")) return "b";
   if (compact === "a" || compact.startsWith("aclas") || compact.startsWith("aclass") || compact.includes("elite")) return "a";
-  if (compact.includes("amateur") || compact.includes("ama")) return "amateur";
-  if (compact.includes("pro")) return "pro";
 
   return compact;
+}
+
+function rowDiscipline(row: ResultRow) {
+  return lower(
+    resultField(
+      row,
+      "discipline",
+      "sport",
+      "vechtsport",
+      "raw.discipline",
+      "raw_json.discipline",
+      "extra.discipline",
+      "extra.raw.discipline",
+    ),
+  );
+}
+
+function isRelevantStandingDiscipline(row: ResultRow) {
+  const d = rowDiscipline(row);
+  // Ontbrekende discipline komt voor in oudere uitslagen. Dan laten we de
+  // herkenbare N/C/B/A/J-klasse beslissen in plaats van de uitslag weg te gooien.
+  if (!d) return true;
+  return (
+    d.includes("kick") ||
+    d.includes("k1") ||
+    d.includes("k-1") ||
+    d.includes("k 1") ||
+    d.includes("muay") ||
+    d.includes("thai")
+  );
 }
 
 function cleanRecordClassLabel(value: unknown) {
@@ -557,21 +609,29 @@ function classRank(token: string) {
 }
 
 function getRowClass(row: ResultRow) {
-  // Uitslagen komen uit meerdere FightPassport-bronnen en de klassekolom heet
-  // niet overal hetzelfde. Pak uitsluitend de klasse van déze uitslag; nooit
-  // de huidige/berekende klasse van de vechter, anders worden oude N-partijen
-  // ten onrechte bij het C-record opgeteld.
+  // De klasse van DEZE uitslag is altijd leidend. Niet de huidige klasse van
+  // de vechter. FightPassport levert oudere records niet altijd top-level aan,
+  // daarom lezen we ook de bekende geneste bronvelden.
   const candidates = [
-    row?.klasse,
-    row?.class,
-    row?.wedstrijdklasse,
-    row?.wedstrijd_klasse,
-    row?.fight_class,
-    row?.fightClass,
-    row?.bout_class,
-    row?.boutClass,
-    row?.niveau,
-    row?.category,
+    resultField(row, "klasse"),
+    resultField(row, "class"),
+    resultField(row, "wedstrijdklasse"),
+    resultField(row, "wedstrijd_klasse"),
+    resultField(row, "fight_class"),
+    resultField(row, "fightClass"),
+    resultField(row, "bout_class"),
+    resultField(row, "boutClass"),
+    resultField(row, "niveau"),
+    resultField(row, "category"),
+    resultField(row, "raw.klasse"),
+    resultField(row, "raw.class"),
+    resultField(row, "raw.wedstrijdklasse"),
+    resultField(row, "raw_json.klasse"),
+    resultField(row, "raw_json.class"),
+    resultField(row, "extra.klasse"),
+    resultField(row, "extra.raw.klasse"),
+    resultField(row, "wedstrijd.klasse"),
+    resultField(row, "partij.klasse"),
   ];
 
   for (const candidate of candidates) {
@@ -589,8 +649,10 @@ function highestRecordClassFromRows(rows: ResultRow[]) {
   let highestRank = 0;
 
   for (const row of rows) {
-    const kind = getResultKind(pickFirst(row?.uitslag, row?.resultaat, row?.outcome));
-    if (kind === "other") continue; // demo/no contest bepaalt nooit hoogste recordklasse
+    if (!isRelevantStandingDiscipline(row)) continue;
+    const kind = rowResultKind(row);
+    // Alleen echte W/L/D-partijen bepalen de hoogste klasse.
+    if (!["win", "loss", "draw"].includes(kind)) continue;
 
     const token = getRowClass(row);
     const rank = classRank(token);
@@ -729,10 +791,12 @@ function recordClassDisplay(token: string) {
 }
 
 function recordOf(f: Fighter, allRows: ResultRow[] = []) {
-  // Het zichtbare record wordt rechtstreeks uit de uitslagen opgebouwd:
-  // hoogste klasse met een echte W/L/D-uitslag, W-L-D binnen die klasse,
-  // en alle overige partijen samen tussen haakjes.
-  const rows = getUitslagenRows(f, allRows);
+  // Eén waarheid voor het zichtbare record:
+  // 1. bepaal de hoogste klasse waarin een echte W/L/D-uitslag staat;
+  // 2. tel W-L-D uitsluitend binnen die hoogste klasse;
+  // 3. iedere andere geldige partij binnen dezelfde stand-up discipline is "overige".
+  // Voorbeeld: N winst + C winst => C 1-0-0 (1), nooit C 2-0-0.
+  const rows = getUitslagenRows(f, allRows).filter(isRelevantStandingDiscipline);
   const highestClass = highestRecordClassFromRows(rows);
 
   if (highestClass) {
@@ -742,22 +806,29 @@ function recordOf(f: Fighter, allRows: ResultRow[] = []) {
     let overige = 0;
 
     for (const row of rows) {
-      const kind = getResultKind(
-        pickFirst(row?.uitslag, row?.resultaat, row?.outcome),
-      );
+      const kind = rowResultKind(row);
       const rowClass = getRowClass(row);
 
-      if (rowClass === highestClass && kind === "win") wins += 1;
-      else if (rowClass === highestClass && kind === "loss") losses += 1;
-      else if (rowClass === highestClass && kind === "draw") draws += 1;
-      else overige += 1;
+      // Onherkenbare lege bronregels tellen niet als partij.
+      if (!rowClass || kind === "other") continue;
+
+      if (rowClass === highestClass) {
+        if (kind === "win") wins += 1;
+        else if (kind === "loss") losses += 1;
+        else if (kind === "draw") draws += 1;
+        else if (kind === "demo") overige += 1;
+      } else {
+        // Alles uit een andere klasse (lager/hoger/jeugd) staat tussen haakjes.
+        // De klasse die W-L-D bepaalt blijft altijd exact de hoogste officiële klasse.
+        overige += 1;
+      }
     }
 
     return `${recordClassDisplay(highestClass)} ${wins}-${losses}-${draws} (${overige})`;
   }
 
-  // Alleen voor oude contextregels zonder uitslagen blijft het door fighterRules
-  // opgeslagen record beschikbaar als terugval.
+  // Alleen als er werkelijk geen bruikbare uitslagen beschikbaar zijn, mag de
+  // oude door fighterRules opgeslagen waarde als fallback worden gebruikt.
   const ruleRecord = pickFirst(
     f.record_label,
     f.recordLabel,

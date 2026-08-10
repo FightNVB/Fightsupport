@@ -225,10 +225,7 @@ export default function FighterDossierPage() {
 
   const bron = String(aanmelding?.bron ?? aanmelding?.source_type ?? aanmelding?.source ?? "").toLowerCase();
   const isExcel = bron.includes("excel") || bron.includes("upload") || !!aanmelding?.upload_id || !!aanmelding?.upload_batch_id;
-  const currentClass = normalizeAdultClass(
-    f.berekende_klasse ?? f.klasse_advies ?? f.nulmeting_klasse,
-  );
-  const record = calculateCurrentClassRecord(resultRows, currentClass);
+  const record = calculateHighestClassRecord(resultRows);
   const extraResults = calculateExtraResultCounts(resultRows);
 
   return (
@@ -283,7 +280,7 @@ export default function FighterDossierPage() {
             ["Discipline", f.nulmeting_discipline], ["Nulmeting klasse", f.nulmeting_klasse],
             ["Berekende klasse", f.berekende_klasse], ["MMA niveau", f.mma_level],
             ["Leeftijd", calcAge(f.geboortedatum, eventDate)], ["Gewicht", f.nulmeting_gewicht],
-            ["Aantal wedstrijden", f.nulmeting_totaal], ["Winst / verlies / onbeslist huidige klasse", `${record.w} / ${record.v} / ${record.o}`],
+            ["Aantal wedstrijden", f.nulmeting_totaal], ["Record hoogste klasse", `${record.klasse ?? "-"} ${record.w}-${record.v}-${record.o}${record.overige > 0 ? ` (${record.overige})` : ""}`],
             ["Opmerking", f.nulmeting_opmerking, "full"],
           ]} />
         </Section>
@@ -466,19 +463,65 @@ function resultType(value: any): "WIN" | "LOSS" | "DRAW" | "DEMO" | "NO_CONTEST"
   return "OTHER";
 }
 
-function calculateCurrentClassRecord(rows: any[], currentClass: "R" | "N" | "C" | "B" | "A" | null) {
-  return (rows ?? []).reduce((acc, row) => {
-    if (!isRelevantStandingDiscipline(row?.discipline)) return acc;
-    if (isYouthClass(row?.klasse)) return acc;
-    const rowClass = normalizeAdultClass(row?.klasse);
-    if (!currentClass || rowClass !== currentClass) return acc;
+function classRank(value: "R" | "N" | "C" | "B" | "A" | null) {
+  return value ? ({ R: 1, N: 2, C: 3, B: 4, A: 5 } as const)[value] : 0;
+}
 
+function calculateHighestClassRecord(rows: any[]) {
+  const standingRows = (rows ?? []).filter((row) => {
+    if (!isRelevantStandingDiscipline(row?.discipline)) return false;
     const result = resultType(row?.uitslag);
-    if (result === "WIN") acc.w += 1;
-    else if (result === "LOSS") acc.v += 1;
-    else if (result === "DRAW") acc.o += 1;
-    return acc;
-  }, { w: 0, v: 0, o: 0 });
+    return result === "WIN" || result === "LOSS" || result === "DRAW";
+  });
+
+  const youthRows = standingRows.filter((row) => isYouthClass(row?.klasse));
+  const adultRows = standingRows.filter((row) => {
+    if (isYouthClass(row?.klasse)) return false;
+    return !!normalizeAdultClass(row?.klasse);
+  });
+
+  // Zolang er geen volwassen resultaat is, tonen we het volledige jeugdrecord als J.
+  if (!adultRows.length && youthRows.length) {
+    let w = 0;
+    let v = 0;
+    let o = 0;
+
+    for (const row of youthRows) {
+      const result = resultType(row?.uitslag);
+      if (result === "WIN") w += 1;
+      else if (result === "LOSS") v += 1;
+      else if (result === "DRAW") o += 1;
+    }
+
+    return { klasse: "J", w, v, o, overige: 0 };
+  }
+
+  let highestClass: "R" | "N" | "C" | "B" | "A" | null = null;
+  for (const row of adultRows) {
+    const rowClass = normalizeAdultClass(row?.klasse);
+    if (classRank(rowClass) > classRank(highestClass)) highestClass = rowClass;
+  }
+
+  let w = 0;
+  let v = 0;
+  let o = 0;
+  let overige = youthRows.length;
+
+  for (const row of adultRows) {
+    const rowClass = normalizeAdultClass(row?.klasse);
+    const result = resultType(row?.uitslag);
+
+    if (rowClass !== highestClass) {
+      overige += 1;
+      continue;
+    }
+
+    if (result === "WIN") w += 1;
+    else if (result === "LOSS") v += 1;
+    else if (result === "DRAW") o += 1;
+  }
+
+  return { klasse: highestClass, w, v, o, overige };
 }
 
 function calculateExtraResultCounts(rows: any[]) {
