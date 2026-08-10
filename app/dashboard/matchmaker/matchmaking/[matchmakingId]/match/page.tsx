@@ -557,15 +557,31 @@ function classRank(token: string) {
 }
 
 function getRowClass(row: ResultRow) {
-  return normalizeClassToken(
-    pickFirst(
-      row?.klasse,
-      row?.class,
-      row?.wedstrijdklasse,
-      row?.niveau,
-      row?.fight_class,
-    ),
-  );
+  // Uitslagen komen uit meerdere FightPassport-bronnen en de klassekolom heet
+  // niet overal hetzelfde. Pak uitsluitend de klasse van déze uitslag; nooit
+  // de huidige/berekende klasse van de vechter, anders worden oude N-partijen
+  // ten onrechte bij het C-record opgeteld.
+  const candidates = [
+    row?.klasse,
+    row?.class,
+    row?.wedstrijdklasse,
+    row?.wedstrijd_klasse,
+    row?.fight_class,
+    row?.fightClass,
+    row?.bout_class,
+    row?.boutClass,
+    row?.niveau,
+    row?.category,
+  ];
+
+  for (const candidate of candidates) {
+    const token = normalizeClassToken(candidate);
+    if (["j", "j+", "r", "n", "c", "b", "a", "amateur", "pro"].includes(token)) {
+      return token;
+    }
+  }
+
+  return "";
 }
 
 function highestRecordClassFromRows(rows: ResultRow[]) {

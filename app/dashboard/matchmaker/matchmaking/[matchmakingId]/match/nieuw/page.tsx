@@ -345,22 +345,30 @@ function getResultKind(v: unknown): "win" | "loss" | "draw" | "other" {
 
 function normalizeClassToken(v: unknown) {
   const x = lower(v)
-    .replace(/klasse/g, "")
+    .replace(/\b(?:klasse|class|clas)\b/g, "")
     .replace(/-/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  const compact = x.replace(/[^a-z0-9+]/g, "");
 
-  if (!x || x === "-") return "";
-  if (x === "j" || x.includes("jeugd") || x.includes("youth")) return "j";
-  if (x === "r" || x.includes("recreant")) return "r";
-  if (x === "n" || x.includes("nieuweling")) return "n";
-  if (x === "c") return "c";
-  if (x === "b") return "b";
-  if (x === "a" || x.includes("elite")) return "a";
-  if (x.includes("amateur") || x.includes("ama")) return "amateur";
-  if (x.includes("pro")) return "pro";
+  if (!compact || compact === "-") return "";
 
-  return x.replace(/[^a-z0-9+]/g, "");
+  // Bronnen kunnen dezelfde klasse tweetalig teruggeven, bijvoorbeeld
+  // C-klasse/C-class. Na opschonen wordt dat "cc"; maak daar exact C van.
+  const repeatedClass = compact.match(/^([jrncba])\1$/i);
+  if (repeatedClass) return repeatedClass[1].toLowerCase();
+
+  if (compact === "j+" || compact.includes("j+") || compact.includes("talentstatus")) return "j+";
+  if (compact === "j" || compact.startsWith("jeugd") || compact.includes("youth")) return "j";
+  if (compact === "r" || compact.startsWith("rclas") || compact.startsWith("rclass") || compact.includes("recreant")) return "r";
+  if (compact === "n" || compact.startsWith("nclas") || compact.startsWith("nclass") || compact.includes("nieuweling")) return "n";
+  if (compact === "c" || compact.startsWith("cclas") || compact.startsWith("cclass")) return "c";
+  if (compact === "b" || compact.startsWith("bclas") || compact.startsWith("bclass")) return "b";
+  if (compact === "a" || compact.startsWith("aclas") || compact.startsWith("aclass") || compact.includes("elite")) return "a";
+  if (compact.includes("amateur") || compact.includes("ama")) return "amateur";
+  if (compact.includes("pro")) return "pro";
+
+  return compact;
 }
 
 function classRank(token: string) {
@@ -378,15 +386,27 @@ function classRank(token: string) {
 }
 
 function getRowClass(row: ResultRow) {
-  return normalizeClassToken(
-    firstFilled(
-      row?.klasse,
-      row?.class,
-      row?.wedstrijdklasse,
-      row?.niveau,
-      row?.fight_class,
-    ),
-  );
+  const candidates = [
+    row?.klasse,
+    row?.class,
+    row?.wedstrijdklasse,
+    row?.wedstrijd_klasse,
+    row?.fight_class,
+    row?.fightClass,
+    row?.bout_class,
+    row?.boutClass,
+    row?.niveau,
+    row?.category,
+  ];
+
+  for (const candidate of candidates) {
+    const token = normalizeClassToken(candidate);
+    if (["j", "j+", "r", "n", "c", "b", "a", "amateur", "pro"].includes(token)) {
+      return token;
+    }
+  }
+
+  return "";
 }
 
 function highestRecordClassFromRows(rows: ResultRow[]) {
@@ -394,6 +414,9 @@ function highestRecordClassFromRows(rows: ResultRow[]) {
   let highestRank = 0;
 
   for (const row of rows) {
+    const kind = getResultKind(firstFilled(row?.uitslag, row?.resultaat, row?.outcome));
+    if (kind === "other") continue;
+
     const token = getRowClass(row);
     const rank = classRank(token);
     if (rank > highestRank) {
@@ -1051,6 +1074,9 @@ export default function NieuweMatchPage() {
       analysis.roodAge != null && analysis.blauwAge != null
         ? Math.abs(analysis.roodAge - analysis.blauwAge)
         : null;
+    const youthAgeDiff = analysis.youth
+      ? diffYMD(birthDate(rood), birthDate(blauw))
+      : null;
     const roodRecord = recordLabel(rood);
     const blauwRecord = recordLabel(blauw);
     const sameDiscipline =
@@ -1067,6 +1093,7 @@ export default function NieuweMatchPage() {
       bw,
       weightDiff,
       ageDiff,
+      youthAgeDiff,
       roodRecord,
       blauwRecord,
       sameDiscipline,
@@ -1258,8 +1285,26 @@ ${engineError}`);
                 label="Leeftijd"
                 red={analysis.roodAge == null ? "-" : `${analysis.roodAge} jaar`}
                 blue={analysis.blauwAge == null ? "-" : `${analysis.blauwAge} jaar`}
-                difference={comparison.ageDiff == null ? "-" : `${comparison.ageDiff} jaar verschil`}
-                state={comparison.ageDiff == null ? "neutral" : analysis.youth && comparison.ageDiff >= 2 ? "warn" : "ok"}
+                difference={
+                  analysis.youth
+                    ? comparison.youthAgeDiff == null
+                      ? "-"
+                      : `${comparison.youthAgeDiff.totalMonths} ${comparison.youthAgeDiff.totalMonths === 1 ? "maand" : "maanden"} en ${comparison.youthAgeDiff.days} ${comparison.youthAgeDiff.days === 1 ? "dag" : "dagen"} verschil`
+                    : comparison.ageDiff == null
+                      ? "-"
+                      : `${comparison.ageDiff} ${comparison.ageDiff === 1 ? "jaar" : "jaar"} verschil`
+                }
+                state={
+                  analysis.youth
+                    ? comparison.youthAgeDiff == null
+                      ? "neutral"
+                      : comparison.youthAgeDiff.totalMonths >= 24
+                        ? "warn"
+                        : "ok"
+                    : comparison.ageDiff == null
+                      ? "neutral"
+                      : "ok"
+                }
               />
               <ComparisonRow
                 label="Gewicht"
