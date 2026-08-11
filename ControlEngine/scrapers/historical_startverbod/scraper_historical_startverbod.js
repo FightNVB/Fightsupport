@@ -1,4 +1,4 @@
-import { loginFightPassport } from "../utils/loginFightPassport.js";
+import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
 import {
   hardCloseFightPassportPage,
@@ -6,12 +6,40 @@ import {
 } from "../utils/fightPassportFighterNavigation.js";
 import { scrapeHistoricalStartverbodPage } from "./scrapeHistoricalStartverbodPage.js";
 
+async function createWorkerContext(browser) {
+  if (browser && typeof browser.createBrowserContext === "function") {
+    return await browser.createBrowserContext();
+  }
+  if (browser && typeof browser.createIncognitoBrowserContext === "function") {
+    return await browser.createIncognitoBrowserContext();
+  }
+  return null;
+}
+
+async function closeWorkerContext(ctx) {
+  if (!ctx) return;
+  try {
+    const pages = await ctx.pages().catch(() => []);
+    for (const workerPage of pages) {
+      await hardCloseFightPassportPage(workerPage).catch(() => {});
+    }
+  } catch {}
+  try {
+    await ctx.close().catch(() => {});
+  } catch {}
+}
+
+
 // Dossierhistorie-only: deze scraper mag nooit fightpassport_fighters,
 // heeft_startverbod, actuele blokkadestatus of gala-controledata schrijven.
 
 const startVa = Number(process.argv[2] || process.env.HISTORY_START_VA || 775);
 const endVa = Number(process.argv[3] || process.env.HISTORY_END_VA || startVa);
-const workers = Math.max(1, Math.min(20, Number(process.env.HISTORY_WORKERS || 4)));
+const workers = Math.max(1, Math.min(10, Number(process.env.HISTORY_WORKERS || 2)));
+const staggerMs = Math.max(
+  0,
+  Number(process.env.HISTORY_STAGGER_MS || process.env.STAGGER_MS || 350)
+);
 const resumeRunId = String(process.env.HISTORY_RUN_ID || "").trim();
 let stopRequested = false;
 process.on("SIGTERM", () => { stopRequested = true; });
@@ -61,6 +89,7 @@ async function saveItem(runId, va, patch) {
 
 export async function scraperHistoricalStartverbod() {
   const run = await createOrResumeRun();
+  console.log(`[historie] 🏁 start VA ${startVa} t/m ${endVa} met ${workers} worker(s), stagger=${staggerMs}ms`);
   let browser;
   let masterPage;
   const stats = {
@@ -73,6 +102,29 @@ export async function scraperHistoricalStartverbod() {
   try {
     ({ browser, page: masterPage } = await loginFightPassport());
     let cookies = await masterPage.cookies().catch(() => []);
+    console.log("[historie] ✅ Master logged in (cookies captured)");
+
+    let masterRefreshPromise = null;
+    async function refreshMasterSessionLocked(reason = "") {
+      if (masterRefreshPromise) {
+        try { await masterRefreshPromise; } catch {}
+        return cookies;
+      }
+
+      masterRefreshPromise = (async () => {
+        console.log(`[historie] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
+        await ensureLoggedIn(masterPage, { force: true });
+        cookies = await masterPage.cookies().catch(() => cookies);
+        console.log("[historie] ✅ master refreshed (cookies updated)");
+        return cookies;
+      })();
+
+      try {
+        return await masterRefreshPromise;
+      } finally {
+        masterRefreshPromise = null;
+      }
+    }
     const allVas = Array.from({ length: endVa - startVa + 1 }, (_, index) => startVa + index)
       .filter((va) => va > stats.lastVa);
     let cursor = 0;
@@ -89,7 +141,11 @@ export async function scraperHistoricalStartverbod() {
     }
 
     async function worker(workerIndex) {
-      while (!stopRequested) {
+      // Zelfde login/cookies als Total, maar iedere VA krijgt via openFighterPageVerified een schone geverifieerde tab.
+      // HISTORY_WORKERS is bewust standaard 4: SYS42-tabellen zijn zwaarder dan de profielsummary van Total.
+      await new Promise((resolve) => setTimeout(resolve, workerIndex * staggerMs));
+
+while (!stopRequested) {
         const va = allVas[cursor++];
         if (va == null) break;
         const startedAt = new Date().toISOString();
@@ -121,6 +177,10 @@ export async function scraperHistoricalStartverbod() {
             });
           }
         } catch (error) {
+          if (error?.message === "LOGIN_PAGE") {
+            await refreshMasterSessionLocked(`worker ${workerIndex + 1} VA ${va}`).catch(() => {});
+          }
+
           stats.errors++;
           stats.lastError = `VA ${va}: ${error?.message ?? String(error)}`;
           await saveItem(run.id, va, {

@@ -225,7 +225,7 @@ export default function FighterDossierPage() {
 
   const bron = String(aanmelding?.bron ?? aanmelding?.source_type ?? aanmelding?.source ?? "").toLowerCase();
   const isExcel = bron.includes("excel") || bron.includes("upload") || !!aanmelding?.upload_id || !!aanmelding?.upload_batch_id;
-  const record = calculateHighestClassRecord(resultRows);
+  const record = calculateHighestClassRecord(resultRows, f);
   const extraResults = calculateExtraResultCounts(resultRows);
 
   return (
@@ -266,8 +266,8 @@ export default function FighterDossierPage() {
           <Card title="Licentie" value={f.licentie_actief ? "Geldig" : "Geen geldige licentie"} />
           <Card title="Status" value={f.heeft_startverbod ? "STARTVERBOD" : "Fit to fight"} danger={f.heeft_startverbod} />
           <Card
-            title="Wedstrijden"
-            value={`${f.totaal_wedstrijden ?? data.results.length} totaal · ${f.gewonnen ?? "?"} gewonnen${extraResults.demo ? ` · ${extraResults.demo} demo` : ""}${extraResults.noContest ? ` · ${extraResults.noContest} no contest` : ""}`}
+            title="Record"
+            value={`${record.klasse ?? "-"} ${record.w}-${record.v}-${record.o} (${record.overige})`}
           />
         </div>
 
@@ -279,10 +279,20 @@ export default function FighterDossierPage() {
           <Grid rows={[
             ["Discipline", f.nulmeting_discipline], ["Nulmeting klasse", f.nulmeting_klasse],
             ["Berekende klasse", f.berekende_klasse], ["MMA niveau", f.mma_level],
-            ["Leeftijd", calcAge(f.geboortedatum, eventDate)], ["Gewicht", f.nulmeting_gewicht],
-            ["Aantal wedstrijden", f.nulmeting_totaal], ["Record hoogste klasse", `${record.klasse ?? "-"} ${record.w}-${record.v}-${record.o}${record.overige > 0 ? ` (${record.overige})` : ""}`],
-            ["Opmerking", f.nulmeting_opmerking, "full"],
           ]} />
+          <div style={s.compactStatsGrid}>
+            <CompactField title="Leeftijd" value={calcAge(f.geboortedatum, eventDate)} />
+            <CompactField title="Gewicht" value={f.nulmeting_gewicht} />
+            <CompactField title="Totaal partijen" value={f.totaal_wedstrijden ?? resultRows.length} />
+            <CompactField title="Winst op KO" value={f.kos ?? 0} />
+            <CompactField title="Record" value={`${record.klasse ?? "-"} ${record.w}-${record.v}-${record.o} (${record.overige})`} wide />
+          </div>
+          {f.nulmeting_opmerking && (
+            <div style={{ ...s.field, ...s.fieldFull, marginTop: 9 }}>
+              <span style={s.muted}>Opmerking</span>
+              <b style={{ wordBreak: "break-word", lineHeight: 1.35 }}>{f.nulmeting_opmerking}</b>
+            </div>
+          )}
         </Section>
 
         <Section title="Opgave voor deze matchmaking">
@@ -382,6 +392,7 @@ export default function FighterDossierPage() {
 function Card({ title, value, danger }: any) { return <div style={s.card}><div style={s.cardTitle}>{title}</div><div style={{ fontSize: 18, fontWeight: 900, color: danger ? "#ff654d" : "#eee" }}>{value}</div></div>; }
 function Section({ title, children }: any) { return <section style={s.section}><h2 style={{ margin: "0 0 14px", color: "#ff7440" }}>{title}</h2>{children}</section>; }
 function Grid({ rows }: any) { return <div style={s.grid}>{rows.map((row: any, index: number) => <div key={index} style={{ ...s.field, ...(row[2] === "wide" ? s.fieldWide : {}), ...(row[2] === "full" ? s.fieldFull : {}) }}><span style={s.muted}>{row[0]}</span><b style={{ wordBreak: "break-word", lineHeight: 1.35 }}>{row[1] ?? "-"}</b></div>)}</div>; }
+function CompactField({ title, value, wide = false }: any) { return <div style={{ ...s.field, ...(wide ? s.compactRecordField : {}) }}><span style={s.muted}>{title}</span><b style={{ wordBreak: "break-word", lineHeight: 1.35 }}>{value ?? "-"}</b></div>; }
 function Table({ headers, rows }: any) { return <div style={{ overflowX: "auto", border: "1px solid #444b52" }}><table style={s.table}><thead><tr>{headers.map((header: any) => <th key={header} style={s.th}>{header}</th>)}</tr></thead><tbody>{rows.map((row: any, index: number) => { const light = index % 2 === 1; return <tr key={index}>{row.map((value: any, cellIndex: number) => <td key={cellIndex} style={{ ...s.td, ...(light ? s.tdLight : s.tdDark) }}>{value ?? "-"}</td>)}</tr>; })}{!rows.length && <tr><td style={{ ...s.td, ...s.tdDark }} colSpan={headers.length}>Geen gegevens.</td></tr>}</tbody></table></div>; }
 
 function ReviewTable({ rows, busyId, onReview }: any) {
@@ -467,7 +478,22 @@ function classRank(value: "R" | "N" | "C" | "B" | "A" | null) {
   return value ? ({ R: 1, N: 2, C: 3, B: 4, A: 5 } as const)[value] : 0;
 }
 
-function calculateHighestClassRecord(rows: any[]) {
+function calculateHighestClassRecord(rows: any[], fighter?: any) {
+  const nulW = Number(fighter?.nulmeting_gewonnen ?? 0) || 0;
+  const nulL = Number(fighter?.nulmeting_verloren ?? 0) || 0;
+  const nulD = Number(fighter?.nulmeting_onbeslist ?? 0) || 0;
+  const nulTotal = Number(fighter?.nulmeting_totaal ?? 0) || 0;
+
+  // Alleen het deel van de nulmeting dat niet als W/L/D is uitgesplitst,
+  // gaat naar "overige". KO telt nooit als extra partij.
+  const nulOther = Math.max(0, nulTotal - nulW - nulL - nulD);
+
+  // Demo en No Contest uit de uitslagen horen ook onder "overige".
+  const extraRows = (rows ?? []).reduce((count, row) => {
+    const result = resultType(row?.uitslag);
+    return count + (result === "DEMO" || result === "NO_CONTEST" ? 1 : 0);
+  }, 0);
+
   const standingRows = (rows ?? []).filter((row) => {
     if (!isRelevantStandingDiscipline(row?.discipline)) return false;
     const result = resultType(row?.uitslag);
@@ -493,7 +519,7 @@ function calculateHighestClassRecord(rows: any[]) {
       else if (result === "DRAW") o += 1;
     }
 
-    return { klasse: "J", w, v, o, overige: 0 };
+    return { klasse: "J", w: w + nulW, v: v + nulL, o: o + nulD, overige: nulOther + extraRows };
   }
 
   let highestClass: "R" | "N" | "C" | "B" | "A" | null = null;
@@ -521,7 +547,7 @@ function calculateHighestClassRecord(rows: any[]) {
     else if (result === "DRAW") o += 1;
   }
 
-  return { klasse: highestClass, w, v, o, overige };
+  return { klasse: highestClass, w: w + nulW, v: v + nulL, o: o + nulD, overige: overige + nulOther + extraRows };
 }
 
 function calculateExtraResultCounts(rows: any[]) {
@@ -567,6 +593,8 @@ const s: any = {
   cardTitle: { fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: "#a6adb4", marginBottom: 6 },
   section: { border: "1px solid #3f464d", borderLeft: "3px solid #ff4d00", background: "linear-gradient(180deg,#151a1f,#0a0d10)", padding: 16, marginBottom: 14, boxShadow: "0 10px 24px rgba(0,0,0,.24)" },
   grid: { display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 9 },
+  compactStatsGrid: { display: "grid", gridTemplateColumns: "0.65fr 0.65fr 0.9fr 0.7fr 1.35fr", gap: 9, marginTop: 9 },
+  compactRecordField: { minWidth: 0 },
   field: { display: "grid", gap: 4, padding: "9px 10px", background: "#0d1115", border: "1px solid #30363d", minHeight: 54 },
   fieldWide: { gridColumn: "span 2", minHeight: 72 },
   fieldFull: { gridColumn: "1 / -1", minHeight: 72 },

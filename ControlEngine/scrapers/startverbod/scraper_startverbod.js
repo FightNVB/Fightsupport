@@ -34,6 +34,30 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function createWorkerContext(browser) {
+  if (browser && typeof browser.createBrowserContext === "function") {
+    return await browser.createBrowserContext();
+  }
+  if (browser && typeof browser.createIncognitoBrowserContext === "function") {
+    return await browser.createIncognitoBrowserContext();
+  }
+  return null;
+}
+
+async function closeWorkerContext(ctx) {
+  if (!ctx) return;
+  try {
+    const pages = await ctx.pages().catch(() => []);
+    for (const workerPage of pages) {
+      await hardCloseFightPassportPage(workerPage).catch(() => {});
+    }
+  } catch {}
+  try {
+    await ctx.close().catch(() => {});
+  } catch {}
+}
+
+
 function normalizeName(value) {
   return String(value ?? "")
     .normalize("NFD")
@@ -599,7 +623,9 @@ export async function scraperStartverbod() {
     const page = login.page;
 
     await waitForDashboard(page);
+    console.log("[startverbod] 1️⃣ centrale STARTVERBODEN-tegel openen (één browserflow voor Excel)");
     await clickStartverbodenTile(page);
+    console.log("[startverbod] 1️⃣ Excel-downloadknop zoeken en rapport downloaden");
     downloadedFile = await downloadStartverbodenExcel(page, browser);
 
     const parsed = await parseStartverbodenExcel(downloadedFile);
@@ -613,33 +639,141 @@ export async function scraperStartverbod() {
     const matched = [];
     const errors = [];
 
-    for (const row of parsed) {
-      const candidates = findCandidateFighters(row.naam_bron, indexes, confirmedDeletedVaNumbers);
+    // De centrale STARTVERBODEN-Excel wordt bewust maar één keer gedownload.
+    // Unieke letterlijke namen koppelen direct. Alleen dubbele namen worden op de individuele vechterpagina gecontroleerd.
+    const verifyWorkersRaw = Number(process.env.STARTVERBOD_VERIFY_WORKERS ?? "10");
+    const verifyWorkers = Number.isFinite(verifyWorkersRaw)
+      ? Math.max(1, Math.min(10, Math.floor(verifyWorkersRaw)))
+      : 10;
+
+    const verifyStaggerMs = Math.max(
+      0,
+      Number(process.env.STARTVERBOD_STAGGER_MS ?? process.env.STAGGER_MS ?? "350")
+    );
+
+    console.log(`[startverbod] 📄 Excel binnen: ${parsed.length} regel(s). Start koppeling; alleen dubbele letterlijke namen krijgen profielverificatie met ${verifyWorkers} worker(s), stagger=${verifyStaggerMs}ms.`);
+
+    let refreshPromise = null;
+    async function refreshCookiesLocked(reason) {
+      if (refreshPromise) return await refreshPromise;
+      refreshPromise = (async () => {
+        console.log(`[startverbod] 🔐 sessie vernieuwen (${reason})`);
+        await ensureLoggedIn(page, { force: true });
+        cookies = await page.cookies().catch(() => cookies);
+        return cookies;
+      })();
+      try {
+        return await refreshPromise;
+      } finally {
+        refreshPromise = null;
+      }
+    }
+
+    let verifyCursor = 0;
+
+    async function verifyRow(row, workerIndex) {
+      const candidates = findCandidateFighters(
+        row.naam_bron,
+        indexes,
+        confirmedDeletedVaNumbers
+      );
+
+      console.log(
+        `[startverbod] 🤖 worker ${workerIndex + 1}/${verifyWorkers}: ${row.naam_bron} (${candidates.length} letterlijke kandidaat/kandidaten)`
+      );
+
+      // De Excelnaam is de interne FightPassportnaam en moet letterlijk overeenkomen.
+      // Bij precies één actief VA-nummer hoeven we daarom de vechterpagina niet te openen.
+      if (candidates.length === 1) {
+        const fighter = candidates[0];
+        const verifiedAt = new Date().toISOString();
+
+        matched.push({
+          ...row,
+          va_nummer: String(fighter.va_nummer),
+          naam: fighter.naam,
+          naam_fp: fighter.naam,
+          koppel_methode: "exact",
+          reden: null,
+          opmerkingen: null,
+          aangemaakt_op: null,
+          aangemaakt_door: null,
+          gewijzigd_op: null,
+          gewijzigd_door: null,
+          verified_in_fightpassport: false,
+          verified_at: verifiedAt,
+          verification_method: "literal_excel_name_unique",
+          raw_json: {
+            ...row.raw_json,
+            kandidaat_va_nummers: [String(fighter.va_nummer)],
+          },
+        });
+        return;
+      }
+
+      if (candidates.length === 0) {
+        errors.push({
+          ...row,
+          match: {
+            status: "not_found",
+            candidates: [],
+            method: "literal",
+          },
+          raw_json: {
+            ...row.raw_json,
+            fightpassport_verifications: [],
+          },
+        });
+        return;
+      }
+
+      // Alleen bij een dubbele letterlijke naam is de Excel niet genoeg.
+      // Open alle kandidaat-VA's en gebruik exact dezelfde profielstatus als Total:
+      // op de vechterpagina moet STARTVERBOD in de samenvatting staan.
       const verifications = [];
 
       for (const fighter of candidates) {
         let fighterPage = null;
         try {
-          fighterPage = await openFighterPageVerified(browser, null, cookies, fighter.va_nummer, {
-            maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-            softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
-            betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
-            workerLabel: `[startverbod VA ${fighter.va_nummer}]`,
-          });
+          fighterPage = await openFighterPageVerified(
+            browser,
+            null,
+            cookies,
+            fighter.va_nummer,
+            {
+              maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
+              softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
+              betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+              workerLabel: `[startverbod dubbel ${row.naam_bron} VA ${fighter.va_nummer}]`,
+            }
+          );
+
           if (!fighterPage) {
-            verifications.push({ verified: false, fighter, reason: "navigation_timeout" });
+            verifications.push({
+              verified: false,
+              fighter,
+              reason: "navigation_timeout",
+            });
             continue;
           }
-          verifications.push(await verifyStartverbodCandidate(fighterPage, fighter, row));
+
+          verifications.push(
+            await verifyStartverbodCandidate(fighterPage, fighter, row)
+          );
         } catch (error) {
           if (error?.message === "LOGIN_PAGE") {
-            await ensureLoggedIn(page, { force: true });
-            cookies = await page.cookies().catch(() => cookies);
+            await refreshCookiesLocked(
+              `dubbele naam ${row.naam_bron} VA ${fighter.va_nummer}`
+            );
           }
+
           verifications.push({
             verified: false,
             fighter,
-            reason: error?.message === "LOGIN_PAGE" ? "login_refresh_required" : "verification_error",
+            reason:
+              error?.message === "LOGIN_PAGE"
+                ? "login_refresh_required"
+                : "verification_error",
             error: error?.message ?? String(error),
           });
         } finally {
@@ -653,33 +787,60 @@ export async function scraperStartverbod() {
         errors.push({
           ...row,
           match,
-          raw_json: { ...row.raw_json, fightpassport_verifications: verifications },
+          raw_json: {
+            ...row.raw_json,
+            fightpassport_verifications: verifications,
+          },
         });
-        continue;
+        return;
       }
 
-      for (const fighter of match.fighters) {
-        const verification = match.verification;
-        const verifiedAt = new Date().toISOString();
-        matched.push({
-          ...row,
-          va_nummer: String(fighter.va_nummer),
-          naam: fighter.naam,
-          naam_fp: verification.profileName || fighter.naam,
-          koppel_methode: match.method,
-          reden: verification.detail?.reden ?? null,
-          opmerkingen: verification.detail?.opmerkingen ?? null,
-          aangemaakt_op: parseExcelDate(verification.detail?.aangemaakt_op),
-          aangemaakt_door: verification.detail?.aangemaakt_door ?? null,
-          gewijzigd_op: parseExcelDate(verification.detail?.gewijzigd_op),
-          gewijzigd_door: verification.detail?.gewijzigd_door ?? null,
-          verified_in_fightpassport: true,
-          verified_at: verifiedAt,
-          verification_method: "startverboden_tegel_details",
-          raw_json: { ...row.raw_json, fightpassport_verification: verification },
-        });
+      const fighter = match.fighters[0];
+      const verification = match.verification;
+      const verifiedAt = new Date().toISOString();
+
+      matched.push({
+        ...row,
+        va_nummer: String(fighter.va_nummer),
+        naam: fighter.naam,
+        naam_fp: verification?.profileName || fighter.naam,
+        koppel_methode: "exact",
+        reden: null,
+        opmerkingen: null,
+        aangemaakt_op: null,
+        aangemaakt_door: null,
+        gewijzigd_op: null,
+        gewijzigd_door: null,
+        verified_in_fightpassport: true,
+        verified_at: verifiedAt,
+        verification_method: "total_profielsamenvatting_startverbod",
+        raw_json: {
+          ...row.raw_json,
+          fightpassport_verification: verification,
+          fightpassport_verifications: verifications,
+        },
+      });
+    }
+
+    async function verifyWorker(workerIndex) {
+      // STARTVERBODEN gebruikt bewust de gedeelde, reeds ingelogde browsercontext.
+      // Dus: wel 10 aparte tabs/workers, maar GEEN incognito/losse BrowserContext.
+      // Hierdoor delen de tabs cookies + overige SYS42 browserstate.
+      await sleep(workerIndex * verifyStaggerMs);
+
+      while (true) {
+        const index = verifyCursor++;
+        if (index >= parsed.length) break;
+        await verifyRow(parsed[index], workerIndex);
       }
     }
+
+    await Promise.all(
+      Array.from(
+        { length: Math.min(verifyWorkers, Math.max(1, parsed.length)) },
+        (_, workerIndex) => verifyWorker(workerIndex)
+      )
+    );
 
     await saveMatchErrors(runId, errors);
     await saveSnapshot(runId, matched, errors.length > 0);

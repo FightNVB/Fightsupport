@@ -18,7 +18,6 @@ import {
   Download,
   Eye,
   Globe2,
-  Send,
   RefreshCw,
   Search,
   Star,
@@ -715,9 +714,31 @@ function effectiveTotalWithDemo(totalInclDemo: number, demo: number) {
   return Math.max(0, totalInclDemo - demo + demoToPartijEquivalent(demo));
 }
 
-function totaalPartijenSortValue(f: Fighter) {
+function currentTotalFights(f: Fighter): number | null {
+  // FightPassport totaal_wedstrijden is de actuele waarheid.
+  // nulmeting_totaal is uitsluitend een historische beginstand en mag hier
+  // nooit als huidig totaal worden gebruikt.
   const direct = pickFirst(
     f.totaal_wedstrijden,
+    getPath(f, "fightpassport_fighter.totaal_wedstrijden"),
+    getPath(f, "fighters_raw.totaal_wedstrijden"),
+    getPath(f, "extra.raw.fighters_raw.totaal_wedstrijden"),
+    f.totaal_partijen,
+    f.aantal_partijen,
+    f.total_fights,
+    f.fights_total,
+    f.uitslagen_count,
+    f.partijen,
+  );
+  const value = Number(String(direct ?? "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function totaalPartijenSortValue(f: Fighter) {
+  const currentTotal = currentTotalFights(f);
+  if (currentTotal != null) return currentTotal;
+
+  const direct = pickFirst(
     f.totaal_partijen,
     f.aantal_partijen,
     f.total_fights,
@@ -790,76 +811,108 @@ function recordClassDisplay(token: string) {
   return labels[token] || "-";
 }
 
+function nulmetingRecordParts(f: Fighter) {
+  const nw = Number(String(pickFirst(f.nulmeting_gewonnen, getPath(f, "fighters_raw.nulmeting_gewonnen"), getPath(f, "extra.raw.fighters_raw.nulmeting_gewonnen"), 0)).replace(/[^\d.-]/g, "")) || 0;
+  const nl = Number(String(pickFirst(f.nulmeting_verloren, getPath(f, "fighters_raw.nulmeting_verloren"), getPath(f, "extra.raw.fighters_raw.nulmeting_verloren"), 0)).replace(/[^\d.-]/g, "")) || 0;
+  const nd = Number(String(pickFirst(f.nulmeting_onbeslist, getPath(f, "fighters_raw.nulmeting_onbeslist"), getPath(f, "extra.raw.fighters_raw.nulmeting_onbeslist"), 0)).replace(/[^\d.-]/g, "")) || 0;
+  const nt = Number(String(pickFirst(f.nulmeting_totaal, getPath(f, "fighters_raw.nulmeting_totaal"), getPath(f, "extra.raw.fighters_raw.nulmeting_totaal"), 0)).replace(/[^\d.-]/g, "")) || 0;
+  return { w: nw, l: nl, d: nd, other: Math.max(0, nt - nw - nl - nd) };
+}
+
 function recordOf(f: Fighter, allRows: ResultRow[] = []) {
-  // Eén waarheid voor het zichtbare record:
-  // 1. bepaal de hoogste klasse waarin een echte W/L/D-uitslag staat;
-  // 2. tel W-L-D uitsluitend binnen die hoogste klasse;
-  // 3. iedere andere geldige partij binnen dezelfde stand-up discipline is "overige".
-  // Voorbeeld: N winst + C winst => C 1-0-0 (1), nooit C 2-0-0.
-  const rows = getUitslagenRows(f, allRows).filter(isRelevantStandingDiscipline);
-  const highestClass = highestRecordClassFromRows(rows);
+  const rows = getUitslagenRows(f, allRows);
+
+  const nul = nulmetingRecordParts(f);
+
+  const isDemoOrNoContest = (row: ResultRow) => {
+    const raw = lower(
+      resultField(
+        row,
+        "uitslag",
+        "resultaat",
+        "outcome",
+        "result",
+        "raw.uitslag",
+        "raw.resultaat",
+        "raw.outcome",
+        "raw_json.uitslag",
+        "raw_json.resultaat",
+        "extra.uitslag",
+        "extra.resultaat",
+      ),
+    );
+    return (
+      raw.includes("demo") ||
+      raw.includes("demonstr") ||
+      raw.includes("no contest") ||
+      raw.includes("nocontest") ||
+      raw.includes("no-contest") ||
+      raw === "nc"
+    );
+  };
+
+  // Zelfde principe als de correcte fighterpagina:
+  // demo + No Contest zijn overige en bepalen de klasse niet.
+  const extraRows = rows.filter(isDemoOrNoContest).length;
+  const officialRows = rows.filter((row) => {
+    if (!isRelevantStandingDiscipline(row)) return false;
+    return ["win", "loss", "draw"].includes(rowResultKind(row));
+  });
+
+  const youthRows = officialRows.filter((row) => {
+    const token = getRowClass(row);
+    return token === "j" || token === "j+";
+  });
+  const adultRows = officialRows.filter((row) => {
+    const token = getRowClass(row);
+    return ["r", "n", "c", "b", "a", "amateur", "pro"].includes(token);
+  });
+
+  if (!adultRows.length && youthRows.length) {
+    let wins = 0, losses = 0, draws = 0;
+    for (const row of youthRows) {
+      const kind = rowResultKind(row);
+      if (kind === "win") wins++;
+      else if (kind === "loss") losses++;
+      else if (kind === "draw") draws++;
+    }
+    return `J ${wins + nul.w}-${losses + nul.l}-${draws + nul.d} (${nul.other + extraRows})`;
+  }
+
+  let highestClass = "";
+  let highestRank = 0;
+  for (const row of adultRows) {
+    const token = getRowClass(row);
+    const rank = classRank(token);
+    if (rank > highestRank) {
+      highestClass = token;
+      highestRank = rank;
+    }
+  }
 
   if (highestClass) {
-    let wins = 0;
-    let losses = 0;
-    let draws = 0;
-    let overige = 0;
+    let wins = 0, losses = 0, draws = 0;
+    let overige = youthRows.length + extraRows + nul.other;
 
-    for (const row of rows) {
-      const kind = rowResultKind(row);
+    for (const row of adultRows) {
       const rowClass = getRowClass(row);
-
-      // Onherkenbare lege bronregels tellen niet als partij.
-      if (!rowClass || kind === "other") continue;
-
-      if (rowClass === highestClass) {
-        if (kind === "win") wins += 1;
-        else if (kind === "loss") losses += 1;
-        else if (kind === "draw") draws += 1;
-        else if (kind === "demo") overige += 1;
-      } else {
-        // Alles uit een andere klasse (lager/hoger/jeugd) staat tussen haakjes.
-        // De klasse die W-L-D bepaalt blijft altijd exact de hoogste officiële klasse.
-        overige += 1;
+      const kind = rowResultKind(row);
+      if (rowClass !== highestClass) {
+        overige++;
+        continue;
       }
+      if (kind === "win") wins++;
+      else if (kind === "loss") losses++;
+      else if (kind === "draw") draws++;
     }
 
-    return `${recordClassDisplay(highestClass)} ${wins}-${losses}-${draws} (${overige})`;
+    return `${recordClassDisplay(highestClass)} ${wins + nul.w}-${losses + nul.l}-${draws + nul.d} (${overige})`;
   }
 
-  // Alleen als er werkelijk geen bruikbare uitslagen beschikbaar zijn, mag de
-  // oude door fighterRules opgeslagen waarde als fallback worden gebruikt.
-  const ruleRecord = pickFirst(
-    f.record_label,
-    f.recordLabel,
-    f.berekend_record,
-    f.berekende_record,
-    f.record_berekend,
-    f.record,
-    getPath(f, "fighterRules.recordLabel"),
-    getPath(f, "fighterRules.record_label"),
-    getPath(f, "fighter_rules.recordLabel"),
-    getPath(f, "fighter_rules.record_label"),
-    getPath(f, "rules.recordLabel"),
-    getPath(f, "rules.record_label"),
-    getPath(f, "rule_result.recordLabel"),
-    getPath(f, "rule_result.record_label"),
-    getPath(f, "rules_result.recordLabel"),
-    getPath(f, "rules_result.record_label"),
-    getPath(f, "extra.fighterRules.recordLabel"),
-    getPath(f, "extra.fighter_rules.record_label"),
-    getPath(f, "raw.fighterRules.recordLabel"),
-    getPath(f, "raw.fighter_rules.record_label"),
-  );
-
-  if (s(ruleRecord)) {
-    const cls = cleanRecordClassLabel(recordClassLabelOf(f));
-    const normalized = normalizeRecordLabel(ruleRecord);
-    if (normalized) return `${cls} ${normalized}`;
-  }
-
-  return `${cleanRecordClassLabel(recordClassLabelOf(f))} 0-0-0 (0)`;
+  // Geen bruikbare uitslagen: nulmeting zelf is dan het record.
+  return `${cleanRecordClassLabel(recordClassLabelOf(f))} ${nul.w}-${nul.l}-${nul.d} (${nul.other})`;
 }
+
 function statusLic(f: Fighter) {
   const x = lower(
     pickFirst(f.licentie_status, f.licentie, f.licentie_ok, f.raw?.licentie),
@@ -1777,22 +1830,21 @@ async function fetchMatchmakingTournamentBouts(matchmakingId: string) {
   });
 }
 
-async function fetchFightPassportResults(matchmakingId: string, vaNumbers: string[]) {
+async function fetchFightPassportData(matchmakingId: string, vaNumbers: string[]) {
   const uniqueVas = Array.from(
     new Set(vaNumbers.map(onlyDigits).filter(Boolean)),
   );
-  if (!matchmakingId || !uniqueVas.length) return [] as ResultRow[];
+  if (!matchmakingId || !uniqueVas.length) {
+    return { fighters: [] as Fighter[], results: [] as ResultRow[] };
+  }
 
-  // De API accepteert maximaal 50 VA-nummers per verzoek. Een matchmaking kan
-  // veel meer vechters bevatten, dus laad de uitslagen veilig in batches.
   const batchSize = 50;
+  const allFighters: Fighter[] = [];
   const allResults: ResultRow[] = [];
 
   for (let start = 0; start < uniqueVas.length; start += batchSize) {
     const batch = uniqueVas.slice(start, start + batchSize);
-    const query = batch
-      .map((va) => `va=${encodeURIComponent(va)}`)
-      .join("&");
+    const query = batch.map((va) => `va=${encodeURIComponent(va)}`).join("&");
 
     const response = await authedFetch(
       `/api/matchmaker/${encodeURIComponent(matchmakingId)}/fightpassport?${query}`,
@@ -1802,17 +1854,22 @@ async function fetchFightPassportResults(matchmakingId: string, vaNumbers: strin
 
     if (!response.ok) {
       throw new Error(
-        json?.error || `FightPassport-uitslagen laden mislukt voor batch ${Math.floor(start / batchSize) + 1}.`,
+        json?.error || `FightPassport-data laden mislukt voor batch ${Math.floor(start / batchSize) + 1}.`,
       );
     }
 
+    if (Array.isArray(json?.fighters)) allFighters.push(...json.fighters);
     if (Array.isArray(json?.results)) allResults.push(...json.results);
   }
 
-  // Voorkom dubbele uitslagen wanneer dezelfde rij via meerdere batches of
-  // bronkoppelingen terugkomt.
+  const fightersByVa = new Map<string, Fighter>();
+  for (const fighter of allFighters) {
+    const va = onlyDigits(fighter?.va_nummer);
+    if (va) fightersByVa.set(va, fighter);
+  }
+
   const seen = new Set<string>();
-  return allResults.filter((row) => {
+  const results = allResults.filter((row) => {
     const key = s(
       pickFirst(
         row?.id,
@@ -1825,6 +1882,42 @@ async function fetchFightPassportResults(matchmakingId: string, vaNumbers: strin
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+
+  return { fighters: [...fightersByVa.values()], results };
+}
+
+function mergeFreshFightPassportFighters(
+  fighters: Fighter[],
+  freshFightPassport: Fighter[],
+) {
+  const byVa = new Map(
+    freshFightPassport
+      .map((fighter) => [onlyDigits(fighter?.va_nummer), fighter] as const)
+      .filter(([va]) => !!va),
+  );
+
+  return fighters.map((fighter) => {
+    const fp = byVa.get(vaOf(fighter));
+    if (!fp) return fighter;
+
+    // De actuele FightPassport-velden zijn leidend voor record/totaal.
+    // De aanmeldingsvelden (naam, gym, gewicht voor deze matchmaking) blijven behouden.
+    return {
+      ...fighter,
+      nulmeting_totaal: fp.nulmeting_totaal,
+      nulmeting_gewonnen: fp.nulmeting_gewonnen,
+      nulmeting_verloren: fp.nulmeting_verloren,
+      nulmeting_onbeslist: fp.nulmeting_onbeslist,
+      nulmeting_kos: fp.nulmeting_kos,
+      totaal_wedstrijden: fp.totaal_wedstrijden,
+      gewonnen: fp.gewonnen,
+      kos: fp.kos,
+      berekende_klasse: fp.berekende_klasse ?? fighter.berekende_klasse,
+      nulmeting_klasse: fp.nulmeting_klasse ?? fighter.nulmeting_klasse,
+      nulmeting_discipline: fp.nulmeting_discipline ?? fighter.nulmeting_discipline,
+      fightpassport_fighter: fp,
+    };
   });
 }
 
@@ -1917,7 +2010,7 @@ export default function FightersPage() {
       setPublication(nextPublication);
 
       if (action === "offline") {
-        setMsg("Promotor- en trainerlink zijn offline gezet.");
+        setMsg("Promotor-live is offline gezet.");
         return;
       }
 
@@ -2046,12 +2139,16 @@ export default function FightersPage() {
 
       setMatchRows(getActiveMatchRows(jsonWithDbBouts));
       setMatchmakingMeta(loadedMatchmakingMeta);
-      setFighters(fightersWithEventDate);
       const vaNumbers = Array.from(
         new Set(fightersWithEventDate.map(vaOf).filter(Boolean)),
       );
-      const fightPassportResults = await fetchFightPassportResults(matchmakingId, vaNumbers);
-      setUitslagenRows(fightPassportResults);
+      const fightPassportData = await fetchFightPassportData(matchmakingId, vaNumbers);
+      const enrichedFighters = mergeFreshFightPassportFighters(
+        fightersWithEventDate,
+        fightPassportData.fighters,
+      );
+      setFighters(enrichedFighters);
+      setUitslagenRows(fightPassportData.results);
       setExistingTournaments(loadedTournaments);
       setTournamentCode(nextTournamentCode(loadedTournaments));
       setSelected((cur) =>
@@ -2405,7 +2502,13 @@ export default function FightersPage() {
           record_w: pickFirst(f.record_w, f.win, f.wins),
           record_l: pickFirst(f.record_l, f.loss, f.losses),
           record_d: pickFirst(f.record_d, f.draw, f.draws),
-          totaal_wedstrijden: pickFirst(f.totaal_wedstrijden, f.uitslagen_count),
+          totaal_wedstrijden: pickFirst(
+            f.totaal_wedstrijden,
+            getPath(f, "fightpassport_fighter.totaal_wedstrijden"),
+            getPath(f, "fighters_raw.totaal_wedstrijden"),
+            getPath(f, "extra.raw.fighters_raw.totaal_wedstrijden"),
+            f.uitslagen_count,
+          ),
           leeftijd_event: leeftijdOf(f),
         }));
 
@@ -2831,18 +2934,18 @@ export default function FightersPage() {
             </button>
             <button
               className="fs-action-btn fs-action-primary"
-              onClick={() => manageShareLink("publish_trainers")}
-              disabled={!!busyId || loading || !matchRows.length || publication?.is_enabled !== true}
-              title="Publiceer de huidige momentopname voor trainers"
+              onClick={() => router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/trainercontrole`)}
+              disabled={!!busyId || loading || !matchRows.length}
+              title="Maak per sportschool een trainercontrolelink en bekijk de reacties"
             >
-              <Send size={16} />
-              <span>{hasTrainerPublication ? "Update" : "Publiceer update"}</span>
+              <Users size={16} />
+              <span>Trainers controleren</span>
             </button>
             <button
               className="fs-action-btn"
               onClick={() => manageShareLink("offline")}
               disabled={!!busyId || loading || publication?.is_enabled !== true}
-              title="Zet zowel de promotor- als trainerlink offline"
+              title="Zet de promotor-livepagina offline"
             >
               <Unlink size={16} />
               <span>Offline</span>

@@ -73,7 +73,7 @@ export async function GET(
     const [fighters, results] = await Promise.all([
       supabaseAdmin
         .from("fightpassport_fighters")
-        .select("va_nummer,naam,geboortedatum,geslacht,licentie_actief,heeft_startverbod,nulmeting_totaal,nulmeting_opmerking,nulmeting_klasse,totaal_wedstrijden,gewonnen")
+        .select("va_nummer,naam,geboortedatum,geslacht,licentie_actief,heeft_startverbod,nulmeting_discipline,nulmeting_klasse,nulmeting_gewicht,nulmeting_totaal,nulmeting_gewonnen,nulmeting_verloren,nulmeting_onbeslist,nulmeting_kos,nulmeting_overige_ervaring,nulmeting_opmerking,totaal_wedstrijden,gewonnen,kos,berekende_klasse,mma_level")
         .in("va_nummer", requestedVas),
       supabaseAdmin
         .from("fightpassport_results")

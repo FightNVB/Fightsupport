@@ -746,6 +746,7 @@ function FighterMetalCard({
   leeftijdEvent,
   geslacht,
   klasseMM,
+  totaalWedstrijden,
   nulKlasse,
   nulTotaal,
   nulOpmerking,
@@ -762,6 +763,7 @@ function FighterMetalCard({
   leeftijdEvent: string;
   geslacht: string;
   klasseMM: string;
+  totaalWedstrijden: any;
   nulKlasse: string;
   nulTotaal: any;
   nulOpmerking: string;
@@ -866,8 +868,19 @@ function FighterMetalCard({
           </div>
         </div>
 
+        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-lg border border-white/15 bg-black/20 p-2">
+            <div className="text-xs text-white/55">Totaal wedstrijden</div>
+            <div className="text-xl font-black text-white">{totaalWedstrijden ?? "-"}</div>
+          </div>
+          <div className="rounded-lg border border-white/15 bg-black/20 p-2">
+            <div className="text-xs text-white/55">Nulmeting totaal</div>
+            <div className="text-xl font-black text-white">{nulTotaal ?? "-"}</div>
+          </div>
+        </div>
+
         <div
-          className="mt-4 rounded-xl border p-3"
+          className="mt-3 rounded-xl border p-3"
           style={{
             border: "2px solid rgba(63,63,70,0.28)",
             background:
@@ -881,8 +894,7 @@ function FighterMetalCard({
             Klasse (nulmeting):{" "}
             <span className="text-white">{nulKlasse || "-"}</span>
             <span className="text-white/40"> • </span>
-            Totaal (nulmeting):{" "}
-            <span className="text-white">{nulTotaal ?? "-"}</span>
+            Beginstand apart hierboven
           </div>
           <div className="mt-1 text-sm text-white/85 whitespace-pre-wrap">
             {nulOpmerking ? nulOpmerking : "-"}
@@ -2041,6 +2053,22 @@ export default function PartijDetailPage() {
               firstFilled(f?.nulmeting_totaal, f?.totaal_nulmeting, f?.nul_totaal),
             );
             setIfEmpty(
+              `${side}_nulmeting_gewonnen`,
+              firstFilled(f?.nulmeting_gewonnen, f?.nul_gewonnen),
+            );
+            setIfEmpty(
+              `${side}_nulmeting_verloren`,
+              firstFilled(f?.nulmeting_verloren, f?.nul_verloren),
+            );
+            setIfEmpty(
+              `${side}_nulmeting_onbeslist`,
+              firstFilled(f?.nulmeting_onbeslist, f?.nul_onbeslist),
+            );
+            setIfEmpty(
+              `${side}_nulmeting_kos`,
+              firstFilled(f?.nulmeting_kos, f?.nul_kos),
+            );
+            setIfEmpty(
               `${side}_nulmeting_opmerking`,
               firstFilled(f?.nulmeting_opmerking, f?.opmerking_nulmeting, f?.nul_opmerking),
             );
@@ -2223,8 +2251,8 @@ export default function PartijDetailPage() {
       ? fmtMonthsDays(leeftijdDiff.months, leeftijdDiff.days)
       : null;
 
-    const roodPartijen = toInt(ctx?.rood_totaal_wedstrijden_scrape);
-    const blauwPartijen = toInt(ctx?.blauw_totaal_wedstrijden_scrape);
+    const roodPartijen = toInt(ctx?.rood_totaal_wedstrijden_scrape) ?? ((toInt(ctx?.rood_nulmeting_totaal) ?? 0) + uitslagenRood.length);
+    const blauwPartijen = toInt(ctx?.blauw_totaal_wedstrijden_scrape) ?? ((toInt(ctx?.blauw_nulmeting_totaal) ?? 0) + uitslagenBlauw.length);
 
     const roodDemo = toInt(ctx?.rood_demo_totaal) ?? countDemo(uitslagenRood);
     const blauwDemo =
@@ -2453,129 +2481,118 @@ export default function PartijDetailPage() {
     };
   }, [regels]);
 
-  function buildRecordFromUitslagen(rows: UitslagRow[], preferredKlasse?: any) {
-    const norm = (s: any) =>
-      String(s ?? "")
-        .trim()
-        .toLowerCase();
-    const isAllowedDiscipline = (d: any) => {
-      const s = norm(d);
-      return (
-        s.includes("kb") ||
-        s.includes("kick") ||
-        s.includes("mt") ||
-        s.includes("muay") ||
-        s.includes("thai") ||
-        s.includes("mma")
-      );
+  function buildRecordFromUitslagen(
+    rows: UitslagRow[],
+    preferredKlasse?: any,
+    nulmeting?: { totaal?: any; gewonnen?: any; verloren?: any; onbeslist?: any },
+  ) {
+    const norm = (value: any) => String(value ?? "").trim().toLowerCase();
+    const classify = (value: any): "win" | "loss" | "draw" | "demo" | "nc" | "other" => {
+      const valueNorm = norm(value);
+      if (valueNorm.includes("demo") || valueNorm.includes("demonstr")) return "demo";
+      if (valueNorm.includes("no contest") || valueNorm.includes("nocontest") || valueNorm.includes("no-contest") || valueNorm === "nc" || valueNorm === "n/c") return "nc";
+      if (valueNorm.includes("draw") || valueNorm.includes("gelijk") || valueNorm.includes("onbeslist") || valueNorm === "d") return "draw";
+      if (valueNorm.includes("win") || valueNorm.includes("winst") || valueNorm.includes("gewonnen") || valueNorm === "w") return "win";
+      if (valueNorm.includes("loss") || valueNorm.includes("verlies") || valueNorm.includes("verloren") || valueNorm === "l") return "loss";
+      return "other";
     };
-    const isBoxing = (d: any) => {
-      const s = norm(d);
-      return s.includes("bok") || s.includes("boxing");
+    const classToken = (value: any) => {
+      const raw = norm(value)
+        .replace(/\b(?:klasse|class|clas)\b/g, "")
+        .replace(/-/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const compact = raw.replace(/[^a-z0-9+]/g, "");
+      const repeated = compact.match(/^([jrncba])\1$/i);
+      if (repeated) return repeated[1].toLowerCase();
+      if (compact === "j+" || compact.includes("j+") || compact.includes("talentstatus")) return "j+";
+      if (compact === "j" || compact.includes("jeugd") || compact.includes("youth")) return "j";
+      if (compact === "r" || compact.includes("recreant")) return "r";
+      if (compact === "n" || compact.includes("nieuweling") || compact.includes("newcomer")) return "n";
+      if (compact === "c") return "c";
+      if (compact === "b") return "b";
+      if (compact === "a") return "a";
+      if (compact.includes("amateur") || compact === "ama") return "amateur";
+      if (compact.includes("pro")) return "pro";
+      return compact;
     };
-    const parseDate = (d: any): number => {
-      const dt = parseISODateOnly(d);
-      return dt ? dt.getTime() : 0;
-    };
+    const rank = (token: string) => ({ j: 1, "j+": 1, r: 2, n: 3, c: 4, b: 5, a: 6, amateur: 3, pro: 6 } as Record<string, number>)[token] ?? 0;
 
-    const sorted = [...(rows ?? [])].sort(
-      (a, b) => parseDate(b.datum) - parseDate(a.datum),
+    const nulW = toInt(nulmeting?.gewonnen) ?? 0;
+    const nulL = toInt(nulmeting?.verloren) ?? 0;
+    const nulD = toInt(nulmeting?.onbeslist) ?? 0;
+    const nulT = toInt(nulmeting?.totaal) ?? 0;
+    const nulOther = Math.max(0, nulT - nulW - nulL - nulD);
+
+    const extraRows = (rows ?? []).filter((row) => {
+      const type = classify(row?.uitslag);
+      return type === "demo" || type === "nc";
+    }).length;
+
+    const officialRows = (rows ?? []).filter((row) =>
+      ["win", "loss", "draw"].includes(classify(row?.uitslag)),
     );
-    const prefNorm = norm(preferredKlasse);
-    const activeKlasse = prefNorm
-      ? preferredKlasse
-      : (sorted.find((r) => norm(r.klasse))?.klasse ?? null);
 
-    let wins = 0;
-    let loss = 0;
-    let draw = 0;
-    let drawRaw = 0;
-    let noContest = 0;
-    let demoTotal = 0;
-    let historieCount = 0;
+    const youthRows = officialRows.filter((row) => ["j", "j+"].includes(classToken(row?.klasse)));
+    const adultRows = officialRows.filter((row) => ["r", "n", "c", "b", "a", "amateur", "pro"].includes(classToken(row?.klasse)));
 
-    const classifyResult = (
-      u: any,
-    ): "win" | "loss" | "draw" | "demo" | "nc" | "unknown" => {
-      const s = norm(u);
-      if (!s) return "unknown";
-      if (s.includes("demo") || s.includes("demonstr")) return "demo";
-      if (
-        s.includes("draw") ||
-        s.includes("gelijk") ||
-        s.includes("onbeslist") ||
-        s === "d"
-      )
-        return "draw";
-      if (s.includes("win") || s.includes("winst") || s === "w") return "win";
-      if (s.includes("loss") || s.includes("verlies") || s === "l")
-        return "loss";
-      if (
-        s.includes("no contest") ||
-        s.includes("n/c") ||
-        s === "nc" ||
-        s.includes("contest")
-      )
-        return "nc";
-      return "unknown";
-    };
+    let wins = 0, loss = 0, draw = 0;
+    let historieCount = nulOther + extraRows;
+    let activeKlasse: string | null = null;
 
-    for (const r of sorted) {
-      const k = norm(r.klasse);
-      const d = norm(r.discipline);
-
-      const inActiveKlasse = activeKlasse
-        ? !k
-          ? true
-          : norm(activeKlasse) === k
-        : true;
-
-      const boxing = isBoxing(d);
-      const allowed = isAllowedDiscipline(d) && !boxing;
-      const resType = classifyResult(r.uitslag);
-
-      if (resType === "demo") {
-        demoTotal += 1;
-        if (!inActiveKlasse) historieCount += 1;
-        continue;
+    if (!adultRows.length && youthRows.length) {
+      activeKlasse = "J";
+      for (const row of youthRows) {
+        const type = classify(row?.uitslag);
+        if (type === "win") wins++;
+        else if (type === "loss") loss++;
+        else if (type === "draw") draw++;
       }
-
-      if (!inActiveKlasse) {
-        if (k) historieCount += 1;
-        continue;
+    } else {
+      let highest = "";
+      let highestRank = 0;
+      for (const row of adultRows) {
+        const token = classToken(row?.klasse);
+        if (rank(token) > highestRank) {
+          highest = token;
+          highestRank = rank(token);
+        }
       }
+      activeKlasse = highest || (preferredKlasse ? String(preferredKlasse) : null);
+      historieCount += youthRows.length;
 
-      if (!allowed) {
-        historieCount += 1;
-        continue;
-      }
-
-      if (resType === "win") wins += 1;
-      else if (resType === "loss") loss += 1;
-      else if (resType === "nc") noContest += 1;
-      else if (resType === "draw") {
-        draw += 1;
-        drawRaw += 1;
-      } else {
-        historieCount += 1;
+      for (const row of adultRows) {
+        const token = classToken(row?.klasse);
+        const type = classify(row?.uitslag);
+        if (highest && token !== highest) {
+          historieCount++;
+          continue;
+        }
+        if (type === "win") wins++;
+        else if (type === "loss") loss++;
+        else if (type === "draw") draw++;
       }
     }
 
-    const demoAsDraw = Math.floor(demoTotal / 3);
-    const drawWithDemo = draw + demoAsDraw;
+    wins += nulW;
+    loss += nulL;
+    draw += nulD;
+
+    const demoTotal = (rows ?? []).filter((row) => classify(row?.uitslag) === "demo").length;
+    const noContest = (rows ?? []).filter((row) => classify(row?.uitslag) === "nc").length;
 
     return {
-      activeKlasse: activeKlasse ? String(activeKlasse) : null,
+      activeKlasse,
       wins,
       loss,
-      draw: drawWithDemo,
+      draw,
       demoTotal,
       historieCount,
-      demoAsDraw,
-      drawRaw,
+      demoAsDraw: 0,
+      drawRaw: draw,
       noContest,
       winPct: (() => {
-        const denom = wins + loss + drawRaw;
+        const denom = wins + loss + draw;
         return denom > 0 ? Math.round((wins / denom) * 1000) / 10 : null;
       })(),
     };
@@ -2586,16 +2603,28 @@ export default function PartijDetailPage() {
       buildRecordFromUitslagen(
         uitslagenRood,
         ctx?.klasse_mm ?? ctx?.klasse ?? null,
+        {
+          totaal: ctx?.rood_nulmeting_totaal,
+          gewonnen: ctx?.rood_nulmeting_gewonnen,
+          verloren: ctx?.rood_nulmeting_verloren,
+          onbeslist: ctx?.rood_nulmeting_onbeslist,
+        },
       ),
-    [uitslagenRood, ctx?.klasse_mm, ctx?.klasse],
+    [uitslagenRood, ctx?.klasse_mm, ctx?.klasse, ctx?.rood_nulmeting_totaal, ctx?.rood_nulmeting_gewonnen, ctx?.rood_nulmeting_verloren, ctx?.rood_nulmeting_onbeslist],
   );
   const recordBlauw = useMemo(
     () =>
       buildRecordFromUitslagen(
         uitslagenBlauw,
         ctx?.klasse_mm ?? ctx?.klasse ?? null,
+        {
+          totaal: ctx?.blauw_nulmeting_totaal,
+          gewonnen: ctx?.blauw_nulmeting_gewonnen,
+          verloren: ctx?.blauw_nulmeting_verloren,
+          onbeslist: ctx?.blauw_nulmeting_onbeslist,
+        },
       ),
-    [uitslagenBlauw, ctx?.klasse_mm, ctx?.klasse],
+    [uitslagenBlauw, ctx?.klasse_mm, ctx?.klasse, ctx?.blauw_nulmeting_totaal, ctx?.blauw_nulmeting_gewonnen, ctx?.blauw_nulmeting_verloren, ctx?.blauw_nulmeting_onbeslist],
   );
 
   async function sendToDispensatie() {
@@ -2940,6 +2969,7 @@ export default function PartijDetailPage() {
                 leeftijdEvent={ageYearsAtEvent(ctx, "rood")}
                 geslacht={String(firstFilled(ctx?.rood_geslacht, ctx?.rood_geslacht_mm, ctx?.geslacht, "-"))}
                 klasseMM={String(header.klasseMM ?? "-")}
+                totaalWedstrijden={verschillen?.roodPartijen ?? "-"}
                 nulKlasse={String(firstFilled(ctx?.rood_nulmeting_klasse, ctx?.rood_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.roodNulmetingTotaal ?? "-"}
                 nulOpmerking={String(firstFilled(ctx?.rood_nulmeting_opmerking, ctx?.rood_opmerking_nulmeting, ""))}
@@ -3057,6 +3087,7 @@ export default function PartijDetailPage() {
                 leeftijdEvent={ageYearsAtEvent(ctx, "blauw")}
                 geslacht={String(firstFilled(ctx?.blauw_geslacht, ctx?.blauw_geslacht_mm, ctx?.geslacht, "-"))}
                 klasseMM={String(header.klasseMM ?? "-")}
+                totaalWedstrijden={verschillen?.blauwPartijen ?? "-"}
                 nulKlasse={String(firstFilled(ctx?.blauw_nulmeting_klasse, ctx?.blauw_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.blauwNulmetingTotaal ?? "-"}
                 nulOpmerking={String(firstFilled(ctx?.blauw_nulmeting_opmerking, ctx?.blauw_opmerking_nulmeting, ""))}
@@ -3079,12 +3110,6 @@ export default function PartijDetailPage() {
                   />
                   <div className="p-3">
                     <UitslagenTable rows={uitslagenRood} pageSize={6} />
-                    {recordRood?.demoAsDraw ? (
-                      <div className="mt-2 text-xs text-zinc-600">
-                        Demo-omrekening: {recordRood.demoTotal} demo’s ⇒ +
-                        {recordRood.demoAsDraw} draw (per 3 demo’s).
-                      </div>
-                    ) : null}
                   </div>
                 </div>
 
@@ -3134,12 +3159,6 @@ export default function PartijDetailPage() {
 
                   <div className="p-3">
                     <UitslagenTable rows={uitslagenBlauw} pageSize={6} />
-                    {recordBlauw?.demoAsDraw ? (
-                      <div className="mt-2 text-xs text-zinc-600">
-                        Demo-omrekening: {recordBlauw.demoTotal} demo’s ⇒ +
-                        {recordBlauw.demoAsDraw} draw (per 3 demo’s).
-                      </div>
-                    ) : null}
                   </div>
                 </div>
 

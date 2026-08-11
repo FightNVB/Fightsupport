@@ -382,43 +382,131 @@ function deriveCurrentClassification(results, nulmeting) {
   const primaryDiscipline = mmaRows.length && !kbRows.length ? "MMA" : kbRows.length ? "KB/TB" : isMma(nulDiscipline) ? "MMA" : isKbTb(nulDiscipline) ? "KB/TB" : null;
   return { berekende_klasse: current, mma_level: mmaLevel, primary_discipline: primaryDiscipline };
 }
-async function readHeaderAndSummary(page, va) {
+async function readHeaderAndSummary(page, va, opts = {}) {
+  const {
+    timeoutMs = 15000,
+    pollMs = 250,
+    reopenDetails = true,
+  } = opts;
+
   await page.waitForSelector(".koptekst1", { timeout: 12000 }).catch(() => null);
-  return page.evaluate((requestedVa) => {
-    const k1 = document.querySelector(".koptekst1");
-    const k2 = document.querySelector(".koptekst2");
-    const title = String(k1?.innerText || "").trim();
-    const info = String(k2?.innerText || "").trim();
-    const m = title.match(/^(.+?)\s*\((\d{3,6})\)\s*$/);
-    const gotVa = m?.[2] || null;
-    if (!gotVa || String(gotVa) !== String(requestedVa)) return null;
 
-    const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
-    const tiles = [...(tab?.querySelectorAll(".tile") || [])];
-    const detailsTile = tiles.find((tile) => {
-      const h = String(tile.querySelector(".tileHeader")?.innerText || "").trim().toUpperCase();
-      return h === "DETAILS";
-    });
-    const text = String(detailsTile?.innerText || "").replace(/\u00a0/g, " ").trim();
+  const startedAt = Date.now();
+  let last = null;
+  let reopened = false;
 
-    const line = (label) => {
-      const re = new RegExp(`${label}\\s*:\\s*([^\\n]+)`, "i");
-      return text.match(re)?.[1]?.trim() || null;
-    };
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await page.evaluate((requestedVa) => {
+      const k1 = document.querySelector(".koptekst1");
+      const k2 = document.querySelector(".koptekst2");
+      const title = String(k1?.innerText || "").trim();
+      const info = String(k2?.innerText || "").trim();
+      const m = title.match(/^(.+?)\s*\((\d{3,6})\)\s*$/);
+      const gotVa = m?.[2] || null;
+      if (!gotVa || String(gotVa) !== String(requestedVa)) return null;
 
-    return {
-      va_nummer: gotVa,
-      naam: m?.[1]?.trim() || null,
-      header_info: info,
-      summary_text: text,
-      fit_to_fight: /fit\s*to\s*fight/i.test(text),
-      heeft_startverbod: /startverbod/i.test(text),
-      licentie: line("Licentie"),
-      wedstrijden: line("Wedstrijden"),
-      gewonnen: line("Gewonnen"),
-      kos: line("KO'?s"),
-    };
-  }, va);
+      const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+      const detailTiles = [...(tab?.querySelectorAll('div[title="DETAILS"], .tile') || [])].filter((tile) => {
+        const titleAttr = String(tile.getAttribute?.("title") || "").trim().toUpperCase();
+        const header = String(tile.querySelector?.(".tileHeader")?.innerText || "").trim().toUpperCase();
+        const txt = String(tile.innerText || tile.textContent || "").trim().toUpperCase();
+        return titleAttr === "DETAILS" || header === "DETAILS" || txt.startsWith("DETAILS");
+      });
+
+      const detailsTile = detailTiles[0] || null;
+      if (!detailsTile) {
+        return {
+          va_nummer: gotVa,
+          naam: m?.[1]?.trim() || null,
+          header_info: info,
+          summary_text: "",
+          fit_to_fight: false,
+          heeft_startverbod: false,
+          licentie: null,
+          wedstrijden: null,
+          gewonnen: null,
+          kos: null,
+          ready: false,
+        };
+      }
+
+      const contentNodes = detailsTile.querySelectorAll(
+        "ul.get_tile_content p, ul.get_tile_content li, ul.get_tile_content div, .get_tile_content p, .get_tile_content li, .get_tile_content div"
+      );
+
+      let text = [...contentNodes]
+        .map((el) => el.innerText || el.textContent || "")
+        .join("\n");
+
+      if (!String(text || "").trim()) {
+        text = detailsTile.innerText || detailsTile.textContent || "";
+      }
+
+      text = String(text || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\r/g, "\n")
+        .trim();
+
+      const valueAfterLabel = (labels) => {
+        const escaped = labels
+          .map((label) => String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join("|");
+        const re = new RegExp(`(?:^|\\n|\\s)(?:${escaped})\\s*:?\\s*([^\\n]+)`, "i");
+        return text.match(re)?.[1]?.trim() || null;
+      };
+
+      const licentie = valueAfterLabel(["Licentie", "Geldige licentie", "License"]);
+      const wedstrijden = valueAfterLabel(["Wedstrijden", "Totaal wedstrijden", "Aantal wedstrijden"]);
+      const gewonnen = valueAfterLabel(["Gewonnen", "Wins"]);
+      const kos = valueAfterLabel(["KO's", "KOs", "KO"]);
+
+      const ready =
+        licentie !== null ||
+        wedstrijden !== null ||
+        gewonnen !== null ||
+        /licentie/i.test(text) ||
+        /wedstrijden/i.test(text) ||
+        /gewonnen/i.test(text);
+
+      return {
+        va_nummer: gotVa,
+        naam: m?.[1]?.trim() || null,
+        header_info: info,
+        summary_text: text,
+        fit_to_fight: /fit\s*to\s*fight/i.test(text),
+        heeft_startverbod: /startverbod/i.test(text),
+        licentie,
+        wedstrijden,
+        gewonnen,
+        kos,
+        ready,
+      };
+    }, va).catch(() => null);
+
+    if (last?.ready) {
+      const { ready, ...summary } = last;
+      return summary;
+    }
+
+    if (reopenDetails && !reopened && Date.now() - startedAt > 2500) {
+      reopened = true;
+      await closeAnyModal(page).catch(() => {});
+      await clickTile(page, va, "DETAILS").catch(() => false);
+    }
+
+    await sleep(pollMs);
+  }
+
+  console.log(`[fp-total] ⚠️ VA ${va} summary/DETAILS niet volledig geladen`, {
+    summaryText: last?.summary_text ?? null,
+  });
+
+  if (last) {
+    const { ready, ...summary } = last;
+    return summary;
+  }
+
+  return null;
 }
 
 async function clickTile(page, va, title) {
@@ -666,16 +754,19 @@ async function readDetailsModal(page) {
       return String(field.value ?? field.textContent ?? "").trim() || null;
     };
 
+    // Nulmeting uitsluitend via de unieke FightPassport classes lezen.
+    // NIET via findValueNearLabel(): meerdere nulmetingvelden zitten in dezelfde
+    // container en dan kan querySelector steeds de eerste input (gewicht) pakken.
     const nul = {
-      totaal: byClass("input.dnva_nulmetingaantalwedstr") || findValueNearLabel("Aantal wedstrijden"),
-      opmerking: byClass("textarea.dvcz_omschr2") || null,
-      klasse: byClass("select.dvnulmetingklasseoms") || findValueNearLabel("Klasse"),
-      gewicht: findValueNearLabel("Gewicht"),
-      discipline: findValueNearLabel("Discipline"),
-      gewonnen: findValueNearLabel("Aantal gewonnen"),
-      verloren: findValueNearLabel("Aantal verloren"),
-      onbeslist: findValueNearLabel("Aantal onbeslist"),
-      kos: findValueNearLabel("Aantal KO's"),
+      gewicht: byClass("input.dfva_nulmeting_gewicht"),
+      discipline: byClass("select.dvnulmetingdisciplineoms"),
+      klasse: byClass("select.dvnulmetingklasseoms"),
+      totaal: byClass("input.dnva_nulmetingaantalwedstr"),
+      gewonnen: byClass("input.dnva_nulmetingaantalgewonwedstr"),
+      verloren: byClass("input.dnva_nulmetingaantalverlwedstr"),
+      onbeslist: byClass("input.dnva_nulmetingaantalonbeslwedstr"),
+      kos: byClass("input.dnva_nulmetingaantalkowedstr"),
+      opmerking: byClass("textarea.dvcz_omschr2"),
     };
 
     const emailInputs = [...visibleModal.querySelectorAll("input.dv2factemail")];
@@ -718,19 +809,35 @@ function detailsScrapeSucceeded(details) {
     typeof details.email === "string" &&
     details.email.trim().includes("@");
 
-  const hasFields =
+  const hasMeaningfulFields =
     Array.isArray(details.field_dump) &&
     details.field_dump.some((f) => {
+      const cls = String(f?.class || "").toLowerCase();
+      const id = String(f?.id || "").toLowerCase();
+      const name = String(f?.name || "").toLowerCase();
       const v = f?.value;
-      return v !== null && v !== undefined && String(v).trim() !== "";
+
+      if (v === null || v === undefined || String(v).trim() === "") return false;
+      if (id === "username" || id === "password") return false;
+      if (name === "login" || name === "password") return false;
+      if (cls.includes("login_invoer")) return false;
+      if (String(v).trim() === "overview_modal") return false;
+
+      return (
+        cls.includes("nulmeting") ||
+        cls.includes("dv2factemail") ||
+        cls.includes("dvcz_omschr2") ||
+        /gewicht|discipline|klasse|wedstrijd|gewonnen|verloren|onbeslist|ko/i.test(`${id} ${name} ${cls}`)
+      );
     });
 
-  const hasText =
-    typeof details.raw_text === "string" &&
-    details.raw_text.trim().length > 100;
+  const text = typeof details.raw_text === "string" ? details.raw_text : "";
+  const hasMeaningfulText =
+    /persoonlijk/i.test(text) &&
+    (/licentie\s*:/i.test(text) || /wedstrijden\s*:/i.test(text) || /gewonnen\s*:/i.test(text));
 
-  // DETAILS moet echt inhoud hebben. Eén van deze bronnen moet aantoonbaar gevuld zijn.
-  return hasNulmeting || hasEmail || hasFields || hasText;
+  // Alleen echte fighter-inhoud telt; generieke body/logintekst is onvoldoende.
+  return hasNulmeting || hasEmail || hasMeaningfulFields || hasMeaningfulText;
 }
 
 async function extractVisibleTables(page) {
@@ -1374,7 +1481,11 @@ async function saveResultsSnapshot(va, results) {
 
 async function scrapeOne(page, va, openFreshPage) {
   // Eerst alleen de profiel/header lezen op de initiele, geverifieerde VA-tab.
-  const summary = await readHeaderAndSummary(page, va).catch(() => null);
+  const summary = await readHeaderAndSummary(page, va, {
+    timeoutMs: 18000,
+    pollMs: 250,
+    reopenDetails: true,
+  }).catch(() => null);
   if (!summary) {
     return {
       exists: false,
@@ -1520,6 +1631,19 @@ async function scrapeOne(page, va, openFreshPage) {
           detailsLastError?.message ?? "onvoldoende gegevens"
         }`
       );
+    }
+
+
+    // DETAILS is nu aantoonbaar geladen. Lees de summary opnieuw zodat
+    // totaal_wedstrijden / gewonnen / licentie niet op vroege null-waarden blijven staan.
+    const refreshedSummary = await readHeaderAndSummary(page, va, {
+      timeoutMs: 8000,
+      pollMs: 200,
+      reopenDetails: false,
+    }).catch(() => null);
+
+    if (refreshedSummary) {
+      Object.assign(summary, refreshedSummary);
     }
 
   }

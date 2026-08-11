@@ -1,102 +1,202 @@
-import matcher from "./startverbodMatcher.cjs";
-
-const { detailsMatchExcel } = matcher;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function openStartverbodenList(page, va) {
-  const clicked = await page.evaluate((requestedVa) => {
+async function closeAnyModal(page) {
+  const selectors = [
+    "button#sluit_inr_detail",
+    "button.sluit_scherm.overview",
+    "button.sluit_scherm",
+    "img.sluit_modal",
+    "button.ui-dialog-titlebar-close",
+  ];
+
+  for (const selector of selectors) {
+    try {
+      const element = await page.$(selector);
+      if (element) {
+        await element.click();
+        await sleep(120);
+      }
+    } catch {}
+  }
+
+  try {
+    await page.keyboard.press("Escape");
+    await sleep(80);
+    await page.keyboard.press("Escape");
+    await sleep(80);
+  } catch {}
+}
+
+async function clickTile(page, va, title) {
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(80);
+
+  return await page.evaluate((requestedVa, requestedTitle) => {
     const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
-    const header = [...(tab?.querySelectorAll(".tileHeader.enabled") ?? [])].find(
-      (element) => String(element.textContent || "").trim().toUpperCase() === "STARTVERBODEN"
+    if (!tab) return false;
+
+    const header = [...tab.querySelectorAll(".tileHeader.enabled, .tileHeader")].find(
+      (element) =>
+        String(element.innerText || element.textContent || "")
+          .trim()
+          .toUpperCase() === requestedTitle.toUpperCase()
     );
+
     const tile = header?.closest(".tile");
     if (!tile) return false;
+
     tile.scrollIntoView?.({ block: "center" });
     tile.click();
     return true;
-  }, String(va));
-  if (!clicked) return { ok: false, reason: "startverboden_tile_missing" };
-
-  await page.waitForFunction(() => {
-    const heading = String(document.querySelector(".dialog_header .koptekst1")?.textContent || "").trim();
-    return heading.includes("Startverboden lijst");
-  }, { timeout: 15000 }).catch(() => null);
-
-  const header = await page.evaluate(() => ({
-    title: String(document.querySelector(".dialog_header .koptekst1")?.textContent || "").trim(),
-    fighterName: String(document.querySelector(".dialog_header .koptekst2")?.textContent || "").trim(),
-  }));
-  if (!header.title.includes("Startverboden lijst")) {
-    return { ok: false, reason: "startverboden_dialog_not_confirmed", header };
-  }
-  return { ok: true, header };
+  }, String(va), String(title));
 }
 
-async function closeDialog(page) {
-  await page.keyboard.press("Escape").catch(() => {});
-  await sleep(200);
-}
+/**
+ * Zelfde bron als scraper_fp_total:
+ * startverbod staat rechtstreeks in de profiel-/DETAILS-samenvatting.
+ * De individuele STARTVERBODEN-tegel wordt hier bewust NIET geopend.
+ */
+async function readHeaderAndSummary(page, va, opts = {}) {
+  const {
+    timeoutMs = 15000,
+    pollMs = 250,
+    reopenDetails = true,
+  } = opts;
 
-async function readDetail(page, soort) {
-  await page.waitForSelector("input.dddiscstartblokkade", { timeout: 10000 }).catch(() => null);
-  return page.evaluate((detailType) => {
-    const value = (selector) => String(document.querySelector(selector)?.value || "").trim() || null;
-    const reasonSelect = document.querySelector("select.dvomsdiscblokkade");
-    const selectedReason = reasonSelect?.selectedOptions?.[0]?.textContent;
-    return {
-      soort: detailType,
-      ingang: value("input.dddiscstartblokkade"),
-      einde: value("input.dddisceindblokkade"),
-      reden: String(selectedReason || "").trim() || null,
-      opmerkingen: value("textarea.dvdiscblokkadeopm"),
-      aangemaakt_op: value("input.ddaangemaakt"),
-      aangemaakt_door: value("input.dvaanmakerfriendlyname"),
-      gewijzigd_op: value("input.ddmutatie"),
-      gewijzigd_door: value("input.dvmuteerderfriendlyname"),
-    };
-  }, soort);
-}
+  await page.waitForSelector(".koptekst1", { timeout: 12000 }).catch(() => null);
 
-export async function verifyStartverbodCandidate(page, fighter, excelRow) {
-  const firstList = await openStartverbodenList(page, fighter.va_nummer);
-  if (!firstList.ok) return { verified: false, fighter, reason: firstList.reason };
+  const startedAt = Date.now();
+  let last = null;
+  let reopened = false;
 
-  const rowCount = await page.evaluate(() => [...document.querySelectorAll("div")].filter((element) => {
-    const style = String(element.getAttribute("style") || "").replace(/\s/g, "").toLowerCase();
-    const type = String(element.textContent || "").trim();
-    return style.includes("width:110px") && ["Startverbod", "Schorsing"].includes(type);
-  }).length);
-  const profileName = firstList.header.fighterName;
-  await closeDialog(page);
+  while (!page.isClosed() && Date.now() - startedAt < timeoutMs) {
+    last = await page.evaluate((requestedVa) => {
+      const k1 = document.querySelector(".koptekst1");
+      const k2 = document.querySelector(".koptekst2");
+      const title = String(k1?.innerText || "").trim();
+      const info = String(k2?.innerText || "").trim();
+      const match = title.match(/^(.+?)\s*\((\d{3,6})\)\s*$/);
+      const gotVa = match?.[2] || null;
 
-  if (!rowCount) return { verified: false, fighter, profileName, reason: "startverbod_row_missing" };
+      if (!gotVa || String(gotVa) !== String(requestedVa)) return null;
 
-  const details = [];
-  for (let index = 0; index < rowCount; index++) {
-    const list = await openStartverbodenList(page, fighter.va_nummer);
-    if (!list.ok) break;
-    const openedType = await page.evaluate((rowIndex) => {
-      const rows = [...document.querySelectorAll("div")].filter((element) => {
-        const style = String(element.getAttribute("style") || "").replace(/\s/g, "").toLowerCase();
-        const type = String(element.textContent || "").trim();
-        return style.includes("width:110px") && ["Startverbod", "Schorsing"].includes(type);
+      const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+      const detailTiles = [...(tab?.querySelectorAll('div[title="DETAILS"], .tile') || [])].filter((tile) => {
+        const titleAttr = String(tile.getAttribute?.("title") || "").trim().toUpperCase();
+        const header = String(tile.querySelector?.(".tileHeader")?.innerText || "").trim().toUpperCase();
+        const text = String(tile.innerText || tile.textContent || "").trim().toUpperCase();
+        return titleAttr === "DETAILS" || header === "DETAILS" || text.startsWith("DETAILS");
       });
-      const target = rows[rowIndex]?.closest(".regel, .row, tr") ?? rows[rowIndex]?.parentElement;
-      if (!target) return false;
-      target.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window }));
-      return String(rows[rowIndex]?.textContent || "").trim();
-    }, index);
-    if (!openedType) {
-      await closeDialog(page);
-      continue;
+
+      const detailsTile = detailTiles[0] || null;
+      if (!detailsTile) {
+        return {
+          va_nummer: gotVa,
+          naam: match?.[1]?.trim() || null,
+          header_info: info,
+          summary_text: "",
+          heeft_startverbod: false,
+          ready: false,
+        };
+      }
+
+      const contentNodes = detailsTile.querySelectorAll(
+        "ul.get_tile_content p, ul.get_tile_content li, ul.get_tile_content div, .get_tile_content p, .get_tile_content li, .get_tile_content div"
+      );
+
+      let text = [...contentNodes]
+        .map((element) => element.innerText || element.textContent || "")
+        .join("\n");
+
+      if (!String(text || "").trim()) {
+        text = detailsTile.innerText || detailsTile.textContent || "";
+      }
+
+      text = String(text || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\r/g, "\n")
+        .trim();
+
+      const ready =
+        /licentie/i.test(text) ||
+        /wedstrijden/i.test(text) ||
+        /gewonnen/i.test(text) ||
+        /fit\s*to\s*fight/i.test(text) ||
+        /startverbod/i.test(text);
+
+      return {
+        va_nummer: gotVa,
+        naam: match?.[1]?.trim() || null,
+        header_info: info,
+        summary_text: text,
+        heeft_startverbod: /startverbod/i.test(text),
+        ready,
+      };
+    }, String(va)).catch(() => null);
+
+    if (last?.ready) {
+      const { ready, ...summary } = last;
+      return summary;
     }
-    const detail = await readDetail(page, openedType);
-    details.push(detail);
-    await closeDialog(page);
-    if (detailsMatchExcel(excelRow, profileName, detail)) {
-      return { verified: true, fighter, profileName, detail, detailsChecked: details.length };
+
+    // Zelfde herstelprincipe als Total: DETAILS één keer opnieuw openen als
+    // de profielsamenvatting na enkele seconden nog niet volledig geladen is.
+    if (reopenDetails && !reopened && Date.now() - startedAt > 2500) {
+      reopened = true;
+      await closeAnyModal(page).catch(() => {});
+      await clickTile(page, va, "DETAILS").catch(() => false);
     }
+
+    await sleep(pollMs);
   }
 
-  return { verified: false, fighter, profileName, details, reason: "no_matching_startverbod" };
+  if (last) {
+    const { ready, ...summary } = last;
+    return summary;
+  }
+
+  return null;
+}
+
+export async function verifyStartverbodCandidate(page, fighter) {
+  const va = String(fighter.va_nummer);
+  const summary = await readHeaderAndSummary(page, va, {
+    timeoutMs: Math.max(
+      15000,
+      Number(process.env.STARTVERBOD_PROFILE_TIMEOUT_MS || 20000)
+    ),
+    pollMs: 250,
+    reopenDetails: true,
+  });
+
+  if (!summary) {
+    return {
+      verified: false,
+      fighter,
+      profileName: null,
+      reason: "profielsamenvatting_niet_geladen",
+    };
+  }
+
+  const correctVa = String(summary.va_nummer || "") === va;
+  const hasStartverbod = summary.heeft_startverbod === true;
+
+  console.log(`[startverbod] 🔎 VA ${va} profielstatus`, {
+    naam: summary.naam,
+    juiste_va: correctVa,
+    startverbod: hasStartverbod,
+  });
+
+  return {
+    verified: correctVa && hasStartverbod,
+    fighter,
+    profileName: summary.naam || fighter.naam || null,
+    reason: !correctVa
+      ? "verkeerde_va_geopend"
+      : hasStartverbod
+        ? null
+        : "geen_startverbod_op_profiel",
+    detail: null,
+    summary,
+  };
 }

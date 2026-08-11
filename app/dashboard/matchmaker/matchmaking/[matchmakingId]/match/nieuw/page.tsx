@@ -576,61 +576,30 @@ function fightStats(f?: Fighter | null, uitslagenRows: ResultRow[] = []) {
   const rows = getUitslagenRows(f, uitslagenRows);
   const fromRows = recordFromUitslagen(rows);
 
-  const totalsAll = currentTotalsAll(
-    f?.uitslagen_per_discipline ??
-      f?.fp_uitslagen_per_discipline ??
-      d.fightersRaw?.uitslagen_per_discipline,
-  );
+  const nulW = n(f?.nulmeting_gewonnen) ?? n(d.fightersRaw?.nulmeting_gewonnen) ?? 0;
+  const nulL = n(f?.nulmeting_verloren) ?? n(d.fightersRaw?.nulmeting_verloren) ?? 0;
+  const nulDraw = n(f?.nulmeting_onbeslist) ?? n(d.fightersRaw?.nulmeting_onbeslist) ?? 0;
+  const nulTotal = n(f?.nulmeting_totaal) ?? n(d.fightersRaw?.nulmeting_totaal) ?? 0;
+  const nulOther = Math.max(0, nulTotal - nulW - nulL - nulDraw);
 
-  const fallbackW =
-    n(f?.record_w) ??
-    n(f?.gewonnen) ??
-    n(d.fightersRaw?.gewonnen) ??
-    n(totalsAll?.wins) ??
-    n(totalsAll?.win) ??
-    n(d.aanmelding?.win) ??
-    0;
+  const fallbackW = n(f?.record_w) ?? n(f?.gewonnen) ?? n(d.fightersRaw?.gewonnen) ?? 0;
+  const fallbackL = n(f?.record_l) ?? n(f?.verloren) ?? n(d.fightersRaw?.verloren) ?? 0;
+  const fallbackDraw = n(f?.record_d) ?? n(f?.draw) ?? n(f?.gelijk) ?? n(d.fightersRaw?.gelijk) ?? 0;
 
-  const fallbackL =
-    n(f?.record_l) ??
-    n(f?.verloren) ??
-    n(d.fightersRaw?.verloren) ??
-    n(totalsAll?.losses) ??
-    n(totalsAll?.loss) ??
-    n(d.aanmelding?.loss) ??
-    0;
+  const resultW = fromRows.hasRows ? fromRows.w : fallbackW;
+  const resultL = fromRows.hasRows ? fromRows.l : fallbackL;
+  const resultDraw = fromRows.hasRows ? fromRows.draw : fallbackDraw;
+  const resultOther = fromRows.hasRows ? fromRows.other : 0;
+  const demo = fromRows.hasRows ? fromRows.demo : 0;
 
-  const fallbackDraw =
-    n(f?.record_d) ??
-    n(f?.draw) ??
-    n(f?.gelijk) ??
-    n(d.fightersRaw?.gelijk) ??
-    n(totalsAll?.draws) ??
-    n(totalsAll?.draw) ??
-    n(d.aanmelding?.draw) ??
-    0;
+  const w = resultW + nulW;
+  const l = resultL + nulL;
+  const draw = resultDraw + nulDraw;
+  const other = resultOther + nulOther;
+  const official = w + l + draw + other;
 
-  const fallbackTotal =
-    n(f?.totaal_wedstrijden) ??
-    n(f?.nulmeting_totaal) ??
-    n(d.fightersRaw?.totaal_wedstrijden) ??
-    n(d.fightersRaw?.nulmeting_totaal) ??
-    n(totalsAll?.total) ??
-    n(f?.uitslagen_count);
-
-  const fallbackOther = Math.max(
-    0,
-    (fallbackTotal ?? fallbackW + fallbackL + fallbackDraw) - fallbackW - fallbackL - fallbackDraw,
-  );
-
-  const w = fromRows.hasRows ? fromRows.w : fallbackW;
-  const l = fromRows.hasRows ? fromRows.l : fallbackL;
-  const draw = fromRows.hasRows ? fromRows.draw : fallbackDraw;
-  const other = fromRows.hasRows ? fromRows.other : fallbackOther;
-  const demo = fromRows.hasRows ? fromRows.demo : fallbackOther;
-
-  const official = fromRows.hasRows ? fromRows.official : w + l + draw + other;
-  const effectiveYouth = official + demoToPartijEquivalent(demo);
+  // Demo is geen extra W/L/D; voor de jeugdregel blijft 3 demo = 1 partij-equivalent.
+  const effectiveYouth = Math.max(0, official - demo + demoToPartijEquivalent(demo));
 
   return {
     official,
@@ -645,8 +614,71 @@ function fightStats(f?: Fighter | null, uitslagenRows: ResultRow[] = []) {
 }
 
 function recordLabel(f?: Fighter | null, uitslagenRows: ResultRow[] = []) {
-  const stats = fightStats(f, uitslagenRows);
-  return `${stats.w}-${stats.l}-${stats.draw} (${stats.other})`;
+  if (!f) return "0-0-0 (0)";
+  const d = deep(f);
+  const rows = getUitslagenRows(f, uitslagenRows);
+
+  const nulW = n(f?.nulmeting_gewonnen) ?? n(d.fightersRaw?.nulmeting_gewonnen) ?? 0;
+  const nulL = n(f?.nulmeting_verloren) ?? n(d.fightersRaw?.nulmeting_verloren) ?? 0;
+  const nulD = n(f?.nulmeting_onbeslist) ?? n(d.fightersRaw?.nulmeting_onbeslist) ?? 0;
+  const nulT = n(f?.nulmeting_totaal) ?? n(d.fightersRaw?.nulmeting_totaal) ?? 0;
+  const nulOther = Math.max(0, nulT - nulW - nulL - nulD);
+
+  const isExtra = (row: ResultRow) => {
+    const raw = lower(firstFilled(row?.uitslag, row?.resultaat, row?.outcome));
+    return (
+      raw.includes("demo") ||
+      raw.includes("demonstr") ||
+      raw.includes("no contest") ||
+      raw.includes("nocontest") ||
+      raw.includes("no-contest") ||
+      raw === "nc"
+    );
+  };
+  const extra = rows.filter(isExtra).length;
+
+  const officialRows = rows.filter((row) => {
+    const kind = getResultKind(firstFilled(row?.uitslag, row?.resultaat, row?.outcome));
+    return ["win", "loss", "draw"].includes(kind);
+  });
+
+  const youthRows = officialRows.filter((row) => {
+    const token = getRowClass(row);
+    return token === "j" || token === "j+";
+  });
+  const adultRows = officialRows.filter((row) => {
+    const token = getRowClass(row);
+    return ["r", "n", "c", "b", "a", "amateur", "pro"].includes(token);
+  });
+
+  let w = 0, l = 0, draw = 0, other = nulOther + extra;
+
+  if (!adultRows.length && youthRows.length) {
+    for (const row of youthRows) {
+      const kind = getResultKind(firstFilled(row?.uitslag, row?.resultaat, row?.outcome));
+      if (kind === "win") w++;
+      else if (kind === "loss") l++;
+      else if (kind === "draw") draw++;
+    }
+    return `${w + nulW}-${l + nulL}-${draw + nulD} (${other})`;
+  }
+
+  const highestClass = highestRecordClassFromRows(adultRows);
+  other += youthRows.length;
+
+  for (const row of adultRows) {
+    const kind = getResultKind(firstFilled(row?.uitslag, row?.resultaat, row?.outcome));
+    const rowClass = getRowClass(row);
+    if (highestClass && rowClass !== highestClass) {
+      other++;
+      continue;
+    }
+    if (kind === "win") w++;
+    else if (kind === "loss") l++;
+    else if (kind === "draw") draw++;
+  }
+
+  return `${w + nulW}-${l + nulL}-${draw + nulD} (${other})`;
 }
 
 function partyDifferenceInfo(
@@ -891,6 +923,72 @@ const page: CSSProperties = {
     "radial-gradient(circle at top, rgba(255,77,0,.10), transparent 30%), linear-gradient(135deg,#101114,#28292d 52%,#111214)",
 };
 
+async function fetchFreshFightPassportForNew(
+  matchmakingId: string,
+  fighters: Fighter[],
+) {
+  const vas = Array.from(
+    new Set(
+      fighters
+        .map((fighter) => s(fighter?.va_nummer ?? fighter?.va ?? fighter?.fighter_id).replace(/\D/g, ""))
+        .filter(Boolean),
+    ),
+  );
+  if (!matchmakingId || !vas.length) return fighters;
+
+  const freshByVa = new Map<string, Fighter>();
+  const resultsByVa = new Map<string, ResultRow[]>();
+
+  for (let start = 0; start < vas.length; start += 50) {
+    const batch = vas.slice(start, start + 50);
+    const query = batch.map((va) => `va=${encodeURIComponent(va)}`).join("&");
+    const response = await authedFetch(
+      `/api/matchmaker/${encodeURIComponent(matchmakingId)}/fightpassport?${query}`,
+      { cache: "no-store" },
+    );
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) continue;
+
+    for (const fp of Array.isArray(json?.fighters) ? json.fighters : []) {
+      const va = s(fp?.va_nummer).replace(/\D/g, "");
+      if (va) freshByVa.set(va, fp);
+    }
+    for (const row of Array.isArray(json?.results) ? json.results : []) {
+      const va = s(row?.va_nummer).replace(/\D/g, "");
+      if (!va) continue;
+      const list = resultsByVa.get(va) ?? [];
+      list.push(row);
+      resultsByVa.set(va, list);
+    }
+  }
+
+  return fighters.map((fighter) => {
+    const va = s(fighter?.va_nummer ?? fighter?.va ?? fighter?.fighter_id).replace(/\D/g, "");
+    const fp = freshByVa.get(va);
+    const results = resultsByVa.get(va) ?? [];
+    if (!fp && !results.length) return fighter;
+
+    return {
+      ...fighter,
+      ...(fp ? {
+        nulmeting_totaal: fp.nulmeting_totaal,
+        nulmeting_gewonnen: fp.nulmeting_gewonnen,
+        nulmeting_verloren: fp.nulmeting_verloren,
+        nulmeting_onbeslist: fp.nulmeting_onbeslist,
+        nulmeting_kos: fp.nulmeting_kos,
+        totaal_wedstrijden: fp.totaal_wedstrijden,
+        gewonnen: fp.gewonnen,
+        kos: fp.kos,
+        berekende_klasse: fp.berekende_klasse ?? fighter.berekende_klasse,
+        nulmeting_klasse: fp.nulmeting_klasse ?? fighter.nulmeting_klasse,
+        nulmeting_discipline: fp.nulmeting_discipline ?? fighter.nulmeting_discipline,
+        fightpassport_fighter: fp,
+      } : {}),
+      matchmaker_uitslagen_raw: results.length ? results : fighter.matchmaker_uitslagen_raw,
+    };
+  });
+}
+
 export default function NieuweMatchPage() {
   const params = useParams<{ matchmakingId?: string; matchmakingid?: string }>();
   const search = useSearchParams();
@@ -921,7 +1019,12 @@ export default function NieuweMatchPage() {
 
       if (!res.ok) throw new Error(json?.error || "Laden mislukt");
 
-      setFighters(json?.fighters ?? json?.gecontroleerde_fighters ?? []);
+      const loadedFighters = json?.fighters ?? json?.gecontroleerde_fighters ?? [];
+      const enrichedFighters = await fetchFreshFightPassportForNew(
+        matchmakingId,
+        loadedFighters,
+      );
+      setFighters(enrichedFighters);
       setMm(json?.matchmaking ?? null);
 
       // Regels/meldingen komen niet meer uit lokale page-logica.
