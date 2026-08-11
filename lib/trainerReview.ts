@@ -290,6 +290,35 @@ function suggestedMaxWeight(red: AnyRow, blue: AnyRow, youth: boolean, disciplin
 }
 
 function hitResult(h: AnyRow) { return s(first(h.resultaat,h.severity,h.status)).toUpperCase(); }
+
+function cornerToken(v: unknown): "rood"|"blauw"|null {
+  const x=s(v).toLowerCase();
+  if (["rood","red"].includes(x)) return "rood";
+  if (["blauw","blue"].includes(x)) return "blauw";
+  return null;
+}
+function fighterTotalParties(f: AnyRow) {
+  return num(first(f?.totaal_wedstrijden,f?.totaalWedstrijden,f?.totaalPartijen)) ?? null;
+}
+function consentCornerForDispensation(hit: AnyRow, red: AnyRow, blue: AnyRow): "rood"|"blauw"|null {
+  const text=`${s(hit?.rule_code)} ${s(hit?.rule)} ${s(hit?.boodschap)}`.toLowerCase();
+
+  // Bij partijen-/ervaringsverschil moet uitsluitend de trainer van de
+  // vechter met de minste partijen nadrukkelijk toestemming geven.
+  if (
+    text.includes("partij") ||
+    text.includes("partijen") ||
+    text.includes("wedstrijd") ||
+    text.includes("ervaring") ||
+    text.includes("record")
+  ) {
+    const rt=fighterTotalParties(red), bt=fighterTotalParties(blue);
+    if (rt!=null && bt!=null && rt!==bt) return rt<bt?"rood":"blauw";
+  }
+
+  // Als de ControlEngine zelf een hoek aanwijst, is die hoek leidend.
+  return cornerToken(hit?.hoek);
+}
 function isDispensation(h: AnyRow) { const r=hitResult(h); const txt=`${s(h.rule_code)} ${s(h.rule)} ${s(h.boodschap)}`.toLowerCase(); return r.includes("DISP") || txt.includes("dispensatie"); }
 function isStartverbodHit(h: AnyRow) { const txt=`${s(h.rule_code)} ${s(h.rule)} ${s(h.boodschap)}`.toLowerCase(); if (txt.includes("geen startverbod") || txt.includes("geen actief startverbod")) return false; return txt.includes("startverbod") || txt.includes("start verbod"); }
 function isRelevantHit(h: AnyRow) { const r=hitResult(h); return !!s(h.boodschap) && !["OK","INFO"].includes(r); }
@@ -369,7 +398,16 @@ export async function buildTrainerReviewData(matchmakingId: string) {
     const red=fighterView(rc,rs,row,"rood",eventDate,fightPassportResults,redFp), blue=fighterView(bc,bs,row,"blauw",eventDate,fightPassportResults,blueFp);
     const youth = isYouthValue(first(row.klasse,raw.klasse,red.klasse,blue.klasse)) || ((red.leeftijd??99)<18 && (blue.leeftijd??99)<18);
     const boutHits=(hitByBout.get(s(row.id))??hitByPartij.get(String(first(row.partij_nr,raw.partij_nr)))??[]).filter(isRelevantHit);
-    const dispensaties=boutHits.filter(isDispensation).map(h=>({code:s(h.rule_code)||s(h.rule), reden:s(h.boodschap), hoek:s(h.hoek)||null}));
+    const dispensaties=boutHits.filter(isDispensation).map(h=>{
+      const consentCorner=consentCornerForDispensation(h,red,blue);
+      return {
+        code:s(h.rule_code)||s(h.rule),
+        reden:s(h.boodschap),
+        hoek:s(h.hoek)||null,
+        consentCorner,
+      };
+    });
+    const dispensatieConsentCorners=[...new Set(dispensaties.map((d:any)=>d.consentCorner).filter(Boolean))];
     const startverbod=red.startverbod.actief||blue.startverbod.actief||boutHits.some(isStartverbodHit);
     const storedMax = num(first(row.max_gewicht,row.max_gewicht_notatie,row.maxGewicht,raw.max_gewicht,raw.max_gewicht_notatie));
     return {
@@ -380,7 +418,7 @@ export async function buildTrainerReviewData(matchmakingId: string) {
       jeugd: youth,
       leeftijdVerschil: ymdDiff(red.geboortedatum,blue.geboortedatum),
       gewichtsVerschil: (()=>{ const a=num(red.gewicht),b=num(blue.gewicht); return a!==null&&b!==null?Math.abs(a-b):null; })(),
-      red,blue, dispensaties, startverbod,
+      red,blue, dispensaties, dispensatieConsentCorners, startverbod,
       bijzonderheden:boutHits.map(h=>({resultaat:hitResult(h),code:s(h.rule_code)||s(h.rule),boodschap:s(h.boodschap),hoek:s(h.hoek)||null})),
     };
   });

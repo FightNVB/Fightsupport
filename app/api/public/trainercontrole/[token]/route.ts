@@ -30,7 +30,20 @@ export async function GET(_req:NextRequest,{params}:{params:Promise<{token:strin
     const red=ownCorner==="rood"?safeOwn:safeOpponent;
     const blue=ownCorner==="blauw"?safeOwn:safeOpponent;
     const ownStartverbod=!!own?.startverbod?.actief || ownMessages.some((x:any)=>`${s(x.code)} ${s(x.boodschap)}`.toLowerCase().includes("startverbod"));
-    return {...b,red,blue,startverbod:ownStartverbod,bijzonderheden:ownMessages,response:responses.get(b.id)||null};
+    const consentCorners=Array.isArray(b.dispensatieConsentCorners)?b.dispensatieConsentCorners:[];
+    const dispensatieToestemmingVereist=consentCorners.includes(ownCorner);
+    const consentCorner=consentCorners.length===1?consentCorners[0]:null;
+    const consentFighter=consentCorner==="rood"?b.red:consentCorner==="blauw"?b.blue:null;
+    return {
+      ...b,
+      red,
+      blue,
+      startverbod:ownStartverbod,
+      bijzonderheden:ownMessages,
+      dispensatieToestemmingVereist,
+      dispensatieToestemmingVoor:consentFighter?.naam||null,
+      response:responses.get(b.id)||null
+    };
   });
   return NextResponse.json({ok:true,event:all.event,sportschool:{key:gym.key,naam:gym.naam,keurmerkOk:gym.keurmerkOk,keurmerkReden:gym.keurmerkReden},bouts},{headers:{"Cache-Control":"no-store"}});
  }catch(e:any){return NextResponse.json({error:s(e?.message)||"Trainerpagina laden mislukt"},{status:500});}
@@ -51,9 +64,12 @@ export async function POST(req:NextRequest,{params}:{params:Promise<{token:strin
   if(ownStartverbod && status==="akkoord")return NextResponse.json({error:"Jouw vechter heeft een actief startverbod; deze partij kan niet akkoord worden gegeven"},{status:400});
   if(status==="afgewezen" && !opmerking)return NextResponse.json({error:"Vul bij afwijzen een reden in"},{status:400});
   if(status==="bespreken" && !opmerking)return NextResponse.json({error:"Vul in wat u wilt bespreken"},{status:400});
-  const needsDisp=Array.isArray(bout.dispensaties)&&bout.dispensaties.length>0; const consent=body.dispensatieToestemming===true;
-  if(status==="akkoord" && needsDisp && !consent)return NextResponse.json({error:"Voor deze partij is nadrukkelijke toestemming voor dispensatie verplicht"},{status:400});
-  const payload={link_id:link.id,matchmaking_id:link.matchmaking_id,bout_id:boutId,partij_nr:bout.partijNr,status,opmerking:opmerking||null,dispensatie_toestemming:status==="akkoord"&&needsDisp?consent:false,dispensatie_redenen:needsDisp?bout.dispensaties:[],responded_at:new Date().toISOString()};
+  const needsDisp=Array.isArray(bout.dispensaties)&&bout.dispensaties.length>0;
+  const consentCorners=Array.isArray(bout.dispensatieConsentCorners)?bout.dispensatieConsentCorners:[];
+  const needsOwnConsent=needsDisp&&consentCorners.includes(ownCorner);
+  const consent=body.dispensatieToestemming===true;
+  if(status==="akkoord" && needsOwnConsent && !consent)return NextResponse.json({error:"Voor jouw vechter is nadrukkelijke toestemming voor deze dispensatie verplicht"},{status:400});
+  const payload={link_id:link.id,matchmaking_id:link.matchmaking_id,bout_id:boutId,partij_nr:bout.partijNr,status,opmerking:opmerking||null,dispensatie_toestemming:status==="akkoord"&&needsOwnConsent?consent:false,dispensatie_redenen:needsDisp?bout.dispensaties:[],responded_at:new Date().toISOString()};
   const up=await supabaseAdmin.from("trainer_match_responses").upsert(payload,{onConflict:"link_id,bout_id"}).select("*").single(); if(up.error)throw up.error; return NextResponse.json({ok:true,response:up.data});
  }catch(e:any){return NextResponse.json({error:s(e?.message)||"Reactie opslaan mislukt"},{status:500});}
 }
