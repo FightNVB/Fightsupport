@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireUserFromAuthHeader } from "@/lib/api/auth";
 import { randomBytes } from "crypto";
+import { GET as getPublicMatchmaking } from "@/app/api/public/matchmaking/[token]/route";
 
 export const runtime = "nodejs";
 
@@ -111,11 +112,12 @@ export async function POST(req: NextRequest) {
     if (error) throw error;
 
     if (action === "publish_trainers") {
-      const liveUrl = new URL(
-        `/api/public/matchmaking/${encodeURIComponent(saved.public_token)}`,
-        req.nextUrl.origin,
-      );
-      const liveResponse = await fetch(liveUrl, { cache: "no-store" });
+      // Gebruik dezelfde publieke matchmaking-handler rechtstreeks in hetzelfde
+      // Node-proces. Dit voorkomt de interne HTTP-call naar de eigen VPS die
+      // "fetch failed" veroorzaakte, terwijl de snapshot exact dezelfde data houdt.
+      const liveResponse = await getPublicMatchmaking(req, {
+        params: Promise.resolve({ token: String(saved.public_token) }),
+      });
       const snapshot = await liveResponse.json().catch(() => null);
       if (!liveResponse.ok || !snapshot) {
         throw new Error(snapshot?.error || "Live matchmaking kon niet worden vastgelegd");
