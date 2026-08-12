@@ -15,6 +15,13 @@ type TerminatorResult = {
   errors: Array<{ matchmaking_id: string; message: string }>;
 };
 
+export type TerminatorProgress = {
+  phase: string;
+  message: string;
+  current?: number;
+  total?: number;
+};
+
 function text(value: unknown): string {
   return String(value ?? "").trim();
 }
@@ -58,6 +65,82 @@ async function latestControleRunId(
 
   if (contextError) throw new Error(contextError.message);
   return text(contexts?.[0]?.controle_run_id) || null;
+}
+
+async function ensureControleRun(
+  supabase: SupabaseLike,
+  matchmakingId: string,
+  totalBouts: number,
+): Promise<string> {
+  const existing = await latestControleRunId(supabase, matchmakingId);
+  if (existing) {
+    const { error } = await supabase
+      .from("controle_runs")
+      .update({
+        status: "running",
+        afgerond_op: null,
+        is_latest: true,
+        totaal_aantal: totalBouts,
+        verwerkt_aantal: 0,
+        progress: 0,
+        current_step: "Matchmaking opnieuw opbouwen vanuit FightPassport database...",
+        foutmelding: null,
+      })
+      .eq("id", existing);
+
+    if (error) throw new Error(`Controlerun herstarten mislukt: ${error.message}`);
+
+    const { error: latestError } = await supabase
+      .from("controle_runs")
+      .update({ is_latest: false })
+      .eq("matchmaking_id", matchmakingId)
+      .neq("id", existing);
+    if (latestError) console.warn("[TERMINATOR] is_latest bijwerken warning:", latestError.message);
+
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("controle_runs")
+    .insert({
+      matchmaking_id: matchmakingId,
+      gestart_door_user_id: null,
+      gestart_door_rol: "matchmaker",
+      status: "running",
+      gestart_op: now,
+      run_type: "control-engine",
+      is_latest: true,
+      totaal_aantal: totalBouts,
+      verwerkt_aantal: 0,
+      progress: 0,
+      current_step: "Matchmaking opnieuw opbouwen vanuit FightPassport database...",
+    })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(`Controlerun aanmaken mislukt: ${error.message}`);
+  const runId = text(data?.id);
+  if (!runId) throw new Error("Controlerun aanmaken gaf geen id terug.");
+
+  const { error: latestError } = await supabase
+    .from("controle_runs")
+    .update({ is_latest: false })
+    .eq("matchmaking_id", matchmakingId)
+    .neq("id", runId);
+  if (latestError) console.warn("[TERMINATOR] is_latest bijwerken warning:", latestError.message);
+
+  console.info(`[TERMINATOR] Nieuwe controlerun aangemaakt: ${runId}`);
+  return runId;
+}
+
+async function updateControleRunProgress(
+  supabase: SupabaseLike,
+  controleRunId: string,
+  values: Record<string, unknown>,
+) {
+  const { error } = await supabase.from("controle_runs").update(values).eq("id", controleRunId);
+  if (error) console.warn("[TERMINATOR] controlerun progress warning:", error.message);
 }
 
 async function rebuildBout(
@@ -104,13 +187,22 @@ async function loadBouts(supabase: SupabaseLike, matchmakingId: string): Promise
 export async function refreshMatchmaking(params: {
   supabase: SupabaseLike;
   matchmakingId: string;
+  onProgress?: (progress: TerminatorProgress) => void;
 }): Promise<TerminatorResult> {
-  const { supabase } = params;
+  const { supabase, onProgress } = params;
   const matchmakingId = text(params.matchmakingId);
   if (!matchmakingId) throw new Error("matchmakingId ontbreekt.");
 
+  const emit = (progress: TerminatorProgress) => {
+    onProgress?.(progress);
+    console.info(`[TERMINATOR] ${progress.message}`);
+  };
+
   console.info(`[TERMINATOR] Matchmaking target acquired: ${matchmakingId}`);
 
+  // Aanmeldingen-flow blijft ondersteund. Een complete matchmaking-upload heeft
+  // bewust geen aanmeldingen; die wordt verderop rechtstreeks vanuit de partijen
+  // en FightPassport-tabellen opgebouwd.
   const { data: registrations, error: registrationsError } = await supabase
     .from("aanmeldingen")
     .select("id")
@@ -129,7 +221,6 @@ export async function refreshMatchmaking(params: {
     const aanmeldingId = text(registration?.id);
     if (!aanmeldingId) continue;
 
-    // Exact hetzelfde codepad als de goed werkende handmatige Refresh.
     await processSingleFighter({
       supabase,
       matchmakingId,
@@ -139,9 +230,12 @@ export async function refreshMatchmaking(params: {
     processed++;
 
     if (processed === 1 || processed === registrationRows.length || processed % 10 === 0) {
-      console.info(
-        `[TERMINATOR] Fighter contexts: ${processed}/${registrationRows.length} verwerkt.`,
-      );
+      emit({
+        phase: "fighter_context",
+        message: `Fighter contexts: ${processed}/${registrationRows.length} verwerkt.`,
+        current: processed,
+        total: registrationRows.length,
+      });
     }
   }
 
@@ -149,39 +243,90 @@ export async function refreshMatchmaking(params: {
 
   const bouts = await loadBouts(supabase, matchmakingId);
   console.info(`[TERMINATOR] ${bouts.length} wedstrijden gevonden.`);
-  const controleRunId = await latestControleRunId(supabase, matchmakingId);
 
-  let rebuilt = 0;
-  if (controleRunId) {
-    for (const bout of bouts) {
-      const partijNr = Number(bout?.partij_nr);
-      if (!Number.isFinite(partijNr) || partijNr <= 0) continue;
-      if (await rebuildBout(supabase, matchmakingId, controleRunId, partijNr)) {
-        rebuilt++;
-      }
-
-      if (rebuilt === 1 || rebuilt === bouts.length || rebuilt % 10 === 0) {
-        console.info(
-          `[TERMINATOR] Wedstrijden: ${rebuilt}/${bouts.length} opnieuw opgebouwd.`,
-        );
-      }
-    }
-  } else if (bouts.length) {
-    console.info("[TERMINATOR] Geen controlerun gevonden; wedstrijdrebuild overgeslagen.");
+  if (!bouts.length) {
+    console.info(
+      `[TERMINATOR] Mission complete: ${processed} fighter contexts, 0 bouts rebuilt. I'll be back.`,
+    );
+    return {
+      ok: true,
+      mode: "matchmaking",
+      va_numbers: [],
+      matchmakings: 1,
+      fighter_contexts: processed,
+      bouts: 0,
+      skipped_without_run: 0,
+      errors: [],
+    };
   }
 
-  console.info(
-    `[TERMINATOR] Mission complete: ${processed} fighter contexts, ${rebuilt} bouts rebuilt. I'll be back.`,
-  );
+  // Een complete matchmaking-upload heeft nog geen controlerun. Start controle
+  // moet die zelf kunnen aanmaken; anders kan build/enrich/rulesEngine niets opslaan.
+  const controleRunId = await ensureControleRun(supabase, matchmakingId, bouts.length);
+
+  emit({
+    phase: "bout_rebuild",
+    message: `${bouts.length} wedstrijden worden opnieuw opgebouwd vanuit FightPassport database.`,
+    current: 0,
+    total: bouts.length,
+  });
+
+  let rebuilt = 0;
+  for (let index = 0; index < bouts.length; index++) {
+    const bout = bouts[index];
+    const partijNr = Number(bout?.partij_nr);
+    if (!Number.isFinite(partijNr) || partijNr <= 0) continue;
+
+    if (await rebuildBout(supabase, matchmakingId, controleRunId, partijNr)) {
+      rebuilt++;
+    }
+
+    const current = index + 1;
+    const progress = Math.max(1, Math.min(99, Math.round((current / bouts.length) * 100)));
+    await updateControleRunProgress(supabase, controleRunId, {
+      verwerkt_aantal: current,
+      progress,
+      current_step: `Wedstrijd ${current}/${bouts.length} opnieuw opgebouwd vanuit FightPassport database`,
+    });
+
+    if (current === 1 || current === bouts.length || current % 10 === 0) {
+      emit({
+        phase: "bout_rebuild",
+        message: `Wedstrijden: ${current}/${bouts.length} verwerkt (${rebuilt} opgebouwd).`,
+        current,
+        total: bouts.length,
+      });
+    }
+  }
+
+  const now = new Date().toISOString();
+  await updateControleRunProgress(supabase, controleRunId, {
+    status: "klaar",
+    afgerond_op: now,
+    is_latest: true,
+    verwerkt_aantal: bouts.length,
+    progress: 100,
+    current_step: "Controle afgerond vanuit FightPassport database",
+    foutmelding: null,
+  });
+
+  emit({
+    phase: "done",
+    message: `Mission complete: ${processed} fighter contexts, ${rebuilt} bouts rebuilt. I'll be back.`,
+    current: bouts.length,
+    total: bouts.length,
+  });
 
   return {
     ok: true,
     mode: "matchmaking",
-    va_numbers: [],
+    va_numbers: unique(
+      bouts.flatMap((bout) => [getBoutVa(bout, "rood"), getBoutVa(bout, "blauw")]),
+    ),
     matchmakings: 1,
     fighter_contexts: processed,
     bouts: rebuilt,
-    skipped_without_run: controleRunId ? 0 : bouts.length > 0 ? 1 : 0,
+    skipped_without_run: 0,
     errors: [],
   };
 }

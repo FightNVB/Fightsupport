@@ -2721,9 +2721,9 @@ export async function matchEngine(opts: {
           bout_id,
           rule: "Dopingcertificaat ontbreekt",
           rule_code: "DOPINGCERTIFICAAT_ONTBREEKT",
-          resultaat: "ACTIE",
-          severity: "warning",
-          boodschap: `A-, B- of Pro-partij niet akkoord: dopingcertificaat behaald is niet gevonden voor ${ontbreekt}.`,
+          resultaat: "INFO",
+          severity: "info",
+          boodschap: `Dopingcertificaat is niet gevonden voor ${ontbreekt}. Vanaf december 2026 is het dopingcertificaat verplicht voor A-, B- en Pro-partijen.`,
         });
       }
     }

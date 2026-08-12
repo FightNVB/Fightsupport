@@ -408,6 +408,25 @@ function getEventDate(ctx: AnyRow): dayjs.Dayjs | null {
   return dateOnly(ctx.evenement_datum) || dateOnly(ctx.event_datum) || dateOnly(ctx.event_date) || dateOnly(ctx.datum);
 }
 
+function hasDopingCertificaatInOpmerking(v: unknown): boolean {
+  const x = lower(v);
+  return (
+    x.includes("[doping_certificaat=behaald]") ||
+    x.includes("doping certificaat behaald") ||
+    x.includes("dopingcertificaat behaald")
+  );
+}
+
+function getDopingOpmerking(ctx: AnyRow): string {
+  return s(
+    ctx.nulmeting_opmerking ??
+      ctx.fp_nulmeting_opmerking ??
+      ctx.extra?.raw_scrape?.nulmeting_opmerking ??
+      ctx.extra?.raw?.fighters_raw?.nulmeting_opmerking ??
+      ctx.extra?.raw?.fighter?.nulmeting_opmerking,
+  );
+}
+
 function getAgeOnEvent(ctx: AnyRow): number | null {
   const dob = getDobFp(ctx) || getDobInput(ctx);
   const eventDate = getEventDate(ctx);
@@ -900,6 +919,34 @@ export function runMatchmakerFighterRules(
     add("MATCHMAKER_BELGIE_CHECK", "LET_OP", keurmerkReden || "Belgische sportschool: controleer BKBMO/boksboekje handmatig.", "info", "België check");
   } else if (keurmerk === false) {
     add("MATCHMAKER_GEEN_KEURMERK", "LET_OP", keurmerkReden, "warning", "Geen geldig keurmerk");
+  }
+
+  // Tijdelijke overgangsregel: dopingcertificaat wordt pas vanaf december 2026 verplicht.
+  // Tot die tijd is ontbreken alleen informatief en mag het de vechter niet afkeuren.
+  const dopingKlasse = klasseAanmelding ?? berekendeKlasse ?? fpKlasse;
+  const dopingVanToepassing =
+    dopingKlasse === "A" || dopingKlasse === "B" || dopingKlasse === "MMA_PRO";
+
+  if (dopingVanToepassing) {
+    const heeftDopingCertificaat = hasDopingCertificaatInOpmerking(getDopingOpmerking(ctx));
+
+    if (heeftDopingCertificaat) {
+      add(
+        "MATCHMAKER_DOPING_CERTIFICAAT",
+        "LET_OP",
+        "Dopingcertificaat behaald. Akkoord voor deze A-, B- of Pro-partij.",
+        "info",
+        "Dopingcertificaat",
+      );
+    } else {
+      add(
+        "MATCHMAKER_DOPING_CERTIFICAAT",
+        "LET_OP",
+        "Vanaf december 2026 is het dopingcertificaat verplicht voor A-, B- en Pro-partijen.",
+        "info",
+        "Dopingcertificaat",
+      );
+    }
   }
 
   if (leeftijd != null && leeftijd < 18) {

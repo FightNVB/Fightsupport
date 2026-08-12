@@ -2034,6 +2034,15 @@ export default function FightersPage() {
     }
   }, [hasSnapshotPublication, matchmakingId, openPublishedPage, publication]);
 
+  const [terminatorProgress, setTerminatorProgress] = useState<{
+    phase: "target" | "fighters" | "bouts" | "complete";
+    message: string;
+    current?: number;
+    total?: number;
+    fighter_contexts?: number;
+    bouts?: number;
+  } | null>(null);
+
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [activeTab, setActiveTab] = useState("");
@@ -2588,7 +2597,11 @@ export default function FightersPage() {
     if (!matchmakingId || busyId || loading) return;
 
     setBusyId("refresh-data");
-    setBusyText("Vechterdata opnieuw berekenen...");
+    setBusyText("TERMINATOR wordt gestart...");
+    setTerminatorProgress({
+      phase: "target",
+      message: "Matchmaking target zoeken...",
+    });
     setMsg("");
 
     try {
@@ -2597,25 +2610,80 @@ export default function FightersPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ matchmaking_id: matchmakingId }),
+          body: JSON.stringify({
+            matchmaking_id: matchmakingId,
+            progress_stream: true,
+          }),
         },
       );
 
-      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
         throw new Error(json?.error || "Vechterdata vernieuwen mislukt");
       }
+      if (!res.body) throw new Error("Geen voortgangsstream ontvangen.");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let result: any = null;
+
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event = JSON.parse(line);
+
+        if (event.type === "error") {
+          throw new Error(event.error || "Vechterdata vernieuwen mislukt");
+        }
+
+        if (event.type === "progress") {
+          setTerminatorProgress(event);
+          setBusyText(event.message || "TERMINATOR is bezig...");
+        }
+
+        if (event.type === "result") result = event;
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) handleLine(line);
+
+        if (done) {
+          if (buffer.trim()) handleLine(buffer);
+          break;
+        }
+      }
+
+      if (!result) throw new Error("TERMINATOR gaf geen eindresultaat terug.");
+
+      setTerminatorProgress({
+        phase: "complete",
+        message: "MISSION COMPLETE, I'LL BE BACK :)",
+        current: result.processed ?? result.fighter_contexts ?? 0,
+        total: result.processed ?? result.fighter_contexts ?? 0,
+        fighter_contexts: result.fighter_contexts ?? result.processed ?? 0,
+        bouts: result.bouts ?? result.rebuilt_bouts ?? 0,
+      });
+      setBusyText("MISSION COMPLETE, I'LL BE BACK :)");
 
       await load(true);
       router.refresh();
       setMsg(
-        `${json?.processed ?? json?.fighter_contexts ?? 0} vechtercontext(en) en ${json?.bouts ?? 0} wedstrijd(en) opnieuw opgebouwd.`,
+        `${result?.processed ?? result?.fighter_contexts ?? 0} vechtercontext(en) en ${result?.bouts ?? 0} wedstrijd(en) opnieuw opgebouwd.`,
       );
+
+      // Laat de eindmelding bewust nog even zichtbaar.
+      await new Promise((resolve) => setTimeout(resolve, 1200));
     } catch (e: any) {
       setMsg(e?.message || "Vechterdata vernieuwen mislukt");
     } finally {
       setBusyId(null);
       setBusyText("");
+      setTerminatorProgress(null);
     }
   }
 
@@ -2921,6 +2989,7 @@ export default function FightersPage() {
       {showWait && (
         <WaitOverlay
           text={busyText || "FightPassport-gegevens laden..."}
+          progress={busyId === "refresh-data" ? terminatorProgress : null}
         />
       )}
 
@@ -3708,24 +3777,90 @@ function Badge({ kind }: { kind: string }) {
     </span>
   );
 }
-function WaitOverlay({ text }: { text: string }) {
+function WaitOverlay({
+  text,
+  progress,
+}: {
+  text: string;
+  progress?: {
+    phase: "target" | "fighters" | "bouts" | "complete";
+    message: string;
+    current?: number;
+    total?: number;
+    fighter_contexts?: number;
+    bouts?: number;
+  } | null;
+}) {
+  const current = Number(progress?.current ?? 0);
+  const total = Number(progress?.total ?? 0);
+  const percent = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+  const complete = progress?.phase === "complete";
+
   return (
     <div style={overlay}>
-      <div style={waitBox}>
-        <div style={spinner} />
+      <div style={{ ...waitBox, minWidth: 420, maxWidth: 560 }}>
+        {!complete && <div style={spinner} />}
         <div
           style={{
-            color: ORANGE,
+            color: complete ? "#7ee29a" : ORANGE,
             fontWeight: 950,
             letterSpacing: 2,
             textTransform: "uppercase",
           }}
         >
-          Even geduld
+          {progress ? "TERMINATOR" : "Even geduld"}
         </div>
-        <div style={{ marginTop: 8, fontSize: 18, fontWeight: 900 }}>
-          {text}
+
+        <div style={{ marginTop: 8, fontSize: complete ? 22 : 18, fontWeight: 950 }}>
+          {complete ? "MISSION COMPLETE, I'LL BE BACK :)" : text}
         </div>
+
+        {progress && !complete && total > 0 && (
+          <>
+            <div
+              style={{
+                marginTop: 16,
+                height: 12,
+                background: "#2a2a2a",
+                border: "1px solid #555",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${percent}%`,
+                  background: ORANGE,
+                  transition: "width .2s ease",
+                }}
+              />
+            </div>
+            <div
+              style={{
+                marginTop: 8,
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 16,
+                fontWeight: 900,
+              }}
+            >
+              <span>{current} / {total} verwerkt</span>
+              <span style={{ color: ORANGE }}>{percent}%</span>
+            </div>
+          </>
+        )}
+
+        {progress?.phase === "bouts" && (
+          <div style={{ marginTop: 10, color: "#bbb", fontSize: 13, fontWeight: 800 }}>
+            Fighter contexts klaar: {progress.fighter_contexts ?? 0}
+          </div>
+        )}
+
+        {complete && (
+          <div style={{ marginTop: 10, color: "#bbb", fontSize: 13, fontWeight: 800 }}>
+            {progress?.fighter_contexts ?? 0} fighter contexts · {progress?.bouts ?? 0} wedstrijden rebuilt
+          </div>
+        )}
       </div>
     </div>
   );

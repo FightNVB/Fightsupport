@@ -3,6 +3,38 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildTrainerReviewData, gymKey, s } from "@/lib/trainerReview";
 
 export const runtime="nodejs";
+function isDopingInfoForOwnFighter(x:any, ownCorner:"rood"|"blauw"){
+ const code=s(x?.code ?? x?.rule_code ?? x?.rule).toUpperCase();
+ const boodschap=s(x?.boodschap).toLowerCase();
+ const resultaat=s(x?.resultaat).toUpperCase();
+ const isDoping=code.includes("DOPINGCERTIFICAAT") || boodschap.includes("dopingcertificaat");
+ if(!isDoping || (resultaat && resultaat!=="INFO")) return false;
+
+ const hoek=s(x?.hoek).toLowerCase();
+ if(hoek){
+  return hoek===ownCorner ||
+   (ownCorner==="rood" && hoek==="red") ||
+   (ownCorner==="blauw" && hoek==="blue");
+ }
+
+ // Robuuste fallback voor bestaande rows waarbij hoek niet gevuld is:
+ // de huidige rulesEngine zet de vechterhoek ook in de rule_code.
+ if(ownCorner==="rood") return /_(ROOD|RED)$/.test(code);
+ return /_(BLAUW|BLUE)$/.test(code);
+}
+
+function belongsToOwnFighter(x:any, ownCorner:"rood"|"blauw", own:any){
+ const hoek=s(x?.hoek).toLowerCase();
+ if(hoek){
+  return hoek===ownCorner ||
+   (ownCorner==="rood" && hoek==="red") ||
+   (ownCorner==="blauw" && hoek==="blue") ||
+   hoek===s(own?.naam).toLowerCase() ||
+   hoek===s(own?.vaNummer).toLowerCase();
+ }
+ return isDopingInfoForOwnFighter(x,ownCorner);
+}
+
 async function load(token:string){ const q=await supabaseAdmin.from("trainer_match_links").select("*").eq("token",token).eq("is_enabled",true).maybeSingle(); if(q.error)throw q.error; return q.data; }
 export async function GET(_req:NextRequest,{params}:{params:Promise<{token:string}>}){
  try{ const {token}=await params; const link=await load(s(token)); if(!link)return NextResponse.json({error:"Deze trainerlink is niet beschikbaar"},{status:404});
@@ -19,17 +51,12 @@ export async function GET(_req:NextRequest,{params}:{params:Promise<{token:strin
     const ownCorner = gymKey(b.red?.sportschool)===link.sportschool_key ? "rood" : "blauw";
     const own = ownCorner==="rood" ? b.red : b.blue;
     const opponent = ownCorner==="rood" ? b.blue : b.red;
-    const ownMessages=(b.bijzonderheden??[]).filter((x:any)=>{
-      const hoek=s(x.hoek).toLowerCase();
-      if(!hoek) return false; // unassigned personal hits are hidden to prevent leakage
-      return hoek===ownCorner || (ownCorner==="rood" && hoek==="red") || (ownCorner==="blauw" && hoek==="blue")
-        || hoek===s(own?.naam).toLowerCase() || hoek===s(own?.vaNummer).toLowerCase();
-    });
+    const ownMessages=(b.bijzonderheden??[]).filter((x:any)=>belongsToOwnFighter(x,ownCorner,own));
     const safeOpponent={...opponent,licentie:null,startverbod:null,keurmerk:null};
     const safeOwn={...own};
     const red=ownCorner==="rood"?safeOwn:safeOpponent;
     const blue=ownCorner==="blauw"?safeOwn:safeOpponent;
-    const ownStartverbod=!!own?.startverbod?.actief || ownMessages.some((x:any)=>`${s(x.code)} ${s(x.boodschap)}`.toLowerCase().includes("startverbod"));
+    const ownStartverbod=!!own?.startverbod?.actief || !!own?.schorsing?.actief || ownMessages.some((x:any)=>{const m=`${s(x.code)} ${s(x.boodschap)}`.toLowerCase();return m.includes("startverbod")||m.includes("schors");});
     const consentCorners=Array.isArray(b.dispensatieConsentCorners)?b.dispensatieConsentCorners:[];
     const dispensatieToestemmingVereist=consentCorners.includes(ownCorner);
     const consentCorner=consentCorners.length===1?consentCorners[0]:null;
@@ -86,13 +113,8 @@ export async function POST(req:NextRequest,{params}:{params:Promise<{token:strin
   const all=await buildTrainerReviewData(link.matchmaking_id); const gym=all.gyms.find(g=>g.key===link.sportschool_key); const bout=gym?.bouts.find((b:any)=>b.id===boutId); if(!bout)return NextResponse.json({error:"Partij hoort niet bij deze sportschool"},{status:403});
   const ownCorner = gymKey(bout.red?.sportschool)===link.sportschool_key ? "rood" : "blauw";
   const own = ownCorner==="rood" ? bout.red : bout.blue;
-  const ownMessages=(bout.bijzonderheden??[]).filter((x:any)=>{
-    const hoek=s(x.hoek).toLowerCase();
-    if(!hoek) return false;
-    return hoek===ownCorner || (ownCorner==="rood" && hoek==="red") || (ownCorner==="blauw" && hoek==="blue")
-      || hoek===s(own?.naam).toLowerCase() || hoek===s(own?.vaNummer).toLowerCase();
-  });
-  const ownStartverbod=!!own?.startverbod?.actief || ownMessages.some((x:any)=>`${s(x.code)} ${s(x.boodschap)}`.toLowerCase().includes("startverbod"));
+  const ownMessages=(bout.bijzonderheden??[]).filter((x:any)=>belongsToOwnFighter(x,ownCorner,own));
+  const ownStartverbod=!!own?.startverbod?.actief || !!own?.schorsing?.actief || ownMessages.some((x:any)=>{const m=`${s(x.code)} ${s(x.boodschap)}`.toLowerCase();return m.includes("startverbod")||m.includes("schors");});
   if(ownStartverbod && status==="akkoord")return NextResponse.json({error:"Jouw vechter heeft een actief startverbod; deze partij kan niet akkoord worden gegeven"},{status:400});
   if(status==="afgewezen" && !opmerking)return NextResponse.json({error:"Vul bij afwijzen een reden in"},{status:400});
   if(status==="bespreken" && !opmerking)return NextResponse.json({error:"Vul in wat u wilt bespreken"},{status:400});

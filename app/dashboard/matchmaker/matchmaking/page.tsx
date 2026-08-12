@@ -603,10 +603,10 @@ function MatchmakingPageContent() {
   >("running");
   const [controleOverlayTitle, setControleOverlayTitle] = useState("Even wachten");
   const [controleOverlayMessage, setControleOverlayMessage] = useState(
-    "Autocheck loopt. Wacht op resultaten...",
+    "Wedstrijden worden gecontroleerd...",
   );
   const [controleOverlaySub, setControleOverlaySub] = useState(
-    "De controle loopt. Dit kan even duren.",
+    "De partijen worden opnieuw opgebouwd vanuit de FightPassport-database.",
   );
 
   const [showCreate, setShowCreate] = useState(false);
@@ -915,7 +915,7 @@ function MatchmakingPageContent() {
       setShowUpload(false);
       resetUploadForm(profile);
       setSuccessMsg(
-        "✅ Upload is gelukt. Controleer de upload en gebruik daarna Start controle of Stuur naar admin.",
+        "✅ Upload is gelukt. Gebruik daarna Start controle om de matchmaking rechtstreeks tegen de FightPassport-database te controleren, of stuur hem naar admin.",
       );
       setViewTab("uploads");
       await load();
@@ -1001,83 +1001,135 @@ function MatchmakingPageContent() {
       setBusyId(target.id);
       setSuccessMsg("");
       setControleOverlayMode("running");
-      setControleOverlayTitle("Even wachten");
-      setControleOverlayMessage("Autocheck loopt. Wacht op resultaten...");
+      setControleOverlayTitle("Matchmaking controleren");
+      setControleOverlayMessage("Wedstrijden worden gecontroleerd...");
       setControleOverlaySub(
-        "Controle loopt. Dit kan even duren.",
+        "De partijen worden opnieuw opgebouwd vanuit de FightPassport-database.",
       );
       setControleOverlayOpen(true);
 
-      const res = await authedFetch("/api/control-engine/matchmaker/start", {
+      const res = await authedFetch("/api/matchmaker/matchmaking/rebuild-from-db", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           matchmaking_id: target.id,
-          do_scrape: true,
+          progress_stream: true,
         }),
       });
 
-      const payload = await res.json().catch(() => null);
-
-      if (!res.ok || payload?.ok === false) {
-        if (payload?.code === "FP_UNLOCK_REQUIRED" || payload?.unlock_required) {
-          setControleOverlayMode("unlock");
-          setControleOverlayTitle("Fightpaspoort verificatie vereist");
-          setControleOverlayMessage("MM wordt automatisch overgedragen aan beheerder.");
-          setControleOverlaySub("");
-          setSuccessMsg(
-            "⚠️ FightPassport verificatie vereist. De matchmaking is automatisch overgedragen aan beheerder.",
-          );
-          await load();
-          return;
-        }
-
-        console.error("start controle response niet ok:", res.status, payload);
-
-        if (isLikelyStartControleTimeout(res.status, payload)) {
-          setControleOverlayMode("running");
-          setControleOverlayTitle("Controle loopt nog");
-          setControleOverlayMessage(
-            "De controle is gestart.",
-          );
-          setControleOverlaySub(
-            "Laat dit scherm open.",
-          );
-          setSuccessMsg(
-            "🔵 Controle loopt nog. Status wordt automatisch bijgewerkt.",
-          );
-          setViewTab("uploads");
-          await finishControleOverlayFromPoll(target.id);
-          return;
-        }
-
+      if (!res.ok || !res.body) {
+        const payload = await res.json().catch(() => null);
+        console.error("rebuild-from-db response niet ok:", res.status, payload);
         setControleOverlayMode("error");
-        setControleOverlayTitle("Controle starten mislukt");
-        setControleOverlayMessage(payload?.error || "Start controle mislukt.");
-        setControleOverlaySub("Controleer de VPS-log of probeer het opnieuw.");
+        setControleOverlayTitle("Controle mislukt");
+        setControleOverlayMessage(
+          payload?.error || "Matchmaking opnieuw opbouwen vanuit de database mislukt.",
+        );
+        setControleOverlaySub("Probeer het opnieuw of controleer de serverlog.");
         return;
       }
 
-      setControleOverlayMessage("Controle loopt. Status wordt gecontroleerd...");
-      setControleOverlaySub("Resultaten worden automatisch geladen zodra de VPS klaar is.");
-      setSuccessMsg("🔵 Controle loopt. Status wordt automatisch bijgewerkt.");
-      setViewTab("uploads");
-      await finishControleOverlayFromPoll(target.id);
-    } catch (e) {
-      console.error("start controle request afgebroken/timeout:", e);
-      setControleOverlayMode("running");
-      setControleOverlayTitle("Controle loopt nog");
-      setControleOverlayMessage(
-        "De startaanvraag is mogelijk door een timeout afgebroken, maar de scraper kan nog gewoon draaien.",
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: any = null;
+
+      const handleLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        let message: any = null;
+        try {
+          message = JSON.parse(trimmed);
+        } catch {
+          return;
+        }
+
+        if (message?.type === "error" || message?.ok === false) {
+          throw new Error(message?.error || "Databasecontrole mislukt.");
+        }
+
+        if (message?.type === "result") {
+          finalResult = message;
+          return;
+        }
+
+        if (message?.type === "progress") {
+          const current = Number(
+            message.current ??
+              message.processed ??
+              message.done ??
+              message.index ??
+              0,
+          );
+          const total = Number(message.total ?? message.count ?? 0);
+          const rawPhase = String(
+            message.message ??
+              message.label ??
+              message.phase ??
+              "",
+          ).trim();
+
+          // Complete matchmaking-upload: fighter-context voortgang is hier niet relevant.
+          // Toon in dit wachtscherm uitsluitend voortgang van de wedstrijden/partijen.
+          const lowerPhase = rawPhase.toLowerCase();
+          const isFighterContextProgress =
+            lowerPhase.includes("fighter context") ||
+            lowerPhase.includes("fighter-context") ||
+            lowerPhase.includes("vechtercontext") ||
+            lowerPhase.includes("vechter context");
+
+          if (!isFighterContextProgress) {
+            setControleOverlayMessage(
+              rawPhase || "Wedstrijden opnieuw opbouwen...",
+            );
+            setControleOverlaySub(
+              total > 0
+                ? `${current}/${total} partijen verwerkt`
+                : "Partijen worden gecontroleerd vanuit de FightPassport-database",
+            );
+          }
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) handleLine(line);
+
+        if (done) break;
+      }
+
+      if (buffer.trim()) handleLine(buffer);
+
+      if (!finalResult?.ok) {
+        throw new Error("De databasecontrole gaf geen geldige eindstatus terug.");
+      }
+
+      const bouts = Number(
+        finalResult.rebuilt_bouts ?? finalResult.bouts ?? 0,
       );
-      setControleOverlaySub(
-        "Laat dit scherm open of ververs straks de pagina.",
-      );
+
       setSuccessMsg(
-        "🔵 Controle loopt nog. Status wordt automatisch bijgewerkt.",
+        `✅ Databasecontrole afgerond: ${bouts} partijen opnieuw opgebouwd.`,
       );
       setViewTab("uploads");
-      await finishControleOverlayFromPoll(target.id);
+      await load();
+
+      // API is klaar: wachtscherm direct sluiten.
+      setControleOverlayOpen(false);
+    } catch (e: any) {
+      console.error("rebuild-from-db mislukt:", e);
+      setControleOverlayMode("error");
+      setControleOverlayTitle("Controle mislukt");
+      setControleOverlayMessage(
+        e?.message || "Matchmaking opnieuw opbouwen vanuit de database mislukt.",
+      );
+      setControleOverlaySub("Er is geen scraper gestart.");
+      setSuccessMsg("🔴 Databasecontrole mislukt.");
     } finally {
       setBusyId(null);
     }
@@ -1506,7 +1558,7 @@ function MatchmakingPageContent() {
                             Complete matchmaking uploaden
                           </div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            Na uploaden blijft de matchmaking eerst bij jou. Je kunt hem controleren, heruploaden, Start controle draaien of daarna naar admin sturen.
+                            Na uploaden blijft de matchmaking eerst bij jou. Gebruik Start controle om alle partijen rechtstreeks tegen de FightPassport-database te controleren en opnieuw op te bouwen; er wordt niet gescrapet.
                           </div>
                         </div>
 

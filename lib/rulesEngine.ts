@@ -2350,11 +2350,11 @@ export async function rulesEngine(opts: {
               rule_code: heeftCertificaat
                 ? `DOPINGCERTIFICAAT_AKKOORD_${hoek.toUpperCase()}`
                 : `DOPINGCERTIFICAAT_ONTBREEKT_${hoek.toUpperCase()}`,
-              resultaat: heeftCertificaat ? "INFO" : "AFKEUR",
-              severity: heeftCertificaat ? "info" : "error",
+              resultaat: "INFO",
+              severity: "info",
               boodschap: heeftCertificaat
                 ? `${naam} (VA ${va}) heeft het dopingcertificaat behaald. Akkoord voor deze A-, B- of Pro-partij.`
-                : `${naam} (VA ${va}) heeft geen behaald dopingcertificaat in de nulmeting-opmerking. A-, B- of Pro-partij niet akkoord.`,
+                : `${naam} (VA ${va}) heeft geen behaald dopingcertificaat in de nulmeting-opmerking. Vanaf december 2026 is het dopingcertificaat verplicht voor A-, B- en Pro-partijen.`,
             },
             ctx
           );

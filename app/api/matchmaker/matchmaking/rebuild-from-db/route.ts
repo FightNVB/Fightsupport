@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { refreshMatchmaking, type TerminatorProgress } from "@/lib/matchmaker/terminator";
+import {
+  refreshMatchmaking,
+  type TerminatorProgress,
+} from "@/lib/matchmaker/terminator";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -58,6 +62,52 @@ async function assertAccess(userId: string, matchmakingId: string) {
   }
 }
 
+
+async function markLatestUploadChecked(matchmakingId: string) {
+  const { data: uploads, error: findError } = await supabaseAdmin
+    .from("matchmaking_uploads")
+    .select("id, uploaded_at, created_at")
+    .eq("matchmaking_id", matchmakingId)
+    .order("uploaded_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false, nullsFirst: false })
+    .limit(1);
+
+  if (findError) {
+    throw new Error(`Laatste matchmaking-upload ophalen mislukt: ${findError.message}`);
+  }
+
+  const uploadId = s(uploads?.[0]?.id);
+  if (!uploadId) return;
+
+  const { error: updateError } = await supabaseAdmin
+    .from("matchmaking_uploads")
+    .update({
+      controle_status: "klaar",
+      flow_status: "klaar",
+    })
+    .eq("id", uploadId)
+    .eq("matchmaking_id", matchmakingId);
+
+  if (updateError) {
+    throw new Error(`Controle-status upload bijwerken mislukt: ${updateError.message}`);
+  }
+}
+
+async function assertHasBouts(matchmakingId: string) {
+  const { count, error } = await supabaseAdmin
+    .from("matchmaking_bouts_raw")
+    .select("id", { count: "exact", head: true })
+    .eq("matchmaking_id", matchmakingId)
+    .or("verwijderd.is.null,verwijderd.eq.false");
+
+  if (error) throw new Error(error.message);
+  if (!count) {
+    throw new Error(
+      "Deze matchmaking bevat geen actieve partijen om tegen FightPassport te controleren.",
+    );
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const user = await requireUser(req);
@@ -67,7 +117,10 @@ export async function POST(req: Request) {
     if (!matchmakingId) throw new Error("matchmaking_id ontbreekt.");
 
     await assertAccess(user.id, matchmakingId);
+    await assertHasBouts(matchmakingId);
 
+    // Dit is bewust dezelfde DB-opbouw als refresh-all. refreshMatchmaking
+    // gebruikt de FightPassport-tabellen als bron en start geen scraper.
     if (body.progress_stream === true) {
       const encoder = new TextEncoder();
 
@@ -79,7 +132,7 @@ export async function POST(req: Request) {
 
           void (async () => {
             try {
-              const terminator = await refreshMatchmaking({
+              const result = await refreshMatchmaking({
                 supabase: supabaseAdmin,
                 matchmakingId,
                 onProgress(progress: TerminatorProgress) {
@@ -87,21 +140,32 @@ export async function POST(req: Request) {
                 },
               });
 
+              await markLatestUploadChecked(matchmakingId);
+
               send({
                 type: "result",
-                ...terminator,
-                refresh_page: true,
+                ...result,
+                ok: true,
+                source: "fightpassport_database",
+                scraper_started: false,
                 matchmaking_id: matchmakingId,
-                processed: terminator.fighter_contexts,
-                rebuilt_bouts: terminator.bouts,
+                processed: result.fighter_contexts,
+                rebuilt_bouts: result.bouts,
+                refresh_page: true,
               });
               controller.close();
             } catch (error: any) {
-              console.error("[POST /api/matchmaker/fighter-context/refresh-all stream]", error);
+              console.error(
+                "[POST /api/matchmaker/matchmaking/rebuild-from-db stream]",
+                error,
+              );
               send({
                 type: "error",
                 ok: false,
-                error: error?.message || "Vechterdata vernieuwen mislukt.",
+                scraper_started: false,
+                error:
+                  error?.message ||
+                  "Matchmaking opnieuw opbouwen vanuit FightPassport mislukt.",
               });
               controller.close();
             }
@@ -119,22 +183,33 @@ export async function POST(req: Request) {
       });
     }
 
-    const terminator = await refreshMatchmaking({
+    const result = await refreshMatchmaking({
       supabase: supabaseAdmin,
       matchmakingId,
     });
 
+    await markLatestUploadChecked(matchmakingId);
+
     return NextResponse.json({
-      ...terminator,
-      refresh_page: true,
+      ...result,
+      ok: true,
+      source: "fightpassport_database",
+      scraper_started: false,
       matchmaking_id: matchmakingId,
-      processed: terminator.fighter_contexts,
-      rebuilt_bouts: terminator.bouts,
+      processed: result.fighter_contexts,
+      rebuilt_bouts: result.bouts,
+      refresh_page: true,
     });
   } catch (error: any) {
-    console.error("[POST /api/matchmaker/fighter-context/refresh-all]", error);
+    console.error("[POST /api/matchmaker/matchmaking/rebuild-from-db]", error);
     return NextResponse.json(
-      { ok: false, error: error?.message || "Vechterdata vernieuwen mislukt." },
+      {
+        ok: false,
+        scraper_started: false,
+        error:
+          error?.message ||
+          "Matchmaking opnieuw opbouwen vanuit FightPassport mislukt.",
+      },
       { status: 400 },
     );
   }
