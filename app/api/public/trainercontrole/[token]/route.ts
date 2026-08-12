@@ -49,6 +49,38 @@ export async function GET(_req:NextRequest,{params}:{params:Promise<{token:strin
  }catch(e:any){return NextResponse.json({error:s(e?.message)||"Trainerpagina laden mislukt"},{status:500});}
 }
 
+async function syncBoutConfirmationStatus(matchmakingId:string,bout:any){
+ const boutId=s(bout?.id); const partijNr=Number(bout?.partijNr)||null;
+ if(!boutId)return "Concept";
+ const linksRes=await supabaseAdmin.from("trainer_match_links").select("id,sportschool_key,is_enabled").eq("matchmaking_id",matchmakingId).eq("is_enabled",true);
+ if(linksRes.error)throw linksRes.error;
+ const redKey=gymKey(bout?.red?.sportschool), blueKey=gymKey(bout?.blue?.sportschool);
+ const requiredKeys=Array.from(new Set([redKey,blueKey].filter(Boolean)));
+ const relevantLinks=(linksRes.data??[]).filter((l:any)=>requiredKeys.includes(s(l.sportschool_key)));
+ const linkIds=relevantLinks.map((l:any)=>l.id).filter(Boolean);
+ let responses:any[]=[];
+ if(linkIds.length){
+  const rr=await supabaseAdmin.from("trainer_match_responses").select("link_id,status").eq("matchmaking_id",matchmakingId).eq("bout_id",boutId).in("link_id",linkIds);
+  if(rr.error)throw rr.error; responses=rr.data??[];
+ }
+ const agreedKeys=new Set<string>();
+ for(const l of relevantLinks){
+  if(responses.some((r:any)=>s(r.link_id)===s(l.id)&&s(r.status).toLowerCase()==="akkoord")) agreedKeys.add(s(l.sportschool_key));
+ }
+ const bothAgreed=requiredKeys.length>0&&requiredKeys.every(k=>agreedKeys.has(k));
+ const nextStatus=bothAgreed?"Match":"Concept";
+ let q=supabaseAdmin.from("matchmaking_bouts_raw").update({status:nextStatus,laatste_bewerking_op:new Date().toISOString()}).eq("matchmaking_id",matchmakingId).eq("id",boutId);
+ const upd=await q.select("id,status").maybeSingle();
+ if(upd.error){
+  // Sommige oudere schema's hebben geen laatste_bewerking_op; status zelf is leidend.
+  const fallback=await supabaseAdmin.from("matchmaking_bouts_raw").update({status:nextStatus}).eq("matchmaking_id",matchmakingId).eq("id",boutId);
+  if(fallback.error)throw fallback.error;
+ }
+ // controle_bout_context is controledata en niet de bron voor Concept/Match.
+ // De bevestigingsstatus hoort daarom bewust alleen op matchmaking_bouts_raw.
+ return nextStatus;
+}
+
 export async function POST(req:NextRequest,{params}:{params:Promise<{token:string}>}){
  try{ const {token}=await params; const link=await load(s(token)); if(!link)return NextResponse.json({error:"Deze trainerlink is niet beschikbaar"},{status:404}); const body=await req.json().catch(()=>({})); const boutId=s(body.boutId), status=s(body.status).toLowerCase(), opmerking=s(body.opmerking); if(!boutId||!["akkoord","afgewezen","bespreken"].includes(status))return NextResponse.json({error:"Ongeldige reactie"},{status:400});
   const all=await buildTrainerReviewData(link.matchmaking_id); const gym=all.gyms.find(g=>g.key===link.sportschool_key); const bout=gym?.bouts.find((b:any)=>b.id===boutId); if(!bout)return NextResponse.json({error:"Partij hoort niet bij deze sportschool"},{status:403});
@@ -70,6 +102,8 @@ export async function POST(req:NextRequest,{params}:{params:Promise<{token:strin
   const consent=body.dispensatieToestemming===true;
   if(status==="akkoord" && needsOwnConsent && !consent)return NextResponse.json({error:"Voor jouw vechter is nadrukkelijke toestemming voor deze dispensatie verplicht"},{status:400});
   const payload={link_id:link.id,matchmaking_id:link.matchmaking_id,bout_id:boutId,partij_nr:bout.partijNr,status,opmerking:opmerking||null,dispensatie_toestemming:status==="akkoord"&&needsOwnConsent?consent:false,dispensatie_redenen:needsDisp?bout.dispensaties:[],responded_at:new Date().toISOString()};
-  const up=await supabaseAdmin.from("trainer_match_responses").upsert(payload,{onConflict:"link_id,bout_id"}).select("*").single(); if(up.error)throw up.error; return NextResponse.json({ok:true,response:up.data});
+  const up=await supabaseAdmin.from("trainer_match_responses").upsert(payload,{onConflict:"link_id,bout_id"}).select("*").single(); if(up.error)throw up.error;
+  const boutStatus=await syncBoutConfirmationStatus(link.matchmaking_id,bout);
+  return NextResponse.json({ok:true,response:up.data,boutStatus});
  }catch(e:any){return NextResponse.json({error:s(e?.message)||"Reactie opslaan mislukt"},{status:500});}
 }

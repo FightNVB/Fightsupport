@@ -70,6 +70,7 @@ export default function FighterDossierPage(){
   else if(/draw|onbeslist|gelijk/.test(u))acc.o++;
   return acc;
  },{w:0,v:0,o:0});
+ const talentstatus=talentstatusFromFighter(f);
  return <main style={s.page}><div style={s.wrap}>
   <header style={s.hero}>
     <div style={s.heroGlow}/>
@@ -96,7 +97,7 @@ export default function FighterDossierPage(){
     </div>
   </header>
   {hercheckMessage&&<div style={s.notice}>{hercheckMessage}</div>}
- <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/></div>
+ <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/><Card title="Talentstatus" value={talentstatus.jeugd?(talentstatus.actief?`Aanwezig · ${talentstatus.datum}`:"Niet gevonden"):"Niet van toepassing"}/></div>
  <Section title="Profiel & contact"><Grid rows={[["Naam",f.naam],["E-mail",f.email],["Geboortedatum",f.geboortedatum],["Geslacht",f.geslacht]]}/></Section>
  <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Leeftijd",calcAge(f.geboortedatum)],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden",f.nulmeting_totaal],["W / V / O",`${record.w} / ${record.v} / ${record.o}`],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
  <Section title={`Sportscholen (${(data.sportscholen||data.gyms||[]).length})`}><Table headers={["Sportschool","Plaats","Land","Sportschool ID","Laatste synchronisatie"]} rows={(data.sportscholen||data.gyms||[]).map((r:any)=>[r.naam||r.organisatie_naam,r.plaats,r.land,r.sportschool_id||r.organisatie_id||"-",fmt(r.last_team_sync_at||r.last_seen_at)])}/></Section>
@@ -148,6 +149,40 @@ function calcAge(v:any){
  if(month<0||(month===0&&today.getDate()<birth.getDate()))age--;
  return age;
 }
+
+function talentstatusFromFighter(f: any) {
+  const text = String(f?.nulmeting_opmerking ?? "").replace(/\u00a0/g, " ").trim();
+  const hasTalent = /\btalent\s*status\b|\btalentstatus\b/i.test(text);
+
+  let datum: string | null = null;
+  const iso = text.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
+  const nl = text.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
+
+  if (iso) {
+    datum = `${String(iso[3]).padStart(2, "0")}-${String(iso[2]).padStart(2, "0")}-${iso[1]}`;
+  } else if (nl) {
+    datum = `${String(nl[1]).padStart(2, "0")}-${String(nl[2]).padStart(2, "0")}-${nl[3]}`;
+  }
+
+  const klasse = String(f?.nulmeting_klasse ?? f?.berekende_klasse ?? "").trim().toUpperCase();
+  const birth = f?.geboortedatum ? new Date(f.geboortedatum) : null;
+  let leeftijd: number | null = null;
+
+  if (birth && !Number.isNaN(birth.getTime())) {
+    const today = new Date();
+    leeftijd = today.getFullYear() - birth.getFullYear();
+    if (
+      today.getMonth() < birth.getMonth() ||
+      (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())
+    ) {
+      leeftijd--;
+    }
+  }
+
+  const jeugd = klasse === "J" || klasse === "J+" || (leeftijd !== null && leeftijd < 18);
+  return { jeugd, actief: jeugd && hasTalent && !!datum, datum, tekst: text || null };
+}
+
 const s:any={
 page:{minHeight:"100vh",background:"radial-gradient(circle at 50% -10%,rgba(255,77,0,.16),transparent 34%),linear-gradient(180deg,#060708 0%,#0b0f13 48%,#050607 100%)",color:"white",padding:20},
 wrap:{maxWidth:1460,margin:"0 auto"},
@@ -165,7 +200,7 @@ identityChip:{padding:"6px 9px",border:"1px solid #6b3018",background:"#22120b",
 silver:{display:"inline-flex",gap:7,alignItems:"center",justifyContent:"center",height:38,padding:"0 13px",background:"linear-gradient(#fff,#c7c7c7)",color:"#111",border:"1px solid #aaa",fontWeight:900,cursor:"pointer",boxShadow:"inset 0 1px 0 #fff,0 4px 10px rgba(0,0,0,.28)"},
  notice:{marginBottom:14,padding:"10px 12px",border:"1px solid #ff7438",background:"#211108",color:"#ffd5c2",fontWeight:800},
 orange:{color:"#ff6c2c",fontWeight:800},
-summary:{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:12,marginBottom:16},
+summary:{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:12,marginBottom:16},
 card:{border:"1px solid #555d65",borderTop:"3px solid #ff4d00",background:"linear-gradient(180deg,#1c2228,#0d1115)",padding:"13px 15px",boxShadow:"0 8px 18px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.04)"},
 cardTitle:{fontSize:10,textTransform:"uppercase",letterSpacing:1.5,color:"#a6adb4",marginBottom:6},
 section:{border:"1px solid #3f464d",borderLeft:"3px solid #ff4d00",background:"linear-gradient(180deg,#151a1f,#0a0d10)",padding:16,marginBottom:14,boxShadow:"0 10px 24px rgba(0,0,0,.24)"},

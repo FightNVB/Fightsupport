@@ -429,6 +429,9 @@ export async function POST(req: Request) {
       va_blauw: va(blauw.va_nummer),
 
       is_toernooi: false,
+      // Een nieuw aangemaakte partij is pas definitief nadat beide trainers akkoord zijn.
+      // De publieke trainercontrole wijzigt deze status daarna naar "Match" of terug naar "Concept".
+      status: "Concept",
       raw_json: {
         source: "matchmaker_match_nieuw",
         rood_inschrijving_id: rood.inschrijving_id ?? null,

@@ -1940,7 +1940,7 @@ export default function FightersPage() {
   const [msg, setMsg] = useState("");
   const [publication, setPublication] = useState<Record<string, any> | null>(null);
 
-  const hasTrainerPublication = publication?.trainer_is_published === true;
+  const hasSnapshotPublication = publication?.trainer_is_published === true;
 
   useEffect(() => {
     if (!matchmakingId) return;
@@ -1992,13 +1992,13 @@ export default function FightersPage() {
       action === "offline"
         ? "Externe links worden offline gezet..."
         : action === "publish_trainers"
-          ? "Update voor trainers wordt gepubliceerd..."
+          ? "Snapshot wordt bijgewerkt en gepubliceerd..."
           : "Live promotorlink wordt gepubliceerd...",
     );
     try {
       // Alleen een werkelijk opgeslagen snapshot betekent dat trainers al
       // gepubliceerd zijn. Een live promotorpublicatie telt hier niet voor mee.
-      const wasTrainerPublished = hasTrainerPublication;
+      const wasSnapshotPublished = hasSnapshotPublication;
       const res = await authedFetch("/api/matchmaker/public-matchmaking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2010,7 +2010,7 @@ export default function FightersPage() {
       setPublication(nextPublication);
 
       if (action === "offline") {
-        setMsg("Promotor-live is offline gezet.");
+        setMsg("Live- en snapshotlink zijn offline gezet.");
         return;
       }
 
@@ -2022,9 +2022,9 @@ export default function FightersPage() {
       setMsg(
         action === "publish_live"
           ? "Promotor-live is gepubliceerd en geopend."
-          : wasTrainerPublished
-            ? "Trainerupdate is bijgewerkt en geopend."
-            : "Trainerupdate is gepubliceerd en geopend.",
+          : wasSnapshotPublished
+            ? "Snapshot is bijgewerkt en geopend."
+            : "Snapshot is gepubliceerd en geopend.",
       );
     } catch (error: any) {
       setMsg(error?.message || "Publicatie verwerken mislukt");
@@ -2032,7 +2032,7 @@ export default function FightersPage() {
       setBusyId(null);
       setBusyText("");
     }
-  }, [hasTrainerPublication, matchmakingId, openPublishedPage, publication]);
+  }, [hasSnapshotPublication, matchmakingId, openPublishedPage, publication]);
 
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -2048,6 +2048,7 @@ export default function FightersPage() {
   const [tournamentWeight, setTournamentWeight] = useState("");
   const [existingTournaments, setExistingTournaments] = useState<any[]>([]);
   const [matchRows, setMatchRows] = useState<any[]>([]);
+  const [trainerResponses, setTrainerResponses] = useState<Record<string, any>>({});
   const [matchmakingMeta, setMatchmakingMeta] = useState<Record<string, any>>({});
   const [mainView, setMainView] = useState<"fighters" | "matches">("fighters");
 
@@ -2058,6 +2059,21 @@ export default function FightersPage() {
       const res = await authedFetch(`/api/matchmaker/${matchmakingId}`, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Laden mislukt");
+
+      const trainerResponseRes = await authedFetch(
+        `/api/matchmaker/${encodeURIComponent(matchmakingId)}/trainer-responses`,
+        { cache: "no-store" },
+      );
+      const trainerResponseJson = await trainerResponseRes.json().catch(() => ({}));
+      if (trainerResponseRes.ok) {
+        setTrainerResponses(trainerResponseJson?.byBoutId ?? {});
+      } else {
+        console.warn(
+          "Trainerreacties laden mislukt",
+          trainerResponseJson?.error || trainerResponseRes.status,
+        );
+        setTrainerResponses({});
+      }
 
       const toernooiBoutsFromDb = await fetchMatchmakingTournamentBouts(matchmakingId);
       const jsonWithDbBouts = {
@@ -2934,6 +2950,19 @@ export default function FightersPage() {
             </button>
             <button
               className="fs-action-btn fs-action-primary"
+              onClick={() => manageShareLink("publish_trainers")}
+              disabled={!!busyId || loading || !matchRows.length}
+              title={
+                hasSnapshotPublication
+                  ? "Maak een nieuwe momentopname en publiceer die op dezelfde snapshotlink"
+                  : "Publiceer een vaste snapshotlink; deze verandert pas na een nieuwe update"
+              }
+            >
+              <Eye size={16} />
+              <span>{hasSnapshotPublication ? "Update snapshot" : "Publiceer snapshot"}</span>
+            </button>
+            <button
+              className="fs-action-btn fs-action-primary"
               onClick={() => router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/trainercontrole`)}
               disabled={!!busyId || loading || !matchRows.length}
               title="Maak per sportschool een trainercontrolelink en bekijk de reacties"
@@ -2945,7 +2974,7 @@ export default function FightersPage() {
               className="fs-action-btn"
               onClick={() => manageShareLink("offline")}
               disabled={!!busyId || loading || publication?.is_enabled !== true}
-              title="Zet de promotor-livepagina offline"
+              title="Zet de live- en snapshotlink offline"
             >
               <Unlink size={16} />
               <span>Offline</span>
@@ -3428,6 +3457,7 @@ export default function FightersPage() {
                   <th style={matchThGym}>Sportschool</th>
                   <th style={matchThRecord}>Record</th>
                   <th style={matchThCompact}>Gewicht</th>
+                  <th style={matchThTrainers}>Trainers</th>
                   <th style={matchThCompact}>Status</th>
                   <th style={matchThAction}>Actie</th>
                 </tr>
@@ -3514,6 +3544,9 @@ export default function FightersPage() {
                   const blauwRecord = blauwFighter
                     ? recordOf(blauwFighter, uitslagenRows)
                     : "-";
+                  const trainerInfo = trainerResponses[s(row?.id)] ?? null;
+                  const redTrainer = trainerInfo?.rood ?? null;
+                  const blueTrainer = trainerInfo?.blauw ?? null;
 
                   return (
                     <tr
@@ -3558,8 +3591,19 @@ export default function FightersPage() {
                             : `-${maxGewicht} kg`
                           : '-'}
                       </td>
+                      <td style={matchTdTrainers}>
+                        <TrainerResponseBadge hoek="R" response={redTrainer} />
+                        <TrainerResponseBadge hoek="B" response={blueTrainer} />
+                      </td>
                       <td style={matchTdCompact}>
-                        <span style={matchStatusBadge}>{boutStatus(row)}</span>
+                        <span
+                          style={{
+                            ...matchStatusBadge,
+                            ...(lower(boutStatus(row)) === "match" ? matchStatusBadgeConfirmed : {}),
+                          }}
+                        >
+                          {boutStatus(row)}
+                        </span>
                       </td>
                       <td style={matchTdAction}>
                         {partijNr != null ? (
@@ -3591,7 +3635,7 @@ export default function FightersPage() {
 
                 {!loading && matchRows.length === 0 && (
                   <tr>
-                    <td style={emptyTd} colSpan={12}>
+                    <td style={emptyTd} colSpan={13}>
                       Nog geen partijen aangemaakt.
                     </td>
                   </tr>
@@ -3684,6 +3728,52 @@ function WaitOverlay({ text }: { text: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function TrainerResponseBadge({
+  hoek,
+  response,
+}: {
+  hoek: "R" | "B";
+  response: any;
+}) {
+  const status = lower(response?.status);
+  const label =
+    status === "akkoord"
+      ? "Akkoord"
+      : status === "afgewezen"
+        ? "Afgewezen"
+        : status === "bespreken"
+          ? "Bespreken"
+          : "Wacht";
+  const icon =
+    status === "akkoord" ? "✓" : status === "afgewezen" ? "✕" : status === "bespreken" ? "💬" : "…";
+  const titleParts = [
+    `${hoek === "R" ? "Rode" : "Blauwe"} hoek: ${label}`,
+    s(response?.sportschool) ? `Sportschool: ${s(response.sportschool)}` : "",
+    s(response?.opmerking) ? `Opmerking: ${s(response.opmerking)}` : "",
+    response?.dispensatie_toestemming === true ? "Dispensatie: toestemming gegeven" : "",
+  ].filter(Boolean);
+
+  return (
+    <span
+      title={titleParts.join("\n")}
+      style={{
+        ...trainerResponseBadge,
+        ...(status === "akkoord"
+          ? trainerResponseOk
+          : status === "afgewezen"
+            ? trainerResponseBad
+            : status === "bespreken"
+              ? trainerResponseTalk
+              : trainerResponseWait),
+      }}
+    >
+      <b>{hoek}</b> {icon} {label}
+      {response?.dispensatie_toestemming === true ? " · DISP ✓" : ""}
+      {s(response?.opmerking) ? <small> · {s(response.opmerking)}</small> : null}
+    </span>
   );
 }
 
@@ -4203,6 +4293,7 @@ const matchFighterName: CSSProperties = {
 };
 const matchThNr: CSSProperties = { ...th, width: 50, textAlign: "center" };
 const matchThCompact: CSSProperties = { ...th, width: 48, minWidth: 48, maxWidth: 48, paddingLeft: 6, paddingRight: 6, textAlign: "center" };
+const matchThTrainers: CSSProperties = { ...th, width: 250, minWidth: 220, textAlign: "left" };
 const matchThGender: CSSProperties = { ...th, width: 72, textAlign: "center" };
 const matchThName: CSSProperties = { ...th, width: 126 };
 const matchThGym: CSSProperties = { ...th, width: 112 };
@@ -4215,6 +4306,7 @@ const matchTdRecord: CSSProperties = { ...matchTd, whiteSpace: "nowrap", fontWei
 const matchTdGender: CSSProperties = { ...matchTd, width: 48, minWidth: 48, maxWidth: 48, paddingLeft: 6, paddingRight: 6, textAlign: "center", whiteSpace: "nowrap", fontWeight: 900 };
 const matchTdNr: CSSProperties = { ...matchTd, textAlign: "center", color: ORANGE, fontSize: 14, fontWeight: 950 };
 const matchTdCompact: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap" };
+const matchTdTrainers: CSSProperties = { ...matchTd, minWidth: 220, display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch" };
 const matchTdAction: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap", padding: "5px" };
 const matchActions: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
 const matchTrEven: CSSProperties = { background: "#171717" };
@@ -4231,6 +4323,27 @@ const matchStatusBadge: CSSProperties = {
   fontWeight: 950,
   textTransform: "uppercase",
 };
+const matchStatusBadgeConfirmed: CSSProperties = {
+  borderColor: "rgba(66, 194, 98, .8)",
+  background: "rgba(36, 119, 57, .24)",
+  color: "#7ee395",
+};
+const trainerResponseBadge: CSSProperties = {
+  display: "block",
+  padding: "4px 6px",
+  border: "1px solid #48484d",
+  background: "#171719",
+  fontSize: 10.5,
+  lineHeight: 1.25,
+  whiteSpace: "normal",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+const trainerResponseOk: CSSProperties = { borderColor: "#356c43", color: "#79db91", background: "#142018" };
+const trainerResponseBad: CSSProperties = { borderColor: "#8b3b35", color: "#ff8178", background: "#271615" };
+const trainerResponseTalk: CSSProperties = { borderColor: "#8a6729", color: "#f3c56b", background: "#261f13" };
+const trainerResponseWait: CSSProperties = { borderColor: "#48484d", color: "#a9a9af", background: "#171719" };
+
 const matchNoDetail: CSSProperties = { color: "#71717a", fontSize: 10, fontWeight: 800 };
 
 const globalCss = `

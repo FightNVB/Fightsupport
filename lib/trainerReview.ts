@@ -219,6 +219,34 @@ function recordForFighter(
   return recordFallback(c,d,snap) || "0-0-0 (0)";
 }
 
+
+function talentstatusFromOpmerking(v: unknown) {
+  const text = s(v).replace(/\u00a0/g, " ");
+  if (!/\btalent\s*status\b|\btalentstatus\b/i.test(text)) {
+    return { actief: false, datum: null as string | null, tekst: text || null };
+  }
+
+  const iso = text.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
+  if (iso) {
+    return {
+      actief: true,
+      datum: `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`,
+      tekst: text,
+    };
+  }
+
+  const nl = text.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
+  if (nl) {
+    return {
+      actief: true,
+      datum: `${nl[3]}-${String(nl[2]).padStart(2, "0")}-${String(nl[1]).padStart(2, "0")}`,
+      tekst: text,
+    };
+  }
+
+  return { actief: false, datum: null as string | null, tekst: text || null };
+}
+
 function contextGym(c?: AnyRow) {
   const extra=obj(c?.extra), raw=obj(extra.raw), aan=obj(raw.aanmelding), fr=obj(raw.fighters_raw);
   return s(first(c?.sportschool,c?.gym_input,c?.fp_gym,c?.gym,fr.gym,fr.sportschool,aan.gym,aan.sportschool));
@@ -238,7 +266,7 @@ function fighterView(c: AnyRow|undefined, snap: AnyRow, row: AnyRow, corner: "ro
   const startRaw=first(c?.heeft_startverbod,c?.startverbod,c?.startverbod_status,d.fr.heeft_startverbod,d.fr.startverbod,d.aan.heeft_startverbod);
   const keurmerkRaw=first(c?.heeft_keurmerk,c?.keurmerk_ok,c?.keurmerk_status,c?.keurmerk,d.fr.heeft_keurmerk,d.fr.keurmerk_ok,d.fr.keurmerk_status,d.aan.heeft_keurmerk,d.aan.keurmerk_status);
   const keurmerkReason=s(first(c?.keurmerk_reden,c?.keurmerk_reason,d.fr.keurmerk_reden,d.fr.keurmerk_reason,d.aan.keurmerk_reden));
-  const geboorte=first(c?.geboortedatum,c?.fp_geboortedatum,c?.geboortedatum_input,d.fr.geboortedatum,d.aan.geboortedatum);
+  const geboorte=first(fp?.geboortedatum,c?.geboortedatum,c?.fp_geboortedatum,c?.geboortedatum_input,d.fr.geboortedatum,d.aan.geboortedatum);
   const va = contextVa(c,snap,row,corner) || null;
   return {
     naam: contextName(c,snap,row,corner),
@@ -247,7 +275,7 @@ function fighterView(c: AnyRow|undefined, snap: AnyRow, row: AnyRow, corner: "ro
     geboortedatum: s(geboorte) || null,
     leeftijd: ageOnDate(geboorte, first(c?.evenement_datum,eventDate)),
     gewicht: num(first(c?.gewicht,c?.gewicht_input,c?.fp_gewicht,d.aan.gewicht,snap.gewicht)),
-    klasse: s(first(c?.klasse,c?.fp_klasse,c?.nulmeting_klasse,d.fr.nulmeting_klasse,d.aan.klasse,row.klasse,snap.klasse)) || null,
+    klasse: s(first(c?.klasse,c?.fp_klasse,fp?.nulmeting_klasse,c?.nulmeting_klasse,d.fr.nulmeting_klasse,d.aan.klasse,row.klasse,snap.klasse)) || null,
     record: recordForFighter(va,c,d,snap,allResults,fp),
     totaal_wedstrijden: num(first(fp?.totaal_wedstrijden,c?.totaal_wedstrijden,d.fr.totaal_wedstrijden)),
     totaalWedstrijden: num(first(fp?.totaal_wedstrijden,c?.totaal_wedstrijden,d.fr.totaal_wedstrijden)),
@@ -256,6 +284,12 @@ function fighterView(c: AnyRow|undefined, snap: AnyRow, row: AnyRow, corner: "ro
     nulmeting_verloren: num(first(fp?.nulmeting_verloren,c?.nulmeting_verloren,d.fr.nulmeting_verloren)),
     nulmeting_onbeslist: num(first(fp?.nulmeting_onbeslist,c?.nulmeting_onbeslist,d.fr.nulmeting_onbeslist)),
     kos: num(first(fp?.kos,c?.kos,d.fr.kos)),
+    talentstatus: talentstatusFromOpmerking(first(
+      fp?.nulmeting_opmerking,
+      c?.nulmeting_opmerking,
+      d.fr.nulmeting_opmerking,
+      d.aan.nulmeting_opmerking,
+    )),
     licentie: { ok: boolish(licenseRaw), tekst: s(licenseRaw) || null },
     startverbod: { actief: activeStartverbod(startRaw), tekst: s(startRaw) || null },
     keurmerk: { ok: boolish(keurmerkRaw), reden: keurmerkReason || null },
@@ -369,7 +403,7 @@ export async function buildTrainerReviewData(matchmakingId: string) {
         .order("datum",{ascending:false}),
       supabaseAdmin
         .from("fightpassport_fighters")
-        .select("va_nummer,totaal_wedstrijden,gewonnen,kos,nulmeting_totaal,nulmeting_gewonnen,nulmeting_verloren,nulmeting_onbeslist,nulmeting_kos,nulmeting_klasse,berekende_klasse")
+        .select("va_nummer,naam,geboortedatum,geslacht,totaal_wedstrijden,gewonnen,kos,nulmeting_totaal,nulmeting_gewonnen,nulmeting_verloren,nulmeting_onbeslist,nulmeting_kos,nulmeting_klasse,nulmeting_opmerking,berekende_klasse")
         .in("va_nummer",batch),
     ]);
 

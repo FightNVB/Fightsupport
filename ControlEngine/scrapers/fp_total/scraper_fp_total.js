@@ -343,6 +343,106 @@ function normalizeClass(v) {
   return null;
 }
 
+
+function parseTalentstatusFromNulmeting(opmerking) {
+  const text = String(opmerking ?? "").replace(/\u00a0/g, " ").trim();
+  if (!/\btalent\s*status\b|\btalentstatus\b/i.test(text)) {
+    return { actief: false, datum: null, tekst: text || null };
+  }
+
+  const iso = text.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
+  if (iso) {
+    return {
+      actief: true,
+      datum: `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`,
+      tekst: text,
+    };
+  }
+
+  const nl = text.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
+  if (nl) {
+    return {
+      actief: true,
+      datum: `${nl[3]}-${String(nl[2]).padStart(2, "0")}-${String(nl[1]).padStart(2, "0")}`,
+      tekst: text,
+    };
+  }
+
+  return { actief: false, datum: null, tekst: text };
+}
+
+function ageOnToday(dateValue) {
+  const raw = String(dateValue ?? "").trim();
+  const birth = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T12:00:00`)
+    : new Date(raw);
+  if (!raw || Number.isNaN(birth.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const beforeBirthday =
+    today.getMonth() < birth.getMonth() ||
+    (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate());
+  if (beforeBirthday) age--;
+  return age >= 0 ? age : null;
+}
+
+async function syncTalentstatusVechterFromFighter(payload, results = []) {
+  const talent = parseTalentstatusFromNulmeting(payload?.nulmeting_opmerking);
+  if (!talent.actief || !talent.datum) return;
+
+  const age = ageOnToday(payload?.geboortedatum);
+  const classToken = normalizeClass(payload?.nulmeting_klasse);
+  const isYouth = classToken === "J" || (age !== null && age < 18);
+  if (!isYouth) return;
+
+  const va = String(payload?.va_nummer ?? "").replace(/\D/g, "");
+  if (!va) return;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("talentstatus_vechters")
+    .select("id")
+    .eq("va_nummer", va)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (existing?.id) return; // bestaande admin/handmatige status nooit overschrijven
+
+  const firstGym = Array.isArray(results)
+    ? String(results.find((row) => String(row?.sportschool ?? "").trim())?.sportschool ?? "").trim() || null
+    : null;
+
+  const insertRow = {
+    va_nummer: va,
+    naam: payload?.naam || null,
+    geboortedatum: payload?.geboortedatum || null,
+    geslacht: payload?.geslacht || null,
+    sportschool: firstGym,
+    land: "NL",
+    klasse: "J+",
+    talent_status: "voorlopig",
+    status: "actief",
+    admin_bevestigd: true,
+    admin_bevestigd_op: new Date().toISOString(),
+    max_proef_partijen: 3,
+    is_actief: true,
+    opmerkingen: `Automatisch uit FightPassport nulmeting: Talentstatus ${talent.datum}`,
+  };
+
+  const { error: insertError } = await supabase
+    .from("talentstatus_vechters")
+    .insert(insertRow);
+
+  if (insertError) {
+    if (String(insertError.code || "") !== "23505") throw insertError;
+    return;
+  }
+
+  console.log(
+    `[fp-total] ⭐ VA ${va} automatisch toegevoegd aan talentstatus_vechters (${talent.datum})`
+  );
+}
+
 function isKbTb(v) {
   const s = String(v ?? "").toLowerCase();
   return s.includes("kick") || s.includes("k1") || s.includes("muay") || s.includes("thai");
@@ -1428,6 +1528,8 @@ async function saveFighter(all) {
   };
   const { error } = await supabase.from("fightpassport_fighters").upsert(payload, { onConflict: "va_nummer" });
   if (error) throw error;
+
+  await syncTalentstatusVechterFromFighter(payload, all.results);
 
   await saveChildSnapshot("fightpassport_startbans", all.va, all.startbans, (r, ts) => ({
     va_nummer: String(all.va), soort: val(r, ["soort"]), ingang: parseNlDate(val(r, ["ingang"])), einde: parseNlDate(val(r, ["einde"])),
