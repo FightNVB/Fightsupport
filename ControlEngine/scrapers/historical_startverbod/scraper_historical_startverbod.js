@@ -100,9 +100,14 @@ export async function scraperHistoricalStartverbod() {
   };
 
   try {
-    ({ browser, page: masterPage } = await loginFightPassport());
+    // HISTORIE ALTIJD met een schone FightPassport-sessie starten.
+    // Alleen de permanente trusted-device cookie mag uit cookies.json mee; PHPSESSID niet.
+    ({ browser, page: masterPage } = await loginFightPassport({
+      freshSession: true,
+      saveCookiesToDisk: false,
+    }));
     let cookies = await masterPage.cookies().catch(() => []);
-    console.log("[historie] ✅ Master logged in (cookies captured)");
+    console.log("[historie] ✅ Schone master-sessie gestart met trusted-device herkenning; alleen nieuwe sessiecookies worden intern gedeeld");
 
     let masterRefreshPromise = null;
     async function refreshMasterSessionLocked(reason = "") {
@@ -113,7 +118,11 @@ export async function scraperHistoricalStartverbod() {
 
       masterRefreshPromise = (async () => {
         console.log(`[historie] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
-        await ensureLoggedIn(masterPage, { force: true });
+        await ensureLoggedIn(masterPage, {
+          force: true,
+          saveCookiesToDisk: false,
+          useStoredCookies: false,
+        });
         cookies = await masterPage.cookies().catch(() => cookies);
         console.log("[historie] ✅ master refreshed (cookies updated)");
         return cookies;
@@ -152,14 +161,62 @@ while (!stopRequested) {
         await saveItem(run.id, va, { status: "running", started_at: startedAt, finished_at: null });
         let page = null;
         try {
-          page = await openFighterPageVerified(browser, null, cookies, va, {
-            maxAttempts: Number(process.env.TAB_ATTEMPTS || 5),
-            softWaitMs: Number(process.env.SOFT_WAIT_MS || 2500),
-            betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS || 1200),
-            workerLabel: `[historie ${workerIndex + 1}/${workers}]`,
-          });
-          if (!page) throw Object.assign(new Error("Vechterpagina niet geladen binnen de timeout."), { step: "navigation", type: "timeout" });
-          const result = await scrapeHistoricalStartverbodPage(page, va);
+          const loginRetries = Math.max(1, Number(process.env.HISTORY_LOGIN_RETRIES || 3));
+          let result = null;
+
+          for (let loginAttempt = 1; loginAttempt <= loginRetries; loginAttempt++) {
+            try {
+              // Pak bij iedere poging de meest actuele master-cookies.
+              // Een worker die per ongeluk op de loginpagina belandt, wordt gesloten
+              // en krijgt voor DEZELFDE VA een volledig nieuwe tab.
+              page = await openFighterPageVerified(browser, null, cookies, va, {
+                maxAttempts: Number(process.env.TAB_ATTEMPTS || 5),
+                softWaitMs: Number(process.env.SOFT_WAIT_MS || 2500),
+                betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS || 1200),
+                workerLabel: `[historie ${workerIndex + 1}/${workers}]`,
+              });
+
+              if (!page) {
+                throw Object.assign(
+                  new Error("Vechterpagina niet geladen binnen de timeout."),
+                  { step: "navigation", type: "timeout" }
+                );
+              }
+
+              result = await scrapeHistoricalStartverbodPage(page, va);
+              break;
+            } catch (error) {
+              const isLoginPage = error?.message === "LOGIN_PAGE";
+
+              await hardCloseFightPassportPage(page).catch(() => {});
+              page = null;
+
+              if (!isLoginPage || loginAttempt >= loginRetries) {
+                throw error;
+              }
+
+              console.log(
+                `[historie] 🔐 VA ${va}: worker ${workerIndex + 1} kwam op loginpagina ` +
+                `(poging ${loginAttempt}/${loginRetries}); master-sessie verversen en DEZELFDE VA opnieuw openen`
+              );
+
+              cookies = await refreshMasterSessionLocked(
+                `worker ${workerIndex + 1} VA ${va} retry ${loginAttempt}`
+              );
+
+              await new Promise((resolve) =>
+                setTimeout(resolve, Math.max(750, Number(process.env.HISTORY_LOGIN_RETRY_WAIT_MS || 1200)))
+              );
+            }
+          }
+
+          if (!result) {
+            throw Object.assign(
+              new Error("Geen scraperresultaat na worker-retries."),
+              { step: "navigation", type: "retry_exhausted" }
+            );
+          }
+
           if (result.status === "skipped") {
             stats.skipped++;
             await saveItem(run.id, va, {
@@ -173,14 +230,11 @@ while (!stopRequested) {
             stats.updated += saved.updated;
             await saveItem(run.id, va, {
               status: "completed", naam_fp: result.naam_fp, found_count: result.records.length,
-              error_type: null, error_step: null, error_message: null, finished_at: new Date().toISOString(),
+              error_type: null, error_step: null, error_message: null,
+              retry_status: null, finished_at: new Date().toISOString(),
             });
           }
         } catch (error) {
-          if (error?.message === "LOGIN_PAGE") {
-            await refreshMasterSessionLocked(`worker ${workerIndex + 1} VA ${va}`).catch(() => {});
-          }
-
           stats.errors++;
           stats.lastError = `VA ${va}: ${error?.message ?? String(error)}`;
           await saveItem(run.id, va, {

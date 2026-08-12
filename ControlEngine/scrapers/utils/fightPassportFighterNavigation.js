@@ -102,8 +102,14 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
     if (Array.isArray(cookies) && cookies.length) await page.setCookie(...cookies).catch(() => {});
     await page.goto(fighterUrl(va), { waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
 
-    const forced = await forceExactFighterUrl(page, va, 30000).catch((error) => {
-      if (error?.message === "LOGIN_PAGE") throw error;
+    const forced = await forceExactFighterUrl(page, va, 30000).catch(async (error) => {
+      if (error?.message === "LOGIN_PAGE") {
+        // Deze page is binnen openFighterPageVerified aangemaakt.
+        // Als we de fout direct doorgooien, krijgt de caller nooit een page-reference
+        // en kan hij deze login-tab dus ook niet sluiten. Daarom hier eerst hard sluiten.
+        await hardCloseFightPassportPage(page).catch(() => {});
+        throw error;
+      }
       return false;
     });
     if (!forced) {

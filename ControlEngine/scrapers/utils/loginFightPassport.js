@@ -157,6 +157,33 @@ async function loadCookiesIfAny(page) {
   }
 }
 
+// Voor de historische scraper: behoud alleen de permanente trusted-device cookie.
+// PHPSESSID en andere sessiecookies worden bewust NIET hergebruikt.
+async function loadTrustedDeviceCookiesOnly(page) {
+  if (!fs.existsSync(COOKIES_PATH)) return false;
+  try {
+    const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
+    if (!Array.isArray(cookies) || !cookies.length) return false;
+
+    const trusted = cookies.filter((cookie) => {
+      const name = String(cookie?.name || "").toLowerCase();
+      return name.startsWith("sys42_device") || name.includes("unlockcode");
+    });
+
+    if (!trusted.length) {
+      console.log("⚠️ Geen FightPassport trusted-device cookie gevonden; unlock kan nodig zijn");
+      return false;
+    }
+
+    await page.setCookie(...trusted);
+    console.log(`🔐 Trusted-device cookie geladen (${trusted.map((c) => c.name).join(", ")}); oude PHPSESSID niet geladen`);
+    return true;
+  } catch (e) {
+    console.log("⚠️ Trusted-device cookie kon niet geladen worden:", e?.message ?? e);
+    return false;
+  }
+}
+
 
 async function dashboardReady(page, timeoutMs = 12000) {
   const started = Date.now();
@@ -456,6 +483,7 @@ export async function ensureLoggedIn(page, opts = {}) {
   const {
     force = false,
     saveCookiesToDisk = true,
+    useStoredCookies = true,
     timeoutMs = 40000,
   } = opts;
 
@@ -478,7 +506,7 @@ export async function ensureLoggedIn(page, opts = {}) {
     }
 
     // 2) cookies proberen (tenzij force)
-    if (!force) {
+    if (!force && useStoredCookies) {
       const hadCookies = await loadCookiesIfAny(page);
       if (hadCookies) {
         await safeGoto(page, FP_URL);
@@ -490,9 +518,8 @@ export async function ensureLoggedIn(page, opts = {}) {
         }
         console.log("⚠️ Cookies ongeldig → normale login nodig");
       }
-    } else {
-      // force: we willen zeker sessie herstellen
-      // we kunnen wél eerst cookies proberen (kan sneller), maar als dat faalt gaan we door
+    } else if (force && useStoredCookies) {
+      // force + opgeslagen cookies toegestaan: quick restore proberen.
       const hadCookies = await loadCookiesIfAny(page);
       if (hadCookies) {
         await safeGoto(page, FP_URL);
@@ -638,7 +665,11 @@ export async function ensureLoggedIn(page, opts = {}) {
 // --------------------------------------------------
 // HOOFDLOGIN (ongewijzigd gedrag)
 // --------------------------------------------------
-export async function loginFightPassport() {
+export async function loginFightPassport(opts = {}) {
+  const freshSession = opts.freshSession === true ||
+    String(process.env.FP_FRESH_LOGIN || "").toLowerCase() === "true";
+  const saveCookiesToDisk = opts.saveCookiesToDisk !== false;
+
   if (!fs.existsSync(LOGIN_PATH)) {
     throw new Error("❌ login_master.json NIET gevonden");
   }
@@ -673,8 +704,16 @@ export async function loginFightPassport() {
       return;
     }
 
-    // 2) cookies proberen
-    const hadCookies = await loadCookiesIfAny(page);
+    // 2) Historie krijgt een schone sessie, maar behoudt de trusted-device herkenning.
+    // Daardoor wordt PHPSESSID nooit van een vorige run meegenomen, terwijl FightPassport
+    // niet iedere run opnieuw om de 7-cijferige unlockcode hoeft te vragen.
+    if (freshSession) {
+      await clearBrowserCookiesOnly(page);
+      await loadTrustedDeviceCookiesOnly(page);
+      console.log("🧼 Fresh FightPassport sessie: trusted-device behouden, oude PHPSESSID weggegooid");
+    }
+
+    const hadCookies = freshSession ? false : await loadCookiesIfAny(page);
     if (hadCookies) {
       await safeGoto(page, FP_URL);
       await safeZoom100(page);
@@ -806,7 +845,9 @@ export async function loginFightPassport() {
       console.log("⚠️ Ingelogd, maar dashboard nog niet gevonden. Scraper probeert alsnog verder.");
     }
 
-    await saveCookies(page);
+    if (saveCookiesToDisk) {
+      await saveCookies(page);
+    }
   }
 
   // 2 pogingen

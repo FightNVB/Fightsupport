@@ -1,6 +1,6 @@
 import core from "./historicalStartverbodCore.cjs";
 
-const { historyFingerprint, mergeHistoryRecord, parseHistoricalRows } = core;
+const { historyFingerprint, mergeHistoryRecord, parseHistoricalRows, parseNlDate } = core;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function readHeaderInfo(page) {
@@ -737,25 +737,80 @@ export async function scrapeHistoricalStartverbodPage(page, va) {
 
   const records = [];
 
-  const rawBaseRows = (first.state?.rows ?? []).map((row) => ({
+  // BELANGRIJK:
+  // Niet eerst parseHistoricalRows() over de hele tabel laten bepalen welke regels
+  // Puppeteer überhaupt aanklikt. Die parser filtert regels weg als de datum niet
+  // parseerbaar is. Daardoor kan een geldige Schorsing verdwijnen vóór de klik.
+  //
+  // We bewaren daarom de ORIGINELE index van iedere echte Startverbod/Schorsing-regel
+  // en klikken die altijd. Pas ná het openen combineren we overzicht + details.
+  const rawRows = (first.state?.rows ?? []).map((row, originalIndex) => ({
+    originalIndex,
     filler: false,
-    columns: row.columns,
+    columns: Array.isArray(row?.columns) ? row.columns : [],
   }));
 
-  const baseRows = parseHistoricalRows(rawBaseRows);
+  const rowsToOpen = rawRows.filter((row) => {
+    const soort = String(row.columns?.[0] || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return soort === "Startverbod" || soort === "Schorsing";
+  });
 
-  for (let index = 0; index < baseRows.length; index++) {
-    const base = baseRows[index];
+  console.log(
+    `[historie] 📋 VA ${va}: ${rowsToOpen.length} historische regel(s) openen`,
+    {
+      soorten: rowsToOpen.map((row) =>
+        String(row.columns?.[0] || "").replace(/\s+/g, " ").trim()
+      ),
+    }
+  );
 
-    // NIET opnieuw openen, NIET verversen.
-    const openedLabel = await openColumnARow(page, index, va);
+  for (let pos = 0; pos < rowsToOpen.length; pos++) {
+    const raw = rowsToOpen[pos];
+    const originalIndex = raw.originalIndex;
+
+    // Probeer de normale parser voor de overzichtsdata. Als die deze regel afwijst
+    // (bijv. afwijkende/onvolledige datum), openen we hem alsnog en vullen we hem
+    // verder vanuit het detailscherm.
+    const parsedBase = parseHistoricalRows([
+      { filler: false, columns: raw.columns },
+    ])[0] || null;
+
+    const columns = raw.columns.map((value) =>
+      String(value ?? "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    );
+
+    const fallbackBase = {
+      soort: columns[0] || null,
+      ingang: parseNlDate(columns[1]) || null,
+      einde: parseNlDate(columns[2]) || null,
+      door: columns[3] || null,
+      reden: columns[4] || null,
+      evenement: columns[5] || null,
+      eventdatum: parseNlDate(columns[6]) || null,
+    };
+
+    const base = parsedBase || fallbackBase;
+
+    // Klik exact de oorspronkelijke tabelregel. Zo slaan we een Schorsing niet over
+    // wanneer een eerdere regel door de parser anders wordt geïnterpreteerd.
+    const openedLabel = await openColumnARow(page, originalIndex, va);
 
     if (!openedLabel) {
-      console.log(`[historie] ℹ️ VA ${va} regel ${index + 1}: niets meer te openen`);
-      break;
+      console.log(
+        `[historie] ℹ️ VA ${va} regel ${originalIndex + 1}: niets meer te openen`
+      );
+      continue;
     }
 
-    console.log(`[historie] 🔎 VA ${va} regel ${index + 1}/${baseRows.length}: ${openedLabel}`);
+    console.log(
+      `[historie] 🔎 VA ${va} regel ${pos + 1}/${rowsToOpen.length}: ${openedLabel}`
+    );
 
     let details = null;
     try {
@@ -766,20 +821,50 @@ export async function scrapeHistoricalStartverbodPage(page, va) {
 
     if (!details) {
       throw Object.assign(
-        new Error(`Historisch detail voor regel ${index + 1} kon niet worden gelezen.`),
+        new Error(
+          `Historisch detail voor regel ${originalIndex + 1} kon niet worden gelezen.`
+        ),
         { step: "startverboden_detail", type: "detail_missing" }
       );
     }
 
-    const merged = mergeHistoryRecord(base, details);
+    // Detailscherm is leidend voor het echte type en de datums.
+    // Dus ook als de overzichtsparser een Schorsing niet goed begreep, wordt hij
+    // hier alsnog correct als Schorsing opgeslagen.
+    const merged = {
+      ...mergeHistoryRecord(base, details),
+      soort: details.soort || base.soort || null,
+      ingang: parseNlDate(details.ingang) || base.ingang || null,
+      einde: parseNlDate(details.einde) || base.einde || null,
+    };
+
+    if (!merged.soort || !["Startverbod", "Schorsing"].includes(merged.soort)) {
+      console.warn(
+        `[historie] ⚠️ VA ${va} regel ${originalIndex + 1}: onbekend detailtype`,
+        { overzicht: base.soort, detail: details.soort }
+      );
+      continue;
+    }
+
+    if (!merged.ingang) {
+      console.warn(
+        `[historie] ⚠️ VA ${va} ${merged.soort}: geen geldige ingangsdatum; regel niet opgeslagen`
+      );
+      continue;
+    }
 
     records.push({
       ...merged,
       va_nummer: String(va),
       naam_fp: naamFp,
-      fingerprint: historyFingerprint(va, base),
+      fingerprint: historyFingerprint(va, merged),
       source: "fightpassport",
     });
+
+    console.log(
+      `[historie] ✅ VA ${va}: ${merged.soort} toegevoegd`,
+      { ingang: merged.ingang, einde: merged.einde }
+    );
   }
 
   await closeOverview(page).catch(() => {});

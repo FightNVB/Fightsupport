@@ -33,6 +33,8 @@ function launch(run: any) {
       HISTORY_END_VA: String(run.end_va),
       HISTORY_WORKERS: String(run.workers),
       FP_SESSION_MODE: "master",
+      // Alleen historische scraper: iedere run begint met een echte schone login.
+      FP_FRESH_LOGIN: "true",
       HEADLESS: process.env.HEADLESS ?? "false",
       PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
     },
