@@ -107,6 +107,7 @@ export async function scraperHistoricalStartverbod() {
       saveCookiesToDisk: false,
     }));
     let cookies = await masterPage.cookies().catch(() => []);
+    let cookieGeneration = 1;
     console.log("[historie] ✅ Schone master-sessie gestart met trusted-device herkenning; alleen nieuwe sessiecookies worden intern gedeeld");
 
     let masterRefreshPromise = null;
@@ -124,7 +125,8 @@ export async function scraperHistoricalStartverbod() {
           useStoredCookies: false,
         });
         cookies = await masterPage.cookies().catch(() => cookies);
-        console.log("[historie] ✅ master refreshed (cookies updated)");
+        cookieGeneration++;
+        console.log(`[historie] ✅ master refreshed (cookies updated, generatie ${cookieGeneration})`);
         return cookies;
       })();
 
@@ -169,6 +171,10 @@ while (!stopRequested) {
               // Pak bij iedere poging de meest actuele master-cookies.
               // Een worker die per ongeluk op de loginpagina belandt, wordt gesloten
               // en krijgt voor DEZELFDE VA een volledig nieuwe tab.
+              // Onthoud met welke cookie-generatie deze tab is geopend.
+              // Als een andere worker intussen al heeft vernieuwd, hoeft deze
+              // worker bij LOGIN_PAGE niet nogmaals de master-login te forceren.
+              const pageCookieGeneration = cookieGeneration;
               page = await openFighterPageVerified(browser, null, cookies, va, {
                 maxAttempts: Number(process.env.TAB_ATTEMPTS || 5),
                 softWaitMs: Number(process.env.SOFT_WAIT_MS || 2500),
@@ -200,9 +206,18 @@ while (!stopRequested) {
                 `(poging ${loginAttempt}/${loginRetries}); master-sessie verversen en DEZELFDE VA opnieuw openen`
               );
 
-              cookies = await refreshMasterSessionLocked(
-                `worker ${workerIndex + 1} VA ${va} retry ${loginAttempt}`
-              );
+              if (cookieGeneration > pageCookieGeneration) {
+                console.log(
+                  `[historie] ♻️ VA ${va}: worker ${workerIndex + 1} gebruikt reeds vernieuwde ` +
+                  `master-sessie (generatie ${cookieGeneration}); geen extra refresh`
+                );
+              } else {
+                // Eén worker ververst werkelijk. Workers die gelijktijdig
+                // binnenkomen wachten via masterRefreshPromise op dezelfde refresh.
+                await refreshMasterSessionLocked(
+                  `worker ${workerIndex + 1} VA ${va} retry ${loginAttempt}`
+                );
+              }
 
               await new Promise((resolve) =>
                 setTimeout(resolve, Math.max(750, Number(process.env.HISTORY_LOGIN_RETRY_WAIT_MS || 1200)))
