@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireUserFromAuthHeader, hasAnyRoleFromReq } from "@/lib/api/requireRole";
+import { buildDispensatieSnapshot } from "@/lib/dispensatie/buildSnapshot";
 
 export const runtime = "nodejs";
 
@@ -174,6 +175,8 @@ export async function POST(req: Request) {
 
     const controle_run_id = runs?.[0]?.id ?? null;
 
+    const snapshot = await buildDispensatieSnapshot(supabaseAdmin, matchmaking_id, partij_nr);
+
     const { data: existingReq, error: existingErr } = await supabaseAdmin
       .from("dispensatie_requests")
       .select("id")
@@ -194,6 +197,9 @@ export async function POST(req: Request) {
         .update({
           partij_nr,
           controle_run_id: controle_run_id ?? undefined,
+          evenement_naam: snapshot.evenement_naam,
+          evenement_datum: snapshot.evenement_datum,
+          snapshot_json: snapshot,
           updated_at: new Date().toISOString(),
         })
         .eq("id", requestId);
@@ -208,6 +214,9 @@ export async function POST(req: Request) {
         rule_code: "WEGING",
         controle_run_id: controle_run_id ?? null,
         created_by: user.id,
+        evenement_naam: snapshot.evenement_naam,
+        evenement_datum: snapshot.evenement_datum,
+        snapshot_json: snapshot,
       };
 
       const { data: insReq, error: insReqErr } = await supabaseAdmin

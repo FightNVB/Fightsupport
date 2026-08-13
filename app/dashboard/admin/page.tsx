@@ -423,14 +423,6 @@ export default function AdminDashboardPage() {
         />
 
         <div className="fs-content">
-          <section className="fs-status-strip" aria-label="Portaaloverzicht">
-            <StatusItem icon={UsersRound} value="6" label="Hoofdmodules" sublabel="Adminfuncties" />
-            <StatusItem icon={Settings} value="7" label="Beheer" sublabel="Interne modules" />
-            <StatusItem icon={Archive} value="6" label="Algemeen" sublabel="Dossiers & historie" />
-            <StatusItem icon={Activity} value="19" label="Totaal" sublabel="Direct bereikbaar" />
-            <StatusItem icon={ShieldCheck} value={isSuperadmin ? "Super" : "Admin"} label="Toegang" sublabel={normalizedBondteam || "NVB"} />
-          </section>
-
           <section className="fs-section">
             <SectionHeading title="Snelle acties" />
             <div className="fs-quick-grid">
@@ -629,7 +621,7 @@ function GlobalStyles() {
 
       * { box-sizing: border-box; }
 
-      html, body { margin: 0; background: #020304; }
+      html, body { margin: 0; background: #171a1e; }
 
       button, input, select, textarea { font: inherit; }
 
@@ -639,7 +631,7 @@ function GlobalStyles() {
         background:
           radial-gradient(circle at 52% 0%, rgba(214,220,228,.12), transparent 24%),
           radial-gradient(circle at 50% 100%, rgba(160,168,178,.08), transparent 32%),
-          linear-gradient(180deg, #0b0d10 0%, #030405 54%, #090b0d 100%);
+          linear-gradient(180deg, #30353b 0%, #202429 48%, #292e34 100%);
       }
 
       .fs-shell { margin-left: var(--fs-sidebar-width); min-height: 100vh; }
@@ -847,7 +839,7 @@ function GlobalStyles() {
       .fs-content {
         width: min(1440px, calc(100% - 34px));
         margin: 0 auto;
-        padding: 24px 0 22px;
+        padding: 16px 0 18px;
       }
 
       .fs-status-strip {
@@ -858,13 +850,13 @@ function GlobalStyles() {
         border-right-color: rgba(226,230,235,.72);
         background:
           linear-gradient(90deg, rgba(255,255,255,.07), transparent 16%, transparent 84%, rgba(255,255,255,.07)),
-          linear-gradient(180deg,#161a1f,#080a0d 70%,#111419);
+          linear-gradient(180deg,#454b52,#282d32 72%,#383e44);
         box-shadow: inset 0 1px rgba(255,255,255,.08), inset 0 -1px rgba(0,0,0,.8), 0 12px 28px rgba(0,0,0,.35);
       }
 
       .fs-status-item {
         min-width: 0;
-        min-height: 72px;
+        min-height: 58px;
         display: flex;
         align-items: center;
         gap: 11px;
@@ -914,17 +906,17 @@ function GlobalStyles() {
       .fs-quick-action span { min-width: 0; font-size: 12px; font-weight: 750; }
       .fs-quick-chevron { margin-left: auto; color: var(--fs-orange) !important; }
 
-      .fs-primary-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
-      .fs-card-grid { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 10px; }
+      .fs-primary-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 8px; }
+      .fs-card-grid { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 8px; }
 
       .fs-module-card {
         position: relative;
         min-width: 0;
-        min-height: 164px;
+        min-height: 126px;
         border: 1px solid rgba(226,230,235,.62);
         background:
           linear-gradient(120deg, rgba(255,255,255,.14), transparent 22%),
-          linear-gradient(180deg,#242930,#0b0e12 65%,#191d22);
+          linear-gradient(180deg,#59616a,#30363c 64%,#464d55);
         box-shadow: inset 0 1px rgba(255,255,255,.24), inset 0 -1px rgba(0,0,0,.85), inset 1px 0 rgba(255,255,255,.10), 0 10px 18px rgba(0,0,0,.34);
         transition: transform 170ms ease, border-color 170ms ease, box-shadow 170ms ease;
       }
@@ -939,13 +931,13 @@ function GlobalStyles() {
       .fs-module-card::before { left: -1px; top: -1px; border-left: 2px solid #d8dde3; border-top: 2px solid #d8dde3; }
       .fs-module-card::after { right: -1px; bottom: -1px; border-right: 2px solid #d8dde3; border-bottom: 2px solid #d8dde3; }
       .fs-module-card:hover { transform: translateY(-3px); border-color: rgba(255,90,10,.72); box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 0 16px rgba(255,77,0,.10), 0 15px 25px rgba(0,0,0,.48); }
-      .fs-module-card-compact { min-height: 158px; }
+      .fs-module-card-compact { min-height: 120px; }
 
       .fs-module-click {
         width: 100%;
         height: 100%;
         min-height: inherit;
-        padding: 13px 12px 11px;
+        padding: 9px 9px 8px;
         border: 0;
         background: transparent;
         color: inherit;
@@ -968,11 +960,11 @@ function GlobalStyles() {
       }
 
       .fs-silver-icon {
-        width: 50px;
-        height: 50px;
+        width: 38px;
+        height: 38px;
         display: grid;
         place-items: center;
-        margin-bottom: 8px;
+        margin-bottom: 5px;
         color: #e7e7e7;
         clip-path: polygon(50% 0, 89% 21%, 89% 79%, 50% 100%, 11% 79%, 11% 21%);
         border: 1px solid rgba(235,238,242,.42);
@@ -996,10 +988,10 @@ function GlobalStyles() {
       }
 
       .fs-module-card p {
-        margin: 6px 0 9px;
-        color: #c7c9cc;
-        font-size: 9.5px;
-        line-height: 1.42;
+        margin: 4px 0 6px;
+        color: #f0f1f2;
+        font-size: 8.5px;
+        line-height: 1.28;
         flex: 1;
       }
 
@@ -1118,7 +1110,7 @@ function GlobalStyles() {
         .fs-status-item:nth-child(n+4) { border-top: 0; }
         .fs-status-item:last-child { border-bottom: 0; }
         .fs-quick-grid, .fs-primary-grid, .fs-card-grid { grid-template-columns: 1fr; }
-        .fs-module-card, .fs-module-card-compact { min-height: 178px; }
+        .fs-module-card, .fs-module-card-compact { min-height: 138px; }
       }
     ` }} />
   );

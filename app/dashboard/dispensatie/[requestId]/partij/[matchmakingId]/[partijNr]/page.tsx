@@ -463,12 +463,7 @@ function BruteHeaderA({
   partijNrStr,
   matchmakingId,
   runStatus,
-  navPrev,
-  navNext,
-  onPrev,
-  onNext,
-  onBack,
-  onBackToMatchmaking,
+  onBackToDispensatie,
 }: {
   evenementNaam: string | null;
   evenementDatum: string | null;
@@ -477,12 +472,7 @@ function BruteHeaderA({
   partijNrStr: string;
   matchmakingId: string | string[] | undefined;
   runStatus: string | null | undefined;
-  navPrev?: number | null;
-  navNext?: number | null;
-  onPrev?: () => void;
-  onNext?: () => void;
-  onBack?: () => void;
-  onBackToMatchmaking?: () => void;
+  onBackToDispensatie?: () => void;
 }) {
   const logo = useLogoFallback([
     "/branding/fightsupport/logo-dark.png",
@@ -684,8 +674,9 @@ function BruteHeaderA({
 
             <div className="mt-3 flex flex-wrap md:justify-end gap-2">
               <button
-                onClick={() => onBack?.()}
-                className="px-3 py-2 rounded font-semibold text-white transition active:scale-95"
+                type="button"
+                onClick={() => onBackToDispensatie?.()}
+                className="px-4 py-2 rounded font-semibold text-white transition active:scale-95"
                 style={{
                   background:
                     "linear-gradient(180deg, #ff6200 0%, #cc3d00 100%)",
@@ -693,40 +684,10 @@ function BruteHeaderA({
                   boxShadow:
                     "inset 0 1px 0 rgba(255,255,255,0.3), 0 6px 14px rgba(0,0,0,0.5)",
                 }}
-                title="Terug"
+                title="Terug naar dispensatie"
               >
-                ←
+                ← Terug naar dispensatie
               </button>
-              <button
-                onClick={() => onBackToMatchmaking?.()}
-                className="px-3 py-2 rounded font-semibold text-white transition active:scale-95"
-                style={{
-                  background:
-                    "linear-gradient(180deg, #ff6200 0%, #cc3d00 100%)",
-                  border: "1px solid rgba(0,0,0,0.6)",
-                  boxShadow:
-                    "inset 0 1px 0 rgba(255,255,255,0.3), 0 6px 14px rgba(0,0,0,0.5)",
-                }}
-                title="Terug naar matchmaking"
-              >
-                Matchmaking
-              </button>
-              <SilverButton
-                disabled={!navPrev}
-                onClick={onPrev}
-                title="Vorige partij"
-                className="px-3 py-2"
-              >
-                ←
-              </SilverButton>
-              <SilverButton
-                disabled={!navNext}
-                onClick={onNext}
-                title="Volgende partij"
-                className="px-3 py-2"
-              >
-                →
-              </SilverButton>
             </div>
           </div>
         </div>
@@ -1058,112 +1019,6 @@ function normResultaat(v: any): string {
   return s;
 }
 
-
-
-type DispDecisionStatus = "none" | "pending" | "approved" | "rejected";
-
-
-function normalizeDispIdentityText(value: any): string {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
-
-function normalizeDispEventDate(value: any): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (m) return m[1];
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return raw.toLowerCase();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function normalizeDispVa(value: any): string {
-  return String(value ?? "").trim().toUpperCase();
-}
-
-function dispIdentityKey(args: {
-  matchmakingId: any;
-  vaRood: any;
-  vaBlauw: any;
-  eventNaam: any;
-  eventDatum: any;
-}): string | null {
-  const matchmaking = String(args.matchmakingId ?? "").trim();
-  const pair = [normalizeDispVa(args.vaRood), normalizeDispVa(args.vaBlauw)]
-    .filter(Boolean)
-    .sort();
-  const eventNaam = normalizeDispIdentityText(args.eventNaam);
-  const eventDatum = normalizeDispEventDate(args.eventDatum);
-  if (!matchmaking || pair.length !== 2 || !eventNaam || !eventDatum) return null;
-  return [matchmaking, pair[0], pair[1], eventNaam, eventDatum].join("|");
-}
-
-function dispIdentityFromContext(
-  matchmakingId: any,
-  row: AnyRow,
-  fallbackEventNaam?: any,
-  fallbackEventDatum?: any,
-): string | null {
-  return dispIdentityKey({
-    matchmakingId,
-    vaRood: firstFilled(
-      row?.rood_va_mm,
-      row?.rood_va_fp,
-      row?.rood_va,
-      row?.va_rood,
-      row?.rood_va_nummer,
-      row?.rood_fighter_id,
-    ),
-    vaBlauw: firstFilled(
-      row?.blauw_va_mm,
-      row?.blauw_va_fp,
-      row?.blauw_va,
-      row?.va_blauw,
-      row?.blauw_va_nummer,
-      row?.blauw_fighter_id,
-    ),
-    eventNaam: firstFilled(row?.evenement_naam, row?.event_naam, fallbackEventNaam),
-    eventDatum: firstFilled(row?.evenement_datum, row?.event_datum, fallbackEventDatum),
-  });
-}
-
-function dispIdentityFromRequest(request: AnyRow): string | null {
-  return dispIdentityKey({
-    matchmakingId: request?.matchmaking_id,
-    vaRood: request?.va_rood,
-    vaBlauw: request?.va_blauw,
-    eventNaam: firstFilled(request?.evenement_naam, request?.event_naam),
-    eventDatum: firstFilled(request?.evenement_datum, request?.event_datum),
-  });
-}
-
-function normalizeDispDecision(row: AnyRow | null | undefined): DispDecisionStatus {
-  if (!row) return "none";
-  const raw = String(
-    firstFilled(
-      row?.decision,
-      row?.beslissing,
-      row?.besluit,
-      row?.final_decision,
-      row?.status,
-    ) ?? "",
-  ).trim().toLowerCase();
-  if (["approved", "approve", "goedgekeurd", "akkoord", "accepted", "geaccepteerd"].includes(raw)) return "approved";
-  if (["rejected", "reject", "afgewezen", "afgekeurd", "denied", "declined"].includes(raw)) return "rejected";
-  return raw ? "pending" : "pending";
-}
-
-function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
-  if (!rows?.length) return "none";
-  const states = rows.map(normalizeDispDecision);
-  if (states.some((state) => state === "rejected")) return "rejected";
-  if (states.some((state) => state === "pending")) return "pending";
-  return "approved";
-}
-
 function asUuid(v: any): string | null {
   if (v == null) return null;
   const s = String(v).trim();
@@ -1422,7 +1277,6 @@ function UitslagenTable({
 }
 
 export default function PartijDetailPage() {
-  const [allPartijNrs, setAllPartijNrs] = useState<number[]>([]);
   const noteDraftRef = useRef<Record<string, string>>({});
 
   const params = useParams();
@@ -1434,22 +1288,6 @@ export default function PartijDetailPage() {
     const n = Number(partijNrStr);
     return Number.isFinite(n) ? n : null;
   }, [partijNrStr]);
-
-  const nav = useMemo(() => {
-    if (!partijNr || allPartijNrs.length === 0) {
-      return { prev: null as number | null, next: null as number | null };
-    }
-
-    const idx = allPartijNrs.indexOf(partijNr);
-    if (idx === -1) {
-      return { prev: null as number | null, next: null as number | null };
-    }
-
-    return {
-      prev: idx > 0 ? allPartijNrs[idx - 1] : null,
-      next: idx < allPartijNrs.length - 1 ? allPartijNrs[idx + 1] : null,
-    };
-  }, [partijNr, allPartijNrs]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1470,7 +1308,6 @@ export default function PartijDetailPage() {
   const [showLoader, setShowLoader] = useState(false);
   const [sendingDisp, setSendingDisp] = useState(false);
   const [dispSent, setDispSent] = useState(false);
-  const [dispDecisionStatus, setDispDecisionStatus] = useState<DispDecisionStatus>("none");
 
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const isSuperadmin = useMemo(
@@ -1639,21 +1476,37 @@ export default function PartijDetailPage() {
   }
 
   async function loadMyRoles() {
-    const { data: u } = await supabase.auth.getUser();
+    const { data: u, error: userErr } = await supabase.auth.getUser();
+    if (userErr) throw userErr;
+
     const uid = u?.user?.id ?? null;
     if (!uid) {
       setRoleNames([]);
       return { uid: null as string | null, roles: [] as string[] };
     }
 
-    const response = await authedFetch("/api/me/profile", { method: "GET", cache: "no-store" });
-    const profile = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(profile?.error || "Rollen laden mislukt.");
-    const names = Array.from(new Set([
-      profile?.role,
-      profile?.active_role,
-      ...(Array.isArray(profile?.available_roles) ? profile.available_roles : []),
-    ].map((value) => String(value ?? "").trim()).filter(Boolean)));
+    // NVB user_profiles is hier de bron van waarheid.
+    // De auth UUID staat in user_profiles.id (niet in user_id).
+    const { data: profile, error: profileErr } = await supabase
+      .from("user_profiles")
+      .select("role,active_role,bondteam")
+      .eq("id", uid)
+      .maybeSingle();
+
+    if (profileErr) throw profileErr;
+
+    const activeRole = String(profile?.active_role ?? "").trim().toLowerCase();
+    const baseRole = String(profile?.role ?? "").trim().toLowerCase();
+    const bondteam = String(profile?.bondteam ?? "").trim().toUpperCase();
+
+    const names = Array.from(
+      new Set([activeRole, baseRole].filter(Boolean)),
+    );
+
+    // Binnen NVB-dispensatie is active_role doorslaggevend.
+    if (bondteam === "NVB" && activeRole === "superadmin") {
+      if (!names.includes("superadmin")) names.unshift("superadmin");
+    }
 
     setRoleNames(names);
     return { uid, roles: names };
@@ -1665,15 +1518,23 @@ export default function PartijDetailPage() {
       .toLowerCase();
 
     if (isApprovedOverride(r)) return false;
-    if (reviewStatus === "goedgekeurd" || reviewStatus === "approved") {
+    if (
+      reviewStatus === "goedgekeurd" ||
+      reviewStatus === "approved" ||
+      reviewStatus === "afgekeurd" ||
+      reviewStatus === "rejected"
+    ) {
       return false;
     }
 
     const display = displayResultaat(r);
     const label = String(display.label ?? "").trim().toUpperCase();
 
-    // Matchmaker-partijpagina: alleen ACTIE en INFO mogen knoppen tonen.
-    // AFKEUR, VERBOD/STARTVERBOD, DISPENSATIE en OK tonen nooit reviewknoppen.
+    // Op de dispensatie-partijpagina mag een NVB-superadmin
+    // de dispensatieregel definitief goed- of afkeuren.
+    if (label === "DISPENSATIE") return isSuperadmin;
+
+    // Bestaande ACTIE/INFO-review blijft beschikbaar zoals op de bronpagina.
     return label === "ACTIE" || label === "INFO";
   }
 
@@ -1981,9 +1842,6 @@ export default function PartijDetailPage() {
       setMsg("");
 
       try {
-        let resolvedEventNaam: string | null = null;
-        let resolvedEventDatum: string | null = null;
-
         if (!matchmakingId || !partijNr) {
           setError("Onjuiste parameters (matchmakingId/partijNr).");
           return;
@@ -2013,8 +1871,6 @@ export default function PartijDetailPage() {
             if (!datum) datum = String((ev as any)?.datum ?? "").trim() || null;
           }
 
-          resolvedEventNaam = naam;
-          resolvedEventDatum = datum;
           setEvenementNaam(naam);
           setEvenementDatum(datum);
         } catch {
@@ -2024,26 +1880,8 @@ export default function PartijDetailPage() {
 
         await loadMyRoles();
 
-        // De partij wordt rechtstreeks gevonden op matchmaking_id + partij_nr.
-        // controle_runs is alleen metadata van de context, niet de zoekingang.
-        const { data: pnRows, error: pnErr } = await supabase
-          .from("controle_bout_context")
-          .select("partij_nr")
-          .eq("matchmaking_id", matchmakingId)
-          .order("partij_nr", { ascending: true });
-
-        if (pnErr) throw pnErr;
-
-        const pnList = Array.from(
-          new Set(
-            (pnRows ?? [])
-              .map((r: any) => Number(r.partij_nr))
-              .filter((n: number) => Number.isFinite(n) && n > 0),
-          ),
-        ).sort((a, b) => a - b);
-
-        setAllPartijNrs(pnList);
-
+        // In dispensatie hoort bij iedere aanvraag precies één partij.
+        // Daarom is er bewust geen vorige/volgende-partij navigatie.
         const { data: ctxRows, error: ctxErr } = await supabase
           .from("controle_bout_context")
           .select("*")
@@ -2062,7 +1900,6 @@ export default function PartijDetailPage() {
           setUitslagenRood([]);
           setUitslagenBlauw([]);
           setDispSent(false);
-          setDispDecisionStatus("none");
           return;
         }
 
@@ -2202,26 +2039,21 @@ export default function PartijDetailPage() {
 
         setCtx(row);
 
-        // Dispensatiebesluit blijft aan dezelfde partij-identiteit hangen, ook als
-        // partij_nr of controle_run_id later verandert.
-        const { data: dispReqRows, error: dispReqErr } = await supabase
+        const boutIdForDisp = String((row as any)?.bout_id ?? "").trim();
+        let dispReqQuery = supabase
           .from("dispensatie_requests")
-          .select("*")
-          .eq("matchmaking_id", matchmakingId);
-        if (dispReqErr) throw dispReqErr;
+          .select("id")
+          .eq("matchmaking_id", matchmakingId)
+          .eq("partij_nr", partijNr)
+          .limit(1);
 
-        const currentIdentity = dispIdentityFromContext(
-          matchmakingId,
-          row,
-          resolvedEventNaam,
-          resolvedEventDatum,
-        );
-        const dispRequests = ((dispReqRows ?? []) as AnyRow[]).filter(
-          (request) =>
-            !!currentIdentity && dispIdentityFromRequest(request) === currentIdentity,
-        );
-        setDispSent(dispRequests.length > 0);
-        setDispDecisionStatus(aggregateDispDecision(dispRequests));
+        if (boutIdForDisp) {
+          dispReqQuery = dispReqQuery.eq("bout_id", boutIdForDisp);
+        }
+
+        const { data: dispReqRows, error: dispReqErr } = await dispReqQuery;
+        if (dispReqErr) throw dispReqErr;
+        setDispSent((dispReqRows ?? []).length > 0);
 
         {
           const rows = await fetchRegelsVoorPartij({
@@ -2804,7 +2636,6 @@ export default function PartijDetailPage() {
       if (!r.ok) throw new Error(j?.error ?? "Naar dispensatie sturen mislukt");
 
       setDispSent(true);
-      setDispDecisionStatus("pending");
       setMsg("✅ Naar dispensatie gestuurd.");
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -3045,24 +2876,7 @@ export default function PartijDetailPage() {
           partijNrStr={partijNrStr}
           matchmakingId={matchmakingId}
           runStatus={run?.status ?? null}
-          onBack={() => router.back()}
-          onBackToMatchmaking={() =>
-            router.push(`/dashboard/matchmaker/matchmaking/${encodeURIComponent(String(matchmakingId))}`)
-          }
-          navPrev={nav.prev ?? null}
-          navNext={nav.next ?? null}
-          onPrev={() =>
-            nav.prev &&
-            router.push(
-              `/dashboard/matchmaker/matchmaking/${encodeURIComponent(String(matchmakingId))}/partij/${encodeURIComponent(String(nav.prev))}`,
-            )
-          }
-          onNext={() =>
-            nav.next &&
-            router.push(
-              `/dashboard/matchmaker/matchmaking/${encodeURIComponent(String(matchmakingId))}/partij/${encodeURIComponent(String(nav.next))}`,
-            )
-          }
+          onBackToDispensatie={() => router.push("/dashboard/dispensatie")}
         />
 
         <div
@@ -3595,20 +3409,8 @@ export default function PartijDetailPage() {
               )}
 
               {dispSent ? (
-                <div
-                  className={`mt-4 rounded-xl border px-4 py-3 text-sm font-extrabold ${
-                    dispDecisionStatus === "approved"
-                      ? "border-green-300 bg-green-50 text-green-900"
-                      : dispDecisionStatus === "rejected"
-                        ? "border-red-300 bg-red-50 text-red-900"
-                        : "border-orange-300 bg-orange-50 text-orange-950"
-                  }`}
-                >
-                  {dispDecisionStatus === "approved"
-                    ? "✓ DISPENSATIE GOEDGEKEURD"
-                    : dispDecisionStatus === "rejected"
-                      ? "✕ DISPENSATIE AFGEWEZEN"
-                      : "DISPENSATIE IN BEHANDELING"}
+                <div className="mt-4 rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-950">
+                  Deze partij is al naar dispensatie gestuurd.
                 </div>
               ) : null}
 

@@ -383,7 +383,7 @@ export default function OvertredingenPage() {
               <p className="mt-1 text-sm text-zinc-300">Overtredingen, meldingen, waarschuwingen en vervolgstappen.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <SilverLink href="/dashboard/admin/administratie"><ArrowLeft size={16} /> Terug naar administratie</SilverLink>
+              <SilverLink href="/dashboard/admin/"><ArrowLeft size={16} /> Terug naar admin</SilverLink>
               <OrangeButton onClick={() => setShowForm((v) => !v)}><Plus size={17} /> Nieuw dossier</OrangeButton>
             </div>
           </div>

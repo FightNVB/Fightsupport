@@ -18,6 +18,9 @@ const NVB_ORANGE = "#ff4d00";
 type RequestRow = {
   id: string;
   status: string | null;
+  decision?: string | null;
+  decision_reason?: string | null;
+  decided_at?: string | null;
   matchmaking_id: string | null;
   partij_nr: number | null;
   rule_code: string | null;
@@ -42,10 +45,19 @@ function normStatus(s: any) {
   return x;
 }
 
+function effectiveStatus(r: RequestRow) {
+  const d = safeText(r.decision).toLowerCase();
+  if (d === "approved" || d === "rejected") return d;
+  return normStatus(r.status);
+}
+
 function statusLabel(s: any) {
   const x = normStatus(s);
   if (x === "open" || x === "nieuw") return "NIEUW";
   if (x === "afgehandeld") return "AFGEHANDELD";
+  if (x === "approved") return "GOEDGEKEURD";
+  if (x === "rejected") return "AFGEKEURD";
+  if (x === "closed") return "GESLOTEN";
   return x.toUpperCase();
 }
 
@@ -141,7 +153,8 @@ function Badge({
 }
 
 function statusType(status: string) {
-  if (status === "afgehandeld") return "ok";
+  if (status === "afgehandeld" || status === "approved") return "ok";
+  if (status === "rejected") return "bad";
   if (status === "pending") return "warn";
   if (status === "nieuw" || status === "open") return "warn";
   return "default";
@@ -357,9 +370,11 @@ export default function DispensatiePage() {
       open: 0,
       pending: 0,
       afgehandeld: 0,
+      approved: 0,
+      rejected: 0,
     };
     for (const r of rows) {
-      const key = normStatus(r.status);
+      const key = effectiveStatus(r);
       c[key] = (c[key] ?? 0) + 1;
     }
     return c;
@@ -403,7 +418,7 @@ export default function DispensatiePage() {
             tone="warn"
           />
           <Stat title="Pending" value={counts.pending || 0} tone="warn" />
-          <Stat title="Afgehandeld" value={counts.afgehandeld || 0} tone="ok" />
+          <Stat title="Beslist" value={(counts.approved || 0) + (counts.rejected || 0) + (counts.afgehandeld || 0)} tone="ok" />
           <Stat title="Rol" value={myRole ?? "-"} tone="default" />
         </div>
 
@@ -450,7 +465,7 @@ export default function DispensatiePage() {
               ) : (
                 rows.map((r, index) => {
                   const dark = index % 2 === 1;
-                  const st = normStatus(r.status);
+                  const st = effectiveStatus(r);
                   return (
                     <tr
                       key={r.id}
@@ -461,7 +476,7 @@ export default function DispensatiePage() {
                     >
                       <td className="border border-zinc-800 p-2">
                         <Badge type={statusType(st)}>
-                          {statusLabel(r.status)}
+                          {statusLabel(st)}
                         </Badge>
                       </td>
                       <td className="border border-zinc-800 p-2">
@@ -487,7 +502,7 @@ export default function DispensatiePage() {
                           />
                           {r.matchmaking_id && r.partij_nr != null ? (
                             <MiniLink
-                              href={`/dashboard/matchmaker/matchmaking/${r.matchmaking_id}/partij/${r.partij_nr}`}
+                              href={`/dashboard/dispensatie/${r.id}/partij/${encodeURIComponent(String(r.matchmaking_id))}/${encodeURIComponent(String(r.partij_nr))}`}
                               label="Partij detail"
                               dark={dark}
                             />

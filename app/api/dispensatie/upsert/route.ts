@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireUserFromAuthHeader, hasAnyRoleFromReq } from "@/lib/api/requireRole";
+import { buildDispensatieSnapshot } from "@/lib/dispensatie/buildSnapshot";
 
 export const runtime = "nodejs";
 
@@ -259,6 +260,8 @@ export async function POST(req: Request) {
       partij_nr,
     });
 
+    const snapshot = await buildDispensatieSnapshot(supabaseAdmin, matchmaking_id, partij_nr);
+
     const { data: existing, error: exErr } = await supabaseAdmin
       .from("dispensatie_requests")
       .select("id")
@@ -278,6 +281,9 @@ export async function POST(req: Request) {
         rule: dispensatieResult.rule ?? null,
         rule_code: resolved_rule_code,
         reason: dispensatie_melding,
+        evenement_naam: snapshot.evenement_naam,
+        evenement_datum: snapshot.evenement_datum,
+        snapshot_json: snapshot,
         updated_at: new Date().toISOString(),
       };
 
@@ -328,6 +334,9 @@ export async function POST(req: Request) {
       reason: dispensatie_melding,
       controle_run_id: controle_run_id ?? null,
       created_by: created_by ?? null,
+      evenement_naam: snapshot.evenement_naam,
+      evenement_datum: snapshot.evenement_datum,
+      snapshot_json: snapshot,
     };
 
     console.log("[dispensatie/upsert] INSERT row:", insertRow);

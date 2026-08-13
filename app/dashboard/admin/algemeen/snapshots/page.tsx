@@ -138,8 +138,8 @@ export default function AdminAlgemeenSnapshotsPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Link className="silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/administratie">
-                Terug naar administratie
+              <Link className="silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/">
+                Terug naar admin
               </Link>
               <Link className="silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/algemeen/matchmakings">
                 Matchmakings

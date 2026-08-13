@@ -178,11 +178,10 @@ export default function AdminAgendaPage() {
             <div className="flex flex-wrap gap-2">
               <Link
                 className="agenda-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black"
-                href="/dashboard/admin/administratie"
+                href="/dashboard/admin/"
               >
                 <ArrowLeft className="mr-2 inline" size={16} /> Terug naar
-                administratie
-              </Link>
+                admin              </Link>
               <button
                 onClick={load}
                 className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black"

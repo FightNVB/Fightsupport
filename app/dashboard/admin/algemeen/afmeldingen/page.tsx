@@ -867,10 +867,10 @@ export default async function AdminAfmeldingenPage({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href="/dashboard/admin/administratie"
+                href="/dashboard/admin/"
                 className="border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black shadow-lg shadow-black/30 transition hover:brightness-110"
               >
-                Terug naar administratie
+                Terug naar admin
               </Link>
               <div className="border border-zinc-600 bg-[#1c1c1c] px-4 py-2 text-right">
                 <p className="text-xs uppercase text-zinc-400">

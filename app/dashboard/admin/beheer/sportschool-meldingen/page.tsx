@@ -198,7 +198,7 @@ export default function AdminSportschoolMeldingenPage() {
               <p className="text-sm text-zinc-300">Meldingen van trainers en sportscholen over vechters, gegevens, licenties en uitslagen.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link className="sportschool-admin-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/administratie">Terug naar administratie</Link>
+              <Link className="sportschool-admin-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-4 py-2 text-sm font-black uppercase !text-black" href="/dashboard/admin/">Terug</Link>
               <button onClick={load} className="border border-[#ff4d00] bg-[#ff4d00] px-4 py-2 text-sm font-black uppercase !text-black">
                 {loading ? "Laden..." : "Vernieuwen"}
               </button>

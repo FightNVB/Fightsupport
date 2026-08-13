@@ -625,6 +625,110 @@ function StatusBadge({ status }: { status: PartijStatus }) {
   return <Chip label="GEEN INFO" tone="white" />;
 }
 
+
+
+type DispDecisionStatus = "pending" | "approved" | "rejected";
+
+
+function normalizeDispIdentityText(value: any): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeDispEventDate(value: any): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw.toLowerCase();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function normalizeDispVa(value: any): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function dispIdentityKey(args: {
+  matchmakingId: any;
+  vaRood: any;
+  vaBlauw: any;
+  eventNaam: any;
+  eventDatum: any;
+}): string | null {
+  const matchmaking = String(args.matchmakingId ?? "").trim();
+  const pair = [normalizeDispVa(args.vaRood), normalizeDispVa(args.vaBlauw)]
+    .filter(Boolean)
+    .sort();
+  const eventNaam = normalizeDispIdentityText(args.eventNaam);
+  const eventDatum = normalizeDispEventDate(args.eventDatum);
+  if (!matchmaking || pair.length !== 2 || !eventNaam || !eventDatum) return null;
+  return [matchmaking, pair[0], pair[1], eventNaam, eventDatum].join("|");
+}
+
+function dispIdentityFromContext(
+  matchmakingId: any,
+  row: AnyRow,
+  fallbackEventNaam?: any,
+  fallbackEventDatum?: any,
+): string | null {
+  return dispIdentityKey({
+    matchmakingId,
+    vaRood: firstFilled(
+      row?.rood_va_mm,
+      row?.rood_va_fp,
+      row?.rood_va,
+      row?.va_rood,
+      row?.rood_va_nummer,
+      row?.rood_fighter_id,
+    ),
+    vaBlauw: firstFilled(
+      row?.blauw_va_mm,
+      row?.blauw_va_fp,
+      row?.blauw_va,
+      row?.va_blauw,
+      row?.blauw_va_nummer,
+      row?.blauw_fighter_id,
+    ),
+    eventNaam: firstFilled(row?.evenement_naam, row?.event_naam, fallbackEventNaam),
+    eventDatum: firstFilled(row?.evenement_datum, row?.event_datum, fallbackEventDatum),
+  });
+}
+
+function dispIdentityFromRequest(request: AnyRow): string | null {
+  return dispIdentityKey({
+    matchmakingId: request?.matchmaking_id,
+    vaRood: request?.va_rood,
+    vaBlauw: request?.va_blauw,
+    eventNaam: firstFilled(request?.evenement_naam, request?.event_naam),
+    eventDatum: firstFilled(request?.evenement_datum, request?.event_datum),
+  });
+}
+
+function normalizeDispDecision(row: AnyRow | null | undefined): DispDecisionStatus {
+  const raw = String(
+    row?.decision ?? row?.beslissing ?? row?.besluit ?? row?.final_decision ?? row?.status ?? "",
+  ).trim().toLowerCase();
+  if (["approved", "approve", "goedgekeurd", "akkoord", "accepted", "geaccepteerd"].includes(raw)) return "approved";
+  if (["rejected", "reject", "afgewezen", "afgekeurd", "denied", "declined"].includes(raw)) return "rejected";
+  return "pending";
+}
+
+function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
+  const states = (rows ?? []).map(normalizeDispDecision);
+  if (states.some((state) => state === "rejected")) return "rejected";
+  if (states.some((state) => state === "pending")) return "pending";
+  return states.length > 0 ? "approved" : "pending";
+}
+
+function DispDecisionBadge({ status }: { status: DispDecisionStatus }) {
+  if (status === "approved") return <Chip label="DISPENSATIE GOEDGEKEURD" tone="green" />;
+  if (status === "rejected") return <Chip label="DISPENSATIE AFGEWEZEN" tone="red" />;
+  return <Chip label="DISPENSATIE IN BEHANDELING" tone="orange" />;
+}
+
 function FilterButton({
   label,
   active,
@@ -2212,7 +2316,7 @@ export default function ControleMatchmakingPage() {
     Record<number, boolean>
   >({});
   const [dispRequestByPartij, setDispRequestByPartij] = useState<
-    Record<number, boolean>
+    Record<number, DispDecisionStatus>
   >({});
   const [countByPartij, setCountByPartij] = useState<Record<number, number>>(
     {},
@@ -2290,7 +2394,13 @@ export default function ControleMatchmakingPage() {
 
   const subtitle = useMemo(() => {
     const naam = (evenementNaam ?? "").trim();
-    const datum = (evenementDatum ?? "").trim();
+    const rawDatum = (evenementDatum ?? "").trim();
+    const datum = rawDatum
+      ? (() => {
+          const dt = parseISODateOnly(rawDatum);
+          return dt ? dt.toLocaleDateString("nl-NL") : rawDatum;
+        })()
+      : "";
     if (naam && datum) return `${naam}  ${datum}`;
     if (naam) return naam;
     if (datum) return datum;
@@ -2752,6 +2862,10 @@ export default function ControleMatchmakingPage() {
     setError(null);
     setMsg("");
 
+    // Ruwe eventwaarden blijven ongewijzigd voor de blijvende dispensatiekoppeling.
+    let resolvedEventNaam: string | null = null;
+    let resolvedEventDatum: string | null = null;
+
     try {
       if (!matchmakingId) {
         setRows([]);
@@ -2762,7 +2876,6 @@ export default function ControleMatchmakingPage() {
         setStatusByPartij({});
         setRunMeldingen([]);
         setHasDispByPartij({});
-        setDispRequestByPartij({});
         setCountByPartij({});
         setVerbodByPartij({});
         setResultatenByPartij({});
@@ -2810,6 +2923,8 @@ export default function ControleMatchmakingPage() {
           if (!datum) datum = String(up?.evenement_datum ?? "").trim() || null;
         }
 
+        resolvedEventNaam = naam;
+        resolvedEventDatum = datum;
         setEvenementNaam(naam);
         setEvenementDatum(datum);
       } catch {
@@ -2912,11 +3027,45 @@ export default function ControleMatchmakingPage() {
         map[pn] = isContextCompleet(r) ? "ok" : "geen_info";
       }
 
+      const { data: dispReqRows, error: dispReqErr } = await supabase
+        .from("dispensatie_requests")
+        .select("*")
+        .eq("matchmaking_id", matchmakingId);
+      if (dispReqErr) throw dispReqErr;
+
+      // Blijvende dispensatiekoppeling: NIET op partij_nr of controle_run_id.
+      // Identiteit = matchmaking_id + beide VA-nummers + eventnaam + eventdatum.
+      // De VA-combinatie is hoek-onafhankelijk, zodat rood/blauw wisselen de koppeling niet breekt.
+      const dispRowsByIdentity: Record<string, AnyRow[]> = {};
+      for (const request of (dispReqRows ?? []) as AnyRow[]) {
+        const key = dispIdentityFromRequest(request);
+        if (!key) continue;
+        (dispRowsByIdentity[key] ??= []).push(request);
+      }
+
+      const dispRequestMap: Record<number, DispDecisionStatus> = {};
+      for (const ctxRow of ctxList) {
+        const pn = Number(ctxRow?.partij_nr);
+        if (!Number.isFinite(pn) || pn <= 0) continue;
+        const key = dispIdentityFromContext(
+          matchmakingId,
+          ctxRow,
+          resolvedEventNaam,
+          resolvedEventDatum,
+        );
+        if (!key) continue;
+        const requests = dispRowsByIdentity[key] ?? [];
+        if (requests.length > 0) {
+          dispRequestMap[pn] = aggregateDispDecision(requests);
+        }
+      }
+      setDispRequestByPartij(dispRequestMap);
+
       if (!latestControleRunId) {
         setStatusByPartij(map);
         setRunMeldingen([]);
         setHasDispByPartij({});
-        setDispRequestByPartij({});
+        // Dispensatiebesluiten blijven zichtbaar, ook zonder actieve/laatste controle-run.
         setCountByPartij({});
         setVerbodByPartij({});
         setResultatenByPartij({});
@@ -3044,7 +3193,6 @@ export default function ControleMatchmakingPage() {
       setCountByPartij(countMap);
       setApprovedLicentieByPartij(approvedLicentieMap);
       setHasDispByPartij(dispMap);
-      setDispRequestByPartij({});
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -4454,9 +4602,10 @@ export default function ControleMatchmakingPage() {
                         const heeftAfkeur = Number.isFinite(originalPn)
                           ? !!hasAfkeurByPartij[originalPn]
                           : false;
-                        const heeftDispRequest = Number.isFinite(originalPn)
-                          ? !!dispRequestByPartij[originalPn]
-                          : false;
+                        const dispRequestStatus = Number.isFinite(originalPn)
+                          ? dispRequestByPartij[originalPn]
+                          : undefined;
+                        const heeftDispRequest = !!dispRequestStatus;
                         const heeftDispensatie = Number.isFinite(originalPn)
                           ? !!hasDispByPartij[originalPn] || heeftDispRequest
                           : false;
@@ -4520,8 +4669,8 @@ export default function ControleMatchmakingPage() {
                                     />
                                   ) : null}
 
-                                  {heeftDispRequest ? (
-                                    <Chip label="NAAR DISPENSATIE" tone="purple" />
+                                  {heeftDispRequest && dispRequestStatus ? (
+                                    <DispDecisionBadge status={dispRequestStatus} />
                                   ) : (
                                     <StatusBadge status={status} />
                                   )}

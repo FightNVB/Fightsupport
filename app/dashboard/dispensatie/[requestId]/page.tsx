@@ -218,38 +218,25 @@ export default function DispensatieDetailPage() {
 
   async function getUserRole() {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id ?? null;
-      if (!uid) return setMyRole(null);
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token ?? null;
+      if (!token) return setMyRole(null);
 
-      const { data: ur, error: urErr } = await supabase
-        .from("user_roles")
-        .select("role_id")
-        .eq("user_id", uid);
-      if (urErr) throw urErr;
+      const r = await fetch("/api/me/profile", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error ?? "Rol laden mislukt");
 
-      const roleIds = (ur ?? [])
-        .map((r: any) => Number(r.role_id))
-        .filter((n) => Number.isFinite(n));
-      if (!roleIds.length) return setMyRole(null);
-
-      const { data: roles, error: rErr } = await supabase
-        .from("roles")
-        .select("id,name")
-        .in("id", roleIds);
-      if (rErr) throw rErr;
-
-      const names = (roles ?? []).map((r: any) =>
-        String(r.name ?? "").toLowerCase(),
-      );
+      const names = [j?.role, j?.active_role, ...(Array.isArray(j?.available_roles) ? j.available_roles : [])]
+        .map((x: any) => String(x ?? "").trim().toLowerCase())
+        .filter(Boolean);
       if (names.includes("superadmin")) return setMyRole("superadmin");
-      if (names.includes("dispensatie_admin"))
-        return setMyRole("dispensatie_admin");
+      if (names.includes("dispensatie_admin")) return setMyRole("dispensatie_admin");
       if (names.includes("admin")) return setMyRole("admin");
-      return setMyRole(names[0] ?? null);
-    } catch {
-      setMyRole(null);
-    }
+      setMyRole(names[0] ?? null);
+    } catch { setMyRole(null); }
   }
 
   async function loadAll() {
@@ -272,6 +259,21 @@ export default function DispensatieDetailPage() {
         ? String((r as any).matchmaking_id)
         : null;
       if (mmId) {
+        const { data: mm } = await supabase
+          .from("matchmakings")
+          .select("id,naam,datum,event_id")
+          .eq("id", mmId)
+          .maybeSingle();
+        let mmNaam = mm?.naam ?? null;
+        let mmDatum = mm?.datum ?? null;
+        if (mm?.event_id && (!mmNaam || !mmDatum)) {
+          const { data: ev } = await supabase.from("events").select("naam,datum").eq("id", mm.event_id).maybeSingle();
+          if (!mmNaam) mmNaam = ev?.naam ?? null;
+          if (!mmDatum) mmDatum = ev?.datum ?? null;
+        }
+        if (mmNaam || mmDatum) {
+          setUploadRow({ matchmaking_id: mmId, evenement_naam: mmNaam, evenement_datum: mmDatum, uploaded_by: null, uploaded_at: null } as any);
+        } else {
         const { data: ups, error: uErr } = await supabase
           .from("matchmaking_uploads")
           .select(
@@ -282,6 +284,7 @@ export default function DispensatieDetailPage() {
           .limit(1);
         if (uErr) throw uErr;
         setUploadRow((ups?.[0] ?? null) as any);
+        }
       } else {
         setUploadRow(null);
       }
@@ -459,8 +462,8 @@ export default function DispensatieDetailPage() {
   const mmId = reqRow?.matchmaking_id ?? null;
   const partijNr = reqRow?.partij_nr ?? null;
   const partijDetailHref =
-    mmId && partijNr != null
-      ? `/dashboard/matchmaker/matchmaking/${mmId}/partij/${partijNr}`
+    reqRow?.matchmaking_id && reqRow?.partij_nr != null
+      ? `/dashboard/dispensatie/${requestId}/partij/${encodeURIComponent(String(reqRow.matchmaking_id))}/${encodeURIComponent(String(reqRow.partij_nr))}`
       : "#";
   const controleHref = mmId ? `/dashboard/admin/controle/${mmId}` : "#";
   const currentStatus = normStatus(reqRow?.status);
@@ -489,7 +492,7 @@ export default function DispensatieDetailPage() {
               >
                 ← Overzicht
               </SilverButton>
-              {mmId && partijNr != null ? (
+              {reqRow && partijNr != null ? (
                 <LinkButton href={partijDetailHref}>Partij detail</LinkButton>
               ) : null}
               {mmId ? (

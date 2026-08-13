@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       .from("dispensatie_requests")
       .update({ status: "pending", updated_at: new Date().toISOString() })
       .eq("id", request_id)
-      .eq("status", "open");
+      .in("status", ["open", "nieuw"]);
 
     if (sErr) throw sErr;
 

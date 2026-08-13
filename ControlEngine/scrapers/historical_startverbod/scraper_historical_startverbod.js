@@ -80,6 +80,37 @@ async function saveRecords(records) {
   };
 }
 
+
+async function loadConfirmedDeletedVaNumbers(startVa, endVa) {
+  const skipped = new Set();
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("fightpassport_missing_va")
+      .select("va_number")
+      .eq("status", "confirmed_deleted")
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.log(`[historie] ⚠️ confirmed_deleted lijst niet beschikbaar: ${error.message}`);
+      return skipped;
+    }
+
+    const rows = data ?? [];
+    for (const row of rows) {
+      const n = Number(row.va_number);
+      if (Number.isInteger(n) && n >= startVa && n <= endVa) skipped.add(n);
+    }
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return skipped;
+}
+
 async function saveItem(runId, va, patch) {
   const { error } = await supabase.from("fighter_startverbod_history_items").upsert({
     run_id: runId, va_nummer: va, ...patch,
@@ -107,7 +138,6 @@ export async function scraperHistoricalStartverbod() {
       saveCookiesToDisk: false,
     }));
     let cookies = await masterPage.cookies().catch(() => []);
-    let cookieGeneration = 1;
     console.log("[historie] ✅ Schone master-sessie gestart met trusted-device herkenning; alleen nieuwe sessiecookies worden intern gedeeld");
 
     let masterRefreshPromise = null;
@@ -125,8 +155,7 @@ export async function scraperHistoricalStartverbod() {
           useStoredCookies: false,
         });
         cookies = await masterPage.cookies().catch(() => cookies);
-        cookieGeneration++;
-        console.log(`[historie] ✅ master refreshed (cookies updated, generatie ${cookieGeneration})`);
+        console.log("[historie] ✅ master refreshed (cookies updated)");
         return cookies;
       })();
 
@@ -136,8 +165,13 @@ export async function scraperHistoricalStartverbod() {
         masterRefreshPromise = null;
       }
     }
+    const confirmedDeleted = await loadConfirmedDeletedVaNumbers(startVa, endVa);
+    if (confirmedDeleted.size) {
+      console.log(`[historie] 🗑️ ${confirmedDeleted.size} bevestigd verwijderde VA-nummer(s) worden overgeslagen.`);
+    }
+
     const allVas = Array.from({ length: endVa - startVa + 1 }, (_, index) => startVa + index)
-      .filter((va) => va > stats.lastVa);
+      .filter((va) => va > stats.lastVa && !confirmedDeleted.has(va));
     let cursor = 0;
 
     async function persistRun(status = "running", finishedAt = null) {
@@ -171,10 +205,6 @@ while (!stopRequested) {
               // Pak bij iedere poging de meest actuele master-cookies.
               // Een worker die per ongeluk op de loginpagina belandt, wordt gesloten
               // en krijgt voor DEZELFDE VA een volledig nieuwe tab.
-              // Onthoud met welke cookie-generatie deze tab is geopend.
-              // Als een andere worker intussen al heeft vernieuwd, hoeft deze
-              // worker bij LOGIN_PAGE niet nogmaals de master-login te forceren.
-              const pageCookieGeneration = cookieGeneration;
               page = await openFighterPageVerified(browser, null, cookies, va, {
                 maxAttempts: Number(process.env.TAB_ATTEMPTS || 5),
                 softWaitMs: Number(process.env.SOFT_WAIT_MS || 2500),
@@ -206,18 +236,9 @@ while (!stopRequested) {
                 `(poging ${loginAttempt}/${loginRetries}); master-sessie verversen en DEZELFDE VA opnieuw openen`
               );
 
-              if (cookieGeneration > pageCookieGeneration) {
-                console.log(
-                  `[historie] ♻️ VA ${va}: worker ${workerIndex + 1} gebruikt reeds vernieuwde ` +
-                  `master-sessie (generatie ${cookieGeneration}); geen extra refresh`
-                );
-              } else {
-                // Eén worker ververst werkelijk. Workers die gelijktijdig
-                // binnenkomen wachten via masterRefreshPromise op dezelfde refresh.
-                await refreshMasterSessionLocked(
-                  `worker ${workerIndex + 1} VA ${va} retry ${loginAttempt}`
-                );
-              }
+              cookies = await refreshMasterSessionLocked(
+                `worker ${workerIndex + 1} VA ${va} retry ${loginAttempt}`
+              );
 
               await new Promise((resolve) =>
                 setTimeout(resolve, Math.max(750, Number(process.env.HISTORY_LOGIN_RETRY_WAIT_MS || 1200)))

@@ -1100,9 +1100,9 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
         >
           <button
             style={buttonBase}
-            onClick={() => router.push("/dashboard/admin/administratie")}
+            onClick={() => router.push("/dashboard/admin/")}
           >
-            <ArrowLeft size={17} /> Terug naar administratie
+            <ArrowLeft size={17} /> Terug naar admin
           </button>
 
           <img

@@ -767,8 +767,8 @@ export default function AccountsBeheerPage() {
               <SilverButton onClick={() => loadAll()} disabled={busy}>
                 <RefreshCw size={16} /> Ververs
               </SilverButton>
-              <SilverButton onClick={() => router.push("/dashboard/admin/administratie")}>
-                <ArrowLeft size={16} /> Administratie
+              <SilverButton onClick={() => router.push("/dashboard/admin/")}>
+                <ArrowLeft size={16} /> Admin
               </SilverButton>
             </div>
           </div>

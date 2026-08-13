@@ -1,7 +1,8 @@
 // app/api/dispensatie/create-from-controle/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserFromAuthHeader, hasAnyRole, hasAnyRoleFromReq } from "@/lib/api/requireRole";
+import { requireUserFromAuthHeader, hasAnyRoleFromReq } from "@/lib/api/requireRole";
+import { buildDispensatieSnapshot } from "@/lib/dispensatie/buildSnapshot";
 
 export const runtime = "nodejs";
 
@@ -47,11 +48,52 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "matchmaking_id en partij_nr zijn verplicht." }, { status: 400 });
     }
 
-    // ✅ upsert op (matchmaking_id, partij_nr, rule_code) zodat dubbel klikken niet 2 requests maakt
+    const snapshot = await buildDispensatieSnapshot(supabaseAdmin, matchmaking_id, partij_nr);
+
+    // Een bestaande aanvraag NOOIT opnieuw openen of een besluit overschrijven.
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from("dispensatie_requests")
+      .select("id,status,decision")
+      .eq("matchmaking_id", matchmaking_id)
+      .eq("partij_nr", partij_nr)
+      .eq("rule_code", rule_code)
+      .maybeSingle();
+
+    if (exErr) throw exErr;
+
+    if (existing?.id) {
+      const patch: any = {
+        bout_id,
+        va_rood,
+        va_blauw,
+        discipline,
+        rule,
+        reason,
+        evenement_naam: snapshot.evenement_naam,
+        evenement_datum: snapshot.evenement_datum,
+        snapshot_json: snapshot,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: updErr } = await supabaseAdmin
+        .from("dispensatie_requests")
+        .update(patch)
+        .eq("id", existing.id);
+      if (updErr) throw updErr;
+
+      return NextResponse.json({
+        ok: true,
+        id: existing.id,
+        status: existing.status,
+        decision: existing.decision,
+        preserved: true,
+      });
+    }
+
     const insertRow: any = {
       matchmaking_id,
       partij_nr,
-      bout_id, // kan null zijn
+      bout_id,
       va_rood,
       va_blauw,
       discipline,
@@ -60,12 +102,15 @@ export async function POST(req: Request) {
       reason,
       status: "nieuw",
       created_by: user.id,
+      evenement_naam: snapshot.evenement_naam,
+      evenement_datum: snapshot.evenement_datum,
+      snapshot_json: snapshot,
       updated_at: new Date().toISOString(),
     };
 
     const { data, error } = await supabaseAdmin
       .from("dispensatie_requests")
-      .upsert(insertRow, { onConflict: "matchmaking_id,partij_nr,rule_code" })
+      .insert(insertRow)
       .select("id")
       .single();
 

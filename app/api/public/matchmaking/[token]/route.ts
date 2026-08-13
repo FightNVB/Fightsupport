@@ -46,7 +46,19 @@ function normalizeStatus(value: unknown) {
   const raw = s(value).toLowerCase().replace(/[\s-]+/g, "_");
   if (raw.includes("tegenstander") || raw.includes("opponent")) return "tegenstander_gezocht";
   if (raw.includes("voorbehoud") || raw.includes("pending")) return "onder_voorbehoud";
-  if (raw.includes("bevest") || raw.includes("confirm") || raw === "akkoord") return "bevestigd";
+
+  // Intern gebruikt de Matchmaking-tab letterlijk "match" voor een bevestigde partij.
+  // De publieke live pagina moet die actuele status daarom ook als bevestigd tonen.
+  if (
+    raw === "match" ||
+    raw === "gematcht" ||
+    raw.includes("bevest") ||
+    raw.includes("confirm") ||
+    raw === "akkoord"
+  ) {
+    return "bevestigd";
+  }
+
   return "concept";
 }
 

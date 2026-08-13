@@ -1301,7 +1301,7 @@ export default function SportschoolAliasesPage() {
         subtitle="Stabiele matching voor scraper en controle"
         actionLabel="Administratie"
         actionIcon={<ArrowLeft size={15} strokeWidth={2.8} />}
-        onAction={() => router.push("/dashboard/admin/administratie")}
+        onAction={() => router.push("/dashboard/admin/")}
       />
 
       <div

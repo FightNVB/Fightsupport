@@ -220,7 +220,7 @@ export default function AdminAlgemeenArchiefPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <SilverLink href="/dashboard/admin/administratie">Terug naar administratie</SilverLink>
+              <SilverLink href="/dashboard/admin/admin">Terug naar admin</SilverLink>
               <div className="border border-zinc-600 bg-[#1c1c1c] px-4 py-2 text-right">
                 <p className="text-xs uppercase tracking-[0.16em] text-zinc-400">Bond</p>
                 <p className="text-xl font-black text-[#ff4d00]">{myBondteam || "-"}</p>

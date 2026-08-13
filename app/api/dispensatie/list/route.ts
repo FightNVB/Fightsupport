@@ -1,14 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireUserFromAuthHeader, hasAnyRole, hasAnyRoleFromReq } from "@/lib/api/requireRole";
+import { requireUserFromAuthHeader, hasAnyRoleFromReq } from "@/lib/api/requireRole";
 
 export const runtime = "nodejs";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
 
 export async function POST(req: Request) {
   try {
@@ -16,37 +11,43 @@ export async function POST(req: Request) {
     const ok = await hasAnyRoleFromReq(req, ["admin", "superadmin", "dispensatie_admin"]);
     if (!ok) return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
 
-    const { data: base, error: rErr } = await supabaseAdmin
+    const { data: rows, error } = await supabaseAdmin
       .from("dispensatie_requests")
-      .select("id,status,matchmaking_id,partij_nr,bout_id,rule_code,created_at,updated_at,decision")
+      .select("id,status,decision,decision_reason,decided_at,decided_by,matchmaking_id,partij_nr,bout_id,rule_code,rule,reason,evenement_naam,evenement_datum,snapshot_json,created_at,updated_at")
       .order("updated_at", { ascending: false });
+    if (error) throw error;
 
-    if (rErr) throw rErr;
+    const ids = [...new Set((rows ?? []).map((r:any)=>r.matchmaking_id).filter(Boolean))];
+    const mmBy = new Map<string, any>();
+    const eventBy = new Map<string, any>();
+    const upBy = new Map<string, any>();
 
-    const rows = (base ?? []) as any[];
+    if (ids.length) {
+      const { data: mm } = await supabaseAdmin.from("matchmakings").select("id,naam,datum,event_id").in("id", ids);
+      for (const x of mm ?? []) mmBy.set(String(x.id), x);
+      const eventIds = [...new Set((mm ?? []).map((x:any)=>x.event_id).filter(Boolean))];
+      if (eventIds.length) {
+        const { data: events } = await supabaseAdmin.from("events").select("id,naam,datum").in("id", eventIds);
+        for (const x of events ?? []) eventBy.set(String(x.id), x);
+      }
+      const { data: ups } = await supabaseAdmin.from("matchmaking_uploads").select("matchmaking_id,evenement_naam,evenement_datum,uploaded_at").in("matchmaking_id", ids).order("uploaded_at", { ascending: false });
+      for (const x of ups ?? []) if (!upBy.has(String(x.matchmaking_id))) upBy.set(String(x.matchmaking_id), x);
+    }
 
-    // 2e query matchmaking_uploads (geen embedded select zonder FK)
-    const matchmakingIds = [...new Set(rows.map((d) => d.matchmaking_id).filter(Boolean) as string[])];
-
-    const { data: uploads, error: uErr } = matchmakingIds.length
-      ? await supabaseAdmin
-          .from("matchmaking_uploads")
-          .select("matchmaking_id,evenement_naam,evenement_datum")
-          .in("matchmaking_id", matchmakingIds)
-      : ({ data: [], error: null } as any);
-
-    if (uErr) throw uErr;
-
-    const uploadsBy = new Map<string, any>();
-    (uploads ?? []).forEach((u: any) => uploadsBy.set(String(u.matchmaking_id), u));
-
-    const merged = rows.map((r) => {
-      const u = r.matchmaking_id ? uploadsBy.get(String(r.matchmaking_id)) ?? null : null;
-      return { ...r, evenement_naam: u?.evenement_naam ?? null, evenement_datum: u?.evenement_datum ?? null };
+    const merged = (rows ?? []).map((r:any) => {
+      const snap = r.snapshot_json ?? {};
+      const mm = r.matchmaking_id ? mmBy.get(String(r.matchmaking_id)) : null;
+      const ev = mm?.event_id ? eventBy.get(String(mm.event_id)) : null;
+      const up = r.matchmaking_id ? upBy.get(String(r.matchmaking_id)) : null;
+      return {
+        ...r,
+        evenement_naam: r.evenement_naam ?? snap.evenement_naam ?? mm?.naam ?? ev?.naam ?? up?.evenement_naam ?? null,
+        evenement_datum: r.evenement_datum ?? snap.evenement_datum ?? mm?.datum ?? ev?.datum ?? up?.evenement_datum ?? null,
+      };
     });
 
     return NextResponse.json({ rows: merged });
-  } catch (e: any) {
+  } catch (e:any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
   }
 }
