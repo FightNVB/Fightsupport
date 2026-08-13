@@ -346,46 +346,8 @@ function normalizeClass(v) {
 
 function parseTalentstatusFromNulmeting(opmerking) {
   const text = String(opmerking ?? "").replace(/\u00a0/g, " ").trim();
-  const talentRx = /\btalent\s*status\b|\btalentstatus\b/i;
-  if (!talentRx.test(text)) {
-    return { actief: false, datum: null, tekst: text || null };
-  }
-
-  const toIso = (value) => {
-    const raw = String(value ?? "").trim();
-    let m = raw.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
-    if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
-    m = raw.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
-    if (m) return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
-    return null;
-  };
-
-  // Alleen een datum accepteren die in DEZELFDE zin/regel als Talentstatus staat.
-  // Daarmee worden wedstrijddatums of "nulmeting bijgewerkt op ..." nooit meer
-  // per ongeluk als talentstatusdatum opgeslagen.
-  const segments = text
-    .split(/\r?\n|(?<=[.!?])\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  for (const segment of segments) {
-    if (!talentRx.test(segment)) continue;
-    const datum = toIso(segment);
-    if (datum) return { actief: true, datum, tekst: text };
-  }
-
-  // Fallback voor tekst zonder nette regeleinden: zoek alleen in een kleine
-  // context rond het woord Talentstatus, niet in de hele nulmeting.
-  const match = talentRx.exec(text);
-  if (match) {
-    const start = Math.max(0, match.index - 80);
-    const end = Math.min(text.length, match.index + match[0].length + 120);
-    const datum = toIso(text.slice(start, end));
-    if (datum) return { actief: true, datum, tekst: text };
-  }
-
-  // Talentstatus zonder gekoppelde datum wordt niet automatisch geregistreerd.
-  return { actief: false, datum: null, tekst: text };
+  const actief = /\btalent\s*status\b|\btalentstatus\b/i.test(text);
+  return { actief, tekst: text || null };
 }
 
 function ageOnToday(dateValue) {
@@ -406,7 +368,7 @@ function ageOnToday(dateValue) {
 
 async function syncTalentstatusVechterFromFighter(payload, results = []) {
   const talent = parseTalentstatusFromNulmeting(payload?.nulmeting_opmerking);
-  if (!talent.actief || !talent.datum) return;
+  if (!talent.actief) return;
 
   const age = ageOnToday(payload?.geboortedatum);
   const classToken = normalizeClass(payload?.nulmeting_klasse);
@@ -424,10 +386,10 @@ async function syncTalentstatusVechterFromFighter(payload, results = []) {
 
   if (existingError) throw existingError;
   if (existing?.id) {
-    const autoPrefix = "Automatisch uit FightPassport nulmeting: Talentstatus ";
+    const autoPrefix = "Automatisch uit FightPassport nulmeting";
     const existingNote = String(existing?.opmerkingen ?? "");
     if (existingNote.startsWith(autoPrefix)) {
-      const nextNote = `${autoPrefix}${talent.datum}`;
+      const nextNote = autoPrefix;
       if (existingNote !== nextNote || Number(existing?.max_proef_partijen ?? 0) !== 3) {
         const { error: updateError } = await supabase
           .from("talentstatus_vechters")
@@ -438,7 +400,7 @@ async function syncTalentstatusVechterFromFighter(payload, results = []) {
           })
           .eq("id", existing.id);
         if (updateError) throw updateError;
-        console.log(`[fp-total] 🏆 VA ${va} automatische talentstatus gecorrigeerd naar ${talent.datum}`);
+        console.log(`[fp-total] 🏆 VA ${va} automatische talentstatus bijgewerkt`);
       }
     }
     return; // handmatige/admin-status nooit overschrijven
@@ -462,7 +424,7 @@ async function syncTalentstatusVechterFromFighter(payload, results = []) {
     admin_bevestigd_op: new Date().toISOString(),
     max_proef_partijen: 3,
     is_actief: true,
-    opmerkingen: `Automatisch uit FightPassport nulmeting: Talentstatus ${talent.datum}`,
+    opmerkingen: "Automatisch uit FightPassport nulmeting",
   };
 
   const { error: insertError } = await supabase
@@ -475,7 +437,7 @@ async function syncTalentstatusVechterFromFighter(payload, results = []) {
   }
 
   console.log(
-    `[fp-total] ⭐ VA ${va} automatisch toegevoegd aan talentstatus_vechters (${talent.datum})`
+    `[fp-total] ⭐ VA ${va} automatisch toegevoegd aan talentstatus_vechters`
   );
 }
 

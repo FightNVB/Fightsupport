@@ -275,7 +275,7 @@ export default function FighterDossierPage() {
             value={
               talentstatus.jeugd
                 ? talentstatus.actief
-                  ? `Aanwezig · ${talentstatus.datum}`
+                  ? "🏆 Talentstatus verdiend"
                   : "Niet gevonden"
                 : "Niet van toepassing"
             }
@@ -586,34 +586,16 @@ function calcAge(value: any, at: any) { const birth = new Date(value); const eve
 function talentstatusFromFighter(f: any) {
   const text = String(f?.nulmeting_opmerking ?? "").replace(/\u00a0/g, " ").trim();
   const hasTalent = /\btalent\s*status\b|\btalentstatus\b/i.test(text);
-
-  let datum: string | null = null;
-  const iso = text.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
-  const nl = text.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
-
-  if (iso) {
-    datum = `${String(iso[3]).padStart(2, "0")}-${String(iso[2]).padStart(2, "0")}-${iso[1]}`;
-  } else if (nl) {
-    datum = `${String(nl[1]).padStart(2, "0")}-${String(nl[2]).padStart(2, "0")}-${nl[3]}`;
-  }
-
   const klasse = String(f?.nulmeting_klasse ?? f?.berekende_klasse ?? "").trim().toUpperCase();
   const birth = f?.geboortedatum ? new Date(f.geboortedatum) : null;
   let leeftijd: number | null = null;
-
   if (birth && !Number.isNaN(birth.getTime())) {
     const today = new Date();
     leeftijd = today.getFullYear() - birth.getFullYear();
-    if (
-      today.getMonth() < birth.getMonth() ||
-      (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())
-    ) {
-      leeftijd--;
-    }
+    if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) leeftijd--;
   }
-
   const jeugd = klasse === "J" || klasse === "J+" || (leeftijd !== null && leeftijd < 18);
-  return { jeugd, actief: jeugd && hasTalent && !!datum, datum, tekst: text || null };
+  return { jeugd, actief: jeugd && hasTalent };
 }
 
 const s: any = {
