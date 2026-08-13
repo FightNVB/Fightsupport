@@ -62,7 +62,7 @@ export async function GET(_req:NextRequest,{params}:{params:Promise<{token:strin
     const own = ownCorner==="rood" ? b.red : b.blue;
     const opponent = ownCorner==="rood" ? b.blue : b.red;
     const ownMessages=(b.bijzonderheden??[]).filter((x:any)=>belongsToOwnFighter(x,ownCorner,own));
-    const safeOpponent={...opponent,licentie:null,startverbod:null,keurmerk:null,talentstatus:null};
+    const safeOpponent={...opponent,licentie:null,startverbod:null,keurmerk:null};
     const safeOwn={...own};
     const red=ownCorner==="rood"?safeOwn:safeOpponent;
     const blue=ownCorner==="blauw"?safeOwn:safeOpponent;

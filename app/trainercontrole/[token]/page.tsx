@@ -43,6 +43,12 @@ function Fighter({title,fighter,own=false,jeugd=false}:{title:string;fighter:Any
     <div><small>VERDIENDE STATUS</small><b>Talentstatus</b></div>
    </div>}
   </div>}
+  {!own&&talent&&<div className="tr-statusgrid opponent-status">
+   <div className="tr-statuspill talent">
+    <Trophy size={22}/>
+    <div><small>PARTIJVOORWAARDE</small><b>Talentstatus</b></div>
+   </div>
+  </div>}
  </div>
 }
 
