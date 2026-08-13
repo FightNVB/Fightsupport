@@ -3,26 +3,36 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildTrainerReviewData, gymKey, s } from "@/lib/trainerReview";
 
 export const runtime="nodejs";
-function isDopingInfoForOwnFighter(x:any, ownCorner:"rood"|"blauw"){
+function trainerInfoKind(x:any):"doping"|"talentstatus"|null{
  const code=s(x?.code ?? x?.rule_code ?? x?.rule).toUpperCase();
  const boodschap=s(x?.boodschap).toLowerCase();
  const resultaat=s(x?.resultaat).toUpperCase();
- const isDoping=code.includes("DOPINGCERTIFICAAT") || boodschap.includes("dopingcertificaat");
- if(!isDoping || (resultaat && resultaat!=="INFO")) return false;
-
+ if(resultaat && resultaat!=="INFO") return null;
+ if(code.includes("DOPINGCERTIFICAAT")||boodschap.includes("dopingcertificaat")) return "doping";
+ if(code.includes("TALENTSTATUS")||boodschap.includes("talentstatus")||boodschap.includes("talent status")) return "talentstatus";
+ return null;
+}
+function infoBelongsToOwnFighter(x:any, ownCorner:"rood"|"blauw"){
+ const kind=trainerInfoKind(x);
+ if(!kind) return false;
  const hoek=s(x?.hoek).toLowerCase();
  if(hoek){
   return hoek===ownCorner ||
    (ownCorner==="rood" && hoek==="red") ||
    (ownCorner==="blauw" && hoek==="blue");
  }
-
- // Robuuste fallback voor bestaande rows waarbij hoek niet gevuld is:
- // de huidige rulesEngine zet de vechterhoek ook in de rule_code.
- if(ownCorner==="rood") return /_(ROOD|RED)$/.test(code);
- return /_(BLAUW|BLUE)$/.test(code);
+ const code=s(x?.code ?? x?.rule_code ?? x?.rule).toUpperCase();
+ if(ownCorner==="rood" && /_(ROOD|RED)$/.test(code)) return true;
+ if(ownCorner==="blauw" && /_(BLAUW|BLUE)$/.test(code)) return true;
+ if(kind==="talentstatus"){
+  const txt=`${code} ${s(x?.boodschap)}`.toLowerCase();
+  return txt.includes("beide") ||
+   txt.includes("rood en blauw") ||
+   txt.includes("jplus_talentstatus_akkoord") ||
+   txt.includes("talentstatus akkoord");
+ }
+ return false;
 }
-
 function belongsToOwnFighter(x:any, ownCorner:"rood"|"blauw", own:any){
  const hoek=s(x?.hoek).toLowerCase();
  if(hoek){
@@ -32,7 +42,7 @@ function belongsToOwnFighter(x:any, ownCorner:"rood"|"blauw", own:any){
    hoek===s(own?.naam).toLowerCase() ||
    hoek===s(own?.vaNummer).toLowerCase();
  }
- return isDopingInfoForOwnFighter(x,ownCorner);
+ return infoBelongsToOwnFighter(x,ownCorner);
 }
 
 async function load(token:string){ const q=await supabaseAdmin.from("trainer_match_links").select("*").eq("token",token).eq("is_enabled",true).maybeSingle(); if(q.error)throw q.error; return q.data; }

@@ -97,7 +97,7 @@ export default function FighterDossierPage(){
     </div>
   </header>
   {hercheckMessage&&<div style={s.notice}>{hercheckMessage}</div>}
- <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/><Card title="Talentstatus" value={talentstatus.jeugd?(talentstatus.actief?`Aanwezig · ${talentstatus.datum}`:"Niet gevonden"):"Niet van toepassing"}/></div>
+ <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/><Card title="Talentstatus" value={talentstatus.jeugd?(talentstatus.actief?"🏆 Verdiend":"Niet gevonden"):"Niet van toepassing"}/></div>
  <Section title="Profiel & contact"><Grid rows={[["Naam",f.naam],["E-mail",f.email],["Geboortedatum",f.geboortedatum],["Geslacht",f.geslacht]]}/></Section>
  <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Leeftijd",calcAge(f.geboortedatum)],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden",f.nulmeting_totaal],["W / V / O",`${record.w} / ${record.v} / ${record.o}`],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
  <Section title={`Sportscholen (${(data.sportscholen||data.gyms||[]).length})`}><Table headers={["Sportschool","Plaats","Land","Sportschool ID","Laatste synchronisatie"]} rows={(data.sportscholen||data.gyms||[]).map((r:any)=>[r.naam||r.organisatie_naam,r.plaats,r.land,r.sportschool_id||r.organisatie_id||"-",fmt(r.last_team_sync_at||r.last_seen_at)])}/></Section>
@@ -153,17 +153,6 @@ function calcAge(v:any){
 function talentstatusFromFighter(f: any) {
   const text = String(f?.nulmeting_opmerking ?? "").replace(/\u00a0/g, " ").trim();
   const hasTalent = /\btalent\s*status\b|\btalentstatus\b/i.test(text);
-
-  let datum: string | null = null;
-  const iso = text.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
-  const nl = text.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
-
-  if (iso) {
-    datum = `${String(iso[3]).padStart(2, "0")}-${String(iso[2]).padStart(2, "0")}-${iso[1]}`;
-  } else if (nl) {
-    datum = `${String(nl[1]).padStart(2, "0")}-${String(nl[2]).padStart(2, "0")}-${nl[3]}`;
-  }
-
   const klasse = String(f?.nulmeting_klasse ?? f?.berekende_klasse ?? "").trim().toUpperCase();
   const birth = f?.geboortedatum ? new Date(f.geboortedatum) : null;
   let leeftijd: number | null = null;
@@ -174,13 +163,11 @@ function talentstatusFromFighter(f: any) {
     if (
       today.getMonth() < birth.getMonth() ||
       (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())
-    ) {
-      leeftijd--;
-    }
+    ) leeftijd--;
   }
 
   const jeugd = klasse === "J" || klasse === "J+" || (leeftijd !== null && leeftijd < 18);
-  return { jeugd, actief: jeugd && hasTalent && !!datum, datum, tekst: text || null };
+  return { jeugd, actief: jeugd && hasTalent };
 }
 
 const s:any={

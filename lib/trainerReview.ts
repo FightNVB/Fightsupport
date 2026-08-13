@@ -232,22 +232,9 @@ function contextVa(c?: AnyRow, snap?: AnyRow, row?: AnyRow, corner?: "rood"|"bla
   return digits(first(c?.va_nummer,c?.va,c?.fp_va_nummer,fr.va_nummer,aan.va_nummer, corner ? row?.[`va_${corner}`] : null, corner ? row?.[`${corner}_va`] : null,snap?.va_nummer,snap?.va));
 }
 function deepValues(c?: AnyRow) { const extra=obj(c?.extra), raw=obj(extra.raw), aan=obj(raw.aanmelding), fr=obj(raw.fighters_raw); return {extra,raw,aan,fr}; }
-function talentstatusFromRegistry(row?: AnyRow) {
-  if (!row) return { actief:false, maxPartijen:null };
-  const status = lower(row?.status);
-  const talentStatus = lower(row?.talent_status);
-  const actief =
-    row?.is_actief !== false &&
-    status !== "inactief" &&
-    status !== "ingetrokken" &&
-    talentStatus !== "ingetrokken";
-  return {
-    actief,
-    maxPartijen: num(row?.max_proef_partijen) ?? 3,
-  };
-}
 
-function fighterView(c: AnyRow|undefined, snap: AnyRow, row: AnyRow, corner: "rood"|"blauw", eventDate: unknown, allResults: AnyRow[], fp?: AnyRow, talentRow?: AnyRow) {
+
+function fighterView(c: AnyRow|undefined, snap: AnyRow, row: AnyRow, corner: "rood"|"blauw", eventDate: unknown, allResults: AnyRow[], fp?: AnyRow) {
   const d=deepValues(c);
   const licenseRaw=first(c?.licentie,c?.licentie_ok,c?.licentie_status,c?.fp_licentie,d.fr.licentie,d.aan.licentie);
   const startRaw=first(c?.heeft_startverbod,c?.startverbod,c?.startverbod_status,d.fr.heeft_startverbod,d.fr.startverbod,d.aan.heeft_startverbod);
@@ -274,7 +261,6 @@ function fighterView(c: AnyRow|undefined, snap: AnyRow, row: AnyRow, corner: "ro
     licentie: { ok: boolish(licenseRaw), tekst: s(licenseRaw) || null },
     startverbod: { actief: activeStartverbod(startRaw), tekst: s(startRaw) || null },
     keurmerk: { ok: boolish(keurmerkRaw), reden: keurmerkReason || null },
-    talentstatus: talentstatusFromRegistry(talentRow),
   };
 }
 
@@ -342,11 +328,59 @@ function isDopingInfoHit(h: AnyRow) {
   const txt=`${s(h.rule_code)} ${s(h.rule)} ${s(h.boodschap)}`.toLowerCase();
   return r==="INFO" && (txt.includes("dopingcertificaat") || txt.includes("doping certificaat"));
 }
+function isTalentstatusInfoHit(h: AnyRow) {
+  const r=hitResult(h);
+  const txt=`${s(h.rule_code)} ${s(h.rule)} ${s(h.boodschap)}`.toLowerCase();
+  return r==="INFO" && (txt.includes("talentstatus") || txt.includes("talent status"));
+}
+function isAllowedTrainerInfoHit(h: AnyRow) {
+  return isDopingInfoHit(h) || isTalentstatusInfoHit(h);
+}
 function isRelevantHit(h: AnyRow) {
   const r=hitResult(h);
   if(!s(h.boodschap) || r==="OK") return false;
-  if(r==="INFO") return isDopingInfoHit(h); // geen andere INFO naar trainercontrole
+  if(r==="INFO") return isAllowedTrainerInfoHit(h); // uitsluitend doping + talentstatus
   return true;
+}
+function inferredHitCorner(hit: AnyRow, red: AnyRow, blue: AnyRow): "rood"|"blauw"|null {
+  const explicit=cornerToken(hit?.hoek);
+  if(explicit) return explicit;
+
+  const code=s(hit?.rule_code ?? hit?.rule).toUpperCase();
+  if(/_(ROOD|RED)$/.test(code)) return "rood";
+  if(/_(BLAUW|BLUE)$/.test(code)) return "blauw";
+
+  const text=`${s(hit?.rule)} ${s(hit?.boodschap)}`.toLowerCase();
+  const redVa=digits(red?.vaNummer), blueVa=digits(blue?.vaNummer);
+  const redName=lower(red?.naam), blueName=lower(blue?.naam);
+
+  const redMention=(!!redVa && text.includes(redVa)) || (!!redName && redName.length>2 && text.includes(redName));
+  const blueMention=(!!blueVa && text.includes(blueVa)) || (!!blueName && blueName.length>2 && text.includes(blueName));
+  if(redMention && !blueMention) return "rood";
+  if(blueMention && !redMention) return "blauw";
+  return null;
+}
+function talentstatusForBout(hits: AnyRow[], red: AnyRow, blue: AnyRow) {
+  let rood=false, blauw=false;
+  for(const hit of hits){
+    if(!isTalentstatusInfoHit(hit)) continue;
+    const corner=inferredHitCorner(hit,red,blue);
+    if(corner==="rood"){ rood=true; continue; }
+    if(corner==="blauw"){ blauw=true; continue; }
+
+    const txt=`${s(hit?.rule_code)} ${s(hit?.rule)} ${s(hit?.boodschap)}`.toLowerCase();
+    if(
+      txt.includes("beide") ||
+      txt.includes("rood en blauw") ||
+      txt.includes("beide vechters") ||
+      txt.includes("jplus_talentstatus_akkoord") ||
+      txt.includes("j+ talentstatus akkoord") ||
+      txt.includes("talentstatus akkoord")
+    ){
+      rood=true; blauw=true;
+    }
+  }
+  return {rood,blauw};
 }
 
 export async function buildTrainerReviewData(matchmakingId: string) {
@@ -384,11 +418,10 @@ export async function buildTrainerReviewData(matchmakingId: string) {
   const vaNumbers=[...allVaNumbers];
   let fightPassportResults: AnyRow[] = [];
   const fightPassportFightersByVa = new Map<string, AnyRow>();
-  const talentstatusByVa = new Map<string, AnyRow>();
 
   for (let start = 0; start < vaNumbers.length; start += 50) {
     const batch = vaNumbers.slice(start, start + 50);
-    const [resultRes, fighterRes, talentRes] = await Promise.all([
+    const [resultRes, fighterRes] = await Promise.all([
       supabaseAdmin
         .from("fightpassport_results")
         .select("id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,last_seen_at")
@@ -398,24 +431,15 @@ export async function buildTrainerReviewData(matchmakingId: string) {
         .from("fightpassport_fighters")
         .select("va_nummer,totaal_wedstrijden,gewonnen,kos,nulmeting_totaal,nulmeting_gewonnen,nulmeting_verloren,nulmeting_onbeslist,nulmeting_kos,nulmeting_klasse,nulmeting_opmerking,berekende_klasse")
         .in("va_nummer",batch),
-      supabaseAdmin
-        .from("talentstatus_vechters")
-        .select("va_nummer,talent_status,status,is_actief,max_proef_partijen,admin_bevestigd")
-        .in("va_nummer",batch),
     ]);
 
     if (resultRes.error) throw resultRes.error;
     if (fighterRes.error) throw fighterRes.error;
-    if (talentRes.error) throw talentRes.error;
 
     fightPassportResults.push(...((resultRes.data ?? []) as AnyRow[]));
     for (const fighter of (fighterRes.data ?? []) as AnyRow[]) {
       const va = digits(fighter?.va_nummer);
       if (va) fightPassportFightersByVa.set(va, fighter);
-    }
-    for (const talent of (talentRes.data ?? []) as AnyRow[]) {
-      const va = digits(talent?.va_nummer);
-      if (va) talentstatusByVa.set(va, talent);
     }
   }
 
@@ -431,11 +455,12 @@ export async function buildTrainerReviewData(matchmakingId: string) {
     const blueVa = contextVa(bc,bs,row,"blauw");
     const redFp = redVa ? fightPassportFightersByVa.get(redVa) : undefined;
     const blueFp = blueVa ? fightPassportFightersByVa.get(blueVa) : undefined;
-    const redTalent = redVa ? talentstatusByVa.get(redVa) : undefined;
-    const blueTalent = blueVa ? talentstatusByVa.get(blueVa) : undefined;
-    const red=fighterView(rc,rs,row,"rood",eventDate,fightPassportResults,redFp,redTalent), blue=fighterView(bc,bs,row,"blauw",eventDate,fightPassportResults,blueFp,blueTalent);
-    const youth = isYouthValue(first(row.klasse,raw.klasse,red.klasse,blue.klasse)) || ((red.leeftijd??99)<18 && (blue.leeftijd??99)<18);
+    const redBase=fighterView(rc,rs,row,"rood",eventDate,fightPassportResults,redFp), blueBase=fighterView(bc,bs,row,"blauw",eventDate,fightPassportResults,blueFp);
+    const youth = isYouthValue(first(row.klasse,raw.klasse,redBase.klasse,blueBase.klasse)) || ((redBase.leeftijd??99)<18 && (blueBase.leeftijd??99)<18);
     const boutHits=(hitByBout.get(s(row.id))??hitByPartij.get(String(first(row.partij_nr,raw.partij_nr)))??[]).filter(isRelevantHit);
+    const talentstatus=talentstatusForBout(boutHits,redBase,blueBase);
+    const red={...redBase,talentstatus:{actief:talentstatus.rood}};
+    const blue={...blueBase,talentstatus:{actief:talentstatus.blauw}};
     const dispensaties=boutHits.filter(isDispensation).map(h=>{
       const consentCorner=consentCornerForDispensation(h,red,blue);
       return {

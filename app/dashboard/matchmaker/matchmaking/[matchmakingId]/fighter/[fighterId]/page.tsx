@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Check, Pencil, RefreshCw, Save, X, XCircle } from "lucide-react";
+import { ArrowLeft, Check, Pencil, RefreshCw, Save, Trophy, X, XCircle } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
 
 export default function FighterDossierPage() {
@@ -227,7 +227,17 @@ export default function FighterDossierPage() {
   const isExcel = bron.includes("excel") || bron.includes("upload") || !!aanmelding?.upload_id || !!aanmelding?.upload_batch_id;
   const record = calculateHighestClassRecord(resultRows, f);
   const extraResults = calculateExtraResultCounts(resultRows);
-  const talentstatus = talentstatusFromFighter(f);
+  const controleInfoMeldingen = Array.isArray(data?.controleInfoMeldingen) ? data.controleInfoMeldingen : [];
+  const talentstatus = controleInfoMeldingen.some((row: any) => {
+    const txt = `${row?.rule_code ?? ""} ${row?.rule ?? ""} ${row?.boodschap ?? ""}`.toLowerCase();
+    return String(row?.resultaat ?? "").toUpperCase() === "INFO" &&
+      (txt.includes("talentstatus") || txt.includes("talent status"));
+  });
+  const trainerInfoMeldingen = controleInfoMeldingen.filter((row: any) => {
+    const txt = `${row?.rule_code ?? ""} ${row?.rule ?? ""} ${row?.boodschap ?? ""}`.toLowerCase();
+    return txt.includes("dopingcertificaat") || txt.includes("doping certificaat") ||
+      txt.includes("talentstatus") || txt.includes("talent status");
+  });
 
   return (
     <main style={s.page}>
@@ -270,16 +280,7 @@ export default function FighterDossierPage() {
             title="Record"
             value={`${record.klasse ?? "-"} ${record.w}-${record.v}-${record.o} (${record.overige})`}
           />
-          <Card
-            title="Talentstatus"
-            value={
-              talentstatus.jeugd
-                ? talentstatus.actief
-                  ? "🏆 Talentstatus verdiend"
-                  : "Niet gevonden"
-                : "Niet van toepassing"
-            }
-          />
+          <Card title="Talentstatus" value={talentstatus ? "🏆 Verdiend" : "Niet gevonden"} />
         </div>
 
         <Section title="Profiel & contact">
@@ -336,6 +337,25 @@ export default function FighterDossierPage() {
         <Section title={`Wedstrijdhistorie (${data.results.length})`}>
           <Table headers={["Datum", "Evenement", "Discipline", "Klasse", "Tegenstander", "Sportschool", "Uitslag"]} rows={data.results.map((row: any) => [row.datum, row.evenement, row.discipline, row.klasse, row.tegenstander, row.sportschool, row.uitslag])} />
         </Section>
+        {trainerInfoMeldingen.length > 0 && (
+          <Section title="Controle-informatie">
+            <div style={s.infoStatusGrid}>
+              {trainerInfoMeldingen.map((row: any, index: number) => {
+                const txt = `${row?.rule_code ?? ""} ${row?.rule ?? ""} ${row?.boodschap ?? ""}`.toLowerCase();
+                const isTalent = txt.includes("talentstatus") || txt.includes("talent status");
+                return (
+                  <div key={row?.id ?? index} style={{ ...s.infoStatusCard, ...(isTalent ? s.talentInfoCard : {}) }}>
+                    <div style={s.infoStatusIcon}>{isTalent ? <Trophy size={20} /> : "ℹ"}</div>
+                    <div>
+                      <b>{isTalent ? "Talentstatus verdiend" : "Dopingcertificaat"}</b>
+                      <div style={s.infoStatusText}>{row?.boodschap ?? "-"}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
         <Section title={`Meldingen (${meldingen.length})`}>
           <ReviewTable
             rows={meldingen}
@@ -583,20 +603,7 @@ function fmt(value: any) { return value ? new Date(value).toLocaleString("nl-NL"
 function calcAge(value: any, at: any) { const birth = new Date(value); const event = new Date(at); if (!value || !at || Number.isNaN(birth.getTime()) || Number.isNaN(event.getTime())) return "-"; let age = event.getFullYear() - birth.getFullYear(); const month = event.getMonth() - birth.getMonth(); if (month < 0 || (month === 0 && event.getDate() < birth.getDate())) age--; return age; }
 
 
-function talentstatusFromFighter(f: any) {
-  const text = String(f?.nulmeting_opmerking ?? "").replace(/\u00a0/g, " ").trim();
-  const hasTalent = /\btalent\s*status\b|\btalentstatus\b/i.test(text);
-  const klasse = String(f?.nulmeting_klasse ?? f?.berekende_klasse ?? "").trim().toUpperCase();
-  const birth = f?.geboortedatum ? new Date(f.geboortedatum) : null;
-  let leeftijd: number | null = null;
-  if (birth && !Number.isNaN(birth.getTime())) {
-    const today = new Date();
-    leeftijd = today.getFullYear() - birth.getFullYear();
-    if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) leeftijd--;
-  }
-  const jeugd = klasse === "J" || klasse === "J+" || (leeftijd !== null && leeftijd < 18);
-  return { jeugd, actief: jeugd && hasTalent };
-}
+
 
 const s: any = {
   page: { minHeight: "100vh", background: "radial-gradient(circle at 50% -10%,rgba(255,77,0,.16),transparent 34%),linear-gradient(180deg,#060708 0%,#0b0f13 48%,#050607 100%)", color: "white", padding: 20 },
@@ -629,6 +636,11 @@ const s: any = {
   notice: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", marginBottom: 12, border: "1px solid #5c6268", background: "#10151a" },
   noticeText: { flex: "1 1 520px", color: "#c9ced3", fontSize: 12, lineHeight: 1.45 },
   feedback: { marginBottom: 14, padding: "10px 12px", border: "1px solid #80502e", background: "#21150d", color: "#ffd2b8", fontWeight: 750 },
+  infoStatusGrid: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 9 },
+  infoStatusCard: { display: "flex", gap: 10, alignItems: "flex-start", padding: "11px 12px", border: "1px solid #6a5529", background: "#211b10" },
+  talentInfoCard: { border: "1px solid #a77b20", background: "linear-gradient(135deg,#30240b,#17130b)" },
+  infoStatusIcon: { width: 30, height: 30, display: "grid", placeItems: "center", flex: "0 0 30px", border: "1px solid #8b7135", color: "#ffd15a", fontWeight: 950 },
+  infoStatusText: { marginTop: 4, color: "#c8c8c8", fontSize: 12, lineHeight: 1.4 },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   th: { textAlign: "left", padding: "9px 10px", borderBottom: "2px solid #ff4d00", background: "#20262c", color: "#f3f3f3", whiteSpace: "nowrap" },
   td: { padding: "9px 10px", borderBottom: "1px solid #31373d", verticalAlign: "top" },

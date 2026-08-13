@@ -13,6 +13,29 @@ function normalizeVa(value: unknown): string {
   return String(value ?? "").replace(/\D/g, "");
 }
 
+function rowRaw(row: any) {
+  const value = row?.raw_json;
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try { return JSON.parse(String(value)); } catch { return {}; }
+}
+function rowCornerForVa(row: any, va: string): "rood"|"blauw"|null {
+  const raw = rowRaw(row);
+  const red = normalizeVa(row?.va_rood ?? row?.rood_va ?? row?.rood_va_nummer ?? raw?.rood?.va_nummer ?? raw?.rood?.va);
+  const blue = normalizeVa(row?.va_blauw ?? row?.blauw_va ?? row?.blauw_va_nummer ?? raw?.blauw?.va_nummer ?? raw?.blauw?.va);
+  if (red && red === va) return "rood";
+  if (blue && blue === va) return "blauw";
+  return null;
+}
+function infoKind(row: any): "doping"|"talentstatus"|null {
+  const resultaat = String(row?.resultaat ?? "").toUpperCase();
+  if (resultaat !== "INFO") return null;
+  const txt = `${row?.rule_code ?? ""} ${row?.rule ?? ""} ${row?.boodschap ?? ""}`.toLowerCase();
+  if (txt.includes("dopingcertificaat") || txt.includes("doping certificaat")) return "doping";
+  if (txt.includes("talentstatus") || txt.includes("talent status")) return "talentstatus";
+  return null;
+}
+
 export async function GET(
   req: Request,
   context: {
@@ -205,6 +228,62 @@ export async function GET(
       sportscholen = schools.data ?? [];
     }
 
+    let controleInfoMeldingen: any[] = [];
+    const latestRun = await supabaseAdmin
+      .from("controle_runs")
+      .select("id")
+      .eq("matchmaking_id", matchmaking_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestRun.error) throw latestRun.error;
+
+    if (latestRun.data?.id) {
+      const bouts = await supabaseAdmin
+        .from("matchmaking_bouts_raw")
+        .select("*")
+        .eq("matchmaking_id", matchmaking_id);
+      if (bouts.error) throw bouts.error;
+
+      const ownBouts = new Map<string, { partijNr: string; corner: "rood"|"blauw" }>();
+      const ownPartijNrs = new Set<string>();
+      for (const bout of bouts.data ?? []) {
+        const corner = rowCornerForVa(bout, va);
+        if (!corner) continue;
+        const id = String(bout?.id ?? "").trim();
+        const partijNr = String(bout?.partij_nr ?? rowRaw(bout)?.partij_nr ?? "").trim();
+        if (id) ownBouts.set(id, { partijNr, corner });
+        if (partijNr) ownPartijNrs.add(partijNr);
+      }
+
+      const infoRows = await supabaseAdmin
+        .from("controle_resultaten")
+        .select("id,bout_id,partij_nr,rule,rule_code,resultaat,severity,boodschap,hoek,created_at")
+        .eq("matchmaking_id", matchmaking_id)
+        .eq("controle_run_id", latestRun.data.id)
+        .eq("resultaat", "INFO");
+      if (infoRows.error) throw infoRows.error;
+
+      controleInfoMeldingen = (infoRows.data ?? []).filter((row: any) => {
+        if (!infoKind(row)) return false;
+        const boutId = String(row?.bout_id ?? "").trim();
+        const partijNr = String(row?.partij_nr ?? "").trim();
+        const match = (boutId && ownBouts.get(boutId)) ||
+          (partijNr && ownPartijNrs.has(partijNr) ? { partijNr, corner: null as "rood"|"blauw"|null } : null);
+        if (!match) return false;
+
+        const hoek = String(row?.hoek ?? "").toLowerCase();
+        if (hoek && match.corner) {
+          const same = hoek === match.corner ||
+            (match.corner === "rood" && hoek === "red") ||
+            (match.corner === "blauw" && hoek === "blue");
+          if (!same) return false;
+        }
+        return true;
+      });
+    }
+
     return NextResponse.json(
       {
         fighter: fighter.data,
@@ -218,6 +297,7 @@ export async function GET(
         eventDate: matchmaking.data?.datum ?? null,
         aanmelding: aanmelding.data ?? null,
         fighterRuleMeldingen: fighterRules.data ?? [],
+        controleInfoMeldingen,
       },
       {
         headers: {
