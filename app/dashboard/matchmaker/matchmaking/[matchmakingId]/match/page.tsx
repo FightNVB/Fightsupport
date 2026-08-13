@@ -56,6 +56,13 @@ function onlyDigits(v: any) {
     .replace(/[^\d]/g, "")
     .trim();
 }
+
+function trainerVaPair(redVa: any, blueVa: any) {
+  const red = onlyDigits(redVa);
+  const blue = onlyDigits(blueVa);
+  if (!red || !blue) return "";
+  return [red, blue].sort().join("|");
+}
 function name(f: Fighter) {
   return (
     s(f.aanmelding_naam) ||
@@ -2057,7 +2064,11 @@ export default function FightersPage() {
   const [tournamentWeight, setTournamentWeight] = useState("");
   const [existingTournaments, setExistingTournaments] = useState<any[]>([]);
   const [matchRows, setMatchRows] = useState<any[]>([]);
-  const [trainerResponses, setTrainerResponses] = useState<Record<string, any>>({});
+  const [trainerResponses, setTrainerResponses] = useState<{
+    byBoutId: Record<string, any>;
+    byVaPair: Record<string, any>;
+    byPartijNr: Record<string, any>;
+  }>({ byBoutId: {}, byVaPair: {}, byPartijNr: {} });
   const [matchmakingMeta, setMatchmakingMeta] = useState<Record<string, any>>({});
   const [mainView, setMainView] = useState<"fighters" | "matches">("fighters");
 
@@ -2075,13 +2086,17 @@ export default function FightersPage() {
       );
       const trainerResponseJson = await trainerResponseRes.json().catch(() => ({}));
       if (trainerResponseRes.ok) {
-        setTrainerResponses(trainerResponseJson?.byBoutId ?? {});
+        setTrainerResponses({
+          byBoutId: trainerResponseJson?.byBoutId ?? {},
+          byVaPair: trainerResponseJson?.byVaPair ?? {},
+          byPartijNr: trainerResponseJson?.byPartijNr ?? {},
+        });
       } else {
         console.warn(
           "Trainerreacties laden mislukt",
           trainerResponseJson?.error || trainerResponseRes.status,
         );
-        setTrainerResponses({});
+        setTrainerResponses({ byBoutId: {}, byVaPair: {}, byPartijNr: {} });
       }
 
       const toernooiBoutsFromDb = await fetchMatchmakingTournamentBouts(matchmakingId);
@@ -3613,7 +3628,22 @@ export default function FightersPage() {
                   const blauwRecord = blauwFighter
                     ? recordOf(blauwFighter, uitslagenRows)
                     : "-";
-                  const trainerInfo = trainerResponses[s(row?.id)] ?? null;
+                  const responseBoutId = s(
+                    pickFirst(row?.id, row?.bout_id, row?.bout_uid),
+                  );
+                  const responsePair = trainerVaPair(roodVa, blauwVa);
+                  const trainerInfo =
+                    (responseBoutId
+                      ? trainerResponses.byBoutId[responseBoutId]
+                      : null) ??
+                    (responsePair
+                      ? trainerResponses.byVaPair[responsePair]
+                      : null) ??
+                    (partijNr != null
+                      ? trainerResponses.byPartijNr[String(partijNr)]
+                      : null) ??
+                    null;
+
                   const redTrainer = trainerInfo?.rood ?? null;
                   const blueTrainer = trainerInfo?.blauw ?? null;
 
@@ -3905,9 +3935,8 @@ function TrainerResponseBadge({
               : trainerResponseWait),
       }}
     >
-      <b>{hoek}</b> {icon} {label}
-      {response?.dispensatie_toestemming === true ? " · DISP ✓" : ""}
-      {s(response?.opmerking) ? <small> · {s(response.opmerking)}</small> : null}
+      <b>{hoek}</b> {icon}
+      {response?.dispensatie_toestemming === true ? <small> D</small> : null}
     </span>
   );
 }
@@ -4428,7 +4457,7 @@ const matchFighterName: CSSProperties = {
 };
 const matchThNr: CSSProperties = { ...th, width: 50, textAlign: "center" };
 const matchThCompact: CSSProperties = { ...th, width: 48, minWidth: 48, maxWidth: 48, paddingLeft: 6, paddingRight: 6, textAlign: "center" };
-const matchThTrainers: CSSProperties = { ...th, width: 250, minWidth: 220, textAlign: "left" };
+const matchThTrainers: CSSProperties = { ...th, width: 92, minWidth: 92, maxWidth: 92, paddingLeft: 5, paddingRight: 5, textAlign: "center" };
 const matchThGender: CSSProperties = { ...th, width: 72, textAlign: "center" };
 const matchThName: CSSProperties = { ...th, width: 126 };
 const matchThGym: CSSProperties = { ...th, width: 112 };
@@ -4441,7 +4470,19 @@ const matchTdRecord: CSSProperties = { ...matchTd, whiteSpace: "nowrap", fontWei
 const matchTdGender: CSSProperties = { ...matchTd, width: 48, minWidth: 48, maxWidth: 48, paddingLeft: 6, paddingRight: 6, textAlign: "center", whiteSpace: "nowrap", fontWeight: 900 };
 const matchTdNr: CSSProperties = { ...matchTd, textAlign: "center", color: ORANGE, fontSize: 14, fontWeight: 950 };
 const matchTdCompact: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap" };
-const matchTdTrainers: CSSProperties = { ...matchTd, minWidth: 220, display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch" };
+const matchTdTrainers: CSSProperties = {
+  ...matchTd,
+  width: 92,
+  minWidth: 92,
+  maxWidth: 92,
+  paddingLeft: 4,
+  paddingRight: 4,
+  display: "flex",
+  flexDirection: "row",
+  gap: 4,
+  alignItems: "center",
+  justifyContent: "center",
+};
 const matchTdAction: CSSProperties = { ...matchTd, textAlign: "center", whiteSpace: "nowrap", padding: "5px" };
 const matchActions: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
 const matchTrEven: CSSProperties = { background: "#171717" };
@@ -4464,15 +4505,19 @@ const matchStatusBadgeConfirmed: CSSProperties = {
   color: "#7ee395",
 };
 const trainerResponseBadge: CSSProperties = {
-  display: "block",
-  padding: "4px 6px",
+  display: "inline-flex",
+  minWidth: 40,
+  height: 27,
+  padding: "0 5px",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 3,
   border: "1px solid #48484d",
   background: "#171719",
-  fontSize: 10.5,
-  lineHeight: 1.25,
-  whiteSpace: "normal",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
+  fontSize: 11,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
+  cursor: "help",
 };
 const trainerResponseOk: CSSProperties = { borderColor: "#356c43", color: "#79db91", background: "#142018" };
 const trainerResponseBad: CSSProperties = { borderColor: "#8b3b35", color: "#ff8178", background: "#271615" };
