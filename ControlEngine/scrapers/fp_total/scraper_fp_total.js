@@ -16,7 +16,7 @@ const START_VA = Number(process.argv[2] || process.env.FP_TOTAL_START_VA || 775)
 const END_VA = Number(process.argv[3] || process.env.FP_TOTAL_END_VA || 33150);
 const WORKERS_RAW = Number(process.env.FP_TOTAL_WORKERS ?? process.env.WORKERS ?? "8");
 const WORKERS = Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
-  ? Math.min(30, Math.max(1, Math.floor(WORKERS_RAW)))
+  ? Math.min(20, Math.max(1, Math.floor(WORKERS_RAW)))
   : 8;
 const SCRAPE_RESULTS = String(process.env.FP_TOTAL_RESULTS || "true").toLowerCase() !== "false";
 const RESUME_RUN_ID = String(process.env.FP_TOTAL_RUN_ID || "").trim();
@@ -346,28 +346,45 @@ function normalizeClass(v) {
 
 function parseTalentstatusFromNulmeting(opmerking) {
   const text = String(opmerking ?? "").replace(/\u00a0/g, " ").trim();
-  if (!/\btalent\s*status\b|\btalentstatus\b/i.test(text)) {
+  const talentRx = /\btalent\s*status\b|\btalentstatus\b/i;
+  if (!talentRx.test(text)) {
     return { actief: false, datum: null, tekst: text || null };
   }
 
-  const iso = text.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
-  if (iso) {
-    return {
-      actief: true,
-      datum: `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`,
-      tekst: text,
-    };
+  const toIso = (value) => {
+    const raw = String(value ?? "").trim();
+    let m = raw.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
+    m = raw.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
+    if (m) return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
+    return null;
+  };
+
+  // Alleen een datum accepteren die in DEZELFDE zin/regel als Talentstatus staat.
+  // Daarmee worden wedstrijddatums of "nulmeting bijgewerkt op ..." nooit meer
+  // per ongeluk als talentstatusdatum opgeslagen.
+  const segments = text
+    .split(/\r?\n|(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    if (!talentRx.test(segment)) continue;
+    const datum = toIso(segment);
+    if (datum) return { actief: true, datum, tekst: text };
   }
 
-  const nl = text.match(/\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b/);
-  if (nl) {
-    return {
-      actief: true,
-      datum: `${nl[3]}-${String(nl[2]).padStart(2, "0")}-${String(nl[1]).padStart(2, "0")}`,
-      tekst: text,
-    };
+  // Fallback voor tekst zonder nette regeleinden: zoek alleen in een kleine
+  // context rond het woord Talentstatus, niet in de hele nulmeting.
+  const match = talentRx.exec(text);
+  if (match) {
+    const start = Math.max(0, match.index - 80);
+    const end = Math.min(text.length, match.index + match[0].length + 120);
+    const datum = toIso(text.slice(start, end));
+    if (datum) return { actief: true, datum, tekst: text };
   }
 
+  // Talentstatus zonder gekoppelde datum wordt niet automatisch geregistreerd.
   return { actief: false, datum: null, tekst: text };
 }
 
@@ -401,12 +418,31 @@ async function syncTalentstatusVechterFromFighter(payload, results = []) {
 
   const { data: existing, error: existingError } = await supabase
     .from("talentstatus_vechters")
-    .select("id")
+    .select("id,opmerkingen,max_proef_partijen")
     .eq("va_nummer", va)
     .maybeSingle();
 
   if (existingError) throw existingError;
-  if (existing?.id) return; // bestaande admin/handmatige status nooit overschrijven
+  if (existing?.id) {
+    const autoPrefix = "Automatisch uit FightPassport nulmeting: Talentstatus ";
+    const existingNote = String(existing?.opmerkingen ?? "");
+    if (existingNote.startsWith(autoPrefix)) {
+      const nextNote = `${autoPrefix}${talent.datum}`;
+      if (existingNote !== nextNote || Number(existing?.max_proef_partijen ?? 0) !== 3) {
+        const { error: updateError } = await supabase
+          .from("talentstatus_vechters")
+          .update({
+            opmerkingen: nextNote,
+            max_proef_partijen: 3,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+        if (updateError) throw updateError;
+        console.log(`[fp-total] 🏆 VA ${va} automatische talentstatus gecorrigeerd naar ${talent.datum}`);
+      }
+    }
+    return; // handmatige/admin-status nooit overschrijven
+  }
 
   const firstGym = Array.isArray(results)
     ? String(results.find((row) => String(row?.sportschool ?? "").trim())?.sportschool ?? "").trim() || null
