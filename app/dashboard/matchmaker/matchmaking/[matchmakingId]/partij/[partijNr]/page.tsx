@@ -750,7 +750,6 @@ function FighterMetalCard({
   nulKlasse,
   nulTotaal,
   nulOpmerking,
-  resultBadges = [],
   onEdit,
 }: {
   side: "rood" | "blauw";
@@ -767,7 +766,6 @@ function FighterMetalCard({
   nulKlasse: string;
   nulTotaal: any;
   nulOpmerking: string;
-  resultBadges?: any[];
   onEdit: () => void;
 }) {
   const isR = side === "rood";
@@ -851,18 +849,6 @@ function FighterMetalCard({
           </div>
         </div>
 
-        {resultBadges.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {resultBadges.map((badge: any) => (
-              <Badge
-                key={badge.key}
-                text={badge.text}
-                tone={badge.tone}
-                invert
-              />
-            ))}
-          </div>
-        ) : null}
 
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-white/75">
           <div>
@@ -2157,26 +2143,11 @@ export default function PartijDetailPage() {
             );
             setFromFightPassport(`${side}_geslacht`, firstFilled(f?.geslacht, f?.gender));
 
-            const licentie = parseLicentie(
-              f?.licentie,
-              f?.licentie_actief,
-              f?.heeft_licentie,
-              f?.license_active,
-              f?.licentie_geldig,
-              f?.licentiestatus,
-              f?.licentie_status,
-            );
-            setFromFightPassport(`${side}_licentie`, licentie);
-
-            setFromFightPassport(
-              `${side}_heeft_startverbod`,
-              firstFilled(
-                f?.heeft_startverbod,
-                f?.startverbod_actief,
-                f?.startverbod,
-                f?.heeft_start_verbod,
-              ),
-            );
+            // Voor de twee statusbadges is de Total-tabel autoritatief:
+            // licentie_actief === true => groen/JA; alles anders => rood/NEE.
+            // heeft_startverbod === true => rood/JA; false => groen/NEE.
+            setFromFightPassport(`${side}_licentie_actief`, f?.licentie_actief === true);
+            setFromFightPassport(`${side}_heeft_startverbod`, f?.heeft_startverbod === true);
 
             // Sommige fightpassport-routes leveren ook keurmerkvelden mee.
             // Neem ze mee wanneer aanwezig; controle_resultaten blijft hieronder
@@ -2334,38 +2305,12 @@ export default function PartijDetailPage() {
       ctx?.blauw_geboortedatum,
     );
 
-    const roodLic = parseLicentie(
-      ctx?.rood_licentie,
-      ctx?.rood_licentie_actief,
-      ctx?.rood_heeft_licentie,
-      ctx?.rood_licentie_geldig,
-      ctx?.rood_licentie_status,
-    );
-    const blauwLic = parseLicentie(
-      ctx?.blauw_licentie,
-      ctx?.blauw_licentie_actief,
-      ctx?.blauw_heeft_licentie,
-      ctx?.blauw_licentie_geldig,
-      ctx?.blauw_licentie_status,
-    );
-    const hasStartverbodResult = (side: "rood" | "blauw") =>
-      (regels ?? []).some((r) => {
-        if (!rowMatchesSide(r, side)) return false;
-        const code = String(r?.rule_code ?? "").trim().toUpperCase();
-        if (!code.startsWith("STARTVERBOD_")) return false;
-        return !isApprovedOverride(r) && normResultaat(r?.resultaat) !== "ok";
-      });
+    // Fighter-card badges: uitsluitend de actuele Total-status gebruiken.
+    const roodLic = ctx?.rood_licentie_actief === true ? "ja" : "nee";
+    const blauwLic = ctx?.blauw_licentie_actief === true ? "ja" : "nee";
 
-    const roodSv = hasStartverbodResult("rood")
-      ? "ja"
-      : parseJaNee(
-          firstFilled(ctx?.rood_heeft_startverbod, ctx?.rood_startverbod_actief, ctx?.rood_startverbod),
-        ) ?? "nee";
-    const blauwSv = hasStartverbodResult("blauw")
-      ? "ja"
-      : parseJaNee(
-          firstFilled(ctx?.blauw_heeft_startverbod, ctx?.blauw_startverbod_actief, ctx?.blauw_startverbod),
-        ) ?? "nee";
+    const roodSv = ctx?.rood_heeft_startverbod === true ? "ja" : "nee";
+    const blauwSv = ctx?.blauw_heeft_startverbod === true ? "ja" : "nee";
 
     return {
       evDatum,
@@ -3162,7 +3107,6 @@ export default function PartijDetailPage() {
                 nulKlasse={String(firstFilled(ctx?.rood_nulmeting_klasse, ctx?.rood_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.roodNulmetingTotaal ?? "-"}
                 nulOpmerking={String(firstFilled(ctx?.rood_nulmeting_opmerking, ctx?.rood_opmerking_nulmeting, ""))}
-                resultBadges={sideBadges.rood}
                 onEdit={() => openEdit("rood")}
               />
             </div>
@@ -3281,7 +3225,6 @@ export default function PartijDetailPage() {
                 nulKlasse={String(firstFilled(ctx?.blauw_nulmeting_klasse, ctx?.blauw_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.blauwNulmetingTotaal ?? "-"}
                 nulOpmerking={String(firstFilled(ctx?.blauw_nulmeting_opmerking, ctx?.blauw_opmerking_nulmeting, ""))}
-                resultBadges={sideBadges.blauw}
                 onEdit={() => openEdit("blauw")}
               />
             </div>
