@@ -113,59 +113,16 @@ async function closeAnyModal(page) {
 
 
 async function closeDetailsModalVerified(page, va = "") {
-  const selector = "button#sluit_inr_detail";
-  const startedAt = Date.now();
-  let clicked = false;
+  const closeSelector = "button#sluit_inr_detail";
 
-  // DETAILS kan op de VPS nét iets later volledig zichtbaar worden.
-  // Wacht daarom expliciet op de echte sluitknop in plaats van alleen best-effort te klikken.
-  while (Date.now() - startedAt < 10000) {
-    const state = await page.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      if (!el) return { exists: false, visible: false };
-
-      const r = el.getBoundingClientRect();
-      const st = getComputedStyle(el);
-      const visible =
-        r.width > 0 &&
-        r.height > 0 &&
-        st.display !== "none" &&
-        st.visibility !== "hidden" &&
-        st.opacity !== "0";
-
-      return { exists: true, visible };
-    }, selector).catch(() => ({ exists: false, visible: false }));
-
-    if (state.visible) {
-      clicked = await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        if (!el) return false;
-        el.scrollIntoView?.({ block: "center" });
-        el.click();
-        return true;
-      }, selector).catch(() => false);
-
-      if (clicked) break;
-    }
-
-    // Als de knop helemaal niet bestaat kan DETAILS al dicht zijn.
-    if (!state.exists && Date.now() - startedAt > 1200) {
-      break;
-    }
-
-    await sleep(150);
-  }
-
-  // Controleer na de klik dat de DETAILS-sluitknop niet meer zichtbaar is.
-  // Zo starten we UITSLAGEN nooit terwijl de DETAILS-modal nog over de pagina hangt.
-  if (clicked) {
-    const closeStartedAt = Date.now();
-
-    while (Date.now() - closeStartedAt < 10000) {
-      const stillVisible = await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        if (!el) return false;
-
+  // FightPassport houdt de sluitknop soms in de DOM nadat het detailscherm is
+  // gesloten. Daarom NIET controleren of de knop uit de DOM verdwijnt.
+  // Klik de echte DETAILS-sluitknop rechtstreeks en controleer daarna of de
+  // UITSLAGEN-tegel weer daadwerkelijk klikbaar is.
+  const clicked = await page.evaluate((selector) => {
+    const buttons = [...document.querySelectorAll(selector)];
+    const button =
+      buttons.find((el) => {
         const r = el.getBoundingClientRect();
         const st = getComputedStyle(el);
         return (
@@ -175,43 +132,82 @@ async function closeDetailsModalVerified(page, va = "") {
           st.visibility !== "hidden" &&
           st.opacity !== "0"
         );
-      }, selector).catch(() => false);
+      }) || buttons[0] || null;
 
-      if (!stillVisible) {
-        console.log(`[fp-total] ✅ VA ${va} DETAILS modal expliciet gesloten`);
-        await sleep(350);
-        return true;
+    if (!button) return false;
+    button.scrollIntoView?.({ block: "center" });
+    button.click();
+    return true;
+  }, closeSelector).catch(() => false);
+
+  if (!clicked) {
+    console.log(`[fp-total] ⚠️ VA ${va} DETAILS sluitknop niet gevonden; probeer UITSLAGEN-ready controle`);
+  }
+
+  // Geef FightPassport tijd om zijn modal/overlay-state af te bouwen.
+  await sleep(700);
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 12000) {
+    const state = await page.evaluate((requestedVa) => {
+      const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+      if (!tab) return { ready: false, reason: "tab ontbreekt" };
+
+      const head = [...tab.querySelectorAll(".tileHeader.enabled, .tileHeader")].find(
+        (h) => String(h.innerText || "").trim().toUpperCase() === "UITSLAGEN"
+      );
+      const tile = head?.closest(".tile");
+      if (!tile) return { ready: false, reason: "uitslagen tegel ontbreekt" };
+
+      const r = tile.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) {
+        return { ready: false, reason: "uitslagen tegel niet zichtbaar" };
       }
 
-      await sleep(150);
+      const x = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2));
+      const y = Math.min(window.innerHeight - 1, Math.max(0, r.top + Math.min(r.height / 2, 30)));
+      const top = document.elementFromPoint(x, y);
+      const unobstructed = !!top && (top === tile || tile.contains(top));
+
+      return {
+        ready: unobstructed,
+        reason: unobstructed ? "ready" : "uitslagen tegel nog bedekt",
+      };
+    }, va).catch(() => ({ ready: false, reason: "evaluate fout" }));
+
+    if (state.ready) {
+      console.log(`[fp-total] ✅ VA ${va} DETAILS gesloten; UITSLAGEN tegel vrij`);
+      await sleep(250);
+      return true;
     }
 
-    console.log(`[fp-total] ⚠️ VA ${va} DETAILS sluitknop bleef zichtbaar; fallback closeAnyModal`);
+    await sleep(200);
   }
 
-  // Fallback voor afwijkende renders / reeds half gesloten modals.
-  await closeAnyModal(page).catch(() => {});
-  await sleep(350);
+  // Eén gerichte tweede klik, geen Escape-cascade. Sommige FightPassport-renders
+  // verwerken de eerste klik niet terwijl de modal nog aan het opbouwen is.
+  const retried = await page.evaluate((selector) => {
+    const buttons = [...document.querySelectorAll(selector)];
+    const button = buttons.find((el) => {
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      return (
+        r.width > 0 &&
+        r.height > 0 &&
+        st.display !== "none" &&
+        st.visibility !== "hidden"
+      );
+    });
+    if (!button) return false;
+    button.click();
+    return true;
+  }, closeSelector).catch(() => false);
 
-  const stillVisibleAfterFallback = await page.evaluate((sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return false;
+  if (retried) await sleep(800);
 
-    const r = el.getBoundingClientRect();
-    const st = getComputedStyle(el);
-    return (
-      r.width > 0 &&
-      r.height > 0 &&
-      st.display !== "none" &&
-      st.visibility !== "hidden" &&
-      st.opacity !== "0"
-    );
-  }, selector).catch(() => false);
-
-  if (stillVisibleAfterFallback) {
-    throw new Error(`DETAILS modal kon niet aantoonbaar worden gesloten voor VA ${va}`);
-  }
-
+  // Niet de hele fighter afbreken alleen omdat FightPassport de sluitknop in DOM
+  // laat staan. openResultsTileVerified krijgt hierna zelf nog zijn normale retry.
+  console.log(`[fp-total] ⚠️ VA ${va} DETAILS sluiting niet volledig verifieerbaar; UITSLAGEN krijgt eigen retry`);
   return true;
 }
 
