@@ -2381,8 +2381,34 @@ async function main() {
     ? Math.max(480000, SCRAPE_TIMEOUT_RAW)
     : 480000;
   const STAGGER = Number(process.env.STAGGER_MS ?? "2500");
+  const GLOBAL_VA_START_GAP_MS = Number(process.env.FP_TOTAL_GLOBAL_START_GAP_MS ?? "2000");
 
   let idx = 0;
+  let nextVaStartAt = 0;
+  let vaStartQueue = Promise.resolve();
+
+  async function waitForGlobalVaStartSlot(label, va) {
+    let release;
+    const myTurn = new Promise((resolve) => { release = resolve; });
+    const previous = vaStartQueue;
+    vaStartQueue = previous.then(() => myTurn);
+
+    await previous;
+
+    try {
+      const waitMs = Math.max(0, nextVaStartAt - Date.now());
+
+      if (waitMs > 0) {
+        console.log(`[fp-total] ⏱️ ${label} wacht ${waitMs}ms voor globale VA-start ${va}`);
+        await sleep(waitMs);
+      }
+
+      nextVaStartAt = Date.now() + GLOBAL_VA_START_GAP_MS;
+    } finally {
+      release();
+    }
+  }
+
 
   async function updateRunProgress(lastVa = lastProcessedVa) {
     if (lastVa != null) {
@@ -2447,6 +2473,7 @@ async function main() {
       // mag een fout uit deze oude generatie niet nóg een volledige herstart veroorzaken.
       const vaBrowserGeneration = browserGeneration;
 
+      await waitForGlobalVaStartSlot(label, va);
       console.log(`[fp-total] 🤖 ${label} → VA ${va}`);
       await upsertSyncItem(run.id, va, { status: "processing", started_at: itemStartedAt, finished_at: null });
 
