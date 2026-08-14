@@ -1047,10 +1047,9 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
 async function openResultsTileVerified(page, va, timeoutMs = 20000) {
   await closeAnyModal(page);
 
-  // Voor UITSLAGEN eerst nogmaals exact deze VA afdwingen.
-  const exactVaLoaded = await forceExactFighterUrl(page, va, 30000);
-  if (!exactVaLoaded) return null;
-
+  // Zelfde aanpak als de stabiele bundle-scraper:
+  // deze page is al op de juiste VA geverifieerd, dus hier NIET opnieuw
+  // forceExactFighterUrl() uitvoeren. Alleen de UITSLAGEN-tegel openen.
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
@@ -1058,12 +1057,12 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000) {
       const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
       if (!tab) return false;
 
-      // Alleen de echte enabled UITSLAGEN-tegel van deze VA.
-      const header = [...tab.querySelectorAll(".tileHeader.enabled")].find(
-        (el) => String(el.innerText || "").trim().toUpperCase() === "UITSLAGEN"
+      const headers = [...tab.querySelectorAll(".tileHeader.enabled")];
+      const target = headers.find(
+        (h) => String(h.innerText || "").trim().toUpperCase() === "UITSLAGEN"
       );
 
-      const tile = header?.closest(".tile");
+      const tile = target?.closest(".tile");
       if (!tile) return false;
 
       tile.scrollIntoView?.({ block: "center" });
@@ -1076,13 +1075,11 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000) {
       continue;
     }
 
-    // FightPassport heeft soms tijd nodig om de juiste modal/frame op te bouwen.
     await sleep(1200);
 
     const found = await findResultsDownloadControl(page, 8000);
     if (found) return found;
 
-    // Verkeerde/oude modal: sluiten en UITSLAGEN opnieuw openen.
     await closeAnyModal(page).catch(() => {});
     await sleep(600);
   }
@@ -1751,9 +1748,9 @@ async function scrapeOne(page, va, openFreshPage) {
   // UITSLAGEN hoort bij iedere bestaande VA te worden uitgevoerd.
   // Licentie en startverbod zijn uitsluitend opgeslagen waarden en nooit selectievoorwaarden.
   if (SCRAPE_RESULTS) {
-    const resultStep = await withFreshVaTab("UITSLAGEN", async (p) => {
-      return await scrapeResults(p, va);
-    }).catch((e) => ({
+    // Net als fp_bundle: UITSLAGEN op dezelfde reeds geverifieerde VA-page uitvoeren.
+    // Geen verse tab en geen extra hash/reload-cyclus tussen FULLFIGHTER en UITSLAGEN.
+    const resultStep = await scrapeResults(page, va).catch((e) => ({
       status: "error",
       rows: [],
       error: e?.message ?? String(e),
