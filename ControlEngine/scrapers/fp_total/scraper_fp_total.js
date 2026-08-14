@@ -1173,11 +1173,10 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
 }
 
 async function openResultsTileVerified(page, va, timeoutMs = 20000) {
+  // UITSLAGEN-flow bewust gelijk aan fp_bundle:
+  // modal sluiten, UITSLAGEN-tegel klikken, uitsluitend wachten op de Excel-knop.
   await closeAnyModal(page);
 
-  // Zelfde aanpak als de stabiele bundle-scraper:
-  // deze page is al op de juiste VA geverifieerd, dus hier NIET opnieuw
-  // forceExactFighterUrl() uitvoeren. Alleen de UITSLAGEN-tegel openen.
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
@@ -1230,29 +1229,54 @@ async function findResultsDownloadControl(page, timeoutMs = 10000) {
         }
 
         for (const handle of handles) {
-          const isVisible = await frame.evaluate((el) => {
-            if (!el) return false;
-            const r = el.getBoundingClientRect();
-            const st = getComputedStyle(el);
-            return (
-              r.width > 0 &&
-              r.height > 0 &&
-              st.display !== "none" &&
-              st.visibility !== "hidden" &&
-              st.opacity !== "0"
-            );
-          }, handle).catch(() => false);
+          const verdict = await frame.evaluate((el) => {
+            const visible = (node) => {
+              if (!node) return false;
+              const r = node.getBoundingClientRect();
+              const st = getComputedStyle(node);
+              return (
+                r.width > 0 &&
+                r.height > 0 &&
+                st.display !== "none" &&
+                st.visibility !== "hidden"
+              );
+            };
 
-          // Zodra de zichtbare Excel-downloadknop bestaat, direct gebruiken.
-          // Niet wachten op tabelkoppen of geladen uitslagregels.
-          if (isVisible) {
+            if (!visible(el)) return { ok: false };
+
+            const container =
+              el.closest(".outer, .modal, [role=dialog], .ui-dialog, .tile, body") ||
+              document.body;
+
+            const contextText = String(
+              container.innerText || document.body.innerText || ""
+            )
+              .replace(/\u00a0/g, " ")
+              .toUpperCase();
+
+            if (contextText.includes("LICENTIES") && !contextText.includes("UITSLAGEN")) {
+              return { ok: false };
+            }
+
+            const looksLikeResults =
+              contextText.includes("UITSLAGEN") ||
+              (
+                contextText.includes("DATUM") &&
+                contextText.includes("EVENEMENT") &&
+                contextText.includes("TEGENSTANDER")
+              );
+
+            return { ok: looksLikeResults };
+          }, handle).catch(() => ({ ok: false }));
+
+          if (verdict?.ok) {
             return { frame, selector, handle };
           }
         }
       }
     }
 
-    await sleep(200);
+    await sleep(300);
   }
 
   return null;
@@ -1288,14 +1312,13 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     downloadPath: dir,
   });
 
-  const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
   const found =
     initialFound ||
-    await waitForAnySelectorInAnyFrame(page, selectors, 45000);
+    await findResultsDownloadControl(page, 45000);
 
   if (!found) {
     cleanupDownloadDir(dir);
-    return null;
+    throw new Error(`UITSLAGEN downloadknop niet gevonden — VA ${va}`);
   }
 
   const clickDownload = async () => {
@@ -1307,8 +1330,8 @@ async function downloadResultsExcel(page, va, initialFound = null) {
       return;
     }
 
-    await found.frame.evaluate((selector) => {
-      const el = document.querySelector(selector);
+    await found.frame.evaluate((sel) => {
+      const el = document.querySelector(sel);
       el?.scrollIntoView?.({ block: "center" });
       el?.click?.();
     }, found.selector);
@@ -1317,17 +1340,16 @@ async function downloadResultsExcel(page, va, initialFound = null) {
   console.log(`[fp-total] ⬇️ VA ${va} UITSLAGEN download gestart; wachten op Excel...`);
   await clickDownload();
 
-  // FightPassport kan de Excel server-side eerst nog opbouwen.
-  // Daarom maximaal 3 minuten wachten voordat deze stap opgeeft.
-  const downloadStartedAt = Date.now();
-  const maxDownloadWaitMs = Number(
-    process.env.FP_RESULTS_DOWNLOAD_TIMEOUT_MS ?? "180000"
+  const startedAt = Date.now();
+  const maxWaitMs = Number(
+    process.env.FP_RESULTS_DOWNLOAD_TIMEOUT_MS ??
+    process.env.UITSLAGEN_DOWNLOAD_TIMEOUT_MS ??
+    "180000"
   );
-
-  let lastLogAt = 0;
   let retried = false;
+  let lastLogAt = 0;
 
-  while (Date.now() - downloadStartedAt < maxDownloadWaitMs) {
+  while (Date.now() - startedAt < maxWaitMs) {
     let filesNow = [];
     try {
       filesNow = fs.readdirSync(dir);
@@ -1335,9 +1357,8 @@ async function downloadResultsExcel(page, va, initialFound = null) {
       filesNow = [];
     }
 
-    const elapsedMs = Date.now() - downloadStartedAt;
+    const elapsedMs = Date.now() - startedAt;
 
-    // Iedere 5 seconden zichtbaar loggen wat de downloadmap bevat.
     if (Date.now() - lastLogAt >= 5000) {
       lastLogAt = Date.now();
       console.log(
@@ -1345,10 +1366,6 @@ async function downloadResultsExcel(page, va, initialFound = null) {
         { files: filesNow }
       );
     }
-
-    const crdownloads = filesNow.filter((f) =>
-      f.toLowerCase().endsWith(".crdownload")
-    );
 
     const xlsxFiles = filesNow
       .filter((f) => f.toLowerCase().endsWith(".xlsx"))
@@ -1375,10 +1392,9 @@ async function downloadResultsExcel(page, va, initialFound = null) {
         `[fp-total] 📥 VA ${va} Excel gezien; wachten tot bestand volledig klaar is: ${path.basename(candidate)}`
       );
 
-      // Zodra Chrome klaar is met downloaden (geen .crdownload meer),
-      // direct proberen te openen met ExcelJS. Geen vaste extra wachttijd.
+      let lastSize = -1;
+      let stableSince = null;
       const completeCheckStartedAt = Date.now();
-      let lastReadError = null;
 
       while (Date.now() - completeCheckStartedAt < 60000) {
         let currentFiles = [];
@@ -1399,25 +1415,40 @@ async function downloadResultsExcel(page, va, initialFound = null) {
           size = 0;
         }
 
-        if (!stillDownloading && size > 0) {
+        if (!stillDownloading && size > 0 && size === lastSize) {
+          if (stableSince === null) stableSince = Date.now();
+        } else {
+          stableSince = null;
+        }
+
+        lastSize = size;
+
+        if (
+          !stillDownloading &&
+          size > 0 &&
+          stableSince !== null &&
+          Date.now() - stableSince >= 4000
+        ) {
+          await sleep(1500);
+
           try {
             await readXlsxToRows(candidate, { sheetIndex: 0 });
+
             console.log(
               `[fp-total] ✅ VA ${va} uitslagen Excel volledig binnen (${size} bytes)`
             );
+
             return { file: candidate, dir };
           } catch (e) {
-            lastReadError = e?.message ?? String(e);
+            console.log(
+              `[fp-total] ⏳ VA ${va} Excel bestaat maar is nog niet leesbaar:`,
+              e?.message ?? String(e)
+            );
+            stableSince = null;
           }
         }
 
-        await sleep(200);
-      }
-
-      if (lastReadError) {
-        console.log(
-          `[fp-total] ⚠️ VA ${va} Excel bleef tijdelijk onleesbaar: ${lastReadError}`
-        );
+        await sleep(500);
       }
     }
 
@@ -1432,11 +1463,6 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     await sleep(500);
   }
 
-  console.log(
-    `[fp-total] ❌ VA ${va} uitslagen Excel niet volledig binnen na ${Math.round(maxDownloadWaitMs / 1000)} seconden`
-  );
-
-  // Alleen bij definitieve download-timeout opruimen.
   cleanupDownloadDir(dir);
   return null;
 }
@@ -1546,57 +1572,89 @@ async function scrapeResults(page, va) {
     return { status: "skipped", rows: [], error: null, download: null };
   }
 
-  const downloadControl = await openResultsTileVerified(page, va);
-  if (!downloadControl) {
-    return {
-      status: "error",
-      rows: [],
-      error: "UITSLAGEN tegel/downloadknop niet geladen",
-      download: null,
-    };
-  }
+  const maxTries = Number(process.env.UITSLAGEN_TRIES ?? "1");
+  let lastError = null;
 
-  const dl = await downloadResultsExcel(page, va, downloadControl).catch(() => null);
-  if (!dl) {
-    await page.keyboard.press("Escape").catch(() => {});
-    return {
-      status: "error",
-      rows: [],
-      error: "Uitslagenbestand niet gedownload",
-      download: null,
-    };
-  }
+  for (let attempt = 1; attempt <= maxTries; attempt++) {
+    let dl = null;
 
-  try {
-    const parsed = await parseResultsExcel(dl.file, va);
+    try {
+      const downloadControl = await openResultsTileVerified(page, va);
 
-    // Exact zoals bundle: alleen een geldig herkend exportformaat mag opgeslagen worden.
-    // Een export zonder de verwachte kolomkoppen wordt apart gelogd als lege export.
-    if (!parsed?.meta?.ok) {
-      console.log(`[fp-total] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`, {
-        missingHeaders: parsed?.meta?.missingHeaders ?? [],
-        headers: parsed?.meta?.headers ?? [],
-      });
+      if (!downloadControl) {
+        throw new Error(`UITSLAGEN tegel/downloadknop niet geladen — VA ${va}`);
+      }
+
+      dl = await downloadResultsExcel(page, va, downloadControl);
+
+      if (!dl) {
+        console.log(`[fp-total] ❌ VA ${va} geen volledig Excel-bestand ontvangen`);
+        return {
+          status: "error",
+          rows: [],
+          error: "Uitslagenbestand niet gedownload",
+          download: null,
+        };
+      }
+
+      const parsed = await parseResultsExcel(dl.file, va);
+
+      if (parsed?.meta?.ok) {
+        return {
+          status: parsed.rows.length ? "success" : "no_results",
+          rows: parsed.rows || [],
+          error: null,
+          download: dl,
+        };
+      }
+
+      console.log(
+        `[fp-total] ℹ️ Geen uitslagen gevonden voor VA ${va} (lege export / geen kolomkoppen)`,
+        {
+          attempt,
+          missingHeaders: parsed?.meta?.missingHeaders ?? [],
+          headers: parsed?.meta?.headers ?? [],
+        }
+      );
+
+      return {
+        status: "no_results",
+        rows: [],
+        error: null,
+        download: dl,
+      };
+    } catch (e) {
+      lastError = e;
+      const msg = e?.message ?? String(e);
+
+      // Net als bundle: tijdelijke downloadmap bij scrape/parsefout opruimen.
+      if (dl?.dir) cleanupDownloadDir(dl.dir);
+
+      if (attempt >= maxTries) {
+        return {
+          status: "error",
+          rows: [],
+          error: msg,
+          download: null,
+        };
+      }
+
+      console.log(
+        `[fp-total] ⚠️ VA ${va} UITSLAGEN poging ${attempt}/${maxTries} mislukt:`,
+        msg
+      );
+
+      await closeAnyModal(page).catch(() => {});
+      await sleep(1000);
     }
-
-    return {
-      status: parsed?.meta?.ok && parsed.rows.length ? "success" : "no_results",
-      rows: parsed?.rows || [],
-      error: null,
-      download: dl,
-    };
-  } catch (e) {
-    // Parse mislukt: dan mag tijdelijke download wel weg.
-    cleanupDownloadDir(dl.dir);
-    return {
-      status: "error",
-      rows: [],
-      error: e?.message ?? String(e),
-      download: null,
-    };
-  } finally {
-    await page.keyboard.press("Escape").catch(() => {});
   }
+
+  return {
+    status: "error",
+    rows: [],
+    error: lastError?.message ?? "UITSLAGEN mislukt",
+    download: null,
+  };
 }
 
 async function saveChildSnapshot(table, va, rows, mapper) {
@@ -1879,61 +1937,16 @@ async function scrapeOne(page, va, openFreshPage) {
 
   }
 
-  // UITSLAGEN hoort bij iedere bestaande VA te worden uitgevoerd.
-  // Licentie en startverbod zijn uitsluitend opgeslagen waarden en nooit selectievoorwaarden.
+  // UITSLAGEN: bewust dezelfde flow als fp_bundle.
+  // Na DETAILS/SYS42 alleen de UITSLAGEN-tegel openen, Excel-knop vinden,
+  // downloaden en parsen. Geen aparte total-only modal/fresh-tab logica.
   if (SCRAPE_RESULTS) {
-    let resultStep = await scrapeResults(page, va).catch((e) => ({
+    const resultStep = await scrapeResults(page, va).catch((e) => ({
       status: "error",
       rows: [],
       error: e?.message ?? String(e),
       download: null,
     }));
-
-    // VPS-herstelpad:
-    // Als DETAILS wel slaagt maar de UITSLAGEN-tegel/downloadknop op deze page niet
-    // meer geladen raakt, probeer UITSLAGEN één keer op een volledig verse,
-    // opnieuw geverifieerde VA-tab. Dit voorkomt dat een achtergebleven modal/
-    // overlay of vermoeide page-state de uitslagen van deze VA verloren laat gaan.
-    if (
-      resultStep?.status === "error" &&
-      /UITSLAGEN tegel\/downloadknop niet geladen/i.test(String(resultStep?.error || ""))
-    ) {
-      // Eerst de bekende FightPassport-header/logo fallback gebruiken.
-      // Een klik hierop sluit in de UI het openstaande modal.
-      const logoClosed = await clickHeaderLogoToCloseModal(page, va).catch(() => false);
-
-      if (logoClosed) {
-        console.log(`[fp-total] 🔁 VA ${va} UITSLAGEN opnieuw proberen na header-logo/SYS42 sluiting`);
-        resultStep = await scrapeResults(page, va).catch((e) => ({
-          status: "error",
-          rows: [],
-          error: e?.message ?? String(e),
-          download: null,
-        }));
-      }
-
-      // Alleen als UITSLAGEN daarna nog steeds niet geladen raakt,
-      // openen we één verse geverifieerde VA-tab.
-      if (
-        resultStep?.status === "error" &&
-        /UITSLAGEN tegel\/downloadknop niet geladen/i.test(String(resultStep?.error || ""))
-      ) {
-        console.log(
-          `[fp-total] 🔁 VA ${va} UITSLAGEN nog niet geladen; retry op verse geverifieerde VA-tab`
-        );
-
-        resultStep = await withFreshVaTab("UITSLAGEN retry", async (freshPage) => {
-        // Geen DETAILS openen op deze verse tab; direct de bundle-achtige
-        // UITSLAGEN-flow gebruiken op een schoon geverifieerd profiel.
-        return await scrapeResults(freshPage, va);
-        }).catch((e) => ({
-          status: "error",
-          rows: [],
-          error: `UITSLAGEN retry mislukt: ${e?.message ?? String(e)}`,
-          download: null,
-        }));
-      }
-    }
 
     resultsStatus = resultStep.status;
     resultsError = resultStep.error;
