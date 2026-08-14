@@ -1858,10 +1858,12 @@ async function scrapeOne(page, va, openFreshPage) {
       );
     }
 
-    // Belangrijk voor UITSLAGEN: sluit de DETAILS-modal aantoonbaar met de echte
-    // FightPassport-knop voordat we verder gaan. Op de VPS bleef deze modal soms
-    // open staan, waardoor de UITSLAGEN-tegel niet meer correct klikbaar was.
-    await closeDetailsModalVerified(page, va);
+    // VPS-werkwijze:
+    // DETAILS is klaar -> direct SYS42/header-logo klikken om de modal te sluiten
+    // -> korte wachttijd -> daarna UITSLAGEN.
+    // Geen langdurige modal-verificatie meer: die bleek op FightPassport onbetrouwbaar.
+    await clickHeaderLogoToCloseModal(page, va).catch(() => false);
+    await sleep(500);
 
     // DETAILS is nu aantoonbaar geladen. Lees de summary opnieuw zodat
     // totaal_wedstrijden / gewonnen / licentie niet op vroege null-waarden blijven staan.
