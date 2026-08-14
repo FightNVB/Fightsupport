@@ -111,6 +111,110 @@ async function closeAnyModal(page) {
   } catch {}
 }
 
+
+async function closeDetailsModalVerified(page, va = "") {
+  const selector = "button#sluit_inr_detail";
+  const startedAt = Date.now();
+  let clicked = false;
+
+  // DETAILS kan op de VPS nét iets later volledig zichtbaar worden.
+  // Wacht daarom expliciet op de echte sluitknop in plaats van alleen best-effort te klikken.
+  while (Date.now() - startedAt < 10000) {
+    const state = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return { exists: false, visible: false };
+
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      const visible =
+        r.width > 0 &&
+        r.height > 0 &&
+        st.display !== "none" &&
+        st.visibility !== "hidden" &&
+        st.opacity !== "0";
+
+      return { exists: true, visible };
+    }, selector).catch(() => ({ exists: false, visible: false }));
+
+    if (state.visible) {
+      clicked = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return false;
+        el.scrollIntoView?.({ block: "center" });
+        el.click();
+        return true;
+      }, selector).catch(() => false);
+
+      if (clicked) break;
+    }
+
+    // Als de knop helemaal niet bestaat kan DETAILS al dicht zijn.
+    if (!state.exists && Date.now() - startedAt > 1200) {
+      break;
+    }
+
+    await sleep(150);
+  }
+
+  // Controleer na de klik dat de DETAILS-sluitknop niet meer zichtbaar is.
+  // Zo starten we UITSLAGEN nooit terwijl de DETAILS-modal nog over de pagina hangt.
+  if (clicked) {
+    const closeStartedAt = Date.now();
+
+    while (Date.now() - closeStartedAt < 10000) {
+      const stillVisible = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return false;
+
+        const r = el.getBoundingClientRect();
+        const st = getComputedStyle(el);
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          st.display !== "none" &&
+          st.visibility !== "hidden" &&
+          st.opacity !== "0"
+        );
+      }, selector).catch(() => false);
+
+      if (!stillVisible) {
+        console.log(`[fp-total] ✅ VA ${va} DETAILS modal expliciet gesloten`);
+        await sleep(350);
+        return true;
+      }
+
+      await sleep(150);
+    }
+
+    console.log(`[fp-total] ⚠️ VA ${va} DETAILS sluitknop bleef zichtbaar; fallback closeAnyModal`);
+  }
+
+  // Fallback voor afwijkende renders / reeds half gesloten modals.
+  await closeAnyModal(page).catch(() => {});
+  await sleep(350);
+
+  const stillVisibleAfterFallback = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+
+    const r = el.getBoundingClientRect();
+    const st = getComputedStyle(el);
+    return (
+      r.width > 0 &&
+      r.height > 0 &&
+      st.display !== "none" &&
+      st.visibility !== "hidden" &&
+      st.opacity !== "0"
+    );
+  }, selector).catch(() => false);
+
+  if (stillVisibleAfterFallback) {
+    throw new Error(`DETAILS modal kon niet aantoonbaar worden gesloten voor VA ${va}`);
+  }
+
+  return true;
+}
+
 async function readHeaderInfo(page) {
   try {
     return await page.evaluate(() => {
@@ -1730,6 +1834,10 @@ async function scrapeOne(page, va, openFreshPage) {
       );
     }
 
+    // Belangrijk voor UITSLAGEN: sluit de DETAILS-modal aantoonbaar met de echte
+    // FightPassport-knop voordat we verder gaan. Op de VPS bleef deze modal soms
+    // open staan, waardoor de UITSLAGEN-tegel niet meer correct klikbaar was.
+    await closeDetailsModalVerified(page, va);
 
     // DETAILS is nu aantoonbaar geladen. Lees de summary opnieuw zodat
     // totaal_wedstrijden / gewonnen / licentie niet op vroege null-waarden blijven staan.
