@@ -212,33 +212,6 @@ async function closeDetailsModalVerified(page, va = "") {
 }
 
 
-async function clickHeaderLogoToCloseModal(page, va = "") {
-  const clicked = await page.evaluate(() => {
-    const candidates = [
-      document.querySelector("#header_logo img"),
-      document.querySelector('img[src="img/logo_header.svg"]'),
-      document.querySelector('img[src$="/img/logo_header.svg"]'),
-      document.querySelector('img[src$="logo_header.svg"]'),
-    ].filter(Boolean);
-
-    const el = candidates[0] || null;
-    if (!el) return false;
-
-    el.scrollIntoView?.({ block: "center", inline: "center" });
-    el.click();
-    return true;
-  }).catch(() => false);
-
-  if (clicked) {
-    console.log(`[fp-total] 🧹 VA ${va} header-logo/SYS42 fallback geklikt om modal te sluiten`);
-    await sleep(700);
-    return true;
-  }
-
-  console.log(`[fp-total] ⚠️ VA ${va} header-logo/SYS42 fallback niet gevonden`);
-  return false;
-}
-
 async function readHeaderInfo(page) {
   try {
     return await page.evaluate(() => {
@@ -1916,12 +1889,11 @@ async function scrapeOne(page, va, openFreshPage) {
       );
     }
 
-    // VPS-werkwijze:
-    // DETAILS is klaar -> direct SYS42/header-logo klikken om de modal te sluiten
-    // -> korte wachttijd -> daarna UITSLAGEN.
-    // Geen langdurige modal-verificatie meer: die bleek op FightPassport onbetrouwbaar.
-    await clickHeaderLogoToCloseModal(page, va).catch(() => false);
-    await sleep(500);
+    // Zelfde overgang als fp_bundle:
+    // na FULLFIGHTER/DETAILS alleen modals sluiten en op DEZELFDE page door naar UITSLAGEN.
+    // Geen SYS42/logo-click, geen dashboard-reset en geen verse tab.
+    await closeAnyModal(page).catch(() => {});
+    await sleep(120);
 
     // DETAILS is nu aantoonbaar geladen. Lees de summary opnieuw zodat
     // totaal_wedstrijden / gewonnen / licentie niet op vroege null-waarden blijven staan.
