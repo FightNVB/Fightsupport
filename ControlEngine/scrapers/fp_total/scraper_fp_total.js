@@ -211,6 +211,34 @@ async function closeDetailsModalVerified(page, va = "") {
   return true;
 }
 
+
+async function clickHeaderLogoToCloseModal(page, va = "") {
+  const clicked = await page.evaluate(() => {
+    const candidates = [
+      document.querySelector("#header_logo img"),
+      document.querySelector('img[src="img/logo_header.svg"]'),
+      document.querySelector('img[src$="/img/logo_header.svg"]'),
+      document.querySelector('img[src$="logo_header.svg"]'),
+    ].filter(Boolean);
+
+    const el = candidates[0] || null;
+    if (!el) return false;
+
+    el.scrollIntoView?.({ block: "center", inline: "center" });
+    el.click();
+    return true;
+  }).catch(() => false);
+
+  if (clicked) {
+    console.log(`[fp-total] 🧹 VA ${va} header-logo/SYS42 fallback geklikt om modal te sluiten`);
+    await sleep(700);
+    return true;
+  }
+
+  console.log(`[fp-total] ⚠️ VA ${va} header-logo/SYS42 fallback niet gevonden`);
+  return false;
+}
+
 async function readHeaderInfo(page) {
   try {
     return await page.evaluate(() => {
@@ -1852,14 +1880,58 @@ async function scrapeOne(page, va, openFreshPage) {
   // UITSLAGEN hoort bij iedere bestaande VA te worden uitgevoerd.
   // Licentie en startverbod zijn uitsluitend opgeslagen waarden en nooit selectievoorwaarden.
   if (SCRAPE_RESULTS) {
-    // Net als fp_bundle: UITSLAGEN op dezelfde reeds geverifieerde VA-page uitvoeren.
-    // Geen verse tab en geen extra hash/reload-cyclus tussen FULLFIGHTER en UITSLAGEN.
-    const resultStep = await scrapeResults(page, va).catch((e) => ({
+    let resultStep = await scrapeResults(page, va).catch((e) => ({
       status: "error",
       rows: [],
       error: e?.message ?? String(e),
       download: null,
     }));
+
+    // VPS-herstelpad:
+    // Als DETAILS wel slaagt maar de UITSLAGEN-tegel/downloadknop op deze page niet
+    // meer geladen raakt, probeer UITSLAGEN één keer op een volledig verse,
+    // opnieuw geverifieerde VA-tab. Dit voorkomt dat een achtergebleven modal/
+    // overlay of vermoeide page-state de uitslagen van deze VA verloren laat gaan.
+    if (
+      resultStep?.status === "error" &&
+      /UITSLAGEN tegel\/downloadknop niet geladen/i.test(String(resultStep?.error || ""))
+    ) {
+      // Eerst de bekende FightPassport-header/logo fallback gebruiken.
+      // Een klik hierop sluit in de UI het openstaande modal.
+      const logoClosed = await clickHeaderLogoToCloseModal(page, va).catch(() => false);
+
+      if (logoClosed) {
+        console.log(`[fp-total] 🔁 VA ${va} UITSLAGEN opnieuw proberen na header-logo/SYS42 sluiting`);
+        resultStep = await scrapeResults(page, va).catch((e) => ({
+          status: "error",
+          rows: [],
+          error: e?.message ?? String(e),
+          download: null,
+        }));
+      }
+
+      // Alleen als UITSLAGEN daarna nog steeds niet geladen raakt,
+      // openen we één verse geverifieerde VA-tab.
+      if (
+        resultStep?.status === "error" &&
+        /UITSLAGEN tegel\/downloadknop niet geladen/i.test(String(resultStep?.error || ""))
+      ) {
+        console.log(
+          `[fp-total] 🔁 VA ${va} UITSLAGEN nog niet geladen; retry op verse geverifieerde VA-tab`
+        );
+
+        resultStep = await withFreshVaTab("UITSLAGEN retry", async (freshPage) => {
+        // Geen DETAILS openen op deze verse tab; direct de bundle-achtige
+        // UITSLAGEN-flow gebruiken op een schoon geverifieerd profiel.
+        return await scrapeResults(freshPage, va);
+        }).catch((e) => ({
+          status: "error",
+          rows: [],
+          error: `UITSLAGEN retry mislukt: ${e?.message ?? String(e)}`,
+          download: null,
+        }));
+      }
+    }
 
     resultsStatus = resultStep.status;
     resultsError = resultStep.error;
