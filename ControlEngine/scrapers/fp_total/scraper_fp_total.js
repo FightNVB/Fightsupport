@@ -1889,31 +1889,21 @@ async function scrapeOne(page, va, openFreshPage) {
       );
     }
 
-    // Zelfde overgang als fp_bundle:
-    // na FULLFIGHTER/DETAILS alleen modals sluiten en op DEZELFDE page door naar UITSLAGEN.
-    // Geen SYS42/logo-click, geen dashboard-reset en geen verse tab.
-    await closeAnyModal(page).catch(() => {});
-    await sleep(120);
-
-    // DETAILS is nu aantoonbaar geladen. Lees de summary opnieuw zodat
-    // totaal_wedstrijden / gewonnen / licentie niet op vroege null-waarden blijven staan.
-    const refreshedSummary = await readHeaderAndSummary(page, va, {
-      timeoutMs: 8000,
-      pollMs: 200,
-      reopenDetails: false,
-    }).catch(() => null);
-
-    if (refreshedSummary) {
-      Object.assign(summary, refreshedSummary);
-    }
+    // Historie-achtige scheiding:
+    // DETAILS is klaar en alle benodigde data zit nu in geheugen.
+    // Sluit deze fighter-tab HARD zodat UITSLAGEN nooit een oude modal/frame/DOM-state erft.
+    await hardClosePage(page).catch(() => {});
+    console.log(`[fp-total] 🧹 VA ${va} DETAILS-tab hard gesloten; UITSLAGEN opent dezelfde VA vers`);
 
   }
 
-  // UITSLAGEN: bewust dezelfde flow als fp_bundle.
-  // Na DETAILS/SYS42 alleen de UITSLAGEN-tegel openen, Excel-knop vinden,
-  // downloaden en parsen. Geen aparte total-only modal/fresh-tab logica.
+  // UITSLAGEN krijgt ALTIJD een volledig verse, opnieuw geverifieerde fighter-tab.
+  // Master-login/cookies blijven gedeeld; alleen deze VA-page wordt opnieuw opgebouwd.
   if (SCRAPE_RESULTS) {
-    const resultStep = await scrapeResults(page, va).catch((e) => ({
+    const resultStep = await withFreshVaTab("UITSLAGEN", async (resultsPage) => {
+      console.log(`[fp-total] 🆕 VA ${va} verse UITSLAGEN-tab geopend`);
+      return await scrapeResults(resultsPage, va);
+    }).catch((e) => ({
       status: "error",
       rows: [],
       error: e?.message ?? String(e),
