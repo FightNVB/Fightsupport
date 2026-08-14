@@ -851,6 +851,19 @@ function FighterMetalCard({
           </div>
         </div>
 
+        {resultBadges.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {resultBadges.map((badge: any) => (
+              <Badge
+                key={badge.key}
+                text={badge.text}
+                tone={badge.tone}
+                invert
+              />
+            ))}
+          </div>
+        ) : null}
+
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-white/75">
           <div>
             Geboortedatum:{" "}
@@ -2128,18 +2141,21 @@ export default function PartijDetailPage() {
             const f: any = byVa.get(va);
             if (!f) return;
 
-            const setIfEmpty = (key: string, value: any) => {
-              if (row && (row[key] == null || String(row[key]).trim() === "") && value != null) {
+            // Data uit de centrale FightPassport/Total-tabellen is leidend voor
+            // FightPassport-velden. Oude controle_bout_context snapshots mogen
+            // deze actuele bron niet overschrijven.
+            const setFromFightPassport = (key: string, value: any) => {
+              if (row && value != null && !(typeof value === "string" && value.trim() === "")) {
                 row = { ...row, [key]: value };
               }
             };
 
-            setIfEmpty(`${side}_naam_fp`, firstFilled(f?.naam, f?.fp_naam, f?.volledige_naam));
-            setIfEmpty(
+            setFromFightPassport(`${side}_naam_fp`, firstFilled(f?.naam, f?.fp_naam, f?.volledige_naam));
+            setFromFightPassport(
               `${side}_geboortedatum_fp`,
               firstFilled(f?.geboortedatum, f?.geboorte_datum, f?.date_of_birth),
             );
-            setIfEmpty(`${side}_geslacht`, firstFilled(f?.geslacht, f?.gender));
+            setFromFightPassport(`${side}_geslacht`, firstFilled(f?.geslacht, f?.gender));
 
             const licentie = parseLicentie(
               f?.licentie,
@@ -2150,9 +2166,9 @@ export default function PartijDetailPage() {
               f?.licentiestatus,
               f?.licentie_status,
             );
-            setIfEmpty(`${side}_licentie`, licentie);
+            setFromFightPassport(`${side}_licentie`, licentie);
 
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_heeft_startverbod`,
               firstFilled(
                 f?.heeft_startverbod,
@@ -2161,39 +2177,51 @@ export default function PartijDetailPage() {
                 f?.heeft_start_verbod,
               ),
             );
-            setIfEmpty(
+
+            // Sommige fightpassport-routes leveren ook keurmerkvelden mee.
+            // Neem ze mee wanneer aanwezig; controle_resultaten blijft hieronder
+            // de fallback voor bestaande controles.
+            setFromFightPassport(
+              `keurmerk_${side}`,
+              firstFilled(f?.heeft_keurmerk, f?.keurmerk, f?.keurmerk_status),
+            );
+            setFromFightPassport(
+              `keurmerk_reden_${side}`,
+              firstFilled(f?.keurmerk_reason, f?.keurmerk_reden, f?.keurmerk_redenen),
+            );
+            setFromFightPassport(
               `${side}_nulmeting_totaal`,
               firstFilled(f?.nulmeting_totaal, f?.totaal_nulmeting, f?.nul_totaal),
             );
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_nulmeting_gewonnen`,
               firstFilled(f?.nulmeting_gewonnen, f?.nul_gewonnen),
             );
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_nulmeting_verloren`,
               firstFilled(f?.nulmeting_verloren, f?.nul_verloren),
             );
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_nulmeting_onbeslist`,
               firstFilled(f?.nulmeting_onbeslist, f?.nul_onbeslist),
             );
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_nulmeting_kos`,
               firstFilled(f?.nulmeting_kos, f?.nul_kos),
             );
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_nulmeting_opmerking`,
               firstFilled(f?.nulmeting_opmerking, f?.opmerking_nulmeting, f?.nul_opmerking),
             );
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_nulmeting_klasse`,
               firstFilled(f?.nulmeting_klasse, f?.klasse_nulmeting, f?.nul_klasse),
             );
-            setIfEmpty(
+            setFromFightPassport(
               `${side}_totaal_wedstrijden_scrape`,
               firstFilled(f?.totaal_wedstrijden, f?.totaal, f?.partijen_totaal),
             );
-            setIfEmpty(`${side}_gewonnen_scrape`, firstFilled(f?.gewonnen, f?.wins));
+            setFromFightPassport(`${side}_gewonnen_scrape`, firstFilled(f?.gewonnen, f?.wins));
           };
 
           fillSide("rood", vaR);
@@ -2320,12 +2348,24 @@ export default function PartijDetailPage() {
       ctx?.blauw_licentie_geldig,
       ctx?.blauw_licentie_status,
     );
-    const roodSv = parseJaNee(
-      firstFilled(ctx?.rood_heeft_startverbod, ctx?.rood_startverbod_actief, ctx?.rood_startverbod),
-    ) ?? "nee";
-    const blauwSv = parseJaNee(
-      firstFilled(ctx?.blauw_heeft_startverbod, ctx?.blauw_startverbod_actief, ctx?.blauw_startverbod),
-    ) ?? "nee";
+    const hasStartverbodResult = (side: "rood" | "blauw") =>
+      (regels ?? []).some((r) => {
+        if (!rowMatchesSide(r, side)) return false;
+        const code = String(r?.rule_code ?? "").trim().toUpperCase();
+        if (!code.startsWith("STARTVERBOD_")) return false;
+        return !isApprovedOverride(r) && normResultaat(r?.resultaat) !== "ok";
+      });
+
+    const roodSv = hasStartverbodResult("rood")
+      ? "ja"
+      : parseJaNee(
+          firstFilled(ctx?.rood_heeft_startverbod, ctx?.rood_startverbod_actief, ctx?.rood_startverbod),
+        ) ?? "nee";
+    const blauwSv = hasStartverbodResult("blauw")
+      ? "ja"
+      : parseJaNee(
+          firstFilled(ctx?.blauw_heeft_startverbod, ctx?.blauw_startverbod_actief, ctx?.blauw_startverbod),
+        ) ?? "nee";
 
     return {
       evDatum,
@@ -2343,7 +2383,7 @@ export default function PartijDetailPage() {
       roodSv,
       blauwSv,
     };
-  }, [ctx, evenementDatum, evenementNaam]);
+  }, [ctx, evenementDatum, evenementNaam, regels]);
 
   const verschillen = useMemo(() => {
     if (!ctx) return null;
@@ -2561,36 +2601,66 @@ export default function PartijDetailPage() {
     const parseBool = (value: any): boolean | null => {
       if (value === true || value === false) return value;
       const s = String(value ?? "").trim().toLowerCase();
-      if (["ja", "true", "1", "yes"].includes(s)) return true;
-      if (["nee", "false", "0", "no"].includes(s)) return false;
+      if (["ja", "true", "1", "yes", "geldig", "actief"].includes(s)) return true;
+      if (["nee", "false", "0", "no", "ongeldig", "verlopen", "ontbreekt"].includes(s)) return false;
       return null;
     };
 
+    const fromControleResultaten = (side: "rood" | "blauw") => {
+      const candidates = (regels ?? []).filter((r) => {
+        if (!rowMatchesSide(r, side)) return false;
+        const code = String(r?.rule_code ?? "").trim().toUpperCase();
+        const rule = String(r?.rule ?? "").trim().toUpperCase();
+        return code.startsWith("KEURMERK_") || rule.includes("KEURMERK");
+      });
+      if (!candidates.length) return { ok: null as boolean | null, reason: null as string | null };
+
+      // Een actuele fout/actie wint van een OK-regel.
+      const failing = candidates.find((r) => {
+        const result = normResultaat(r?.resultaat);
+        return !isApprovedOverride(r) && result !== "ok";
+      });
+      const chosen = failing ?? candidates[candidates.length - 1];
+      return {
+        ok: failing ? false : true,
+        reason: String(chosen?.boodschap ?? chosen?.review_note ?? "").trim() || null,
+      };
+    };
+
+    const roodControle = fromControleResultaten("rood");
+    const blauwControle = fromControleResultaten("blauw");
+
     const roodOk =
-      parseBool(ctx?.keurmerk_rood) ?? parseBool(ctx?.heeft_keurmerk_rood);
+      parseBool(ctx?.keurmerk_rood) ??
+      parseBool(ctx?.heeft_keurmerk_rood) ??
+      roodControle.ok;
 
     const blauwOk =
-      parseBool(ctx?.keurmerk_blauw) ?? parseBool(ctx?.heeft_keurmerk_blauw);
+      parseBool(ctx?.keurmerk_blauw) ??
+      parseBool(ctx?.heeft_keurmerk_blauw) ??
+      blauwControle.ok;
 
     return {
       rood: {
         ok: roodOk,
         reason:
-          ctx?.keurmerk_reden_rood ??
-          ctx?.keurmerk_redenen_rood ??
-          ctx?.heeft_keurmerk_rood ??
-          null,
+          firstFilled(
+            ctx?.keurmerk_reden_rood,
+            ctx?.keurmerk_redenen_rood,
+            roodControle.reason,
+          ) ?? null,
       },
       blauw: {
         ok: blauwOk,
         reason:
-          ctx?.keurmerk_reden_blauw ??
-          ctx?.keurmerk_redenen_blauw ??
-          ctx?.heeft_keurmerk_blauw ??
-          null,
+          firstFilled(
+            ctx?.keurmerk_reden_blauw,
+            ctx?.keurmerk_redenen_blauw,
+            blauwControle.reason,
+          ) ?? null,
       },
     };
-  }, [ctx]);
+  }, [ctx, regels]);
 
   const sideBadges = useMemo(() => {
     return {
@@ -3092,6 +3162,7 @@ export default function PartijDetailPage() {
                 nulKlasse={String(firstFilled(ctx?.rood_nulmeting_klasse, ctx?.rood_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.roodNulmetingTotaal ?? "-"}
                 nulOpmerking={String(firstFilled(ctx?.rood_nulmeting_opmerking, ctx?.rood_opmerking_nulmeting, ""))}
+                resultBadges={sideBadges.rood}
                 onEdit={() => openEdit("rood")}
               />
             </div>
@@ -3210,6 +3281,7 @@ export default function PartijDetailPage() {
                 nulKlasse={String(firstFilled(ctx?.blauw_nulmeting_klasse, ctx?.blauw_klasse_nulmeting, "-"))}
                 nulTotaal={verschillen?.blauwNulmetingTotaal ?? "-"}
                 nulOpmerking={String(firstFilled(ctx?.blauw_nulmeting_opmerking, ctx?.blauw_opmerking_nulmeting, ""))}
+                resultBadges={sideBadges.blauw}
                 onEdit={() => openEdit("blauw")}
               />
             </div>

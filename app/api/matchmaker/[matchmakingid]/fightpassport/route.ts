@@ -70,23 +70,105 @@ export async function GET(
       return privateJson({ error: "Geen toegang tot een of meer geselecteerde vechters." }, 403);
     }
 
-    const [fighters, results] = await Promise.all([
+    // Centrale FightPassport/Total-tabellen zijn vanaf hier de waarheid.
+    // Geen fighters_raw of andere oude scraper-snapshots gebruiken.
+    const [fighters, results, startbans, licenses] = await Promise.all([
       supabaseAdmin
         .from("fightpassport_fighters")
-        .select("va_nummer,naam,geboortedatum,geslacht,licentie_actief,heeft_startverbod,nulmeting_discipline,nulmeting_klasse,nulmeting_gewicht,nulmeting_totaal,nulmeting_gewonnen,nulmeting_verloren,nulmeting_onbeslist,nulmeting_kos,nulmeting_overige_ervaring,nulmeting_opmerking,totaal_wedstrijden,gewonnen,kos,berekende_klasse,mma_level")
+        .select(
+          "va_nummer,naam,geboortedatum,geslacht,fit_to_fight,licentie_actief,heeft_startverbod,nulmeting_discipline,nulmeting_klasse,nulmeting_gewicht,nulmeting_totaal,nulmeting_gewonnen,nulmeting_verloren,nulmeting_onbeslist,nulmeting_kos,nulmeting_overige_ervaring,nulmeting_opmerking,totaal_wedstrijden,gewonnen,kos,berekende_klasse,mma_level,primary_discipline,last_seen_at,last_scraped_at,updated_at",
+        )
         .in("va_nummer", requestedVas),
       supabaseAdmin
         .from("fightpassport_results")
-        .select("id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,last_seen_at")
+        .select(
+          "id,va_nummer,datum,evenement,tegenstander,sportschool,discipline,klasse,gewicht,uitslag,last_seen_at",
+        )
         .in("va_nummer", requestedVas)
         .order("datum", { ascending: false }),
+      supabaseAdmin
+        .from("fightpassport_startbans")
+        .select(
+          "id,va_nummer,soort,ingang,einde,opgelegd_door,reden,evenement,evenement_datum,actief,last_seen_at",
+        )
+        .in("va_nummer", requestedVas)
+        .order("ingang", { ascending: false }),
+      supabaseAdmin
+        .from("fightpassport_licenses")
+        .select(
+          "id,va_nummer,soort,status,geldig_van,geldig_tot,bond,last_seen_at",
+        )
+        .in("va_nummer", requestedVas)
+        .order("geldig_tot", { ascending: false }),
     ]);
 
-    if (fighters.error || results.error) {
-      return privateJson({ error: "FightPassport-gegevens konden niet worden geladen." }, 500);
+    if (fighters.error || results.error || startbans.error || licenses.error) {
+      console.error("[fightpassport] centrale data laden mislukt", {
+        fighters: fighters.error?.message,
+        results: results.error?.message,
+        startbans: startbans.error?.message,
+        licenses: licenses.error?.message,
+      });
+      return privateJson(
+        { error: "FightPassport-gegevens konden niet worden geladen." },
+        500,
+      );
     }
 
-    return privateJson({ fighters: fighters.data ?? [], results: results.data ?? [] });
+    const startbansByVa = new Map<string, any[]>();
+    for (const row of startbans.data ?? []) {
+      const va = normalizeVa((row as any).va_nummer);
+      if (!va) continue;
+      const list = startbansByVa.get(va) ?? [];
+      list.push(row);
+      startbansByVa.set(va, list);
+    }
+
+    const licensesByVa = new Map<string, any[]>();
+    for (const row of licenses.data ?? []) {
+      const va = normalizeVa((row as any).va_nummer);
+      if (!va) continue;
+      const list = licensesByVa.get(va) ?? [];
+      list.push(row);
+      licensesByVa.set(va, list);
+    }
+
+    const enrichedFighters = (fighters.data ?? []).map((fighter: any) => {
+      const va = normalizeVa(fighter.va_nummer);
+      const fighterStartbans = startbansByVa.get(va) ?? [];
+      const fighterLicenses = licensesByVa.get(va) ?? [];
+
+      // Detailregels uit Total zijn leidend wanneer ze aanwezig zijn.
+      // De samenvattingsvelden op fightpassport_fighters blijven fallback.
+      const activeStartban = fighterStartbans.find((row: any) => row?.actief === true);
+      const activeLicense = fighterLicenses.find((row: any) => {
+        const status = String(row?.status ?? "").trim().toLowerCase();
+        return ["actief", "active", "geldig", "valid"].includes(status);
+      });
+
+      return {
+        ...fighter,
+        heeft_startverbod:
+          fighterStartbans.length > 0
+            ? Boolean(activeStartban)
+            : fighter.heeft_startverbod,
+        licentie_actief:
+          fighterLicenses.length > 0
+            ? Boolean(activeLicense)
+            : fighter.licentie_actief,
+        startverbod_detail: activeStartban ?? null,
+        startverboden: fighterStartbans,
+        licentie_detail: activeLicense ?? fighterLicenses[0] ?? null,
+        licenties: fighterLicenses,
+      };
+    });
+
+    return privateJson({
+      fighters: enrichedFighters,
+      results: results.data ?? [],
+      startbans: startbans.data ?? [],
+      licenses: licenses.data ?? [],
+    });
   } catch (error) {
     return secureError(error, "FightPassport-gegevens konden niet worden geladen.");
   }
