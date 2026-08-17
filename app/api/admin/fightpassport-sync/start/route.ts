@@ -106,7 +106,8 @@ export async function POST(req: Request) {
     const startVa = clampInt(body?.start_va, 775, 1, 99999);
     const endVa = clampInt(body?.end_va, startVa, 1, 99999);
 
-    const workersPerProcess = 24;
+    const workersPerProcess = 10;
+    const requestedProcesses = 2;
     const staggerMs = clampInt(body?.stagger_ms ?? 2500, 2500, 0, 10000);
     const tabAttempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
     const softWaitMs = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);
@@ -171,16 +172,32 @@ export async function POST(req: Request) {
       start_va: startVa,
       end_va: endVa,
       workers_per_process: workersPerProcess,
-      processes: 1,
+      processes: requestedProcesses,
       robot: TOTAL_ROBOT_FILE,
       role,
       totalRobotPath,
     });
 
     const batchId = crypto.randomUUID();
-    const parts = [
-      { part: 1, startVa, endVa },
-    ];
+
+    // Verdeel het bereik zonder overlap over maximaal 2 processen.
+    // Bij een bereik van 1 VA starten we vanzelf maar 1 proces.
+    const totalVaCount = endVa - startVa + 1;
+    const processCount = Math.min(requestedProcesses, totalVaCount);
+    const baseSize = Math.floor(totalVaCount / processCount);
+    const remainder = totalVaCount % processCount;
+
+    let nextStartVa = startVa;
+    const parts = Array.from({ length: processCount }, (_, index) => {
+      const size = baseSize + (index < remainder ? 1 : 0);
+      const part = {
+        part: index + 1,
+        startVa: nextStartVa,
+        endVa: nextStartVa + size - 1,
+      };
+      nextStartVa = part.endVa + 1;
+      return part;
+    });
 
     for (const part of parts) {
       void runNodeScript(
@@ -244,7 +261,7 @@ export async function POST(req: Request) {
         processes: parts.length,
         workers_per_process: workersPerProcess,
         parts: parts.map((part) => ({ part: part.part, start_va: part.startVa, end_va: part.endVa })),
-        message: `Total AutoCheck gestart als ${parts.length} proces met ${workersPerProcess} workers voor VA ${startVa} t/m ${endVa}.`,
+        message: `Total AutoCheck gestart als ${parts.length} ${parts.length === 1 ? "proces" : "processen"} × ${workersPerProcess} workers voor VA ${startVa} t/m ${endVa}.`,
       },
       { status: 202 }
     );

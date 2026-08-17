@@ -321,7 +321,7 @@ async function closeWorkerContext(ctx) {
 async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   const {
     maxAttempts = 4,
-    softWaitMs = 1500,
+    softWaitMs = 200,
     betweenAttemptsMs = 1200,
     workerLabel = "",
   } = opts ?? {};
@@ -835,11 +835,12 @@ async function openDetailsLikeBundle(page, va) {
     }, va).catch(() => false);
 
     if (clicked) {
-      await sleep(1200);
+      // Geen vaste wachttijd: scrapeDetailsFromPage controleert direct of de
+      // benodigde DETAILS-inhoud/modalvelden daadwerkelijk beschikbaar zijn.
       return true;
     }
 
-    await sleep(250);
+    await sleep(100);
   }
 
   return false;
@@ -898,7 +899,7 @@ async function waitForDetailsTileContentLikeBundle(page, va) {
     }, va).catch(() => null);
 
     if (last?.ready) return true;
-    await sleep(500);
+    await sleep(100);
   }
 
   console.log(`[fp-total] ⚠️ VA ${va} DETAILS tegelinhoud nog niet volledig zichtbaar`, {
@@ -1171,17 +1172,16 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000) {
     }, va).catch(() => false);
 
     if (!clicked) {
-      await sleep(400);
+      await sleep(100);
       continue;
     }
 
-    await sleep(1200);
-
+    // Geen vaste wachttijd: de downloadknop is het bewijs dat UITSLAGEN klaar is.
     const found = await findResultsDownloadControl(page, 8000);
     if (found) return found;
 
     await closeAnyModal(page).catch(() => {});
-    await sleep(600);
+    await sleep(100);
   }
 
   return null;
@@ -1249,7 +1249,7 @@ async function findResultsDownloadControl(page, timeoutMs = 10000) {
       }
     }
 
-    await sleep(300);
+    await sleep(100);
   }
 
   return null;
@@ -1361,13 +1361,12 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     if (xlsxFiles.length > 0) {
       const candidate = xlsxFiles[0];
 
-      console.log(
-        `[fp-total] 📥 VA ${va} Excel gezien; wachten tot bestand volledig klaar is: ${path.basename(candidate)}`
-      );
-
-      let lastSize = -1;
-      let stableSince = null;
+      // Geen vaste "stabiel gedurende 4s + 1,5s extra" wachttijd meer.
+      // Zodra Chrome geen .crdownload meer heeft en het .xlsx-bestand bestaat,
+      // proberen we het direct te lezen. Alleen als Excel nét nog niet volledig
+      // is weggeschreven, pollen we kort opnieuw.
       const completeCheckStartedAt = Date.now();
+      let loggedSeen = false;
 
       while (Date.now() - completeCheckStartedAt < 60000) {
         let currentFiles = [];
@@ -1388,22 +1387,14 @@ async function downloadResultsExcel(page, va, initialFound = null) {
           size = 0;
         }
 
-        if (!stillDownloading && size > 0 && size === lastSize) {
-          if (stableSince === null) stableSince = Date.now();
-        } else {
-          stableSince = null;
+        if (!loggedSeen) {
+          loggedSeen = true;
+          console.log(
+            `[fp-total] 📥 VA ${va} Excel gezien; direct leescontrole: ${path.basename(candidate)}`
+          );
         }
 
-        lastSize = size;
-
-        if (
-          !stillDownloading &&
-          size > 0 &&
-          stableSince !== null &&
-          Date.now() - stableSince >= 4000
-        ) {
-          await sleep(1500);
-
+        if (!stillDownloading && size > 0) {
           try {
             await readXlsxToRows(candidate, { sheetIndex: 0 });
 
@@ -1413,15 +1404,14 @@ async function downloadResultsExcel(page, va, initialFound = null) {
 
             return { file: candidate, dir };
           } catch (e) {
-            console.log(
-              `[fp-total] ⏳ VA ${va} Excel bestaat maar is nog niet leesbaar:`,
-              e?.message ?? String(e)
-            );
-            stableSince = null;
+            // Bestand kan tussen rename en volledige flush heel kort zichtbaar zijn.
+            // Geen secondenlange stabiliteitswacht: na 100ms opnieuw proberen.
+            await sleep(100);
+            continue;
           }
         }
 
-        await sleep(500);
+        await sleep(100);
       }
     }
 
@@ -1793,64 +1783,23 @@ async function scrapeOne(page, va, openFreshPage) {
         throw new Error("DETAILS tegelinhoud niet volledig geladen");
       }
 
-      // Veel korter dan voorheen: wacht totdat de modalvelden een kleine periode
-      // aantoonbaar stabiel zijn in plaats van meerdere seconden vaste marge.
-      await sleep(500);
-
-      let previousSignature = "";
-      let stableChecks = 0;
+      // Geen vaste marge of stabiliteitswacht. Lees direct zodra de modal
+      // bruikbare fightervelden bevat. Als FightPassport nét nog rendert,
+      // proberen we na 100ms opnieuw.
       const detailsWaitStartedAt = Date.now();
+      let lastScraped = null;
 
       while (Date.now() - detailsWaitStartedAt < 10000) {
-        const signature = await p.evaluate(() => {
-          const visibleModal = [...document.querySelectorAll(".outer, .modal, [role=dialog]")].find((el) => {
-            const r = el.getBoundingClientRect();
-            const st = getComputedStyle(el);
-            return r.width > 300 && r.height > 200 && st.display !== "none" && st.visibility !== "hidden";
-          });
+        lastScraped = await readDetailsModal(p).catch(() => null);
 
-          if (!visibleModal) return "";
-
-          const fields = [...visibleModal.querySelectorAll("input, select, textarea")];
-
-          return fields.map((el) => {
-            const value =
-              el.tagName === "SELECT"
-                ? (el.options?.[el.selectedIndex]?.textContent?.trim() || el.value || "")
-                : String(el.value ?? "").trim();
-
-            return [
-              el.tagName,
-              el.getAttribute("name") || "",
-              el.id || "",
-              typeof el.className === "string" ? el.className : "",
-              value,
-            ].join("|");
-          }).join("||");
-        }).catch(() => "");
-
-        if (signature && signature === previousSignature) {
-          stableChecks++;
-        } else {
-          stableChecks = 0;
+        if (detailsScrapeSucceeded(lastScraped)) {
+          return lastScraped;
         }
 
-        previousSignature = signature;
-
-        // Ongeveer 0,75 seconde stabiele inhoud is voldoende.
-        if (signature && stableChecks >= 3) break;
-
-        await sleep(250);
+        await sleep(100);
       }
 
-      await sleep(350);
-
-      const scraped = await readDetailsModal(p);
-      if (!detailsScrapeSucceeded(scraped)) {
-        throw new Error("DETAILS geopend maar inhoud onvoldoende/lege scrape");
-      }
-
-      return scraped;
+      throw new Error("DETAILS geopend maar inhoud onvoldoende/lege scrape");
     }
 
     for (let detailsAttempt = 1; detailsAttempt <= 3; detailsAttempt++) {
@@ -2039,7 +1988,7 @@ async function confirmProfileMissing(browser, context, cookies, va, label) {
     await sleep(1000 * retry);
     const retryPage = await openTabToFighterVerified(browser, context, cookies, va, {
       maxAttempts: 2,
-      softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
+      softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
       betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
       workerLabel: `[${label} ontbrekend-hercontrole ${retry}/2]`,
     });
@@ -2425,7 +2374,7 @@ async function main() {
       try {
         page = await openFighterPageVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "350"),
+          softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
           workerLabel: `[${label}]`,
         });
@@ -2449,7 +2398,7 @@ async function main() {
 
         const openFreshPage = async (stepName = "") => openFighterPageVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "350"),
+          softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
           betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
           workerLabel: `[${label}${stepName ? ` ${stepName}` : ""}]`,
         });

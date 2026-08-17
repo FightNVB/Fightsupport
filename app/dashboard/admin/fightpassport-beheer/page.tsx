@@ -422,7 +422,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTotal(false);
     setMessage(
       res.ok
-        ? (json.message || `Total AutoCheck gestart als 1 proces met 20 workers voor VA ${startVa} t/m ${endVa}.`)
+        ? (json.message || `Total AutoCheck gestart als 2 processen × 10 workers voor VA ${startVa} t/m ${endVa}.`)
         : json.error || "Total AutoCheck starten mislukt."
     );
     setTimeout(loadRuns, 1200);
@@ -735,7 +735,7 @@ export default function FightPaspoortBeheerPage() {
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <span style={styles.activeRunBadge}>● TOTAL AUTOCHECK ACTIEF</span>
             <b>VA {activeTotalBatch.startVa}–{activeTotalBatch.endVa}</b>
-            <span>1 proces · {activeTotalBatch.workers || 20} workers</span>
+            <span>{activeTotalBatch.runs.length} {activeTotalBatch.runs.length === 1 ? "proces" : "processen"} · {activeTotalBatch.workers || 20} workers totaal</span>
             <span>{activeTotalBatch.processed}/{activeTotalBatch.total} verwerkt</span>
             <span>Gestart {fmt(activeTotalBatch.startedAt)}</span>
             <span>Loopt {formatRuntimeMs(activeTotalBatch.activeRuntimeMs)}</span>
@@ -748,10 +748,15 @@ export default function FightPaspoortBeheerPage() {
             <StopCircle size={15}/>{stoppingRunId===activeTotalRun?.id?"Stoppen...":"Stop proces"}
           </button>
         </div>
-        <div style={{border:"1px solid #81401f",background:"#160b06",padding:"9px 11px",fontSize:12,marginTop:12}}>
-          <b>VA {activeTotalRun?.start_va}–{activeTotalRun?.end_va}</b>
-          <span> · {activeTotalRun?.processed_count ?? 0}/{activeTotalRun ? runTotalCount(activeTotalRun) : 0}</span>
-          <span> · laatste {activeTotalRun?.last_processed_va ?? "—"}</span>
+        <div style={{display:"grid",gap:6,marginTop:12}}>
+          {activeTotalBatch.runs
+            .slice()
+            .sort((a:any,b:any)=>Number(a?.meta?.batch_part ?? 0)-Number(b?.meta?.batch_part ?? 0))
+            .map((run:any)=><div key={run.id} style={{border:"1px solid #81401f",background:"#160b06",padding:"9px 11px",fontSize:12}}>
+              <b>Proces {run?.meta?.batch_part ?? "—"} · VA {run.start_va}–{run.end_va}</b>
+              <span> · {run.processed_count ?? 0}/{runTotalCount(run)}</span>
+              <span> · laatste {run.last_processed_va ?? "—"}</span>
+            </div>)}
         </div>
       </section>}
       {activeRetryRun&&<section style={styles.retryRunBanner}>
@@ -795,12 +800,12 @@ export default function FightPaspoortBeheerPage() {
       </section>}
       <section style={styles.panel}>
         <h2 style={{marginTop:0}}>Nieuwe synchronisatie</h2>
-        <p style={{color:"#bbb"}}>De Total AutoCheck verwerkt de volledige VA-range in 1 proces met 20 workers. Sportscholen Sync en Startverboden Sync zijn losse processen en kunnen afzonderlijk worden gestart.</p>
+        <p style={{color:"#bbb"}}>De Total AutoCheck verdeelt de VA-range automatisch over 2 processen met elk 10 workers (20 workers totaal). Sportscholen Sync en Startverboden Sync zijn losse processen en kunnen afzonderlijk worden gestart.</p>
         <div style={styles.filters}>
           <label style={styles.label}>Start VA<input style={styles.input} value={startVa} onChange={e=>setStartVa(e.target.value)}/></label>
           <label style={styles.label}>Eind VA<input style={styles.input} value={endVa} onChange={e=>setEndVa(e.target.value)}/></label>
           <button style={styles.orange} disabled={busyTotal||!!activeTotalRun} onClick={startTotalRobot}>
-            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 1 × 20"}
+            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 2 × 10"}
           </button>
           <button style={styles.silver} disabled={busyTeam||!!activeTeamRun} onClick={startTeamRobot}>
             <Users size={16}/>{busyTeam||activeTeamRun?"Sportscholen draaien...":"Start Sportscholen Sync"}
