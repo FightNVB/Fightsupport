@@ -97,3 +97,9 @@ screenshots/
 
 ControlEngine/scrapers/sportscholen/downloads/*
 ControlEngine/scrapers/startverbod/downloads/*
+# FightPassport lokale browserprofielen / sessies
+ControlEngine/fightpassport_profiles/
+ControlEngine/scrapers/.fightpassport-chrome-profile/
+
+# Tijdelijke FightPassport downloads
+ControlEngine/scrapers/fp_total/downloads/
