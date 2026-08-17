@@ -43,10 +43,34 @@ function launch(run: any) {
   child.stderr?.on("data", (data) => process.stderr.write(`[historical-startverbod] ${data}`));
   child.on("error", async (error) => {
     await supabaseAdmin.from("fighter_startverbod_history_runs").update({
-      status: "failed", last_error: `Proces kon niet starten: ${error.message}`,
-      finished_at: new Date().toISOString(),
-    }).eq("id", run.id);
+      status: "paused",
+      last_error: `Proces kon niet starten: ${error.message}`,
+      finished_at: null,
+      pid: null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", run.id).eq("status", "running");
   });
+
+  // Bij een lokale crash/afgesloten terminal komt er soms geen nette scraper-finalize.
+  // Laat zo'n run niet eeuwig als "running" staan: maak hem hervatbaar.
+  child.on("exit", async (code, signal) => {
+    const { data: current } = await supabaseAdmin
+      .from("fighter_startverbod_history_runs")
+      .select("status")
+      .eq("id", run.id)
+      .maybeSingle();
+
+    if (current?.status === "running") {
+      await supabaseAdmin.from("fighter_startverbod_history_runs").update({
+        status: "paused",
+        pid: null,
+        finished_at: null,
+        last_error: `Scraperproces onverwacht beëindigd (code=${code ?? "null"}, signal=${signal ?? "none"}). Hervatten is mogelijk.`,
+        updated_at: new Date().toISOString(),
+      }).eq("id", run.id).eq("status", "running");
+    }
+  });
+
   return child.pid ?? null;
 }
 

@@ -170,8 +170,40 @@ export async function scraperHistoricalStartverbod() {
       console.log(`[historie] 🗑️ ${confirmedDeleted.size} bevestigd verwijderde VA-nummer(s) worden overgeslagen.`);
     }
 
+    // Hervatten gebeurt op ITEMSTATUS, niet op last_processed_va.
+    // Daardoor worden eerder mislukte VA's en VA's die tijdens een crash op
+    // "running" bleven staan opnieuw aangeboden, ook als ze lager zijn dan
+    // het hoogste reeds verwerkte VA-nummer. Completed/skipped blijven klaar.
+    const { data: existingItems, error: existingItemsError } = await supabase
+      .from("fighter_startverbod_history_items")
+      .select("va_nummer,status")
+      .eq("run_id", run.id);
+    if (existingItemsError) throw existingItemsError;
+
+    const terminalVas = new Set(
+      (existingItems ?? [])
+        .filter((item) => ["completed", "skipped"].includes(String(item.status || "")))
+        .map((item) => Number(item.va_nummer))
+        .filter(Number.isInteger)
+    );
+
+    const retryVas = new Set(
+      (existingItems ?? [])
+        .filter((item) => ["failed", "running"].includes(String(item.status || "")))
+        .map((item) => Number(item.va_nummer))
+        .filter(Number.isInteger)
+    );
+
     const allVas = Array.from({ length: endVa - startVa + 1 }, (_, index) => startVa + index)
-      .filter((va) => va > stats.lastVa && !confirmedDeleted.has(va));
+      .filter((va) => !confirmedDeleted.has(va) && !terminalVas.has(va));
+
+    if (existingItems?.length) {
+      console.log(
+        `[historie] ▶️ hervatten: ${terminalVas.size} al klaar, ` +
+        `${retryVas.size} failed/running opnieuw aangeboden, ${allVas.length} VA(s) in wachtrij`
+      );
+    }
+
     let cursor = 0;
 
     async function persistRun(status = "running", finishedAt = null) {

@@ -2281,7 +2281,10 @@ async function main() {
     return;
   }
 
-  let { browser, page: masterPage } = await loginFightPassport();
+  let { browser, page: masterPage } = await loginFightPassport({
+    freshSession: true,
+    saveCookiesToDisk: false,
+  });
   let browserGeneration = 1;
   let browserRestartPromise = null;
 
@@ -2290,7 +2293,7 @@ async function main() {
     cookies = await masterPage.cookies();
   } catch {}
 
-  console.log("[fp-total] ✅ Master logged in (cookies captured)");
+  console.log("[fp-total] ✅ Schone master-sessie gestart; workers delen browser + actuele sessiecookies");
 
   function isBrowserConnectionError(message) {
     return /Connection closed|Target closed|Session closed|Protocol error|browser has disconnected|Not connected to DevTools/i.test(
@@ -2310,7 +2313,10 @@ async function main() {
       try { await masterPage?.close(); } catch {}
       try { await browser?.close(); } catch {}
 
-      const fresh = await loginFightPassport();
+      const fresh = await loginFightPassport({
+        freshSession: true,
+        saveCookiesToDisk: false,
+      });
       browser = fresh.browser;
       masterPage = fresh.page;
 
@@ -2338,7 +2344,11 @@ async function main() {
 
     masterRefreshPromise = (async () => {
       console.log(`[fp-total] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
-      await ensureLoggedIn(masterPage, { force: true });
+      await ensureLoggedIn(masterPage, {
+        force: true,
+        saveCookiesToDisk: false,
+        useStoredCookies: false,
+      });
       try { cookies = await masterPage.cookies(); } catch {}
       console.log("[fp-total] ✅ master refreshed (cookies updated)");
       return cookies;
@@ -2355,34 +2365,11 @@ async function main() {
   const SCRAPE_TIMEOUT_MS = Number.isFinite(SCRAPE_TIMEOUT_RAW)
     ? Math.max(480000, SCRAPE_TIMEOUT_RAW)
     : 480000;
-  const STAGGER = Number(process.env.STAGGER_MS ?? "2500");
-  const GLOBAL_VA_START_GAP_MS = Number(process.env.FP_TOTAL_GLOBAL_START_GAP_MS ?? "2000");
+  // Zelfde model als Historisch: geen globale startwachtrij en geen aparte browsercontext per worker.
+  // Alleen een kleine optionele stagger om niet alle eerste tabs exact in dezelfde milliseconde te openen.
+  const STAGGER = Math.max(0, Number(process.env.STAGGER_MS ?? "150"));
 
   let idx = 0;
-  let nextVaStartAt = 0;
-  let vaStartQueue = Promise.resolve();
-
-  async function waitForGlobalVaStartSlot(label, va) {
-    let release;
-    const myTurn = new Promise((resolve) => { release = resolve; });
-    const previous = vaStartQueue;
-    vaStartQueue = previous.then(() => myTurn);
-
-    await previous;
-
-    try {
-      const waitMs = Math.max(0, nextVaStartAt - Date.now());
-
-      if (waitMs > 0) {
-        console.log(`[fp-total] ⏱️ ${label} wacht ${waitMs}ms voor globale VA-start ${va}`);
-        await sleep(waitMs);
-      }
-
-      nextVaStartAt = Date.now() + GLOBAL_VA_START_GAP_MS;
-    } finally {
-      release();
-    }
-  }
 
 
   async function updateRunProgress(lastVa = lastProcessedVa) {
@@ -2415,23 +2402,8 @@ async function main() {
   async function workerLoop(workerIdx) {
     await sleep(workerIdx * STAGGER);
 
-    // Zelfde robuuste worker-opzet als fp_bundle:
-    // iedere worker krijgt een eigen, killbare browsercontext.
-    let ctx = await createWorkerContext(browser);
-    let ctxBrowserGeneration = browserGeneration;
-
-    async function resetWorkerContext(reason = "") {
-      console.log(`[fp-total] 🧨 reset worker context (worker${workerIdx + 1}) ${reason ? `(${reason})` : ""}`);
-      await closeWorkerContext(ctx).catch(() => {});
-      ctx = await createWorkerContext(browser);
-      ctxBrowserGeneration = browserGeneration;
-    }
-
-    async function ensureCurrentWorkerContext() {
-      if (ctxBrowserGeneration !== browserGeneration) {
-        await resetWorkerContext("browser generation changed");
-      }
-    }
+    // Historisch-model: worker = alleen async taakverdeler.
+    // Geen incognito/browsercontext per worker; alle tabs delen dezelfde masterbrowser + sessiecookies.
 
     while (!stopRequested) {
       const myIdx = idx++;
@@ -2441,28 +2413,25 @@ async function main() {
       const label = `worker${workerIdx + 1}/${WORKERS}`;
       const itemStartedAt = new Date().toISOString();
 
-      await ensureCurrentWorkerContext();
-
       // Onthoud met welke browsergeneratie deze VA daadwerkelijk begint.
       // Wanneer een andere worker de gedeelde browser inmiddels al herstelt,
       // mag een fout uit deze oude generatie niet nóg een volledige herstart veroorzaken.
       const vaBrowserGeneration = browserGeneration;
 
-      await waitForGlobalVaStartSlot(label, va);
       console.log(`[fp-total] 🤖 ${label} → VA ${va}`);
       await upsertSyncItem(run.id, va, { status: "processing", started_at: itemStartedAt, finished_at: null });
 
       let page = null;
       try {
-        page = await openFighterPageVerified(browser, ctx, cookies, va, {
+        page = await openFighterPageVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
-          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "350"),
+          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
           workerLabel: `[${label}]`,
         });
 
         if (!page) {
-          page = await confirmProfileMissing(browser, ctx, cookies, va, label);
+          page = await confirmProfileMissing(browser, null, cookies, va, label);
         }
 
         if (!page) {
@@ -2478,10 +2447,10 @@ async function main() {
           continue;
         }
 
-        const openFreshPage = async (stepName = "") => openFighterPageVerified(browser, ctx, cookies, va, {
+        const openFreshPage = async (stepName = "") => openFighterPageVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
-          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "350"),
+          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
           workerLabel: `[${label}${stepName ? ` ${stepName}` : ""}]`,
         });
 
@@ -2492,7 +2461,6 @@ async function main() {
           async () => {
             await hardClosePage(page).catch(() => {});
             page = null;
-            await resetWorkerContext(`timeout VA ${va}`);
           }
         );
 
@@ -2544,9 +2512,6 @@ async function main() {
               );
             }
 
-            // Deze worker moet altijd opnieuw aan de actuele browser worden gekoppeld.
-            await resetWorkerContext(`browser recovery VA ${va}`);
-
             // Plan dezelfde VA niet meerdere keren achteraan in.
             if (!vaList.includes(String(va))) {
               vaList.push(String(va));
@@ -2582,7 +2547,6 @@ async function main() {
             console.log(`[fp-total] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
             try {
               await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
-              await resetWorkerContext(`login refresh VA ${va}`);
             } catch (err) {
               console.log("[fp-total] ❌ master refresh failed:", err?.message ?? String(err));
             }
@@ -2603,9 +2567,6 @@ async function main() {
         }
       }
     }
-
-    // Zelfde als fp_bundle: workercontext aan het einde volledig opruimen.
-    await closeWorkerContext(ctx).catch(() => {});
   }
 
   try {

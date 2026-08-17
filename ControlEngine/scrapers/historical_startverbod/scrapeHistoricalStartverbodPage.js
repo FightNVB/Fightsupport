@@ -409,14 +409,18 @@ async function waitForListRows(
   let lastLogAt = 0;
   let fillerOnlySince = null;
 
+  // Een SYS42-lijst die alleen filler-rijen bevat is doorgaans al klaar.
+  // We bevestigen dit kort en triggeren één keer opnieuw om een trage tabel niet
+  // ten onrechte als leeg te markeren. Hiermee daalt de normale lege VA van
+  // ~37s wachten naar grofweg 6-8s, terwijl echte rijen onmiddellijk winnen.
   const fillerRetryMs = Math.max(
-    5000,
-    Number(process.env.HISTORY_FILLER_RETRY_MS || 12000)
+    1500,
+    Number(process.env.HISTORY_FILLER_RETRY_MS || 2500)
   );
 
   const fillerEmptyMs = Math.max(
-    15000,
-    Number(process.env.HISTORY_FILLER_EMPTY_MS || 25000)
+    2500,
+    Number(process.env.HISTORY_FILLER_EMPTY_MS || 4000)
   );
 
   while (!page.isClosed() && Date.now() - startedAt < effectiveTimeout) {
@@ -435,7 +439,7 @@ async function waitForListRows(
       const fillerMs = Date.now() - fillerOnlySince;
 
       // Eerste poging: fillers zijn nog geen lege tabel.
-      // Na 12s triggeren we STARTVERBODEN één keer opnieuw.
+      // Na een korte stabiele filler-periode triggeren we STARTVERBODEN één keer opnieuw.
       if (!allowEmpty && fillerMs >= fillerRetryMs) {
         console.warn(
           `[historie] ♻️ VA ${va}: ${Math.round(fillerMs/1000)}s alleen filler-rijen; STARTVERBODEN opnieuw triggeren`
@@ -443,7 +447,7 @@ async function waitForListRows(
         return { ok: false, state: last, loadState: "filler_retry" };
       }
 
-      // Alleen na de tweede volledige tegeltrigger mag langdurig filler-only
+      // Alleen na de tweede volledige tegeltrigger mag stabiel filler-only
       // als werkelijk leeg gelden.
       if (allowEmpty && fillerMs >= fillerEmptyMs) {
         console.log(
@@ -498,7 +502,7 @@ async function openLoadedList(page, va) {
     const waited = await waitForListRows(
       page,
       va,
-      Math.max(30000, Number(process.env.HISTORY_LIST_TIMEOUT_MS || 120000)),
+      Math.max(15000, Number(process.env.HISTORY_LIST_TIMEOUT_MS || 45000)),
       { allowEmpty: attempt === 2 }
     );
 
