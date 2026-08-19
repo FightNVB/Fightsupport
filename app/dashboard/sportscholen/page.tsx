@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
-  CheckCircle2,
   Download,
   Eye,
   RefreshCw,
@@ -14,7 +13,6 @@ import {
   ShieldCheck,
   Trophy,
   Users,
-  XCircle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -28,20 +26,6 @@ type Sportschool = {
 };
 
 
-
-type Uitslag = {
-  id?: string | number;
-  va_nummer?: string | number | null;
-  sportschool_id?: string | number | null;
-  datum?: string | null;
-  evenement?: string | null;
-  tegenstander?: string | null;
-  uitslag?: string | null;
-  discipline?: string | null;
-  klasse?: string | null;
-  gewicht?: string | number | null;
-  sportschool?: string | null;
-};
 
 type Fighter = {
   id: string;
@@ -67,16 +51,39 @@ type Fighter = {
   nulmeting_klasse?: string | null;
   nulmeting_totaal?: number | null;
   nulmeting_opmerking?: string | null;
-  scrape_status?: string | null;
-  status?: string | null;
-  scrape_error?: string | null;
-  scraped_at?: string | null;
   raw?: any;
 };
 
 function safe(v: unknown, fallback = "-") {
   const s = String(v ?? "").trim();
   return s || fallback;
+}
+
+function formatDate(v: unknown) {
+  const s = String(v ?? "").trim();
+  if (!s) return "-";
+
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+
+  return new Intl.DateTimeFormat("nl-NL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d);
+}
+
+function daysUntil(v: unknown) {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const now = new Date();
+  d.setHours(23, 59, 59, 999);
+
+  return Math.ceil((d.getTime() - now.getTime()) / 86400000);
 }
 
 function parseRaw(raw: any) {
@@ -109,60 +116,6 @@ function no(v: unknown) {
   );
 }
 
-function statusValue(f: Fighter) {
-  return String(f.scrape_status ?? f.status ?? "")
-    .trim()
-    .toLowerCase();
-}
-
-function checked(f: Fighter) {
-  return ["klaar", "gescrapt", "gescraped", "gecontroleerd"].includes(
-    statusValue(f),
-  );
-}
-
-function failed(f: Fighter) {
-  return ["mislukt", "failed", "scrape_mislukt", "fout"].includes(
-    statusValue(f),
-  );
-}
-
-function formatDate(v: unknown) {
-  const s = String(v ?? "").trim();
-  if (!s) return "-";
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleDateString("nl-NL");
-}
-
-function daysUntil(v: unknown) {
-  const s = String(v ?? "").trim();
-  if (!s) return null;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return null;
-  const now = new Date();
-  d.setHours(23, 59, 59, 999);
-  return Math.ceil((d.getTime() - now.getTime()) / 86400000);
-}
-
-function statusLabel(f: Fighter) {
-  const s = statusValue(f);
-  if (!s) return "Niet gestart";
-  if (checked(f)) return "Gecontroleerd";
-  if (["bezig", "running", "controle_bezig"].includes(s)) return "Bezig";
-  if (failed(f)) return "Mislukt";
-  return safe(f.scrape_status ?? f.status);
-}
-
-function statusClass(f: Fighter) {
-  const s = statusValue(f);
-  if (checked(f)) return "border-emerald-400/60 bg-[#10261b] text-emerald-200";
-  if (["bezig", "running", "controle_bezig"].includes(s))
-    return "border-[#ff7a3d]/60 bg-[#2a1c14] text-[#ffd2bd]";
-  if (failed(f)) return "border-red-500/60 bg-[#2a1111] text-red-200";
-  return "border-[#8a8178] bg-[#211c19] text-zinc-200";
-}
-
 function fighterName(f: Fighter) {
   return safe(f.fp_naam ?? f.naam, "Onbekende vechter");
 }
@@ -183,83 +136,11 @@ function licenseValue(f: Fighter) {
 }
 
 
-function getResultKind(v?: string | null): "win" | "loss" | "draw" | "other" {
-  const x = String(v ?? "").trim().toLowerCase();
-
-  if (x.includes("onbeslist") || x.includes("draw") || x.includes("gelijk")) return "draw";
-  if (x.includes("verlies") || x.includes("verliest") || x.includes("verloren") || x.includes("loss") || x === "l") return "loss";
-  if (x.includes("winst") || x.includes("wint") || x.includes("gewonnen") || x === "win" || x === "w") return "win";
-
-  return "other";
-}
-
-function normalizeClassToken(v?: string | null) {
-  const x = String(v ?? "").trim().toLowerCase();
-  if (!x) return "";
-
-  if (x.includes("jeugd") || x.includes("youth") || /^j(\b|\s|\/|-)/i.test(x) || x === "j") return "j";
-  if (x.includes("recreant") || /^r(\b|\s|\/|-)/i.test(x) || x === "r") return "r";
-  if (x.includes("nieuweling") || /^n(\b|\s|\/|-)/i.test(x) || x === "n") return "n";
-  if (x.includes("c-klasse") || x.includes("c klasse") || /^c(\b|\s|\/|-)/i.test(x) || x === "c") return "c";
-  if (x.includes("b-klasse") || x.includes("b klasse") || /^b(\b|\s|\/|-)/i.test(x) || x === "b") return "b";
-  if (x.includes("a-klasse") || x.includes("a klasse") || x.includes("elite") || /^a(\b|\s|\/|-)/i.test(x) || x === "a") return "a";
-
-  return x.replace(/[^a-z0-9+]/g, "");
-}
-
-function classRank(token?: string | null) {
-  const t = normalizeClassToken(token);
-  const order: Record<string, number> = { j: 1, r: 2, n: 3, c: 4, b: 5, a: 6 };
-  return order[t] ?? 0;
-}
-
-function highestRecordClass(rows: Uitslag[]) {
-  let best = "";
-  let bestRank = 0;
-
-  for (const row of rows) {
-    const token = normalizeClassToken(row.klasse);
-    const rank = classRank(token);
-    if (rank > bestRank) {
-      best = token;
-      bestRank = rank;
-    }
-  }
-
-  return best;
-}
-
-function recordStatsFromUitslagen(rows: Uitslag[]) {
-  const hoogsteKlasse = highestRecordClass(rows);
-
-  return rows.reduce(
-    (acc, row) => {
-      const kind = getResultKind(row.uitslag);
-      const rowKlasse = normalizeClassToken(row.klasse);
-
-      if (!hoogsteKlasse || rowKlasse !== hoogsteKlasse || kind === "other") {
-        acc.other += 1;
-        return acc;
-      }
-
-      if (kind === "win") acc.w += 1;
-      else if (kind === "loss") acc.l += 1;
-      else if (kind === "draw") acc.d += 1;
-      else acc.other += 1;
-
-      return acc;
-    },
-    { w: 0, l: 0, d: 0, other: 0 },
-  );
-}
-
-function recordLabelFromUitslagen(rows: Uitslag[]) {
-  const r = recordStatsFromUitslagen(rows);
-  return `${r.w}-${r.l}-${r.d} (${r.other})`;
-}
-
-function normalizeVa(v: unknown) {
-  return String(v ?? "").replace(/[^0-9]/g, "");
+function fighterRecordLabel(f: Fighter) {
+  const w = Number(f.gewonnen ?? 0);
+  const l = Number(f.verloren ?? 0);
+  const d = Number(f.onbeslist ?? 0);
+  return `${w}-${l}-${d}`;
 }
 
 function hasStartverbod(f: Fighter) {
@@ -274,7 +155,6 @@ function hasStartverbod(f: Fighter) {
 export default function SportschoolPage() {
   const router = useRouter();
   const [fighters, setFighters] = useState<Fighter[]>([]);
-  const [uitslagenByVa, setUitslagenByVa] = useState<Record<string, Uitslag[]>>({});
   const [sportschool, setSportschool] = useState<Sportschool | null>(null);
   const [loading, setLoading] = useState(true);
   const [exportLoading, setExportLoading] = useState(false);
@@ -285,48 +165,6 @@ export default function SportschoolPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-
-  async function loadUitslagenForFighters(nextFighters: Fighter[], nextSportschool: Sportschool | null) {
-    const sportschoolId = nextSportschool?.sportschool_id;
-    const vaNummers = Array.from(
-      new Set(nextFighters.map((f) => normalizeVa(f.va_nummer)).filter(Boolean)),
-    );
-
-    if (!sportschoolId || !vaNummers.length) {
-      setUitslagenByVa({});
-      return;
-    }
-
-    let q = supabase
-      .from("sportschool_fighter_uitslagen_raw")
-      .select("id,sportschool_id,va_nummer,datum,evenement,tegenstander,uitslag,discipline,klasse,gewicht,sportschool")
-      .in("va_nummer", vaNummers)
-      .order("datum", { ascending: false });
-
-    const sportschoolIdNumber = Number(sportschoolId);
-    q = Number.isFinite(sportschoolIdNumber)
-      ? q.eq("sportschool_id", sportschoolIdNumber)
-      : q.eq("sportschool_id", String(sportschoolId));
-
-    const { data, error } = await q;
-
-    if (error) {
-      console.warn("Sportschool uitslagen laden mislukt", error);
-      setUitslagenByVa({});
-      return;
-    }
-
-    const grouped: Record<string, Uitslag[]> = {};
-    for (const row of (data ?? []) as Uitslag[]) {
-      const va = normalizeVa(row.va_nummer);
-      if (!va) continue;
-      if (!grouped[va]) grouped[va] = [];
-      grouped[va].push(row);
-    }
-    setUitslagenByVa(grouped);
-  }
-
 
 
   async function downloadFightcrewExcel() {
@@ -408,12 +246,10 @@ export default function SportschoolPage() {
       const nextFighters = Array.isArray(json?.fighters) ? json.fighters : [];
       setSportschool(nextSportschool);
       setFighters(nextFighters);
-      await loadUitslagenForFighters(nextFighters, nextSportschool);
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Vechters laden mislukt");
       setFighters([]);
-      setUitslagenByVa({});
     } finally {
       setLoading(false);
     }
@@ -432,8 +268,6 @@ export default function SportschoolPage() {
             f.klasse,
             f.geslacht,
             f.nulmeting_klasse,
-            f.scrape_status,
-            f.status,
             raw?.details?.licentie,
           ]
             .filter(Boolean)
@@ -450,11 +284,10 @@ export default function SportschoolPage() {
 
   const stats = useMemo(() => {
     const total = fighters.length;
-    const gecontroleerd = fighters.filter(checked).length;
-    const mislukt = fighters.filter(failed).length;
     const startverbod = fighters.filter(hasStartverbod).length;
     const zonderLicentie = fighters.filter((f) => !yes(licenseValue(f))).length;
-    return { total, gecontroleerd, mislukt, startverbod, zonderLicentie };
+    const inzetbaar = Math.max(0, total - startverbod - zonderLicentie);
+    return { total, inzetbaar, startverbod, zonderLicentie };
   }, [fighters]);
 
   const keurmerkDays = daysUntil(sportschool?.keurmerk_einde);
@@ -463,7 +296,7 @@ export default function SportschoolPage() {
     keurmerkDays !== null && keurmerkDays >= 0 && keurmerkDays <= 62;
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(255,77,0,0.16),transparent_30%),linear-gradient(180deg,#050505_0%,#111_38%,#020202_100%)] p-4 text-white sm:p-6">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(255,77,0,0.12),transparent_32%),linear-gradient(180deg,#17191c_0%,#0d0f11_22%,#050607_100%)] p-3 text-white sm:p-5">
       <style>{`
         .sportschool-silver-btn, .sportschool-silver-btn *{color:#050505!important;}
         .fs-metal-btn{transition:filter .12s ease, transform .12s ease;}
@@ -486,7 +319,7 @@ export default function SportschoolPage() {
         }
       `}</style>
 
-      <section className="mx-auto max-w-7xl space-y-4">
+      <section className="mx-auto max-w-[1500px] space-y-4">
         <header className="fs-steel">
           <div className="fs-steel-inner p-4 sm:p-5">
             <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
@@ -571,10 +404,9 @@ export default function SportschoolPage() {
               )}
             </div>
 
-            <div className="mt-4 grid gap-2 border-t border-white/15 pt-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="mt-4 grid gap-2 border-t border-white/15 pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <Stat label="Totaal" value={stats.total} icon={<Users size={17} />} />
-              <Stat label="Gecontroleerd" value={stats.gecontroleerd} icon={<CheckCircle2 size={17} />} good />
-              <Stat label="Mislukt" value={stats.mislukt} icon={<XCircle size={17} />} bad />
+              <Stat label="Inzetbaar" value={stats.inzetbaar} icon={<ShieldCheck size={17} />} good />
               <Stat label="Startverbod" value={stats.startverbod} icon={<ShieldAlert size={17} />} warn />
               <Stat label="Zonder licentie" value={stats.zonderLicentie} icon={<AlertTriangle size={17} />} bad />
             </div>
@@ -588,7 +420,7 @@ export default function SportschoolPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Zoek vechter op naam, VA, discipline, klasse, status of licentie..."
+                placeholder="Zoek vechter op naam, VA, discipline, klasse of licentie..."
                 className="w-full bg-transparent py-2.5 text-sm font-bold text-white outline-none placeholder:text-zinc-500"
               />
             </div>
@@ -647,27 +479,27 @@ export default function SportschoolPage() {
             <div className="border-b border-white/15 bg-[linear-gradient(180deg,rgba(255,255,255,.12),rgba(0,0,0,.12))] px-5 py-3">
               <div className="text-lg font-black uppercase tracking-wide text-white">Vechters</div>
               <div className="text-xs font-bold text-zinc-400">
-                Duidelijk overzicht voor trainers: VA, nulmeting, licentie en controle.
+                Duidelijk overzicht voor trainers: VA, nulmeting, record, licentie en startverbod.
               </div>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
                 <thead>
-                  <tr className="bg-[linear-gradient(180deg,#ffffff,#d7d7d7_24%,#777_68%,#202020)] text-xs uppercase tracking-[0.13em] text-black">
-                    <th className="w-[26%] border-r border-black/25 px-3 py-3 text-left font-black">Vechter</th>
-                    <th className="w-[10%] border-r border-black/25 px-3 py-3 text-left font-black">VA</th>
-                    <th className="w-[18%] border-r border-black/25 px-3 py-3 text-left font-black">Nulmeting</th>
-                    <th className="w-[12%] border-r border-black/25 px-3 py-3 text-left font-black">Record</th>
-                    <th className="w-[14%] border-r border-black/25 px-3 py-3 text-left font-black">Licentie</th>
-                    <th className="w-[14%] border-r border-black/25 px-3 py-3 text-left font-black">Controle</th>
-                    <th className="w-[6%] px-3 py-3 text-right font-black">Open</th>
+                  <tr className="bg-black text-xs uppercase tracking-[0.13em] text-white">
+                    <th className="w-[28%] border-r border-white/15 px-3 py-3 text-left font-black">Vechter</th>
+                    <th className="w-[10%] border-r border-white/15 px-3 py-3 text-left font-black">VA</th>
+                    <th className="w-[20%] border-r border-white/15 px-3 py-3 text-left font-black">Nulmeting</th>
+                    <th className="w-[14%] border-r border-white/15 px-3 py-3 text-left font-black">Record</th>
+                    <th className="w-[14%] border-r border-white/15 px-3 py-3 text-left font-black">Licentie</th>
+                    <th className="w-[10%] border-r border-white/15 px-3 py-3 text-left font-black">Startverbod</th>
+                    <th className="w-[4%] px-3 py-3 text-right font-black"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && (
-                    <tr className="bg-[#111]">
-                      <td colSpan={7} className="px-4 py-14 text-center font-bold text-zinc-300">
+                    <tr className="bg-white">
+                      <td colSpan={7} className="px-4 py-14 text-center font-bold text-zinc-600">
                         <RefreshCw className="mx-auto mb-3 animate-spin text-[#ff4d00]" />
                         Vechters laden...
                       </td>
@@ -686,52 +518,67 @@ export default function SportschoolPage() {
                       return (
                         <tr
                           key={f.id || `${f.sportschool_id}-${f.va_nummer}-${idx}`}
-                          className="border-t border-white/10 bg-[#111] text-white"
+                          className={`border-t transition-colors hover:bg-[#fff0e8] ${
+                            idx % 2 === 0
+                              ? "border-white/10 bg-black text-white"
+                              : "border-black/10 bg-white text-black"
+                          }`}
                         >
                           <td className="px-3 py-2.5 align-middle">
                             <div className="truncate font-black uppercase tracking-[0.02em] text-[#ff4d00]">
                               {fighterName(f)}
                             </div>
-                            <div className="mt-0.5 truncate text-xs font-bold text-white">
+                            <div className={`mt-0.5 truncate text-xs font-bold ${
+                                idx % 2 === 0 ? "text-zinc-300" : "text-zinc-700"
+                              }`}>
                               {formatDate(dob(f))} • {safe(f.geslacht)}
                             </div>
                           </td>
-                          <td className="px-3 py-2.5 align-middle text-white">
-                            <span className="border border-white/25 bg-black/45 px-2.5 py-1 font-mono text-xs font-black text-white shadow-sm shadow-black/40">
+                          <td className="px-3 py-2.5 align-middle">
+                            <span
+                              className={`border px-2.5 py-1 font-mono text-xs font-black shadow-sm ${
+                                idx % 2 === 0
+                                  ? "border-white/25 bg-white/10 text-white"
+                                  : "border-black/20 bg-black text-white"
+                              }`}
+                            >
                               {safe(f.va_nummer)}
                             </span>
                           </td>
-                          <td className="px-3 py-2.5 align-middle text-white">
-                            <div className="truncate font-black text-white">{nulKlasse}</div>
-                            <div className="text-xs font-bold text-white">Totaal nulmeting: {nulTotaal}</div>
-                          </td>
-                          <td className="px-3 py-2.5 align-middle text-white">
-                            <div className="font-black text-white">
-                              {recordLabelFromUitslagen(uitslagenByVa[normalizeVa(f.va_nummer)] ?? [])}
-                            </div>
-                            <div className="text-xs font-bold text-white">
-                              {(uitslagenByVa[normalizeVa(f.va_nummer)] ?? []).length || 0} partijen
+                          <td className="px-3 py-2.5 align-middle">
+                            <div className="truncate font-black">{nulKlasse}</div>
+                            <div
+                              className={`text-xs font-bold ${
+                                idx % 2 === 0 ? "text-zinc-300" : "text-zinc-700"
+                              }`}
+                            >
+                              Totaal nulmeting: {nulTotaal}
                             </div>
                           </td>
-                          <td className="px-3 py-2.5 align-middle text-white">
+                          <td className="px-3 py-2.5 align-middle">
+                            <div className="font-black">
+                              {fighterRecordLabel(f)}
+                            </div>
+                            <div
+                              className={`text-xs font-bold ${
+                                idx % 2 === 0 ? "text-zinc-300" : "text-zinc-700"
+                              }`}
+                            >
+                              {Number(f.totaal_wedstrijden ?? 0)} partijen
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle">
                             {licOk ? (
                               <Badge icon={<ShieldCheck size={15} />} label="OK" tone="good" />
                             ) : (
                               <Badge icon={<ShieldAlert size={15} />} label="Geen licentie" tone="bad" />
                             )}
                           </td>
-                          <td className="px-3 py-2.5 align-middle text-white">
+                          <td className="px-3 py-2.5 align-middle">
                             {startverbod ? (
-                              <Badge icon={<AlertTriangle size={15} />} label="Startverbod" tone="bad" />
+                              <Badge icon={<AlertTriangle size={15} />} label="Ja" tone="bad" />
                             ) : (
-                              <span className={`inline-flex items-center gap-2 border px-2.5 py-1 text-xs font-black ${statusClass(f)}`}>
-                                {statusLabel(f)}
-                              </span>
-                            )}
-                            {f.scrape_error && (
-                              <div className="mt-1 max-w-[180px] truncate text-[11px] font-bold text-red-300">
-                                {f.scrape_error}
-                              </div>
+                              <Badge icon={<ShieldCheck size={15} />} label="Nee" tone="good" />
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-right align-middle">

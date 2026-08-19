@@ -219,19 +219,9 @@ export async function POST(req: Request) {
       .single();
     if (error) throw error;
 
-    // Trainer mag zelf niet scrapen. We zetten alleen een admin/job klaar,
-    // zodat de nachtelijke scraper_team.js de Fightcrew kan vullen/verversen.
-    await supabaseAdmin.from("sportschool_sync_jobs").insert({
-      sportschool_id,
-      sportschool_naam: (school.data as any)?.naam ?? null,
-      status: "nieuw",
-      bron: "trainer_create",
-      payload: { contactpersoon_id: (data as any)?.id, email, naam },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-
-    return NextResponse.json({ row: data, invited, sync_job_created: true });
+    // Geen scraperjob meer aanmaken. De Fightcrew en vechterinformatie
+    // worden door de fightcrew GET-route rechtstreeks uit de database gelezen.
+    return NextResponse.json({ row: data, invited });
   } catch (e: any) {
     if (e instanceof Response) return e;
     return NextResponse.json({ error: e?.message ?? "server_error" }, { status: 500 });

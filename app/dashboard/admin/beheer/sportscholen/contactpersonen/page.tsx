@@ -147,9 +147,9 @@ function fmtDateTime(v?: string | null) {
 
 function syncLabel(status?: string | null) {
   const s = String(status ?? "").toLowerCase();
-  if (!s) return "Nog niet opgehaald";
-  if (["bezig", "running", "syncing"].includes(s)) return "Fightcrew ophalen";
-  if (["klaar", "ok", "done"].includes(s)) return "Fightcrew klaar";
+  if (!s) return "Geen sync-status";
+  if (["bezig", "running", "syncing"].includes(s)) return "Database bijwerken";
+  if (["klaar", "ok", "done"].includes(s)) return "Database klaar";
   if (["mislukt", "error", "failed"].includes(s)) return "Mislukt";
   return status ?? "Onbekend";
 }
@@ -443,14 +443,6 @@ export default function ContactpersonenFightcrewPage() {
   const [rol, setRol] = useState("trainer");
   const [melding, setMelding] = useState("");
   const [busy, setBusy] = useState(false);
-  const [waitMessage, setWaitMessage] = useState<{
-    title: string;
-    text: string;
-  } | null>(null);
-  const [syncingKey, setSyncingKey] = useState<string | number | null>(null);
-  const [enrichingKey, setEnrichingKey] = useState<string | number | null>(
-    null,
-  );
   const [loginKey, setLoginKey] = useState<string | number | null>(null);
   const [meekijkSportschoolId, setMeekijkSportschoolId] = useState<string | null>(null);
   const [meekijkBusyKey, setMeekijkBusyKey] = useState<string | number | null>(null);
@@ -487,13 +479,8 @@ export default function ContactpersonenFightcrewPage() {
   const selectedContactHasExistingLogin = Boolean(selectedContact?.user_id);
   const selectedHasCrew =
     fighters.length > 0 || Number(selected?.fighter_count ?? 0) > 0;
-  const selectedSynced = ["klaar", "ok", "done"].includes(
-    String(selected?.team_sync_status ?? "").toLowerCase(),
-  );
   const selectedReadyForLogin = Boolean(
-    selectedContact &&
-      !selectedContactHasExistingLogin &&
-      (selectedHasCrew || selectedSynced),
+    selectedContact && !selectedContactHasExistingLogin,
   );
 
   useEffect(() => {
@@ -700,75 +687,6 @@ export default function ContactpersonenFightcrewPage() {
     ]);
   }
 
-  async function startFightcrewSync(sportschoolId: string | number) {
-    setMelding("");
-    setSyncingKey(sportschoolId);
-    setWaitMessage({
-      title: "Fightcrew ophalen",
-      text: "De scraper opent FightPassport, haalt de Excel op en zet de vechters in de database. Dit scherm blijft staan tot de route klaar is.",
-    });
-
-    try {
-      const res = await authedFetch(`/api/admin/sportscholen/fightcrew/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(await tokenHeaders()),
-        },
-        body: JSON.stringify({ sportschool_id: sportschoolId }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? "Fightcrew ophalen mislukt");
-
-      setMelding(
-        `Fightcrew is bijgewerkt voor ${clean(selected?.naam, String(sportschoolId))}.`,
-      );
-      await loadFighters(sportschoolId);
-      await searchSchools();
-      router.refresh();
-      return json;
-    } catch (e: any) {
-      setMelding(e?.message ?? "Fightcrew ophalen mislukt");
-      return null;
-    } finally {
-      setSyncingKey(null);
-      setWaitMessage(null);
-    }
-  }
-
-  async function enrichFightcrew(sportschoolId: string | number) {
-    setMelding("");
-    setEnrichingKey(sportschoolId);
-    setWaitMessage({
-      title: "Vechters beperkt scrapen",
-      text: "De gevonden VA-nummers worden nu één voor één bijgewerkt. Zodra dit klaar is, verversen we de tabel automatisch.",
-    });
-
-    try {
-      const res = await authedFetch(`/api/admin/sportscholen/fightcrew/enrich`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(await tokenHeaders()),
-        },
-        body: JSON.stringify({ sportschool_id: sportschoolId }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? "Team verrijken mislukt");
-
-      setMelding("Team verrijken is klaar. De tabel is opnieuw geladen.");
-      await loadFighters(sportschoolId);
-      router.refresh();
-      return json;
-    } catch (e: any) {
-      setMelding(e?.message ?? "Team verrijken mislukt");
-      return null;
-    } finally {
-      setEnrichingKey(null);
-      setWaitMessage(null);
-    }
-  }
-
   async function sendTrainerLogin(contact: Contact) {
     setLoginKey(contact.sportschool_id ?? null);
     try {
@@ -826,7 +744,7 @@ export default function ContactpersonenFightcrewPage() {
 
       await loadContacts(selected.sportschool_id);
       setMelding(
-        "Contactpersoon gekoppeld. Je kunt nu de Fightcrew ophalen of bijwerken.",
+        "Contactpersoon gekoppeld. De Fightcrew wordt rechtstreeks uit de database geladen.",
       );
       setNaam("");
       setEmail("");
@@ -967,10 +885,6 @@ export default function ContactpersonenFightcrewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, canAdmin]);
 
-  const selectedBusy =
-    selected && String(syncingKey ?? "") === String(selected.sportschool_id);
-  const selectedEnriching =
-    selected && String(enrichingKey ?? "") === String(selected.sportschool_id);
   const selectedLoginBusy =
     selected && String(loginKey ?? "") === String(selected.sportschool_id);
 
@@ -978,67 +892,6 @@ export default function ContactpersonenFightcrewPage() {
     <main style={bg}>
       <style>{`${spinKeyframes}
 input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#111827;}`}</style>
-      {waitMessage ? (
-        <div style={waitOverlay}>
-          <div style={waitBox}>
-            <div
-              style={{
-                width: 92,
-                height: 92,
-                margin: "0 auto 18px",
-                borderRadius: 999,
-                display: "grid",
-                placeItems: "center",
-                border: "1px solid rgba(255,255,255,.32)",
-                background:
-                  "linear-gradient(135deg,#ffffff 0%,#cfd5dc 32%,#636b74 62%,#151a21 100%)",
-                boxShadow:
-                  "inset 0 1px 0 rgba(255,255,255,.86), 0 0 34px rgba(255,77,0,.22)",
-              }}
-            >
-              <RefreshCw
-                size={42}
-                color={ORANGE}
-                style={{ animation: "fsSpin 1s linear infinite" }}
-              />
-            </div>
-            <div
-              style={{
-                color: ORANGE,
-                fontSize: 12,
-                fontWeight: 1000,
-                letterSpacing: 2,
-                textTransform: "uppercase",
-              }}
-            >
-              FightSupport controle
-            </div>
-            <h2 style={{ margin: "9px 0 9px", fontSize: 30 }}>
-              {waitMessage.title}
-            </h2>
-            <p
-              style={{
-                margin: "0 auto",
-                maxWidth: 440,
-                color: "rgba(255,255,255,.72)",
-                lineHeight: 1.55,
-              }}
-            >
-              {waitMessage.text}
-            </p>
-            <div
-              style={{
-                marginTop: 18,
-                color: "rgba(255,255,255,.54)",
-                fontSize: 13,
-              }}
-            >
-              Je hoeft niet opnieuw te klikken. De pagina ververst zodra de
-              scraper klaar is.
-            </div>
-          </div>
-        </div>
-      ) : null}
       {editContact ? (
         <div style={waitOverlay}>
           <div style={{ ...waitBox, textAlign: "left", maxWidth: 560 }}>
@@ -1164,9 +1017,9 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                 lineHeight: 1.45,
               }}
             >
-              Koppel eerst een bestaande trainer-gebruiker of handmatige contactpersoon aan de echte FightPassport
-              sportschool-key. Daarna haal je de Fightcrew op, verrijk je de
-              gevonden VA-nummers beperkt en verstuur je pas de trainer-login.
+              Koppel een trainer of contactpersoon aan de echte FightPassport
+              sportschool-key. De Fightcrew en vechterinformatie worden daarna
+              rechtstreeks uit de database geladen; hiervoor wordt niet meer gescrapet.
             </p>
           </div>
 
@@ -1190,8 +1043,8 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                 fontSize: 13,
               }}
             >
-              Geen aliases op deze pagina. Alleen koppeling, team ophalen,
-              verrijken en login.
+              Geen aliases op deze pagina. Alleen koppeling, databasegegevens
+              tonen/verversen en trainer-login.
             </div>
           </div>
         </section>
@@ -1199,7 +1052,7 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
         <section
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
             gap: 12,
             marginBottom: 18,
           }}
@@ -1213,22 +1066,15 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
           />
           <StepCard
             nr="2"
-            title="Fightcrew ophalen"
-            text="De scraper opent organisation/key, klikt VECHTERS en haalt de Excel op."
+            title="Fightcrew uit database"
+            text="Vechters en actuele FightPassport-informatie worden direct uit de database geladen."
             active={!!selectedContact && !selectedHasCrew}
-            done={selectedHasCrew || selectedSynced}
+            done={selectedHasCrew}
           />
           <StepCard
             nr="3"
-            title="Vechters verrijken"
-            text="Alleen beperkte basisinformatie per VA, geen volledige match-control flow."
-            active={selectedHasCrew && !fighters.some((f) => f.scraped_at)}
-            done={fighters.some((f) => f.scraped_at)}
-          />
-          <StepCard
-            nr="4"
             title="Login versturen"
-            text="Pas versturen als de trainer aan de juiste sportschool en Fightcrew gekoppeld is."
+            text="Verstuur de trainer-login zodra de contactpersoon aan de juiste sportschool is gekoppeld."
             active={selectedReadyForLogin}
             done={selectedContactHasExistingLogin || !!selectedContact?.login_verstuurd_at}
           />
@@ -1319,8 +1165,6 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                 const active =
                   String(selected?.sportschool_id ?? "") ===
                   String(s.sportschool_id);
-                const isSyncing =
-                  String(syncingKey ?? "") === String(s.sportschool_id);
                 return (
                   <button
                     key={String(s.sportschool_id)}
@@ -1371,7 +1215,7 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                     >
                       <Badge
                         value={
-                          isSyncing ? "bezig" : syncLabel(s.team_sync_status)
+                          s.fighter_count ? "database klaar" : syncLabel(s.team_sync_status)
                         }
                       />
                       {s.team_sync_error ? (
@@ -1617,32 +1461,15 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                     gap: 8,
                   }}
                 >
-                  <Users size={18} color={ORANGE} /> 2 t/m 4. Team klaarzetten
+                  <Users size={18} color={ORANGE} /> 2 t/m 3. Team & toegang
                 </b>
                 <div style={{ display: "grid", gap: 10, marginTop: 13 }}>
                   <button
                     style={buttonBase}
-                    onClick={() =>
-                      selected && startFightcrewSync(selected.sportschool_id)
-                    }
-                    disabled={!selected || !selectedContact || !!selectedBusy}
+                    onClick={() => selected && loadFighters(selected.sportschool_id)}
+                    disabled={!selected}
                   >
-                    <RefreshCw size={16} />{" "}
-                    {selectedBusy ? "Fightcrew ophalen…" : "Fightcrew ophalen"}
-                  </button>
-                  <button
-                    style={buttonBase}
-                    onClick={() =>
-                      selected && enrichFightcrew(selected.sportschool_id)
-                    }
-                    disabled={
-                      !selected || !selectedHasCrew || !!selectedEnriching
-                    }
-                  >
-                    <ShieldCheck size={16} />{" "}
-                    {selectedEnriching
-                      ? "Team verrijken…"
-                      : "Vechters beperkt scrapen"}
+                    <RefreshCw size={16} /> Fightcrew uit database verversen
                   </button>
                   <button
                     style={selectedContactHasExistingLogin ? darkButton : orangeButton}
@@ -1921,13 +1748,12 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                       <td style={td}>
                         <Badge
                           value={
-                            f.scrape_status ||
-                            (f.scraped_at ? "verrijkt" : "nieuw")
+                            f.scrape_status || "database"
                           }
                         />
                       </td>
                       <td style={td}>
-                        {fmtDateTime(f.scraped_at || f.updated_at)}
+                        {fmtDateTime(f.updated_at || f.scraped_at)}
                       </td>
                     </tr>
                   ))
