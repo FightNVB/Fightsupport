@@ -12,6 +12,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function throwIfAborted(signal, va = "") {
+  if (signal?.aborted) {
+    const err = new Error(`SCRAPE_ABORTED${va ? ` VA ${va}` : ""}`);
+    err.name = "AbortError";
+    throw err;
+  }
+}
+
 const START_VA = Number(process.argv[2] || process.env.FP_TOTAL_START_VA || 775);
 const END_VA = Number(process.argv[3] || process.env.FP_TOTAL_END_VA || 33150);
 const WORKERS_RAW = Number(process.env.FP_TOTAL_WORKERS ?? process.env.WORKERS ?? "8");
@@ -64,12 +72,14 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
  */
 async function withTimeout(promiseFactory, ms, label, onTimeout) {
   let t;
+  const controller = new AbortController();
 
   const timeout = new Promise((_, rej) => {
     t = setTimeout(async () => {
+      controller.abort();
       try {
         if (typeof onTimeout === "function") {
-          await onTimeout();
+          await onTimeout(controller.signal);
         }
       } catch {}
       rej(new Error(`HARD TIMEOUT ${ms}ms for ${label}`));
@@ -77,7 +87,7 @@ async function withTimeout(promiseFactory, ms, label, onTimeout) {
   });
 
   try {
-    const p = Promise.resolve().then(() => promiseFactory());
+    const p = Promise.resolve().then(() => promiseFactory(controller.signal));
     return await Promise.race([p, timeout]);
   } finally {
     clearTimeout(t);
@@ -109,6 +119,62 @@ async function closeAnyModal(page) {
     await page.keyboard.press("Escape");
     await sleep(80);
   } catch {}
+}
+
+
+async function closeDetailsExact(page, va = "", signal = null) {
+  throwIfAborted(signal, va);
+
+  const clicked = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll("button#sluit_inr_detail")];
+    const button = buttons.find((el) => {
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      return (
+        r.width > 0 &&
+        r.height > 0 &&
+        st.display !== "none" &&
+        st.visibility !== "hidden" &&
+        st.opacity !== "0"
+      );
+    });
+
+    if (!button) return false;
+    button.scrollIntoView?.({ block: "center" });
+    button.click();
+    return true;
+  }).catch(() => false);
+
+  if (!clicked) {
+    throw new Error(`DETAILS sluitknop #sluit_inr_detail niet gevonden — VA ${va}`);
+  }
+
+  // Niet opnieuw navigeren. Alleen kort wachten tot de UITSLAGEN-tegel op
+  // dezelfde VA-tab weer zichtbaar/klikbaar is.
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 3000) {
+    throwIfAborted(signal, va);
+    const ready = await page.evaluate((requestedVa) => {
+      const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+      if (!tab) return false;
+      const head = [...tab.querySelectorAll(".tileHeader.enabled")].find(
+        (h) => String(h.innerText || "").trim().toUpperCase() === "UITSLAGEN"
+      );
+      const tile = head?.closest(".tile");
+      if (!tile) return false;
+      const r = tile.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }, va).catch(() => false);
+
+    if (ready) {
+      console.log(`[fp-total] 🚪 VA ${va} DETAILS gesloten via #sluit_inr_detail; UITSLAGEN op dezelfde tab`);
+      return true;
+    }
+
+    await sleep(50);
+  }
+
+  throw new Error(`DETAILS gesloten maar UITSLAGEN-tegel niet vrij — VA ${va}`);
 }
 
 
@@ -727,7 +793,7 @@ async function clickTile(page, va, title) {
 }
 
 
-async function forceExactFighterUrl(page, va, timeoutMs = 30000) {
+async function forceExactFighterUrl(page, va, timeoutMs = 30000, signal = null) {
   const requestedVa = String(va);
   const url = fighterUrl(va);
   const wantedHash = `#va_vechter/${requestedVa}`;
@@ -736,6 +802,7 @@ async function forceExactFighterUrl(page, va, timeoutMs = 30000) {
   let hardReloads = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
+    throwIfAborted(signal, va);
     if (await isLoginPage(page)) {
       throw new Error("LOGIN_PAGE");
     }
@@ -806,11 +873,12 @@ async function forceExactFighterUrl(page, va, timeoutMs = 30000) {
   return false;
 }
 
-async function openDetailsLikeBundle(page, va) {
+async function openDetailsLikeBundle(page, va, signal = null) {
+  throwIfAborted(signal, va);
   await closeAnyModal(page).catch(() => {});
 
   // Voor DETAILS eerst nogmaals expliciet exact deze fighter-url forceren.
-  const exactVaLoaded = await forceExactFighterUrl(page, va, 15000);
+  const exactVaLoaded = await forceExactFighterUrl(page, va, 15000, signal);
   if (!exactVaLoaded) return false;
 
   const startedAt = Date.now();
@@ -818,6 +886,7 @@ async function openDetailsLikeBundle(page, va) {
   // Zelfde tegel-detectie als de werkende bundle:
   // alleen de echte enabled DETAILS-header accepteren.
   while (Date.now() - startedAt < 15000) {
+    throwIfAborted(signal, va);
     const clicked = await page.evaluate((requestedVa) => {
       const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
       if (!tab) return false;
@@ -846,11 +915,12 @@ async function openDetailsLikeBundle(page, va) {
   return false;
 }
 
-async function waitForDetailsTileContentLikeBundle(page, va) {
+async function waitForDetailsTileContentLikeBundle(page, va, signal = null) {
   let last = null;
 
   // Bundle pollt de tegelinhoud; total krijgt bewust meer tijd.
   for (let attempt = 1; attempt <= 60; attempt++) {
+    throwIfAborted(signal, va);
     last = await page.evaluate((requestedVa) => {
       const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
       if (!tab) return null;
@@ -1146,7 +1216,8 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
   return null;
 }
 
-async function openResultsTileVerified(page, va, timeoutMs = 20000) {
+async function openResultsTileVerified(page, va, timeoutMs = 20000, signal = null) {
+  throwIfAborted(signal, va);
   // UITSLAGEN-flow bewust gelijk aan fp_bundle:
   // modal sluiten, UITSLAGEN-tegel klikken, uitsluitend wachten op de Excel-knop.
   await closeAnyModal(page);
@@ -1154,6 +1225,7 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000) {
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
+    throwIfAborted(signal, va);
     const clicked = await page.evaluate((requestedVa) => {
       const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
       if (!tab) return false;
@@ -1177,7 +1249,7 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000) {
     }
 
     // Geen vaste wachttijd: de downloadknop is het bewijs dat UITSLAGEN klaar is.
-    const found = await findResultsDownloadControl(page, 8000);
+    const found = await findResultsDownloadControl(page, 8000, signal);
     if (found) return found;
 
     await closeAnyModal(page).catch(() => {});
@@ -1187,11 +1259,12 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000) {
   return null;
 }
 
-async function findResultsDownloadControl(page, timeoutMs = 10000) {
+async function findResultsDownloadControl(page, timeoutMs = 10000, signal = null, va = "") {
   const start = Date.now();
   const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
 
   while (Date.now() - start < timeoutMs) {
+    throwIfAborted(signal, va);
     for (const frame of page.frames()) {
       for (const selector of selectors) {
         let handles = [];
@@ -1275,11 +1348,16 @@ function cleanupDownloadDir(dir) {
   } catch {}
 }
 
-async function downloadResultsExcel(page, va, initialFound = null) {
+async function downloadResultsExcel(page, va, initialFound = null, signal = null) {
+  throwIfAborted(signal, va);
   const dir = path.resolve(__dirname, "downloads", `${va}_${crypto.randomUUID().slice(0, 8)}`);
   fs.mkdirSync(dir, { recursive: true });
 
+  // Iedere VA houdt zijn eigen downloadmap. We blijven bewust page-scoped werken:
+  // Browser.setDownloadBehavior is browser-context scoped en alle 20 workers delen
+  // dezelfde browsercontext; daarmee zouden downloadPaths elkaar juist kunnen overschrijven.
   const client = await page.target().createCDPSession();
+  await client.send("Page.enable").catch(() => {});
   await client.send("Page.setDownloadBehavior", {
     behavior: "allow",
     downloadPath: dir,
@@ -1287,12 +1365,37 @@ async function downloadResultsExcel(page, va, initialFound = null) {
 
   const found =
     initialFound ||
-    await findResultsDownloadControl(page, 45000);
+    await findResultsDownloadControl(page, 8000, signal, va);
 
   if (!found) {
+    await client.detach().catch(() => {});
     cleanupDownloadDir(dir);
     throw new Error(`UITSLAGEN downloadknop niet gevonden — VA ${va}`);
   }
+
+  let downloadStarted = null;
+  let downloadProgress = null;
+
+  const onDownloadWillBegin = (event) => {
+    downloadStarted = {
+      guid: event?.guid || null,
+      suggestedFilename: event?.suggestedFilename || null,
+      url: event?.url || null,
+      at: Date.now(),
+    };
+    console.log(
+      `[fp-total] 🚀 VA ${va} Chrome bevestigt downloadstart: ${event?.suggestedFilename || "bestand"}`
+    );
+  };
+
+  const onDownloadProgress = (event) => {
+    if (!downloadStarted?.guid || event?.guid === downloadStarted.guid) {
+      downloadProgress = event || null;
+    }
+  };
+
+  client.on("Page.downloadWillBegin", onDownloadWillBegin);
+  client.on("Page.downloadProgress", onDownloadProgress);
 
   const clickDownload = async () => {
     if (found.handle) {
@@ -1310,37 +1413,16 @@ async function downloadResultsExcel(page, va, initialFound = null) {
     }, found.selector);
   };
 
-  console.log(`[fp-total] ⬇️ VA ${va} UITSLAGEN download gestart; wachten op Excel...`);
-  await clickDownload();
-
-  const startedAt = Date.now();
-  const maxWaitMs = Number(
-    process.env.FP_RESULTS_DOWNLOAD_TIMEOUT_MS ??
-    process.env.UITSLAGEN_DOWNLOAD_TIMEOUT_MS ??
-    "180000"
-  );
-  let retried = false;
-  let lastLogAt = 0;
-
-  while (Date.now() - startedAt < maxWaitMs) {
-    let filesNow = [];
+  const listFiles = () => {
     try {
-      filesNow = fs.readdirSync(dir);
+      return fs.readdirSync(dir);
     } catch {
-      filesNow = [];
+      return [];
     }
+  };
 
-    const elapsedMs = Date.now() - startedAt;
-
-    if (Date.now() - lastLogAt >= 5000) {
-      lastLogAt = Date.now();
-      console.log(
-        `[fp-total] ⏳ VA ${va} wacht op uitslagen Excel (${Math.round(elapsedMs / 1000)}s)`,
-        { files: filesNow }
-      );
-    }
-
-    const xlsxFiles = filesNow
+  const getXlsx = () => {
+    return listFiles()
       .filter((f) => f.toLowerCase().endsWith(".xlsx"))
       .map((f) => path.join(dir, f))
       .filter((f) => {
@@ -1356,30 +1438,69 @@ async function downloadResultsExcel(page, va, initialFound = null) {
         } catch {
           return 0;
         }
+      })[0] || null;
+  };
+
+  // De huidige scraper laadt UITSLAGEN direct. Als een klik echt een download
+  // veroorzaakt, zien we normaal meteen een CDP download-event of het .xlsx-bestand.
+  const firstStartWaitMs = Math.max(
+    500,
+    Number(process.env.FP_RESULTS_DOWNLOAD_START_TIMEOUT_MS ?? "2500")
+  );
+  const retryStartWaitMs = Math.max(
+    1000,
+    Number(process.env.FP_RESULTS_DOWNLOAD_RETRY_TIMEOUT_MS ?? "5000")
+  );
+  const completeWaitMs = Math.max(
+    1000,
+    Number(process.env.FP_RESULTS_DOWNLOAD_COMPLETE_TIMEOUT_MS ?? "5000")
+  );
+
+  const waitForStartOrFile = async (timeoutMs) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      throwIfAborted(signal, va);
+      const candidate = getXlsx();
+      if (downloadStarted || candidate) return { started: !!downloadStarted, candidate };
+      await sleep(50);
+    }
+    return { started: !!downloadStarted, candidate: getXlsx() };
+  };
+
+  try {
+    console.log(`[fp-total] ⬇️ VA ${va} UITSLAGEN downloadklik`);
+    await clickDownload();
+
+    let signal = await waitForStartOrFile(firstStartWaitMs);
+
+    if (!signal.started && !signal.candidate) {
+      console.log(
+        `[fp-total] 🔁 VA ${va} geen downloadstart binnen ${firstStartWaitMs}ms; één directe herklik`
+      );
+      await clickDownload().catch(() => {});
+      signal = await waitForStartOrFile(retryStartWaitMs);
+    }
+
+    if (!signal.started && !signal.candidate) {
+      const filesNow = listFiles();
+      console.log(`[fp-total] ❌ VA ${va} Chrome startte geen uitslagen-download`, {
+        waitedMs: firstStartWaitMs + retryStartWaitMs,
+        files: filesNow,
       });
+      cleanupDownloadDir(dir);
+      return null;
+    }
 
-    if (xlsxFiles.length > 0) {
-      const candidate = xlsxFiles[0];
+    const completeStartedAt = Date.now();
+    let loggedSeen = false;
 
-      // Geen vaste "stabiel gedurende 4s + 1,5s extra" wachttijd meer.
-      // Zodra Chrome geen .crdownload meer heeft en het .xlsx-bestand bestaat,
-      // proberen we het direct te lezen. Alleen als Excel nét nog niet volledig
-      // is weggeschreven, pollen we kort opnieuw.
-      const completeCheckStartedAt = Date.now();
-      let loggedSeen = false;
+    while (Date.now() - completeStartedAt < completeWaitMs) {
+      throwIfAborted(signal, va);
+      const filesNow = listFiles();
+      const candidate = getXlsx();
+      const stillDownloading = filesNow.some((f) => f.toLowerCase().endsWith(".crdownload"));
 
-      while (Date.now() - completeCheckStartedAt < 60000) {
-        let currentFiles = [];
-        try {
-          currentFiles = fs.readdirSync(dir);
-        } catch {
-          currentFiles = [];
-        }
-
-        const stillDownloading = currentFiles.some((f) =>
-          f.toLowerCase().endsWith(".crdownload")
-        );
-
+      if (candidate) {
         let size = 0;
         try {
           size = fs.statSync(candidate).size;
@@ -1397,37 +1518,39 @@ async function downloadResultsExcel(page, va, initialFound = null) {
         if (!stillDownloading && size > 0) {
           try {
             await readXlsxToRows(candidate, { sheetIndex: 0 });
-
             console.log(
               `[fp-total] ✅ VA ${va} uitslagen Excel volledig binnen (${size} bytes)`
             );
-
             return { file: candidate, dir };
-          } catch (e) {
-            // Bestand kan tussen rename en volledige flush heel kort zichtbaar zijn.
-            // Geen secondenlange stabiliteitswacht: na 100ms opnieuw proberen.
-            await sleep(100);
-            continue;
+          } catch {
+            // Chrome kan het bestand nét vóór de laatste flush zichtbaar maken.
           }
         }
-
-        await sleep(100);
       }
+
+      if (downloadProgress?.state === "canceled") {
+        console.log(`[fp-total] ❌ VA ${va} Chrome meldde download geannuleerd`, {
+          guid: downloadProgress?.guid || downloadStarted?.guid || null,
+        });
+        cleanupDownloadDir(dir);
+        return null;
+      }
+
+      await sleep(50);
     }
 
-    if (!retried && elapsedMs > 20000 && filesNow.length === 0) {
-      retried = true;
-      console.log(
-        `[fp-total] 🔁 VA ${va} na 20s nog geen bestand; download één keer opnieuw klikken`
-      );
-      await clickDownload().catch(() => {});
-    }
-
-    await sleep(500);
+    console.log(`[fp-total] ❌ VA ${va} download gestart maar Excel niet tijdig leesbaar`, {
+      waitedMs: completeWaitMs,
+      files: listFiles(),
+      progress: downloadProgress?.state || null,
+    });
+    cleanupDownloadDir(dir);
+    return null;
+  } finally {
+    client.off("Page.downloadWillBegin", onDownloadWillBegin);
+    client.off("Page.downloadProgress", onDownloadProgress);
+    await client.detach().catch(() => {});
   }
-
-  cleanupDownloadDir(dir);
-  return null;
 }
 
 async function parseResultsExcel(filePath, va) {
@@ -1530,7 +1653,8 @@ async function parseResultsExcel(filePath, va) {
   };
 }
 
-async function scrapeResults(page, va) {
+async function scrapeResults(page, va, signal = null) {
+  throwIfAborted(signal, va);
   if (!SCRAPE_RESULTS) {
     return { status: "skipped", rows: [], error: null, download: null };
   }
@@ -1539,16 +1663,17 @@ async function scrapeResults(page, va) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxTries; attempt++) {
+    throwIfAborted(signal, va);
     let dl = null;
 
     try {
-      const downloadControl = await openResultsTileVerified(page, va);
+      const downloadControl = await openResultsTileVerified(page, va, 20000, signal);
 
       if (!downloadControl) {
         throw new Error(`UITSLAGEN tegel/downloadknop niet geladen — VA ${va}`);
       }
 
-      dl = await downloadResultsExcel(page, va, downloadControl);
+      dl = await downloadResultsExcel(page, va, downloadControl, signal);
 
       if (!dl) {
         console.log(`[fp-total] ❌ VA ${va} geen volledig Excel-bestand ontvangen`);
@@ -1589,6 +1714,10 @@ async function scrapeResults(page, va) {
     } catch (e) {
       lastError = e;
       const msg = e?.message ?? String(e);
+
+      // LOGIN_PAGE en echte abort nooit degraderen tot alleen UITSLAGEN=error.
+      // De worker moet dan de sessie herstellen / de VA stoppen.
+      if (msg === "LOGIN_PAGE" || msg === "SCRAPE_ABORTED") throw e;
 
       // Net als bundle: tijdelijke downloadmap bij scrape/parsefout opruimen.
       if (dl?.dir) cleanupDownloadDir(dl.dir);
@@ -1725,13 +1854,20 @@ async function saveResultsSnapshot(va, results) {
   }
 }
 
-async function scrapeOne(page, va, openFreshPage) {
-  // Eerst alleen de profiel/header lezen op de initiele, geverifieerde VA-tab.
-  const summary = await readHeaderAndSummary(page, va, {
+async function scrapeOne(page, va, openFreshPage, signal = null) {
+  throwIfAborted(signal, va);
+
+  // Eén lineaire VA-flow:
+  // VA openen -> DETAILS openen/lezen -> DETAILS exact sluiten -> UITSLAGEN openen
+  // op DEZELFDE tab -> Excel lezen -> VA-tab sluiten.
+  let currentPage = page;
+
+  const summary = await readHeaderAndSummary(currentPage, va, {
     timeoutMs: 18000,
     pollMs: 250,
     reopenDetails: true,
   }).catch(() => null);
+
   if (!summary) {
     return {
       exists: false,
@@ -1743,7 +1879,6 @@ async function scrapeOne(page, va, openFreshPage) {
 
   const licensed = boolFromJaNee(summary.licentie) === true;
   let details = {};
-  // Niet apart openen: licentie en startverbod staan direct op de vechterpagina.
   const gyms = [];
   const startbans = [];
   const licenses = [];
@@ -1752,134 +1887,115 @@ async function scrapeOne(page, va, openFreshPage) {
   let resultsError = null;
   let resultsDownload = null;
 
-  // Alleen DETAILS en UITSLAGEN krijgen zo nodig een schone, opnieuw geverifieerde VA-tab.
-  // Licentie en startverbod worden rechtstreeks van de hoofdpagina gelezen.
-  async function withFreshVaTab(stepName, fn) {
-    const freshPage = await openFreshPage(stepName);
-    if (!freshPage) throw new Error(`${stepName}: VA ${va} kon niet opnieuw worden geopend`);
+  async function scrapeDetailsFromPage(p) {
+    throwIfAborted(signal, va);
+    const opened = await openDetailsLikeBundle(p, va, signal);
+    if (!opened) {
+      throw new Error("DETAILS: exacte VA-url/tegel niet correct geladen");
+    }
+
+    const tileReady = await waitForDetailsTileContentLikeBundle(p, va, signal);
+    if (!tileReady) {
+      throw new Error("DETAILS tegelinhoud niet volledig geladen");
+    }
+
+    const detailsWaitStartedAt = Date.now();
+    let lastScraped = null;
+
+    while (Date.now() - detailsWaitStartedAt < 10000) {
+      throwIfAborted(signal, va);
+      lastScraped = await readDetailsModal(p).catch(() => null);
+      if (detailsScrapeSucceeded(lastScraped)) return lastScraped;
+      await sleep(100);
+    }
+
+    throw new Error("DETAILS geopend maar inhoud onvoldoende/lege scrape");
+  }
+
+  // DETAILS maximaal drie pogingen. Alleen wanneer de huidige VA-tab echt fout is,
+  // openen we voor dezelfde VA een vervangende tab. Een geslaagde DETAILS-tab blijft
+  // daarna open voor UITSLAGEN; hij wordt dus NIET meer tussendoor hard gesloten.
+  let detailsLastError = null;
+  for (let detailsAttempt = 1; detailsAttempt <= 3; detailsAttempt++) {
+    throwIfAborted(signal, va);
 
     try {
-      return await fn(freshPage);
-    } finally {
-      await closeAnyModal(freshPage).catch(() => {});
-      await hardClosePage(freshPage).catch(() => {});
-    }
-  }
-
-  {
-    // DETAILS is verplicht. Gebruik de reeds geverifieerde hoofdtab voor poging 1.
-    // Alleen bij een echte fout openen we een nieuwe schone VA-tab.
-    // Dit scheelt per geldige vechter een volledige extra paginalaad.
-    let detailsLastError = null;
-
-    async function scrapeDetailsFromPage(p) {
-      const opened = await openDetailsLikeBundle(p, va);
-      if (!opened) {
-        throw new Error("DETAILS: exacte VA-url/tegel niet correct geladen");
-      }
-
-      const tileReady = await waitForDetailsTileContentLikeBundle(p, va);
-      if (!tileReady) {
-        throw new Error("DETAILS tegelinhoud niet volledig geladen");
-      }
-
-      // Geen vaste marge of stabiliteitswacht. Lees direct zodra de modal
-      // bruikbare fightervelden bevat. Als FightPassport nét nog rendert,
-      // proberen we na 100ms opnieuw.
-      const detailsWaitStartedAt = Date.now();
-      let lastScraped = null;
-
-      while (Date.now() - detailsWaitStartedAt < 10000) {
-        lastScraped = await readDetailsModal(p).catch(() => null);
-
-        if (detailsScrapeSucceeded(lastScraped)) {
-          return lastScraped;
-        }
-
-        await sleep(100);
-      }
-
-      throw new Error("DETAILS geopend maar inhoud onvoldoende/lege scrape");
-    }
-
-    for (let detailsAttempt = 1; detailsAttempt <= 3; detailsAttempt++) {
-      try {
-        if (detailsAttempt === 1) {
-          details = await scrapeDetailsFromPage(page);
-        } else {
-          details = await withFreshVaTab(`DETAILS poging ${detailsAttempt}`, scrapeDetailsFromPage);
-        }
-
-        console.log(`[fp-total] ✅ VA ${va} DETAILS gelukt (poging ${detailsAttempt})`);
-        detailsLastError = null;
-        break;
-      } catch (e) {
-        detailsLastError = e;
-        console.log(
-          `[fp-total] ⚠️ VA ${va} DETAILS poging ${detailsAttempt}/3 mislukt:`,
-          e?.message ?? String(e)
-        );
-
-        // De hoofdtab kan na een mislukte eerste poging een modal bevatten.
-        // Sluit die best-effort; volgende pogingen gebruiken sowieso een verse tab.
-        if (detailsAttempt === 1) {
-          await closeAnyModal(page).catch(() => {});
-        }
-
-        await sleep(300);
-      }
-    }
-
-    if (detailsLastError || !detailsScrapeSucceeded(details)) {
-      throw new Error(
-        `DETAILS verplicht maar niet gelukt voor VA ${va}: ${
-          detailsLastError?.message ?? "onvoldoende gegevens"
-        }`
+      details = await scrapeDetailsFromPage(currentPage);
+      console.log(`[fp-total] ✅ VA ${va} DETAILS gelukt (poging ${detailsAttempt})`);
+      detailsLastError = null;
+      break;
+    } catch (e) {
+      detailsLastError = e;
+      console.log(
+        `[fp-total] ⚠️ VA ${va} DETAILS poging ${detailsAttempt}/3 mislukt:`,
+        e?.message ?? String(e)
       );
+
+      if (detailsAttempt >= 3) break;
+
+      // Deze tab is niet bruikbaar. Sluit hem en open exact dezelfde VA opnieuw.
+      await hardClosePage(currentPage).catch(() => {});
+      throwIfAborted(signal, va);
+      currentPage = await openFreshPage(`DETAILS poging ${detailsAttempt + 1}`, signal);
+      throwIfAborted(signal, va);
+      if (!currentPage) {
+        detailsLastError = new Error(`DETAILS poging ${detailsAttempt + 1}: VA ${va} kon niet opnieuw worden geopend`);
+        break;
+      }
     }
-
-    // Historie-achtige scheiding:
-    // DETAILS is klaar en alle benodigde data zit nu in geheugen.
-    // Sluit deze fighter-tab HARD zodat UITSLAGEN nooit een oude modal/frame/DOM-state erft.
-    await hardClosePage(page).catch(() => {});
-    console.log(`[fp-total] 🧹 VA ${va} DETAILS-tab hard gesloten; UITSLAGEN opent dezelfde VA vers`);
-
   }
 
-  // UITSLAGEN krijgt ALTIJD een volledig verse, opnieuw geverifieerde fighter-tab.
-  // Master-login/cookies blijven gedeeld; alleen deze VA-page wordt opnieuw opgebouwd.
+  if (detailsLastError || !detailsScrapeSucceeded(details)) {
+    await hardClosePage(currentPage).catch(() => {});
+    throw new Error(
+      `DETAILS verplicht maar niet gelukt voor VA ${va}: ${
+        detailsLastError?.message ?? "onvoldoende gegevens"
+      }`
+    );
+  }
+
+  // Exact de door FightPassport gebruikte DETAILS-sluitknop. Geen reload,
+  // geen nieuwe VA-tab en geen algemene modal-cascade.
+  throwIfAborted(signal, va);
+  await closeDetailsExact(currentPage, va, signal);
+  throwIfAborted(signal, va);
+
   if (SCRAPE_RESULTS) {
-    const resultStep = await withFreshVaTab("UITSLAGEN", async (resultsPage) => {
-      console.log(`[fp-total] 🆕 VA ${va} verse UITSLAGEN-tab geopend`);
-      return await scrapeResults(resultsPage, va);
-    }).catch((e) => ({
-      status: "error",
-      rows: [],
-      error: e?.message ?? String(e),
-      download: null,
-    }));
-
-    resultsStatus = resultStep.status;
-    resultsError = resultStep.error;
-    results = resultStep.rows || [];
-    resultsDownload = resultStep.download || null;
+    try {
+      console.log(`[fp-total] 📊 VA ${va} UITSLAGEN opent op dezelfde VA-tab`);
+      const resultStep = await scrapeResults(currentPage, va, signal);
+      resultsStatus = resultStep.status;
+      resultsError = resultStep.error;
+      results = resultStep.rows || [];
+      resultsDownload = resultStep.download || null;
+    } catch (e) {
+      const msg = e?.message ?? String(e);
+      if (msg === "LOGIN_PAGE" || msg === "SCRAPE_ABORTED") throw e;
+      resultsStatus = "error";
+      resultsError = msg;
+      results = [];
+      resultsDownload = null;
+    }
   }
 
-  // FULLFIGHTER en UITSLAGEN zijn bewust twee losse opslagstappen.
+  // Alles van deze VA zit nu in geheugen/downloadbestand. Sluit de URL/tab meteen;
+  // database-opslag heeft de FightPassport-pagina niet meer nodig.
+  await hardClosePage(currentPage).catch(() => {});
+  console.log(`[fp-total] 🧹 VA ${va} VA-tab gesloten na DETAILS + UITSLAGEN`);
+  throwIfAborted(signal, va);
+
   await saveFighter({ va, summary, details, gyms, startbans, licenses, results });
 
   if (resultsStatus === "success" || resultsStatus === "no_results") {
     try {
-      // Eerst parsen-resultaat naar database schrijven.
+      throwIfAborted(signal, va);
       await saveResultsSnapshot(va, results);
 
-      // Pas NA succesvolle database-save het gedownloade Excel-bestand/map opruimen.
       if (resultsDownload?.dir) {
         cleanupDownloadDir(resultsDownload.dir);
         resultsDownload = null;
       }
     } catch (e) {
-      // Bij databasefout download bewust laten staan voor controle/herstel.
       console.log(
         `[fp-total] ❌ VA ${va} uitslagen DB-save mislukt; download blijft staan:`,
         resultsDownload?.file || null
@@ -2307,19 +2423,70 @@ async function main() {
     finally { masterRefreshPromise = null; }
   }
 
-  const SCRAPE_TIMEOUT_RAW = Number(process.env.FP_TOTAL_TIMEOUT_MS ?? "480000");
-  // De bundle heeft 240s voor FULLFIGHTER + 240s voor UITSLAGEN.
-  // Total doet beide binnen één VA-run, dus laat een te lage route/env-timeout
-  // (zoals 150000ms) de scrape niet voortijdig afbreken.
+  // Ultieme vangrail voor één complete VA. De oude 480s maskeerde vastlopers;
+  // de huidige directe DETAILS/UITSLAGEN-flow hoort ruim binnen 120s klaar te zijn.
+  const SCRAPE_TIMEOUT_RAW = Number(process.env.FP_TOTAL_TIMEOUT_MS ?? "120000");
   const SCRAPE_TIMEOUT_MS = Number.isFinite(SCRAPE_TIMEOUT_RAW)
-    ? Math.max(480000, SCRAPE_TIMEOUT_RAW)
-    : 480000;
+    ? Math.max(30000, SCRAPE_TIMEOUT_RAW)
+    : 120000;
   // Zelfde model als Historisch: geen globale startwachtrij en geen aparte browsercontext per worker.
   // Alleen een kleine optionele stagger om niet alle eerste tabs exact in dezelfde milliseconde te openen.
-  const STAGGER = Math.max(0, Number(process.env.STAGGER_MS ?? "150"));
+  // Workers bewust uit fase laten starten. Er is géén fasebarrière:
+  // iedere worker verwerkt zijn eigen VA volledig (fighter -> DETAILS -> UITSLAGEN)
+  // en pakt daarna direct de volgende. De offset voorkomt alleen "golven".
+  const STAGGER = Math.max(0, Number(process.env.STAGGER_MS ?? "450"));
+  const WORKER_DRIFT_MAX_MS = Math.max(
+    0,
+    Number(process.env.FP_TOTAL_WORKER_DRIFT_MAX_MS ?? "250")
+  );
 
   let idx = 0;
 
+  // Houd bij hoeveel VA-pogingen nog echt bezig zijn. Een worker die tijdelijk
+  // aan het einde van vaList komt, mag pas stoppen als NIEMAND meer bezig is
+  // die nog een VA achteraan kan zetten (login/browser/tijdelijke retry).
+  let activeAttempts = 0;
+
+  // LOGIN_PAGE is geen inhoudelijke VA-fout. We sluiten de getroffen tab,
+  // herstellen de gedeelde sessie en plannen exact die VA opnieuw in.
+  // Begrens dit om een echte login-storing niet eindeloos te laten rondgaan.
+  const loginRetryCounts = new Map();
+  const MAX_LOGIN_RETRIES_PER_VA = Math.max(1, Number(process.env.FP_TOTAL_LOGIN_RETRIES ?? "3"));
+
+  // Tijdelijke VA-problemen niet minutenlang repareren op dezelfde tab.
+  // Sluit alles van die poging en zet exact dezelfde VA achteraan.
+  // Default: 2 herkansingen = maximaal 3 volledige verse pogingen per VA.
+  const transientRetryCounts = new Map();
+  const MAX_TRANSIENT_RETRIES_PER_VA = Math.max(
+    0,
+    Number(process.env.FP_TOTAL_TRANSIENT_RETRIES ?? "2")
+  );
+
+  async function requeueTransientVa(va, label, reason) {
+    const key = String(va);
+    const retryNr = (transientRetryCounts.get(key) || 0) + 1;
+    if (retryNr > MAX_TRANSIENT_RETRIES_PER_VA) return false;
+
+    transientRetryCounts.set(key, retryNr);
+
+    await upsertSyncItem(run.id, va, {
+      status: "pending",
+      profiel_gevonden: false,
+      error_step: "temporary_retry",
+      error_message:
+        `Tijdelijke fout; VA achteraan opnieuw ingepland ` +
+        `(poging ${retryNr + 1}/${MAX_TRANSIENT_RETRIES_PER_VA + 1}). Oorzaak: ${reason}`,
+      finished_at: null,
+    });
+
+    // Altijd pushen: het oorspronkelijke exemplaar staat uiteraard al eerder in vaList.
+    vaList.push(key);
+    console.log(
+      `[fp-total] ♻️ ${label} VA ${va} achteraan opnieuw ingepland ` +
+      `(verse poging ${retryNr + 1}/${MAX_TRANSIENT_RETRIES_PER_VA + 1}): ${reason}`
+    );
+    return true;
+  }
 
   async function updateRunProgress(lastVa = lastProcessedVa) {
     if (lastVa != null) {
@@ -2349,15 +2516,30 @@ async function main() {
   }
 
   async function workerLoop(workerIdx) {
-    await sleep(workerIdx * STAGGER);
+    const workerStartDelay = workerIdx * STAGGER;
+    if (workerStartDelay > 0) await sleep(workerStartDelay);
 
     // Historisch-model: worker = alleen async taakverdeler.
     // Geen incognito/browsercontext per worker; alle tabs delen dezelfde masterbrowser + sessiecookies.
 
     while (!stopRequested) {
-      const myIdx = idx++;
-      if (myIdx >= vaList.length) break;
+      // Tijdelijk geen werk zichtbaar? Wacht zolang een andere worker nog bezig
+      // is; die kan door login/browserherstel een VA achteraan toevoegen.
+      if (idx >= vaList.length) {
+        if (activeAttempts > 0) {
+          await sleep(100);
+          continue;
+        }
+        break;
+      }
 
+      const myIdx = idx++;
+      if (myIdx >= vaList.length) {
+        await sleep(50);
+        continue;
+      }
+
+      activeAttempts++;
       const va = vaList[myIdx];
       const label = `worker${workerIdx + 1}/${WORKERS}`;
       const itemStartedAt = new Date().toISOString();
@@ -2371,6 +2553,9 @@ async function main() {
       await upsertSyncItem(run.id, va, { status: "processing", started_at: itemStartedAt, finished_at: null });
 
       let page = null;
+      // Alle tabs die tijdens deze VA worden geopend bijhouden. Bij een hard timeout
+      // moeten ook verse DETAILS/UITSLAGEN-tabs dicht, niet alleen de eerste tab.
+      const vaPages = new Set();
       try {
         page = await openFighterPageVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
@@ -2379,40 +2564,80 @@ async function main() {
           workerLabel: `[${label}]`,
         });
 
+        if (page) vaPages.add(page);
+
         if (!page) {
           page = await confirmProfileMissing(browser, null, cookies, va, label);
+          if (page) vaPages.add(page);
         }
 
         if (!page) {
+          const requeued = await requeueTransientVa(
+            va,
+            label,
+            "fighter-url/profiel niet betrouwbaar geopend"
+          );
+          if (requeued) {
+            console.log(`[fp-total] 🚪 ${label} VA ${va}: mislukte openpoging afgesloten; later vers opnieuw`);
+            continue;
+          }
+
           processed++;
+          errors++;
           lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
-          await registerMissingVa(va, run.id, "Na drie onafhankelijke profielverificaties geen geldige fighter-header gevonden.");
+          await registerMissingVa(va, run.id, "Na meerdere volledig verse profielpogingen geen geldige fighter-header gevonden.");
           await upsertSyncItem(run.id, va, {
             status: "not_found", profiel_gevonden: false, finished_at: new Date().toISOString(),
             error_step: "pending_review",
-            error_message: "Niet gevonden na drie verificatiecycli; toegevoegd aan AI Controle.",
+            error_message: "Niet gevonden na meerdere verse verificatiepogingen; toegevoegd aan AI Controle.",
           });
-          console.log(`[fp-total] — ${label} VA ${va}: na 3 verificatiecycli niet gevonden; pending_review`);
+          console.log(`[fp-total] — ${label} VA ${va}: ook na verse herkansingen niet gevonden; pending_review`);
           continue;
         }
 
-        const openFreshPage = async (stepName = "") => openFighterPageVerified(browser, null, cookies, va, {
-          maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-          softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
-          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
-          workerLabel: `[${label}${stepName ? ` ${stepName}` : ""}]`,
-        });
+        const openFreshPage = async (stepName = "", signal = null) => {
+          throwIfAborted(signal, va);
+          const freshPage = await openFighterPageVerified(browser, null, cookies, va, {
+            maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
+            softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
+            betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
+            workerLabel: `[${label}${stepName ? ` ${stepName}` : ""}]`,
+          });
+          if (signal?.aborted) {
+            if (freshPage) await hardClosePage(freshPage).catch(() => {});
+            throwIfAborted(signal, va);
+          }
+          if (freshPage) vaPages.add(freshPage);
+          return freshPage;
+        };
 
         const res = await withTimeout(
-          () => scrapeOne(page, va, openFreshPage),
+          (signal) => scrapeOne(page, va, openFreshPage, signal),
           SCRAPE_TIMEOUT_MS,
           `fp-total ${va}`,
           async () => {
-            await hardClosePage(page).catch(() => {});
+            // Promise.race annuleert de onderliggende async niet. Daarom alle tabs
+            // van deze VA hard sluiten, inclusief verse UITSLAGEN-tabs.
+            for (const p of vaPages) {
+              await hardClosePage(p).catch(() => {});
+            }
             page = null;
           }
         );
 
+        if (res?.resultsStatus === "error") {
+          const reason = res?.resultsError || "UITSLAGEN stap gaf error";
+          const requeued = await requeueTransientVa(va, label, reason);
+          if (requeued) {
+            console.log(
+              `[fp-total] 🚪 ${label} VA ${va}: UITSLAGEN niet goed; VA-tab is dicht en VA gaat achteraan`
+            );
+            continue;
+          }
+        }
+
+        loginRetryCounts.delete(String(va));
+        transientRetryCounts.delete(String(va));
         processed++;
         lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
         if (res.exists) {
@@ -2435,10 +2660,61 @@ async function main() {
         });
 
         console.log(`[fp-total] ✅ ${label} VA ${va}: FULLFIGHTER=${res.exists ? "success" : "not_found"} | UITSLAGEN=${res.resultsStatus || "skipped"}${res.resultsError ? ` (${res.resultsError})` : ""}${res.licensed ? " | licentie" : ""}`);
+        console.log(`[fp-total] ➡️ ${label} VA ${va} volledig klaar; worker gaat zelfstandig door`);
       } catch (e) {
         const msg = e?.message ?? String(e);
 
-        if (isBrowserConnectionError(msg)) {
+        if (msg === "LOGIN_PAGE") {
+          // De worker-tab is op login beland: meteen sluiten zodat die niet blijft
+          // meedraaien terwijl de master-sessie wordt hersteld.
+          for (const p of vaPages) {
+            await hardClosePage(p).catch(() => {});
+          }
+          page = null;
+
+          const retryKey = String(va);
+          const retryNr = (loginRetryCounts.get(retryKey) || 0) + 1;
+          loginRetryCounts.set(retryKey, retryNr);
+
+          console.log(
+            `[fp-total] 🔐 ${label} LOGIN_PAGE bij VA ${va}; tab gesloten → master opnieuw inloggen ` +
+            `(poging ${retryNr}/${MAX_LOGIN_RETRIES_PER_VA})`
+          );
+
+          await upsertSyncItem(run.id, va, {
+            status: "pending",
+            profiel_gevonden: false,
+            error_step: "login_recovery",
+            error_message: `Loginpagina geraakt; sessie wordt hersteld (poging ${retryNr}/${MAX_LOGIN_RETRIES_PER_VA}).`,
+            finished_at: null,
+          });
+
+          try {
+            await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
+
+            if (retryNr <= MAX_LOGIN_RETRIES_PER_VA) {
+              // Altijd opnieuw achteraan toevoegen: de oorspronkelijke VA staat uiteraard
+              // al in vaList en een includes()-controle zou requeue dus blokkeren.
+              vaList.push(retryKey);
+              console.log(`[fp-total] ♻️ ${label} VA ${va} opnieuw ingepland na verse login`);
+            } else {
+              throw new Error(`LOGIN_PAGE bleef terugkomen na ${MAX_LOGIN_RETRIES_PER_VA} herstelpogingen`);
+            }
+          } catch (loginError) {
+            processed++;
+            errors++;
+            lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
+            const loginMsg = loginError?.message ?? String(loginError);
+            await upsertSyncItem(run.id, va, {
+              status: "error",
+              profiel_gevonden: false,
+              error_step: "login_recovery_failed",
+              error_message: loginMsg,
+              finished_at: new Date().toISOString(),
+            });
+            console.log(`[fp-total] ❌ ${label} loginherstel mislukt bij VA ${va}:`, loginMsg);
+          }
+        } else if (isBrowserConnectionError(msg)) {
           console.log(`[fp-total] 🔌 ${label} browserverbinding weg bij VA ${va}: ${msg}`);
 
           await upsertSyncItem(run.id, va, {
@@ -2461,12 +2737,16 @@ async function main() {
               );
             }
 
-            // Plan dezelfde VA niet meerdere keren achteraan in.
-            if (!vaList.includes(String(va))) {
-              vaList.push(String(va));
+            const requeued = await requeueTransientVa(
+              va,
+              label,
+              `browserverbinding hersteld: ${msg}`
+            );
+            if (!requeued) {
+              throw new Error(
+                `Browserverbinding bleef fout na ${MAX_TRANSIENT_RETRIES_PER_VA + 1} verse pogingen: ${msg}`
+              );
             }
-
-            console.log(`[fp-total] ♻️ ${label} VA ${va} opnieuw achteraan ingepland`);
           } catch (restartError) {
             processed++;
             errors++;
@@ -2482,37 +2762,53 @@ async function main() {
             console.log(`[fp-total] ❌ browserherstart mislukt bij VA ${va}:`, restartMsg);
           }
         } else {
-          processed++;
-          errors++;
-          lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
+          // Geen lange reparatie op een verdachte/vaste tab: alles wordt in finally
+          // gesloten en dezelfde VA gaat als volledig verse poging achteraan.
+          const requeued = await requeueTransientVa(va, label, msg);
 
-          await upsertSyncItem(run.id, va, {
-            status: "error", profiel_gevonden: false,
-            error_step: String(msg).startsWith("HARD TIMEOUT") ? "timeout" : "scrape_or_save",
-            error_message: msg, finished_at: new Date().toISOString(),
-          });
+          if (!requeued) {
+            processed++;
+            errors++;
+            lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
 
-          if (msg === "LOGIN_PAGE") {
-            console.log(`[fp-total] 🔐 ${label} LOGIN_PAGE (VA ${va}) → master ensureLoggedIn + refresh cookies (LOCKED)`);
-            try {
-              await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
-            } catch (err) {
-              console.log("[fp-total] ❌ master refresh failed:", err?.message ?? String(err));
-            }
-          } else {
-            console.log(`[fp-total] ❌ ${label} fout VA ${va}:`, msg);
+            await upsertSyncItem(run.id, va, {
+              status: "error", profiel_gevonden: false,
+              error_step: String(msg).startsWith("HARD TIMEOUT") ? "timeout" : "scrape_or_save",
+              error_message:
+                `${msg} (definitief na ${MAX_TRANSIENT_RETRIES_PER_VA + 1} verse pogingen)`,
+              finished_at: new Date().toISOString(),
+            });
+
+            console.log(
+              `[fp-total] ❌ ${label} VA ${va} definitief fout na ` +
+              `${MAX_TRANSIENT_RETRIES_PER_VA + 1} verse pogingen: ${msg}`
+            );
           }
         }
       } finally {
         try {
-          if (page) {
-            await closeAnyModal(page).catch(() => {});
-            await hardClosePage(page).catch(() => {});
+          // Best-effort alle tabs van deze VA opruimen. Gesloten pages mogen hier
+          // opnieuw langskomen; hardClosePage vangt dat veilig af.
+          for (const p of vaPages) {
+            await closeAnyModal(p).catch(() => {});
+            await hardClosePage(p).catch(() => {});
           }
         } catch {}
 
         if (processed % 10 === 0 || Number(va) === effectiveEndVa || stopRequested) {
           await updateRunProgress(va).catch((e) => console.log("[fp-total] run progress update fout:", e?.message ?? String(e)));
+        }
+
+        activeAttempts = Math.max(0, activeAttempts - 1);
+
+        // Kleine worker-specifieke drift zodat workers na een paar VA's niet
+        // opnieuw exact gelijk gaan lopen. Geen batch-wachtpunt: deze worker
+        // gaat hierna zelfstandig meteen verder met de volgende VA.
+        if (!stopRequested && WORKER_DRIFT_MAX_MS > 0) {
+          const driftMs =
+            ((workerIdx + 1) * 37 + (Number(va) % 97)) %
+            (WORKER_DRIFT_MAX_MS + 1);
+          if (driftMs > 0) await sleep(driftMs);
         }
       }
     }
@@ -2522,8 +2818,40 @@ async function main() {
     await Promise.all(Array.from({ length: WORKERS }, (_, i) => workerLoop(i)));
     await updateRunProgress();
 
-    const allDone = processed >= requestedVaNumbers.length;
+    // Een run mag NOOIT completed worden zolang een aangevraagde VA nog
+    // pending/processing is. processed alleen is daarvoor onvoldoende, omdat
+    // retries dezelfde VA meerdere keren door de worker-loop kunnen laten gaan.
+    const finalSyncRunId = activeRun?.id || run.id;
+    const { data: finalItems, error: finalItemsError } = await supabase
+      .from("fightpassport_sync_items")
+      .select("va_nummer,status")
+      .eq("sync_run_id", finalSyncRunId);
+
+    if (finalItemsError) throw finalItemsError;
+
+    const requestedSet = new Set(requestedVaNumbers.map((v) => String(v)));
+    const finalStatusByVa = new Map(
+      (finalItems || [])
+        .filter((item) => requestedSet.has(String(item.va_nummer)))
+        .map((item) => [String(item.va_nummer), String(item.status || "").toLowerCase()])
+    );
+
+    const nonTerminalVaNumbers = requestedVaNumbers
+      .map((v) => String(v))
+      .filter((vaNr) => {
+        const status = finalStatusByVa.get(vaNr) || "";
+        return !terminalStatuses.has(status);
+      });
+
+    const allDone = nonTerminalVaNumbers.length === 0;
     const now = new Date().toISOString();
+
+    if (!allDone) {
+      console.log(
+        `[fp-total] ⚠️ run kan nog niet afronden; ${nonTerminalVaNumbers.length} VA('s) niet terminaal:`,
+        nonTerminalVaNumbers.slice(0, 50)
+      );
+    }
     const segmentStartedAt = new Date(run.meta?.resumed_at || run.meta?.cycle_started_at || run.started_at).getTime();
     const segmentEndedAt = new Date(now).getTime();
     const previousRuntimeMs = Number(run.meta?.accumulated_runtime_ms);
@@ -2566,7 +2894,9 @@ async function main() {
       licensed_count: licensed,
       error_count: errors,
       finished_at: now,
-      error_message: "Scraper beëindigd voordat alle VA-nummers waren verwerkt, zonder stopsignaal.",
+      error_message:
+        `Scraper beëindigd terwijl ${nonTerminalVaNumbers.length} VA('s) nog pending/processing waren: ` +
+        nonTerminalVaNumbers.slice(0, 25).join(", "),
       meta: currentMeta,
     };
 
