@@ -422,7 +422,7 @@ export default function FightPaspoortBeheerPage() {
     setBusyTotal(false);
     setMessage(
       res.ok
-        ? (json.message || `Total AutoCheck gestart als 2 processen × 10 workers voor VA ${startVa} t/m ${endVa}.`)
+        ? (json.message || `Total AutoCheck gestart als 3 processen × 10 workers voor VA ${startVa} t/m ${endVa}.`)
         : json.error || "Total AutoCheck starten mislukt."
     );
     setTimeout(loadRuns, 1200);
@@ -735,7 +735,7 @@ export default function FightPaspoortBeheerPage() {
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <span style={styles.activeRunBadge}>● TOTAL AUTOCHECK ACTIEF</span>
             <b>VA {activeTotalBatch.startVa}–{activeTotalBatch.endVa}</b>
-            <span>{activeTotalBatch.runs.length} {activeTotalBatch.runs.length === 1 ? "proces" : "processen"} · {activeTotalBatch.workers || 20} workers totaal</span>
+            <span>{activeTotalBatch.runs.length} {activeTotalBatch.runs.length === 1 ? "proces" : "processen"} · {activeTotalBatch.workers || 30} workers totaal</span>
             <span>{activeTotalBatch.processed}/{activeTotalBatch.total} verwerkt</span>
             <span>Gestart {fmt(activeTotalBatch.startedAt)}</span>
             <span>Loopt {formatRuntimeMs(activeTotalBatch.activeRuntimeMs)}</span>
@@ -800,12 +800,12 @@ export default function FightPaspoortBeheerPage() {
       </section>}
       <section style={styles.panel}>
         <h2 style={{marginTop:0}}>Nieuwe synchronisatie</h2>
-        <p style={{color:"#bbb"}}>De Total AutoCheck verdeelt de VA-range automatisch over 2 processen met elk 10 workers (20 workers totaal). Sportscholen Sync en Startverboden Sync zijn losse processen en kunnen afzonderlijk worden gestart.</p>
+        <p style={{color:"#bbb"}}>De Total AutoCheck verdeelt de VA-range automatisch over 3 processen met elk 10 workers (30 workers totaal). Sportscholen Sync en Startverboden Sync zijn losse processen en kunnen afzonderlijk worden gestart.</p>
         <div style={styles.filters}>
           <label style={styles.label}>Start VA<input style={styles.input} value={startVa} onChange={e=>setStartVa(e.target.value)}/></label>
           <label style={styles.label}>Eind VA<input style={styles.input} value={endVa} onChange={e=>setEndVa(e.target.value)}/></label>
           <button style={styles.orange} disabled={busyTotal||!!activeTotalRun} onClick={startTotalRobot}>
-            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 2 × 10"}
+            <Play size={16}/>{busyTotal?"Total start...":activeTotalRun?"Total draait...":"Start Total AutoCheck · 3 × 10"}
           </button>
           <button style={styles.silver} disabled={busyTeam||!!activeTeamRun} onClick={startTeamRobot}>
             <Users size={16}/>{busyTeam||activeTeamRun?"Sportscholen draaien...":"Start Sportscholen Sync"}
