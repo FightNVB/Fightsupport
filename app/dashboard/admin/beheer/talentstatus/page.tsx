@@ -80,14 +80,62 @@ export default function TalentstatusPage() {
             <tr><th className="border border-zinc-700 p-2">Vechter</th><th className="border border-zinc-700 p-2">Sportschool</th><th className="border border-zinc-700 p-2">Land</th><th className="border border-zinc-700 p-2">Partijen</th><th className="border border-zinc-700 p-2">Status</th><th className="border border-zinc-700 p-2">Actie</th></tr>
           </thead>
           <tbody>
-            {loading ? <tr><td colSpan={6} className="p-4">Laden...</td></tr> : items.map(item => <tr key={item.id} className="bg-[#171717] hover:bg-[#202020]">
-              <td className="border border-zinc-800 p-2"><b className="text-[#ff4d00]">{item.naam}</b><br/><span className="text-xs text-zinc-400">{item.va_nummer ? `VA ${item.va_nummer}` : "Geen VA"}</span></td>
-              <td className="border border-zinc-800 p-2">{item.sportschool || "-"}</td>
-              <td className="border border-zinc-800 p-2">{item.land}</td>
-              <td className="border border-zinc-800 p-2 font-bold">{item.partijen_totaal ?? 0} / {item.max_proef_partijen ?? 3}</td>
-              <td className="border border-zinc-800 p-2"><span className={`border px-2 py-1 text-xs font-black uppercase ${item.moet_evalueren || item.status === "evaluatie_nodig" ? "border-[#ff4d00] text-[#ff4d00]" : "border-zinc-500 text-zinc-200"}`}>{item.moet_evalueren ? "evaluatie nodig" : item.status}</span></td>
-              <td className="border border-zinc-800 p-2"><Link className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black !text-black" href={`/dashboard/admin/beheer/talentstatus/${item.id}`}>Open</Link></td>
-            </tr>)}
+            {loading ? (
+              <tr className="bg-white text-black">
+                <td colSpan={6} className="p-4">Laden...</td>
+              </tr>
+            ) : items.map((item, idx) => {
+              const darkRow = idx % 2 === 0;
+
+              return (
+                <tr
+                  key={item.id}
+                  className={`transition-colors ${
+                    darkRow
+                      ? "bg-[#171717] text-white hover:bg-[#fff0e8] hover:text-black"
+                      : "bg-white text-black hover:bg-[#fff0e8] hover:text-black"
+                  }`}
+                >
+                  <td className="border border-zinc-700 p-2">
+                    <b className="text-[#ff4d00]">{item.naam}</b>
+                    <br />
+                    <span
+                      className={`text-xs ${
+                        darkRow ? "text-zinc-300" : "text-zinc-700"
+                      }`}
+                    >
+                      {item.va_nummer ? `VA ${item.va_nummer}` : "Geen VA"}
+                    </span>
+                  </td>
+                  <td className="border border-zinc-700 p-2">{item.sportschool || "-"}</td>
+                  <td className="border border-zinc-700 p-2">{item.land}</td>
+                  <td className="border border-zinc-700 p-2 font-bold">
+                    {item.partijen_totaal ?? 0} / {item.max_proef_partijen ?? 3}
+                  </td>
+                  <td className="border border-zinc-700 p-2">
+                    <span
+                      className={`border px-2 py-1 text-xs font-black uppercase ${
+                        item.moet_evalueren || item.status === "evaluatie_nodig"
+                          ? "border-[#ff4d00] text-[#ff4d00]"
+                          : darkRow
+                            ? "border-zinc-500 text-zinc-200"
+                            : "border-zinc-500 text-black"
+                      }`}
+                    >
+                      {item.moet_evalueren ? "evaluatie nodig" : item.status}
+                    </span>
+                  </td>
+                  <td className="border border-zinc-700 p-2">
+                    <Link
+                      className="talent-silver-btn border border-zinc-300 bg-gradient-to-b from-white via-zinc-200 to-zinc-500 px-3 py-1 text-xs font-black !text-black"
+                      href={`/dashboard/admin/beheer/talentstatus/${item.id}`}
+                    >
+                      Open
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

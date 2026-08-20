@@ -37,6 +37,7 @@ const RUN_KIND = String(process.env.FP_TOTAL_RUN_KIND || (HAS_EXPLICIT_VA_LIST ?
   .trim()
   .toLowerCase();
 const IS_RETRY_RUN = RUN_KIND === "retry";
+const SKIP_RUN_TERMINATOR = String(process.env.FP_SKIP_RUN_TERMINATOR || "false").toLowerCase() === "true";
 const BATCH_ID = String(process.env.FP_TOTAL_BATCH_ID || "").trim();
 const BATCH_PART = Number(process.env.FP_TOTAL_BATCH_PART || "1");
 const BATCH_PARTS = Number(process.env.FP_TOTAL_BATCH_PARTS || "1");
@@ -2340,9 +2341,11 @@ async function main() {
       })
       .eq("id", run.id);
     console.log(`[fp-total] ✅ run ${run.id} was al volledig verwerkt`);
-    await terminateSyncRun({ syncRunId: run.id }).catch((error) => {
-      console.log(`[TERMINATOR] Fout na reeds complete run ${run.id}:`, error?.message ?? String(error));
-    });
+    if (!SKIP_RUN_TERMINATOR) {
+      await terminateSyncRun({ syncRunId: run.id }).catch((error) => {
+        console.log(`[TERMINATOR] Fout na reeds complete run ${run.id}:`, error?.message ?? String(error));
+      });
+    }
     return;
   }
 
@@ -2911,7 +2914,7 @@ async function main() {
         ? `[fp-total] ⏸️ ronde ${run.id} gepauzeerd na expliciet stopsignaal en ${processed} verwerkte VA's`
         : `[fp-total] ❌ ronde ${run.id} onverwacht beëindigd na ${processed} verwerkte VA's`);
 
-    if (allDone) {
+    if (allDone && !SKIP_RUN_TERMINATOR) {
       await terminateSyncRun({ syncRunId: run.id }).catch((error) => {
         // De scrape blijft voltooid; de fout is zichtbaar en de admin endpoint kan handmatig opnieuw worden gestart.
         console.log(`[TERMINATOR] Fout na total run ${run.id}:`, error?.message ?? String(error));

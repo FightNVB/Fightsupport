@@ -17,6 +17,7 @@ export default function FighterDossierPage() {
   const [eventDate, setEventDate] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fpUpdateStatus, setFpUpdateStatus] = useState<"idle" | "queued" | "processing" | "done" | "error">("idle");
   const [notice, setNotice] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [reviewBusyId, setReviewBusyId] = useState<string | null>(null);
@@ -88,38 +89,128 @@ export default function FighterDossierPage() {
       );
   }
 
+
+  async function loadFightPassportUpdateStatus() {
+    const va = String(fighterId || "")
+      .replace(/\D/g, "");
+
+    if (!va) return;
+
+    try {
+      const response = await authedFetch(
+        `/api/admin/fightpassport-beheer/fighters/${encodeURIComponent(va)}/rescrape`,
+        { cache: "no-store" },
+      );
+
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) return;
+
+      const status = String(json?.item?.status ?? "").toLowerCase();
+
+      if (status === "pending") setFpUpdateStatus("queued");
+      else if (status === "processing") setFpUpdateStatus("processing");
+      else if (status === "done") setFpUpdateStatus("done");
+      else if (status === "error") setFpUpdateStatus("error");
+      else setFpUpdateStatus("idle");
+    } catch {
+      // Statuscontrole mag het dossier zelf nooit blokkeren.
+    }
+  }
+
   useEffect(() => {
     void load();
+    void loadFightPassportUpdateStatus();
   }, [fighterId, matchmakingId]);
 
-  async function refreshScoped() {
-    if (!aanmelding?.id || !matchmakingId) {
-      setNotice("Geen aanmelding gevonden om te vernieuwen.");
+  async function updateFromFightPassport() {
+    const va = String(fighterId || aanmelding?.va_nummer || data?.fighter?.va_nummer || "")
+      .replace(/\D/g, "");
+
+    if (!va) {
+      setNotice("Geen geldig VA-nummer gevonden voor FightPassport update.");
       return;
     }
 
     setBusy(true);
+    setFpUpdateStatus("queued");
     setNotice("");
+
     try {
-      const response = await authedFetch("/api/matchmaker/fighter-context/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchmaking_id: matchmakingId,
-          aanmelding_id: aanmelding.id,
-        }),
-      });
+      const response = await authedFetch(
+        `/api/admin/fightpassport-beheer/fighters/${encodeURIComponent(va)}/rescrape`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            matchmaking_id: matchmakingId || null,
+            aanmelding_id: aanmelding?.id || null,
+          }),
+        },
+      );
+
       const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json.error || "Vernieuwen mislukt.");
-      await load();
-      router.refresh();
-      setNotice("Deze vechter en de bijbehorende regels zijn opnieuw opgebouwd en opnieuw geladen.");
+      if (!response.ok) {
+        throw new Error(json.error || "FightPassport update aanvragen mislukt.");
+      }
+
+      setFpUpdateStatus("queued");
+      setNotice(
+        json.already_queued
+          ? `VA ${va} stond al in de FightPassport updatewachtrij.`
+          : `VA ${va} is toegevoegd aan de FightPassport updatewachtrij.`,
+      );
+
+      // Volg het verzoek. De aparte refresh-worker zet de regel pas op done
+      // nadat de scrape én Terminator voor deze VA klaar zijn.
+      for (let attempt = 0; attempt < 240; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+
+        const statusResponse = await authedFetch(
+          `/api/admin/fightpassport-beheer/fighters/${encodeURIComponent(va)}/rescrape`,
+          { cache: "no-store" },
+        );
+
+        const statusJson = await statusResponse.json().catch(() => ({}));
+        if (!statusResponse.ok) {
+          throw new Error(statusJson.error || "Update-status laden mislukt.");
+        }
+
+        const status = String(statusJson?.item?.status ?? "").toLowerCase();
+
+        if (status === "processing") {
+          setFpUpdateStatus("processing");
+          setNotice(`VA ${va} wordt nu opnieuw uit FightPassport opgehaald…`);
+        }
+
+        if (status === "done") {
+          setFpUpdateStatus("done");
+          await load();
+          router.refresh();
+          setNotice(
+            `FightPassport is bijgewerkt voor VA ${va}. De vechtercontext en eventuele match zijn opnieuw opgebouwd.`,
+          );
+          return;
+        }
+
+        if (status === "error") {
+          throw new Error(
+            statusJson?.item?.error_message ||
+              `FightPassport update voor VA ${va} is mislukt.`,
+          );
+        }
+      }
+
+      setNotice(
+        `De FightPassport update voor VA ${va} staat nog in de wachtrij. De pagina kan later opnieuw worden geopend.`,
+      );
     } catch (e: any) {
-      setNotice(e?.message || "Vernieuwen mislukt.");
+      setFpUpdateStatus("error");
+      setNotice(e?.message || "FightPassport update mislukt.");
     } finally {
       setBusy(false);
     }
   }
+
 
   async function saveCorrection() {
     if (!aanmelding?.id || !matchmakingId) return;
@@ -482,11 +573,40 @@ export default function FighterDossierPage() {
           <div style={s.heroShade} />
 
           <div style={s.heroToolbar} className="fighter-dossier-toolbar">
-            <button style={s.glassButton} onClick={() => router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`)}>
-              <ArrowLeft size={16} /> Terug
+            <button
+              style={s.glassButton}
+              onClick={() =>
+                router.push(
+                  `/dashboard/matchmaker/matchmaking/${matchmakingId}/aanmeldingen`,
+                )
+              }
+            >
+              <ArrowLeft size={16} /> Terug naar aanmeldingen
             </button>
-            <button style={s.glassButton} disabled={busy || !aanmelding?.id} onClick={refreshScoped}>
-              <RefreshCw size={16} /> {busy ? "Bezig..." : "Vernieuwen"}
+            <button
+              style={s.glassButton}
+              onClick={() =>
+                router.push(`/dashboard/matchmaker/matchmaking/${matchmakingId}/match`)
+              }
+            >
+              Matchmaking
+            </button>
+            <button
+              style={s.glassButton}
+              disabled={busy}
+              onClick={updateFromFightPassport}
+              title="Haal de nieuwste gegevens van deze vechter opnieuw op uit FightPassport"
+            >
+              <RefreshCw size={16} />{" "}
+              {fpUpdateStatus === "queued"
+                ? "In wachtrij…"
+                : fpUpdateStatus === "processing"
+                  ? "FightPassport bijwerken…"
+                  : fpUpdateStatus === "done"
+                    ? "FightPassport bijgewerkt"
+                    : fpUpdateStatus === "error"
+                      ? "Update opnieuw proberen"
+                      : "Update FightPassport"}
             </button>
           </div>
 

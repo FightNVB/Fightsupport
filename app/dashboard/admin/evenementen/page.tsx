@@ -120,7 +120,7 @@ export default function EvenementenPage() {
       const json = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(json.error || "Scraperstatus kon niet worden geladen.");
+        throw new Error(json.error || "Status kon niet worden geladen.");
       }
 
       setRun(json.run ?? null);
@@ -191,12 +191,12 @@ export default function EvenementenPage() {
       const json = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(json.error || "Evenementenscraper kon niet worden gestart.");
+        throw new Error(json.error || "Evenementen Terminator kon niet worden gestart.");
       }
 
       setNotice(
         json.message ||
-          `Evenementenscraper gestart voor ${startEventId} t/m ${endEventId} met 20 workers.`
+          `Evenementen Terminator gestart voor ${startEventId} t/m ${endEventId} met 20 workers.`
       );
 
       window.setTimeout(() => void reloadAll(), 800);
@@ -252,7 +252,7 @@ export default function EvenementenPage() {
               <div style={styles.identityStrip}>
                 <span style={styles.identityChip}>{total} evenementen</span>
                 <span style={styles.identityChip}>
-                  Status: {running ? "scraper actief" : run?.status || "gereed"}
+                  Status: {running ? "Terminator actief" : run?.status || "gereed"}
                 </span>
                 <span style={styles.identityChip}>20 workers</span>
               </div>
@@ -266,7 +266,7 @@ export default function EvenementenPage() {
         <section style={styles.section}>
           <div style={styles.sectionHeader}>
             <div>
-              <div style={styles.sectionKicker}>SCRAPER</div>
+              <div style={styles.sectionKicker}>TERMINATOR</div>
               <h2 style={styles.sectionTitle}>Evenementen ophalen</h2>
             </div>
             <span
@@ -329,7 +329,7 @@ export default function EvenementenPage() {
               disabled={running || starting}
             >
               <Play size={16} />
-              {starting ? "Starten..." : running ? "Scraper draait" : "Start scraper"}
+              {starting ? "Starten..." : running ? "Terminator draait" : "Start Terminator"}
             </button>
           </div>
 

@@ -107,7 +107,7 @@ export async function POST(req: Request) {
     const endVa = clampInt(body?.end_va, startVa, 1, 99999);
 
     const workersPerProcess = 10;
-    const requestedProcesses = 2;
+    const requestedProcesses = 3;
     const staggerMs = clampInt(body?.stagger_ms ?? 2500, 2500, 0, 10000);
     const tabAttempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
     const softWaitMs = clampInt(body?.soft_wait_ms ?? 1500, 1500, 200, 5000);
@@ -180,7 +180,7 @@ export async function POST(req: Request) {
 
     const batchId = crypto.randomUUID();
 
-    // Verdeel het bereik zonder overlap over maximaal 2 processen.
+    // Verdeel het bereik zonder overlap over maximaal 3 processen.
     // Bij een bereik van 1 VA starten we vanzelf maar 1 proces.
     const totalVaCount = endVa - startVa + 1;
     const processCount = Math.min(requestedProcesses, totalVaCount);

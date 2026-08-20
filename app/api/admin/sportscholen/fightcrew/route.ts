@@ -1,13 +1,14 @@
-// app/api/admin/sportscholen/fightcrew/route.ts
+// app/api/admin/sportscholen/fightcrew/start/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
 import { createClient } from "@supabase/supabase-js";
-import { requireAdmin } from "@/app/api/_utils/authz";
+import { requireAnyRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-type AnyRow = Record<string, any>;
 
 function normalizeKey(raw: unknown) {
   const key = String(raw ?? "")
@@ -29,101 +30,173 @@ function getServiceKey() {
   return key;
 }
 
-function normalizeStatus(raw: unknown, fighterCount: number) {
-  const s = String(raw ?? "").trim().toLowerCase();
-
-  // Belangrijk: als de VA-enrich later faalt, mogen de gevonden Fightcrew-rijen
-  // niet verdwijnen uit de pagina. Zodra er rows zijn is de Fightcrew opgehaald.
-  if (fighterCount > 0 && (!s || s === "mislukt" || s === "error" || s === "failed")) {
-    return "klaar";
-  }
-
-  if (!s) return fighterCount > 0 ? "klaar" : null;
-  return s;
+function logLine(line: string) {
+  console.log(`[${new Date().toISOString()}] ${line}`);
 }
 
-function sortFighters(rows: AnyRow[]) {
-  return [...rows].sort((a, b) => {
-    const an = String(a.naam ?? `${a.voornaam ?? ""} ${a.achternaam ?? ""}`).trim().toLowerCase();
-    const bn = String(b.naam ?? `${b.voornaam ?? ""} ${b.achternaam ?? ""}`).trim().toLowerCase();
-    return an.localeCompare(bn, "nl") || String(a.va_nummer ?? "").localeCompare(String(b.va_nummer ?? ""), "nl");
-  });
+function findScraperPath() {
+  const candidates = [
+    path.join(
+      process.cwd(),
+      "control-engine",
+      "scrapers",
+      "team",
+      "scraper_team.js"
+    ),
+    path.join(
+      process.cwd(),
+      "ControlEngine",
+      "scrapers",
+      "team",
+      "scraper_team.js"
+    ),
+    path.join(process.cwd(), "scrapers", "team", "scraper_team.js"),
+  ];
+
+  return candidates.find((p) => fs.existsSync(p)) || candidates[0];
 }
 
-export async function GET(req: NextRequest) {
-  await requireAdmin(req);
+export async function POST(req: NextRequest) {
   try {
-    const url = new URL(req.url);
+    await requireAnyRole(req, ["admin", "superadmin", "trainer"]);
 
+    const body = await req.json().catch(() => ({}));
     const sportschoolKey = normalizeKey(
-      url.searchParams.get("sportschool_id") ??
-        url.searchParams.get("sportschoolKey") ??
-        url.searchParams.get("key") ??
-        url.searchParams.get("")
+      body?.sportschool_id ?? body?.sportschoolKey ?? body?.key
     );
 
     if (!sportschoolKey) {
-      return NextResponse.json({ error: "sportschool_id ontbreekt" }, { status: 400 });
+      return NextResponse.json(
+        { error: "sportschool_id ontbreekt" },
+        { status: 400 }
+      );
     }
 
     const admin = createClient(getBaseUrl(), getServiceKey(), {
       auth: { persistSession: false },
     });
 
-    // Eerst fighters ophalen. Deze tabel bestaat bij jou en bepaalt of de Fightcrew
-    // daadwerkelijk binnen is, los van de latere VA-scrape/status.
-    const { data: fighterRows, error: fighterErr } = await admin
-      .from("sportschool_fighters")
-      .select("*")
+    const { data: school, error: schoolErr } = await admin
+      .from("sportscholen")
+      .select("sportschool_id, naam")
       .eq("sportschool_id", Number(sportschoolKey))
-      .order("naam", { ascending: true })
-      .limit(1000);
+      .single();
 
-    if (fighterErr) {
+    if (schoolErr || !school) {
       return NextResponse.json(
-        { error: `Fightcrew rows laden mislukt: ${fighterErr.message}` },
-        { status: 500 }
+        { error: "Sportschool niet gevonden" },
+        { status: 404 }
       );
     }
 
-    const fighters = sortFighters(fighterRows ?? []);
-    const fighterCount = fighters.length;
+    const scraperPath = findScraperPath();
 
-    // Bewust alleen kolommen die in jouw project al stabiel gebruikt worden.
-    // team_sync_started_at / team_sync_finished_at geven 500 als ze niet bestaan.
-    const { data: school, error: schoolErr } = await admin
+    if (!fs.existsSync(scraperPath)) {
+      const msg = `Scraper niet gevonden: ${scraperPath}`;
+
+      await admin
+        .from("sportscholen")
+        .update({
+          team_sync_status: "mislukt",
+          team_sync_error: msg,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("sportschool_id", Number(sportschoolKey));
+
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+
+    await admin
       .from("sportscholen")
-      .select("sportschool_id, naam, plaats, land, last_team_sync_at, team_sync_status, team_sync_error, updated_at")
-      .eq("sportschool_id", Number(sportschoolKey))
-      .maybeSingle();
+      .update({
+        team_sync_status: "bezig",
+        team_sync_error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("sportschool_id", Number(sportschoolKey));
 
-    if (schoolErr) {
-      return NextResponse.json({ error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
-    }
+    logLine(
+      `Start actuele FightPassport Fightcrew-sync voor sportschool ${sportschoolKey} (${school.naam})`
+    );
+    logLine(`Command: ${process.execPath} ${scraperPath} run ${sportschoolKey}`);
 
-    if (!school) {
-      return NextResponse.json({ error: "Sportschool niet gevonden" }, { status: 404 });
-    }
+    const child = spawn(
+      process.execPath,
+      [scraperPath, "run", sportschoolKey],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
 
-    const fixedStatus = normalizeStatus(school.team_sync_status, fighterCount);
-    const fixedSchool = {
-      ...school,
-      team_sync_status: fixedStatus,
-      fighter_count: fighterCount,
-    };
+          // Team/sportschool gebruikt master-login.
+          FP_MATCHMAKER_ID: "",
+          FP_SESSION_MODE: "master",
+          HEADLESS: process.env.HEADLESS ?? "false",
+          PUPPETEER_HEADLESS:
+            process.env.PUPPETEER_HEADLESS ??
+            process.env.HEADLESS ??
+            "false",
+
+          TEAM_SPORTSCHOOL_ID: sportschoolKey,
+          FIGHTCREW_SPORTSCHOOL_ID: sportschoolKey,
+        },
+        detached: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      }
+    );
+
+    child.stdout?.on("data", (chunk) => {
+      logLine(String(chunk).trimEnd());
+    });
+
+    child.stderr?.on("data", (chunk) => {
+      logLine(`[stderr] ${String(chunk).trimEnd()}`);
+    });
+
+    child.on("error", async (err) => {
+      const msg = err?.message ?? "Fightcrew scraper kon niet starten";
+      logLine(`[error] ${msg}`);
+
+      await admin
+        .from("sportscholen")
+        .update({
+          team_sync_status: "mislukt",
+          team_sync_error: msg,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("sportschool_id", Number(sportschoolKey));
+    });
+
+    child.on("close", async (code) => {
+      const ok = code === 0;
+
+      logLine(`Fightcrew scraper klaar met exit code ${code}`);
+
+      // scraper_team.js zet bij succes zelf last_team_sync_at/status.
+      // Hier alleen een vangnet voor onverwachte exit.
+      if (!ok) {
+        await admin
+          .from("sportscholen")
+          .update({
+            team_sync_status: "mislukt",
+            team_sync_error: `Fightcrew scraper gestopt met exit code ${code}. Zie terminal output.`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("sportschool_id", Number(sportschoolKey));
+      }
+    });
 
     return NextResponse.json({
       ok: true,
-      sportschool: fixedSchool,
-      rows: fighters,
-      fighters,
-      fighter_count: fighterCount,
-      // pagina mag dit tonen, maar niet als harde fout behandelen
-      fighters_error: null,
+      sportschool_id: Number(sportschoolKey),
+      naam: school.naam,
+      status: "bezig",
+      pid: child.pid,
     });
   } catch (e: any) {
+    console.error("[admin/fightcrew/start] POST fout", e);
     return NextResponse.json(
-      { error: "De aanvraag kon niet worden verwerkt." },
+      { error: e?.message ?? "Fightcrew-sync starten mislukt" },
       { status: 500 }
     );
   }

@@ -443,6 +443,7 @@ export default function ContactpersonenFightcrewPage() {
   const [rol, setRol] = useState("trainer");
   const [melding, setMelding] = useState("");
   const [busy, setBusy] = useState(false);
+  const [teamSyncBusy, setTeamSyncBusy] = useState(false);
   const [loginKey, setLoginKey] = useState<string | number | null>(null);
   const [meekijkSportschoolId, setMeekijkSportschoolId] = useState<string | null>(null);
   const [meekijkBusyKey, setMeekijkBusyKey] = useState<string | number | null>(null);
@@ -669,6 +670,115 @@ export default function ContactpersonenFightcrewPage() {
     }
 
     return nextRows;
+  }
+
+
+  function wait(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function syncFightcrew(sportschoolId: string | number) {
+    setMelding("");
+    setTeamSyncBusy(true);
+
+    try {
+      const res = await authedFetch(`/api/admin/sportscholen/fightcrew/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await tokenHeaders()),
+        },
+        body: JSON.stringify({ sportschool_id: sportschoolId }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error ?? "FightPassport Fightcrew-sync starten mislukt");
+      }
+
+      setMelding(
+        "FightPassport wordt geopend en de actuele Vechters-Excel wordt opgehaald…",
+      );
+
+      // De start-route start de scraper. Poll daarna dezelfde GET-route totdat
+      // scraper_team.js de sportschool op klaar of mislukt heeft gezet.
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await wait(1500);
+
+        const getRes = await authedFetch(
+          `/api/admin/sportscholen/fightcrew?sportschool_id=${encodeURIComponent(
+            String(sportschoolId),
+          )}`,
+          {
+            headers: await tokenHeaders(),
+            cache: "no-store",
+          },
+        );
+
+        const getJson = await getRes.json().catch(() => ({}));
+        if (!getRes.ok) {
+          throw new Error(getJson.error ?? "Fightcrew status laden mislukt");
+        }
+
+        const nextRows = getJson.rows ?? getJson.fighters ?? [];
+        const status = String(
+          getJson?.sportschool?.team_sync_status ?? "",
+        ).toLowerCase();
+
+        setFighters(nextRows);
+
+        if (getJson.sportschool) {
+          setSelected((prev) => {
+            if (
+              !prev ||
+              String(prev.sportschool_id) !== String(sportschoolId)
+            ) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              ...getJson.sportschool,
+              fighter_count: getJson.fighter_count ?? nextRows.length,
+            };
+          });
+
+          setSchools((prev) =>
+            prev.map((s) =>
+              String(s.sportschool_id) === String(sportschoolId)
+                ? {
+                    ...s,
+                    ...getJson.sportschool,
+                    fighter_count: getJson.fighter_count ?? nextRows.length,
+                  }
+                : s,
+            ),
+          );
+        }
+
+        if (["klaar", "ok", "done"].includes(status)) {
+          setMelding(
+            `Fightcrew vernieuwd: ${nextRows.length} actuele vechters uit de FightPassport-Excel.`,
+          );
+          return;
+        }
+
+        if (["mislukt", "error", "failed"].includes(status)) {
+          throw new Error(
+            getJson?.sportschool?.team_sync_error ??
+              "FightPassport Fightcrew-sync is mislukt",
+          );
+        }
+      }
+
+      throw new Error(
+        "FightPassport Fightcrew-sync is nog niet afgerond. Gebruik Ververs om de status opnieuw te laden.",
+      );
+    } catch (e: any) {
+      setMelding(e?.message ?? "FightPassport Fightcrew-sync mislukt");
+    } finally {
+      setTeamSyncBusy(false);
+    }
   }
 
   async function chooseSchool(school: School) {
@@ -1019,7 +1129,7 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
             >
               Koppel een trainer of contactpersoon aan de echte FightPassport
               sportschool-key. De Fightcrew en vechterinformatie worden daarna
-              rechtstreeks uit de database geladen; hiervoor wordt niet meer gescrapet.
+              uit de database geladen. Bij vernieuwen wordt alleen de actuele Vechters-Excel van FightPassport opgehaald.
             </p>
           </div>
 
@@ -1066,8 +1176,8 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
           />
           <StepCard
             nr="2"
-            title="Fightcrew uit database"
-            text="Vechters en actuele FightPassport-informatie worden direct uit de database geladen."
+            title="Actuele Fightcrew"
+            text="De actuele ledenlijst komt uit de FightPassport-Excel; vechterdetails komen uit de database."
             active={!!selectedContact && !selectedHasCrew}
             done={selectedHasCrew}
           />
@@ -1466,10 +1576,16 @@ input[type="checkbox"]{accent-color:#ff4d00;} option{background:#fff;color:#1118
                 <div style={{ display: "grid", gap: 10, marginTop: 13 }}>
                   <button
                     style={buttonBase}
-                    onClick={() => selected && loadFighters(selected.sportschool_id)}
-                    disabled={!selected}
+                    onClick={() => selected && syncFightcrew(selected.sportschool_id)}
+                    disabled={!selected || teamSyncBusy}
                   >
-                    <RefreshCw size={16} /> Fightcrew uit database verversen
+                    <RefreshCw
+                      size={16}
+                      style={teamSyncBusy ? { animation: "fsSpin 1s linear infinite" } : undefined}
+                    />{" "}
+                    {teamSyncBusy
+                      ? "FightPassport Excel ophalen…"
+                      : "Fightcrew vernieuwen uit FightPassport"}
                   </button>
                   <button
                     style={selectedContactHasExistingLogin ? darkButton : orangeButton}

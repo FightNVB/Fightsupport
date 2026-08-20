@@ -36,6 +36,12 @@ type UitslagenBout = {
   blauw_va?: string | null;
 };
 
+type FightPassportResult = {
+  va_nummer?: string | null;
+  datum?: string | null;
+  sportschool?: string | null;
+};
+
 function normalizeVa(value: unknown) {
   return cleanVa(value);
 }
@@ -69,6 +75,47 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ ok: false, error: "De aanvraag kon niet worden verwerkt." }, { status: 500 });
 
   const fighters = (data ?? []) as TalentFighter[];
+
+  // Sportschool-fallback:
+  // als talentstatus zelf geen sportschool heeft, pak dan de sportschool
+  // uit de meest recente FightPassport-uitslag van die VA.
+  const missingSchoolVas = Array.from(
+    new Set(
+      fighters
+        .filter((fighter) => !String(fighter.sportschool ?? "").trim())
+        .map((fighter) => normalizeVa(fighter.va_nummer))
+        .filter(Boolean)
+    )
+  ) as string[];
+
+  const latestSchoolByVa = new Map<string, string>();
+
+  if (missingSchoolVas.length > 0) {
+    const { data: fpResults, error: fpResultsError } = await supabaseAdmin
+      .from("fightpassport_results")
+      .select("va_nummer, datum, sportschool")
+      .in("va_nummer", missingSchoolVas)
+      .not("sportschool", "is", null)
+      .order("datum", { ascending: false });
+
+    if (fpResultsError) {
+      return NextResponse.json(
+        { ok: false, error: "De aanvraag kon niet worden verwerkt." },
+        { status: 500 }
+      );
+    }
+
+    for (const result of (fpResults ?? []) as FightPassportResult[]) {
+      const va = normalizeVa(result.va_nummer);
+      const sportschool = String(result.sportschool ?? "").trim();
+
+      // Resultaten staan datum DESC; de eerste bruikbare sportschool per VA
+      // is dus de meest recente bekende gym.
+      if (va && sportschool && !latestSchoolByVa.has(va)) {
+        latestSchoolByVa.set(va, sportschool);
+      }
+    }
+  }
 
   // 1) Handmatig ingevoerde / doorgeschreven talentstatus-partijen tellen.
   const { data: partijen, error: partijenError } = await supabaseAdmin
@@ -157,6 +204,10 @@ export async function GET(req: NextRequest) {
 
     return {
       ...fighter,
+      sportschool:
+        String(fighter.sportschool ?? "").trim() ||
+        (fighterVa ? latestSchoolByVa.get(fighterVa) : null) ||
+        null,
       partijen_totaal: partijenTotaal,
       max_proef_partijen: maxProefPartijen,
       moet_evalueren: moetEvalueren,

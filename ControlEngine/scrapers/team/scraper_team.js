@@ -4,7 +4,6 @@ import { loginFightPassport } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
 import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
 import { fileURLToPath } from "url";
 
@@ -1075,127 +1074,152 @@ async function parseVechtersExcel(filePath, sportschool) {
   return out;
 }
 
-async function saveFightcrew(fighters) {
-  if (!fighters.length) return [];
+function normalizeGymName(raw) {
+  return String(raw ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " en ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  const { error } = await supabase.from("sportschool_fighters").upsert(fighters, {
-    onConflict: "sportschool_id,va_nummer",
-  });
+async function latestResultGymByVa(vaList) {
+  if (!vaList.length) return new Map();
+
+  const { data, error } = await supabase
+    .from("fightpassport_results")
+    .select("va_nummer,datum,sportschool")
+    .in("va_nummer", vaList)
+    .not("sportschool", "is", null)
+    .order("datum", { ascending: false });
 
   if (error) throw error;
 
-  return fighters.map((f) => f.va_nummer);
+  const out = new Map();
+
+  // Door datum DESC is de eerste rij per VA de meest recente uitslag met sportschool.
+  for (const row of data ?? []) {
+    const va = normalizeVa(row?.va_nummer);
+    const gym = normalizeText(row?.sportschool);
+    if (!va || !gym || out.has(va)) continue;
+
+    out.set(va, {
+      sportschool: gym,
+      sportschool_norm: normalizeGymName(gym),
+      datum: row?.datum ?? null,
+    });
+  }
+
+  return out;
 }
 
-async function markFightcrewScrapeStatus(
-  sportschoolKey,
-  vaList,
-  status,
-  errorMessage = null
-) {
-  if (!vaList.length) return;
+async function saveFightcrew(fighters, sportschool) {
+  if (!fighters.length) return [];
 
-  const payload = {
-    status,
-    updated_at: new Date().toISOString(),
-  };
+  const sportschoolId = String(
+    sportschool?.sportschool_id ?? fighters[0]?.sportschool_id ?? ""
+  ).trim();
 
-  if (status === "bezig" || status === "controle_bezig") {
-    payload.scraped_at = null;
+  if (!sportschoolId) {
+    throw new Error("sportschool_id ontbreekt in FightPassport Excel");
   }
 
-  if (status === "klaar" || status === "gescrapt") {
-    payload.scraped_at = new Date().toISOString();
-  }
+  const sportschoolNaam = normalizeText(sportschool?.naam);
+  const sportschoolNaamNorm = normalizeGymName(sportschoolNaam);
+  const now = new Date().toISOString();
+  const vaList = fighters.map((f) => String(f.va_nummer)).filter(Boolean);
 
-  if (errorMessage) {
-    payload.raw = {
-      fightcrew_error: String(errorMessage).slice(0, 1000),
-      fightcrew_error_at: new Date().toISOString(),
+  // De sportschool-Excel bevat ook historische leden.
+  // Daarom bepaalt de meest recente uitslag met sportschool welke gym actueel is.
+  const latestGymByVa = await latestResultGymByVa(vaList);
+
+  let activeCount = 0;
+  let historicalCount = 0;
+  let noResultCount = 0;
+
+  for (const fighter of fighters) {
+    const va = String(fighter.va_nummer);
+    const latest = latestGymByVa.get(va);
+
+    // Geen uitslag = geen betrouwbare historische gym om mee te vergelijken.
+    // Dan blijft de Excel-koppeling geldig, zodat debutanten niet verdwijnen.
+    const currentGymMatches =
+      !latest ||
+      (sportschoolNaamNorm &&
+        latest.sportschool_norm &&
+        latest.sportschool_norm === sportschoolNaamNorm);
+
+    if (latest && !currentGymMatches) historicalCount++;
+    else if (!latest) noResultCount++;
+
+    if (latest && currentGymMatches) {
+      // Deze gym staat in de meest recente uitslag:
+      // alle oudere sportschoolkoppelingen voor deze VA vervallen.
+      const { error: deactivateOthersError } = await supabase
+        .from("fightpassport_school_fighters")
+        .update({ actief: false, updated_at: now })
+        .eq("va_nummer", va)
+        .neq("sportschool_id", sportschoolId);
+
+      if (deactivateOthersError) throw deactivateOthersError;
+    }
+
+    const link = {
+      sportschool_id: sportschoolId,
+      va_nummer: va,
+      naam: fighter.naam ?? null,
+      geslacht: fighter.geslacht ?? null,
+      actief: currentGymMatches,
+      updated_at: now,
     };
+
+    const { error: upsertError } = await supabase
+      .from("fightpassport_school_fighters")
+      .upsert(link, { onConflict: "sportschool_id,va_nummer" });
+
+    if (upsertError) throw upsertError;
+    if (currentGymMatches) activeCount++;
   }
 
-  await supabase
-    .from("sportschool_fighters")
-    .update(payload)
-    .eq("sportschool_id", String(sportschoolKey))
-    .in("va_nummer", vaList);
-}
+  // Vechters die vroeger aan deze gym gekoppeld waren maar nu helemaal niet meer
+  // in de Excel staan, mogen eveneens niet actief blijven.
+  const { data: existingRows, error: existingError } = await supabase
+    .from("fightpassport_school_fighters")
+    .select("va_nummer")
+    .eq("sportschool_id", sportschoolId)
+    .eq("actief", true);
 
-async function scrapeFightcrewVaNumbers(sportschoolKey, vaList) {
-  const cleanVaList = [...new Set((vaList ?? []).map(normalizeVa).filter(Boolean))];
+  if (existingError) throw existingError;
 
-  if (!cleanVaList.length) {
-    console.log("ℹ️ Geen VA-nummers om te scrapen");
-    return;
+  const excelVaSet = new Set(vaList);
+
+  const missingFromExcel = (existingRows ?? [])
+    .map((r) => normalizeVa(r?.va_nummer))
+    .filter((va) => va && !excelVaSet.has(va));
+
+  if (missingFromExcel.length) {
+    const { error: deactivateMissingError } = await supabase
+      .from("fightpassport_school_fighters")
+      .update({ actief: false, updated_at: now })
+      .eq("sportschool_id", sportschoolId)
+      .in("va_nummer", missingFromExcel);
+
+    if (deactivateMissingError) throw deactivateMissingError;
   }
 
-  console.log("🚀 Start VA scrape voor sportschool vechters:", {
-    sportschoolKey,
-    count: cleanVaList.length,
-    vaList: cleanVaList,
+  console.log("✅ Fightcrew gekoppeld op basis van Excel + meest recente uitslag", {
+    sportschool_id: sportschoolId,
+    sportschool: sportschoolNaam || null,
+    excel: vaList.length,
+    actief: activeCount,
+    historisch_bij_deze_gym: historicalCount,
+    zonder_uitslag_fallback_excel: noResultCount,
+    niet_meer_in_excel: missingFromExcel.length,
   });
 
-  await markFightcrewScrapeStatus(sportschoolKey, cleanVaList, "bezig");
-
-  const bundlePath = path.resolve(
-    __dirname,
-    "scraper_team_bundle.js"
-  );
-
-  const scrapeRunId = `team_${new Date()
-    .toISOString()
-    .replace(/[-:.TZ]/g, "")
-    .slice(0, 14)}_${String(Date.now()).slice(-6)}`;
-
-  await new Promise((resolve, reject) => {
-    const child = spawn(
-      process.execPath,
-      [bundlePath, String(sportschoolKey), scrapeRunId, ...cleanVaList],
-      {
-        cwd: __dirname,
-        env: {
-          ...process.env,
-
-          // Team/sportschool gebruikt ALTIJD master-login, nooit matchmaker profiel/cookies.
-          FP_MATCHMAKER_ID: "",
-          FP_SESSION_MODE: "master",
-
-          // Zelfde headless-regels als admin/officials/sportscholen.
-          HEADLESS: process.env.HEADLESS ?? "false",
-          PUPPETEER_HEADLESS:
-            process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
-
-          SOURCE_TYPE: "sportschool_fighters",
-          SPORTSCHOOL_ID: String(sportschoolKey),
-          FIGHTCREW_MODE: "1",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    );
-
-    child.stdout.on("data", (data) => {
-      process.stdout.write(`[fightcrew-va] ${data}`);
-    });
-
-    child.stderr.on("data", (data) => {
-      process.stderr.write(`[fightcrew-va] ${data}`);
-    });
-
-    child.on("error", reject);
-
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`VA scraper gestopt met code ${code}`));
-    });
-  });
-
-  await markFightcrewScrapeStatus(sportschoolKey, cleanVaList, "klaar");
-
-  console.log("✅ VA scrape klaar voor sportschool vechters:", {
-    sportschoolKey,
-    count: cleanVaList.length,
-  });
+  return vaList;
 }
 
 async function updateSportschoolSyncStatus(key, status, errorMessage = null) {
@@ -1247,7 +1271,7 @@ export async function scraperFightcrew(sportschoolKey) {
     downloadedExcelFile = await downloadVechtersExcel(page, browser, key);
 
     const fighters = await parseVechtersExcel(downloadedExcelFile, sportschool);
-    const vaList = await saveFightcrew(fighters);
+    const vaList = await saveFightcrew(fighters, sportschool);
 
     console.log("✅ Sportschool vechters opgeslagen in DB:", {
       sportschool: sportschool.naam,
@@ -1258,7 +1282,9 @@ export async function scraperFightcrew(sportschoolKey) {
     await removeDownloadedExcel(downloadedExcelFile);
     downloadedExcelFile = null;
 
-    await scrapeFightcrewVaNumbers(key, vaList);
+    // Geen individuele VA-scrape meer.
+    // De Excel bepaalt uitsluitend welke vechters NU bij de sportschool horen.
+    // De Fightcrew API haalt de details van deze VA's uit fightpassport_fighters.
 
     await updateSportschoolSyncStatus(key, "klaar");
 
@@ -1273,25 +1299,6 @@ export async function scraperFightcrew(sportschoolKey) {
     await updateSportschoolSyncStatus(key, "mislukt", err?.message ?? err).catch(
       () => {}
     );
-
-    try {
-      const { data: rows } = await supabase
-        .from("sportschool_fighters")
-        .select("va_nummer")
-        .eq("sportschool_id", String(key))
-        .eq("status", "bezig");
-
-      const busyVaList = (rows ?? [])
-        .map((r) => normalizeVa(r.va_nummer))
-        .filter(Boolean);
-
-      await markFightcrewScrapeStatus(
-        key,
-        busyVaList,
-        "mislukt",
-        err?.message ?? err
-      );
-    } catch {}
 
     console.error("❌ Fightcrew fout:", err?.stack ?? err);
 

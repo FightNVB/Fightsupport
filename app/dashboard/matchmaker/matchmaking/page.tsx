@@ -19,6 +19,7 @@ const NVB_ORANGE = "#ff4d00";
 
 const BONDTEAM_OPTIONS = [
   "IRO",
+  "FOG",
   "MMAAN",
   "MON",
   "NKF",
