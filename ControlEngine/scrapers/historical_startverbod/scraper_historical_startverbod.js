@@ -230,13 +230,17 @@ while (!stopRequested) {
         let page = null;
         try {
           const loginRetries = Math.max(1, Number(process.env.HISTORY_LOGIN_RETRIES || 3));
+          const scrapeRetries = Math.max(1, Number(process.env.HISTORY_SCRAPE_RETRIES || 3));
           let result = null;
+          let loginAttempts = 0;
+          let lastScrapeError = null;
 
-          for (let loginAttempt = 1; loginAttempt <= loginRetries; loginAttempt++) {
+          // Niet alleen LOGIN_PAGE opnieuw proberen. Een incidenteel niet geopende
+          // STARTVERBODEN-modal/tabel krijgt dezelfde VA opnieuw op een volledig verse tab.
+          // Met de trusted-device login is een sessieverversing alleen nodig als we
+          // daadwerkelijk op de loginpagina terechtkomen.
+          for (let scrapeAttempt = 1; scrapeAttempt <= scrapeRetries; scrapeAttempt++) {
             try {
-              // Pak bij iedere poging de meest actuele master-cookies.
-              // Een worker die per ongeluk op de loginpagina belandt, wordt gesloten
-              // en krijgt voor DEZELFDE VA een volledig nieuwe tab.
               page = await openFighterPageVerified(browser, null, cookies, va, {
                 maxAttempts: Number(process.env.TAB_ATTEMPTS || 5),
                 softWaitMs: Number(process.env.SOFT_WAIT_MS || 2500),
@@ -254,34 +258,51 @@ while (!stopRequested) {
               result = await scrapeHistoricalStartverbodPage(page, va);
               break;
             } catch (error) {
+              lastScrapeError = error;
               const isLoginPage = error?.message === "LOGIN_PAGE";
 
               await hardCloseFightPassportPage(page).catch(() => {});
               page = null;
 
-              if (!isLoginPage || loginAttempt >= loginRetries) {
-                throw error;
+              if (isLoginPage) {
+                loginAttempts++;
+                if (loginAttempts >= loginRetries) throw error;
+
+                console.log(
+                  `[historie] 🔐 VA ${va}: worker ${workerIndex + 1} kwam op loginpagina ` +
+                  `(loginpoging ${loginAttempts}/${loginRetries}); master-sessie verversen en DEZELFDE VA opnieuw openen`
+                );
+
+                cookies = await refreshMasterSessionLocked(
+                  `worker ${workerIndex + 1} VA ${va} loginretry ${loginAttempts}`
+                );
+
+                await new Promise((resolve) =>
+                  setTimeout(resolve, Math.max(500, Number(process.env.HISTORY_LOGIN_RETRY_WAIT_MS || 750)))
+                );
+                continue;
               }
 
-              console.log(
-                `[historie] 🔐 VA ${va}: worker ${workerIndex + 1} kwam op loginpagina ` +
-                `(poging ${loginAttempt}/${loginRetries}); master-sessie verversen en DEZELFDE VA opnieuw openen`
-              );
+              if (scrapeAttempt >= scrapeRetries) throw error;
 
-              cookies = await refreshMasterSessionLocked(
-                `worker ${workerIndex + 1} VA ${va} retry ${loginAttempt}`
+              console.warn(
+                `[historie] ♻️ VA ${va}: poging ${scrapeAttempt}/${scrapeRetries} mislukt bij ` +
+                `${error?.step || "historical_startverbod"}/${error?.type || "scrape_error"}; ` +
+                `volledig verse VA-tab proberen`
               );
-
               await new Promise((resolve) =>
-                setTimeout(resolve, Math.max(750, Number(process.env.HISTORY_LOGIN_RETRY_WAIT_MS || 1200)))
+                setTimeout(resolve, Math.max(250, Number(process.env.HISTORY_SCRAPE_RETRY_WAIT_MS || 500)))
               );
             }
           }
 
           if (!result) {
             throw Object.assign(
-              new Error("Geen scraperresultaat na worker-retries."),
-              { step: "navigation", type: "retry_exhausted" }
+              new Error(lastScrapeError?.message || "Geen scraperresultaat na worker-retries."),
+              {
+                step: lastScrapeError?.step || "navigation",
+                type: lastScrapeError?.type || "retry_exhausted",
+              }
             );
           }
 

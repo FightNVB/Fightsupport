@@ -2825,12 +2825,31 @@ async function main() {
     // pending/processing is. processed alleen is daarvoor onvoldoende, omdat
     // retries dezelfde VA meerdere keren door de worker-loop kunnen laten gaan.
     const finalSyncRunId = activeRun?.id || run.id;
-    const { data: finalItems, error: finalItemsError } = await supabase
-      .from("fightpassport_sync_items")
-      .select("va_nummer,status")
-      .eq("sync_run_id", finalSyncRunId);
 
-    if (finalItemsError) throw finalItemsError;
+    // Supabase geeft zonder expliciete pagination standaard maar een beperkt aantal
+    // regels terug. Bij grote ranges (bijv. 10.785 VA's) leek daardoor het grootste
+    // deel van de run nog pending/processing, terwijl alle VA's al terminaal waren.
+    // Lees daarom ALLE sync-items paginagewijs voordat we de eindstatus bepalen.
+    const finalItems = [];
+    const finalPageSize = 1000;
+    let finalFrom = 0;
+
+    while (true) {
+      const { data: pageItems, error: finalItemsError } = await supabase
+        .from("fightpassport_sync_items")
+        .select("va_nummer,status")
+        .eq("sync_run_id", finalSyncRunId)
+        .order("va_nummer", { ascending: true })
+        .range(finalFrom, finalFrom + finalPageSize - 1);
+
+      if (finalItemsError) throw finalItemsError;
+
+      const rows = pageItems ?? [];
+      finalItems.push(...rows);
+
+      if (rows.length < finalPageSize) break;
+      finalFrom += finalPageSize;
+    }
 
     const requestedSet = new Set(requestedVaNumbers.map((v) => String(v)));
     const finalStatusByVa = new Map(

@@ -397,30 +397,20 @@ async function rawListState(page) {
   });
 }
 
-async function waitForListRows(
-  page,
-  va,
-  timeoutMs = 120000,
-  { allowEmpty = false } = {}
-) {
-  const effectiveTimeout = Math.max(15000, Number(timeoutMs || 0));
+async function waitForListRows(page, va, timeoutMs = 15000) {
+  const effectiveTimeout = Math.max(5000, Number(timeoutMs || 0));
   const startedAt = Date.now();
   let last = null;
   let lastLogAt = 0;
   let fillerOnlySince = null;
 
-  // Een SYS42-lijst die alleen filler-rijen bevat is doorgaans al klaar.
-  // We bevestigen dit kort en triggeren één keer opnieuw om een trage tabel niet
-  // ten onrechte als leeg te markeren. Hiermee daalt de normale lege VA van
-  // ~37s wachten naar grofweg 6-8s, terwijl echte rijen onmiddellijk winnen.
-  const fillerRetryMs = Math.max(
-    1500,
-    Number(process.env.HISTORY_FILLER_RETRY_MS || 2500)
-  );
-
+  // Met de trusted-device sessie staat de SYS42-data na het openen van de modal
+  // normaal direct klaar. Echte regels winnen onmiddellijk. Een tabel met alleen
+  // filler-rijen geldt na een korte stabiele periode meteen als lege historie;
+  // hiervoor openen we STARTVERBODEN niet nogmaals.
   const fillerEmptyMs = Math.max(
-    2500,
-    Number(process.env.HISTORY_FILLER_EMPTY_MS || 4000)
+    500,
+    Number(process.env.HISTORY_FILLER_EMPTY_MS || 1200)
   );
 
   while (!page.isClosed() && Date.now() - startedAt < effectiveTimeout) {
@@ -434,24 +424,13 @@ async function waitForListRows(
       return { ok: true, state: last, loadState: "loaded_rows" };
     }
 
-    if (last?.visible && last?.onlyFillers === true) {
+    if (last?.visible && last?.tablePresent && last?.onlyFillers === true) {
       if (fillerOnlySince === null) fillerOnlySince = Date.now();
       const fillerMs = Date.now() - fillerOnlySince;
 
-      // Eerste poging: fillers zijn nog geen lege tabel.
-      // Na een korte stabiele filler-periode triggeren we STARTVERBODEN één keer opnieuw.
-      if (!allowEmpty && fillerMs >= fillerRetryMs) {
-        console.warn(
-          `[historie] ♻️ VA ${va}: ${Math.round(fillerMs/1000)}s alleen filler-rijen; STARTVERBODEN opnieuw triggeren`
-        );
-        return { ok: false, state: last, loadState: "filler_retry" };
-      }
-
-      // Alleen na de tweede volledige tegeltrigger mag stabiel filler-only
-      // als werkelijk leeg gelden.
-      if (allowEmpty && fillerMs >= fillerEmptyMs) {
+      if (fillerMs >= fillerEmptyMs) {
         console.log(
-          `[historie] ℹ️ VA ${va} Startverboden-lijst LEEG: ${Math.round(fillerMs/1000)}s uitsluitend ${last.fillerRowCount} filler-rij(en)`
+          `[historie] ℹ️ VA ${va} Startverboden-lijst LEEG: ${Math.round(fillerMs/1000)}s stabiel alleen ${last.fillerRowCount} filler-rij(en)`
         );
         return { ok: true, state: last, loadState: "loaded_empty" };
       }
@@ -468,86 +447,44 @@ async function waitForListRows(
         filler_rijen: last?.fillerRowCount ?? 0,
         alleen_fillers: last?.onlyFillers ?? false,
         preview: last?.realRowPreview ?? [],
-        tweede_poging: allowEmpty,
       });
     }
 
-    await sleep(300);
+    await sleep(200);
   }
 
   return { ok: false, state: last, loadState: "timeout" };
 }
 
 async function openLoadedList(page, va) {
-  // Eerste keer zoals een echte gebruiker klikken.
-  // Alleen fillers? Dan één automatische "refresh":
-  // modal sluiten -> VA opnieuw verifiëren -> tegel opnieuw echt aanklikken.
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    if (attempt === 2) {
-      console.log(`[historie] 🔄 VA ${va}: tweede volledige STARTVERBODEN-openpoging`);
-    }
+  // Eén echte STARTVERBODEN-openactie. Als de modal opent, is de tabel zelf leidend:
+  // echte regels = gevuld, stabiele fillers = leeg. Alleen een werkelijk ontbrekende
+  // of niet geladen modal/tabel komt als fout terug; de worker kan die VA dan met
+  // een volledig verse tab opnieuw proberen.
+  const opened = await openList(page, va);
+  if (!opened.ok) return opened;
 
-    const opened = await openList(page, va);
+  const waited = await waitForListRows(
+    page,
+    va,
+    Math.max(5000, Number(process.env.HISTORY_LIST_TIMEOUT_MS || 15000))
+  );
 
-    if (!opened.ok) {
-      if (attempt === 1) {
-        await closeOverview(page).catch(() => {});
-        await forceExactFighterUrl(page, va, 15000).catch(() => false);
-        await sleep(750);
-        continue;
-      }
-      return opened;
-    }
-
-    const waited = await waitForListRows(
-      page,
-      va,
-      Math.max(15000, Number(process.env.HISTORY_LIST_TIMEOUT_MS || 45000)),
-      { allowEmpty: attempt === 2 }
-    );
-
-    if (waited.ok) {
-      return {
-        ok: true,
-        header: opened.header,
-        state: waited.state,
-        loadState: waited.loadState,
-      };
-    }
-
-    if (attempt === 1) {
-      console.log(`[historie] 🔄 VA ${va}: modal sluiten en STARTVERBODEN opnieuw openen`);
-      await closeOverview(page).catch(() => {});
-      await sleep(500);
-
-      const exactAgain = await forceExactFighterUrl(page, va, 20000)
-        .catch(() => false);
-
-      if (!exactAgain) {
-        return {
-          ok: false,
-          reason: "va_not_verified_before_retry",
-          header: opened.header,
-          state: waited.state,
-        };
-      }
-
-      await sleep(750);
-      continue;
-    }
-
+  if (waited.ok) {
     return {
-      ok: false,
-      reason:
-        waited.loadState === "timeout"
-          ? "rows_not_loaded"
-          : waited.loadState || "rows_not_loaded",
+      ok: true,
       header: opened.header,
       state: waited.state,
+      loadState: waited.loadState,
     };
   }
 
-  return { ok: false, reason: "rows_not_loaded" };
+  return {
+    ok: false,
+    reason: waited.loadState === "timeout" ? "rows_not_loaded" : waited.loadState || "rows_not_loaded",
+    header: opened.header,
+    state: waited.state,
+  };
 }
 
 function parseStateRows(state) {
