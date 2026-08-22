@@ -118,6 +118,33 @@ async function saveItem(runId, va, patch) {
   if (error) throw error;
 }
 
+async function sendHistoricalVaToAiReview(runId, va, error) {
+  const now = new Date().toISOString();
+  const message = error?.message ?? String(error);
+  const { data: existing } = await supabase
+    .from("fightpassport_missing_va")
+    .select("status,not_found_count,first_seen_at")
+    .eq("va_number", String(va))
+    .maybeSingle();
+
+  const { error: queueError } = await supabase
+    .from("fightpassport_missing_va")
+    .upsert({
+      va_number: String(va),
+      status: existing?.status === "confirmed_deleted" ? "confirmed_deleted" : "pending_review",
+      first_seen_at: existing?.first_seen_at || now,
+      last_seen_at: now,
+      not_found_count: Number(existing?.not_found_count || 0) + 1,
+      last_source: "historical_startverbod",
+      last_run_id: runId,
+      last_error_message: message,
+      resolved_at: null,
+      updated_at: now,
+    }, { onConflict: "va_number" });
+
+  if (queueError) throw queueError;
+}
+
 export async function scraperHistoricalStartverbod() {
   const run = await createOrResumeRun();
   console.log(`[historie] 🏁 start VA ${startVa} t/m ${endVa} met ${workers} worker(s), stagger=${staggerMs}ms`);
@@ -229,8 +256,8 @@ while (!stopRequested) {
         await saveItem(run.id, va, { status: "running", started_at: startedAt, finished_at: null });
         let page = null;
         try {
-          const loginRetries = Math.max(1, Number(process.env.HISTORY_LOGIN_RETRIES || 3));
-          const scrapeRetries = Math.max(1, Number(process.env.HISTORY_SCRAPE_RETRIES || 3));
+          const loginRetries = Math.max(1, Number(process.env.HISTORY_LOGIN_RETRIES || 2));
+          const scrapeRetries = Math.max(1, Number(process.env.HISTORY_SCRAPE_RETRIES || 2));
           let result = null;
           let loginAttempts = 0;
           let lastScrapeError = null;
@@ -324,13 +351,20 @@ while (!stopRequested) {
             });
           }
         } catch (error) {
-          stats.errors++;
-          stats.lastError = `VA ${va}: ${error?.message ?? String(error)}`;
+          // Een VA-fout is geen runfout. Na maximaal 2 volledig verse pogingen
+          // gaat het VA-nummer naar AI Controle. Daar kiest admin: opnieuw proberen
+          // of bevestigd verwijderd. De historische run gaat direct verder.
+          stats.skipped++;
+          await sendHistoricalVaToAiReview(run.id, va, error);
           await saveItem(run.id, va, {
-            status: "failed", error_type: error?.type || "scrape_error",
-            error_step: error?.step || "historical_startverbod", error_message: error?.message ?? String(error),
-            retry_status: "beschikbaar", finished_at: new Date().toISOString(),
+            status: "skipped",
+            error_type: "pending_review",
+            error_step: "ai_review",
+            error_message: `${error?.message ?? String(error)} (na 2 verse pogingen; naar AI Controle)`,
+            retry_status: "pending_review",
+            finished_at: new Date().toISOString(),
           });
+          console.log(`[historie] 🧠 VA ${va}: na 2 pogingen naar AI Controle; run gaat verder`);
         } finally {
           await hardCloseFightPassportPage(page).catch(() => {});
           stats.processed++;

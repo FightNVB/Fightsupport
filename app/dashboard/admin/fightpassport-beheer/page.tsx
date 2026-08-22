@@ -19,9 +19,6 @@ export default function FightPaspoortBeheerPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [historicalRuns, setHistoricalRuns] = useState<any[]>([]);
   const [historicalItems, setHistoricalItems] = useState<any[]>([]);
-  const [historicalStartVa, setHistoricalStartVa] = useState("775");
-  const [historicalEndVa, setHistoricalEndVa] = useState("33150");
-  const [historicalWorkers, setHistoricalWorkers] = useState("4");
   const [historicalBusy, setHistoricalBusy] = useState(false);
   const [selectedHistoricalRun, setSelectedHistoricalRun] = useState("");
   const [items, setItems] = useState<SyncItem[]>([]);
@@ -354,6 +351,29 @@ export default function FightPaspoortBeheerPage() {
     return Math.max(0, Number(run?.end_va ?? 0) - Number(run?.start_va ?? 0) + 1);
   }, []);
 
+  const historicalLatestBatch = useMemo(() => {
+    const latest = historicalRuns.slice(0, 3);
+    if (!latest.length) return [];
+    const expectedRanges = new Set(["775-11559", "11560-22344", "22345-33129"]);
+    const matching = latest.filter((run:any) => expectedRanges.has(`${run.start_va}-${run.end_va}`));
+    return matching.length === 3 ? matching : latest;
+  }, [historicalRuns]);
+
+  const historicalBatchSummary = useMemo(() => {
+    const batch = historicalLatestBatch;
+    if (!batch.length) return null;
+    const total = batch.reduce((sum:number, run:any) => sum + Math.max(0, Number(run.end_va)-Number(run.start_va)+1), 0);
+    const processed = batch.reduce((sum:number, run:any) => sum + Number(run.processed_count ?? 0), 0);
+    const found = batch.reduce((sum:number, run:any) => sum + Number(run.found_count ?? 0), 0);
+    const errors = batch.reduce((sum:number, run:any) => sum + Number(run.error_count ?? 0), 0);
+    const statuses = batch.map((run:any) => String(run.status ?? "").toLowerCase());
+    const status = statuses.some((x:string)=>x==="running") ? "running"
+      : statuses.some((x:string)=>x==="paused") ? "paused"
+      : statuses.every((x:string)=>x==="completed" || x==="completed_with_errors") ? "completed"
+      : statuses.some((x:string)=>x==="failed") ? "failed" : statuses[0] || "-";
+    return { batch, total, processed, found, errors, status };
+  }, [historicalLatestBatch]);
+
   const activeTotalRuns = useMemo(() => {
     return runs.filter((run: any) => {
       const status = String(run?.status ?? "").toLowerCase();
@@ -467,18 +487,18 @@ export default function FightPaspoortBeheerPage() {
     );
   }
 
-  async function historicalAction(action: "start"|"resume"|"pause"|"stop", runId?: string, full = false) {
+  async function historicalAction(action: "start"|"resume"|"pause"|"stop"|"resume_all"|"pause_all"|"stop_all", runId?: string) {
     setHistoricalBusy(true); setMessage("");
-    const method = action === "pause" || action === "stop" ? "PATCH" : "POST";
+    const method = action === "pause" || action === "stop" || action === "pause_all" || action === "stop_all" ? "PATCH" : "POST";
+    const body = action === "start"
+      ? { action, full: true }
+      : runId
+        ? { action, run_id: runId }
+        : { action };
     const res = await authedFetch("/api/admin/fightpassport-sync/historical-startverbod", {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(action === "start" ? {
-        action,
-        start_va: full ? 775 : Number(historicalStartVa),
-        end_va: full ? 33150 : Number(historicalEndVa),
-        workers: Number(historicalWorkers),
-      } : { action, run_id: runId }),
+      body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
     setHistoricalBusy(false);
@@ -822,41 +842,37 @@ export default function FightPaspoortBeheerPage() {
         </div>
         {message&&<p style={{color:"#ff8a52"}}>{message}</p>}
       </section>
-      <section style={{...styles.panel,marginTop:16,borderColor:"#7b5bc7"}}>
-        <h2 style={{marginTop:0}}>Historische startverboden &amp; schorsingen</h2>
-        <p style={{color:"#bbb"}}>Uitsluitend dossierhistorie per VA. Deze records zetten nooit een actuele blokkade, rode badge of VERBOD-melding en staan volledig los van de gala-controle.</p>
-        <div style={styles.filters}>
-          <label style={styles.label}>Van VA<input style={styles.input} value={historicalStartVa} onChange={e=>setHistoricalStartVa(e.target.value)}/></label>
-          <label style={styles.label}>Tot VA<input style={styles.input} value={historicalEndVa} onChange={e=>setHistoricalEndVa(e.target.value)}/></label>
-          <label style={styles.label}>Workers<input style={styles.input} value={historicalWorkers} onChange={e=>setHistoricalWorkers(e.target.value)}/></label>
-          <button style={styles.orange} disabled={historicalBusy||historicalRuns.some(r=>r.status==="running")} onClick={()=>historicalAction("start")}><Play size={16}/>Start bereik</button>
-          <button style={styles.silver} disabled={historicalBusy||historicalRuns.some(r=>r.status==="running")} onClick={()=>historicalAction("start",undefined,true)}><Database size={16}/>Volledige historische synchronisatie</button>
+      <section style={{...styles.panel,marginTop:16,borderColor:"#7b5bc7",padding:"14px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+          <div>
+            <h3 style={{margin:0}}>Historische startverboden &amp; schorsingen</h3>
+            <p style={{color:"#bbb",margin:"4px 0 0",fontSize:12}}>Eenmalige dossierimport · VA 775–33129 · 3 processen × 10 workers · bevestigde ontbrekende VA-nummers worden overgeslagen.</p>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {!historicalBatchSummary || ["completed","failed","-"].includes(historicalBatchSummary.status)
+              ? <button style={styles.silver} disabled={historicalBusy||historicalRuns.some(r=>r.status==="running")} onClick={()=>historicalAction("start")}><Database size={16}/>{historicalBusy?"Starten...":"Start volledige historie · 3 × 10"}</button>
+              : historicalBatchSummary.status === "running"
+                ? <><button style={styles.stop} disabled={historicalBusy} onClick={()=>historicalAction("pause_all")}>Pauze</button><button style={styles.dangerMini} disabled={historicalBusy} onClick={()=>historicalAction("stop_all")}>Stop</button></>
+                : <button style={styles.mini} disabled={historicalBusy} onClick={()=>historicalAction("resume_all")}><Play size={14}/>Hervat 3 processen</button>}
+          </div>
         </div>
-        {historicalRuns[0]&&<div style={{...styles.statGrid,marginBottom:16}}>
-          <div style={styles.statCard}><small>Status</small><b>{historicalRuns[0].status}</b></div>
-          <div style={styles.statCard}><small>Bereik</small><b>VA {historicalRuns[0].start_va}–{historicalRuns[0].end_va}</b></div>
-          <div style={styles.statCard}><small>Verwerkt</small><b>{historicalRuns[0].processed_count}</b></div>
-          <div style={styles.statCard}><small>Blokkades gevonden</small><b>{historicalRuns[0].found_count}</b></div>
-          <div style={styles.statCard}><small>Opgeslagen / bijgewerkt</small><b>{historicalRuns[0].inserted_count} / {historicalRuns[0].updated_count}</b></div>
-          <div style={styles.statCard}><small>Zonder STARTVERBODEN</small><b>{historicalRuns[0].skipped_count}</b></div>
-          <div style={styles.statCard}><small>Fouten</small><b>{historicalRuns[0].error_count}</b></div>
-          <div style={styles.statCard}><small>Duur</small><b>{formatDuration(historicalRuns[0].started_at,historicalRuns[0].finished_at)}</b></div>
-        </div>}
-        {historicalRuns[0]?.last_error&&<p style={{color:"#ff8a52"}}>Laatste fout: {historicalRuns[0].last_error}</p>}
-        <Table><thead><tr><Th>Run-id</Th><Th>Start</Th><Th>Einde</Th><Th>Duur</Th><Th>Bereik</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Nieuw / bijgewerkt</Th><Th>Fouten</Th><Th>Status</Th><Th>Acties</Th></tr></thead>
-          <tbody>{historicalRuns.map(run=><tr key={run.id}>
-            <Td>{String(run.id).slice(0,8)}</Td><Td>{fmt(run.started_at)}</Td><Td>{fmt(run.finished_at)}</Td>
-            <Td>{formatDuration(run.started_at,run.finished_at)}</Td><Td>{run.start_va}–{run.end_va}</Td>
-            <Td>{run.processed_count}</Td><Td>{run.found_count}</Td><Td>{run.inserted_count} / {run.updated_count}</Td>
-            <Td>{run.error_count}</Td><Td>{run.status}</Td><Td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {run.status==="running"&&<><button style={styles.stop} onClick={()=>historicalAction("pause",run.id)}>Pauze</button><button style={styles.dangerMini} onClick={()=>historicalAction("stop",run.id)}>Stop</button></>}
-              {run.status==="paused"&&<button style={styles.mini} onClick={()=>historicalAction("resume",run.id)}>Hervatten</button>}
-              <button style={styles.mini} onClick={()=>openHistoricalDetails(run.id)}>Details</button>
-            </div></Td>
-          </tr>)}</tbody></Table>
-        {selectedHistoricalRun&&<div style={{marginTop:16}}><h3>Foutdetails historische synchronisatie</h3>
-          <Table><thead><tr><Th>VA</Th><Th>Naam</Th><Th>Status</Th><Th>Fouttype</Th><Th>Stap</Th><Th>Melding</Th><Th>Retry</Th></tr></thead>
-            <tbody>{historicalItems.filter(item=>item.status==="failed"||item.error_message).map(item=><tr key={item.id}><Td>{item.va_nummer}</Td><Td>{item.naam_fp||"-"}</Td><Td>{item.status}</Td><Td>{item.error_type||"-"}</Td><Td>{item.error_step||"-"}</Td><Td>{item.error_message||"-"}</Td><Td>{item.retry_status||"-"}</Td></tr>)}</tbody>
+        {historicalBatchSummary&&<>
+          <div style={{display:"flex",gap:14,flexWrap:"wrap",marginTop:10,fontSize:12,color:"#d4d4d4"}}>
+            <span><b>Status:</b> {historicalBatchSummary.status}</span>
+            <span><b>Verwerkt:</b> {historicalBatchSummary.processed}/{historicalBatchSummary.total}</span>
+            <span><b>Gevonden:</b> {historicalBatchSummary.found}</span>
+            <span><b>Naar AI/controle:</b> {historicalBatchSummary.errors}</span>
+          </div>
+          <div style={{display:"grid",gap:5,marginTop:8}}>
+            {historicalBatchSummary.batch.slice().sort((a:any,b:any)=>Number(a.start_va)-Number(b.start_va)).map((run:any,index:number)=><div key={run.id} style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",border:"1px solid #40344f",padding:"6px 8px",fontSize:11}}>
+              <span><b>Proces {index+1}</b> · VA {run.start_va}–{run.end_va} · {run.processed_count ?? 0}/{Math.max(0,Number(run.end_va)-Number(run.start_va)+1)} · {run.status}</span>
+              <button style={styles.link} onClick={()=>openHistoricalDetails(run.id)}>Details</button>
+            </div>)}
+          </div>
+        </>}
+        {selectedHistoricalRun&&historicalItems.some(item=>item.status==="failed"||item.error_message)&&<div style={{marginTop:12}}><h4 style={{margin:"0 0 6px"}}>Historische aandachtspunten</h4>
+          <Table><thead><tr><Th>VA</Th><Th>Status</Th><Th>Stap</Th><Th>Melding</Th></tr></thead>
+            <tbody>{historicalItems.filter(item=>item.status==="failed"||item.error_message).map(item=><tr key={item.id}><Td>{item.va_nummer}</Td><Td>{item.status}</Td><Td>{item.error_step||"-"}</Td><Td>{item.error_message||"-"}</Td></tr>)}</tbody>
           </Table></div>}
       </section>
       <section style={{...styles.panel,marginTop:16}}><h2 style={{marginTop:0}}>Synchronisaties</h2><Table><thead><tr><Th>Gestart</Th><Th>Klaar</Th><Th>Duur</Th><Th>Range</Th><Th>Laatste VA</Th><Th>Verwerkt</Th><Th>Gevonden</Th><Th>Fouten</Th><Th>Status</Th><Th></Th></tr></thead><tbody>{runs.map(r=>{

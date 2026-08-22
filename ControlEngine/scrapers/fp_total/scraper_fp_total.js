@@ -2079,6 +2079,17 @@ async function registerMissingVa(va, runId, message = null) {
   if (error) console.log(`[fp-total] missing-va registratie fout VA ${va}: ${error.message}`);
 }
 
+async function sendVaToAiReview(va, runId, message, { profielGevonden = false, step = "pending_review" } = {}) {
+  await registerMissingVa(va, runId, message);
+  await upsertSyncItem(runId, va, {
+    status: profielGevonden ? "skipped" : "not_found",
+    profiel_gevonden: !!profielGevonden,
+    error_step: step,
+    error_message: `${message} Toegevoegd aan AI Controle: opnieuw proberen of nummer als verwijderd bevestigen.`,
+    finished_at: new Date().toISOString(),
+  });
+}
+
 async function resolveMissingVa(va, runId) {
   const now = new Date().toISOString();
   const { error } = await supabase
@@ -2454,15 +2465,15 @@ async function main() {
   // herstellen de gedeelde sessie en plannen exact die VA opnieuw in.
   // Begrens dit om een echte login-storing niet eindeloos te laten rondgaan.
   const loginRetryCounts = new Map();
-  const MAX_LOGIN_RETRIES_PER_VA = Math.max(1, Number(process.env.FP_TOTAL_LOGIN_RETRIES ?? "3"));
+  const MAX_LOGIN_RETRIES_PER_VA = Math.max(1, Number(process.env.FP_TOTAL_LOGIN_RETRIES ?? "1"));
 
   // Tijdelijke VA-problemen niet minutenlang repareren op dezelfde tab.
   // Sluit alles van die poging en zet exact dezelfde VA achteraan.
-  // Default: 2 herkansingen = maximaal 3 volledige verse pogingen per VA.
+  // Default: 1 herkansing = maximaal 2 volledige verse pogingen per VA.
   const transientRetryCounts = new Map();
   const MAX_TRANSIENT_RETRIES_PER_VA = Math.max(
     0,
-    Number(process.env.FP_TOTAL_TRANSIENT_RETRIES ?? "2")
+    Number(process.env.FP_TOTAL_TRANSIENT_RETRIES ?? "1")
   );
 
   async function requeueTransientVa(va, label, reason) {
@@ -2586,15 +2597,14 @@ async function main() {
           }
 
           processed++;
-          errors++;
           lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
-          await registerMissingVa(va, run.id, "Na meerdere volledig verse profielpogingen geen geldige fighter-header gevonden.");
-          await upsertSyncItem(run.id, va, {
-            status: "not_found", profiel_gevonden: false, finished_at: new Date().toISOString(),
-            error_step: "pending_review",
-            error_message: "Niet gevonden na meerdere verse verificatiepogingen; toegevoegd aan AI Controle.",
-          });
-          console.log(`[fp-total] — ${label} VA ${va}: ook na verse herkansingen niet gevonden; pending_review`);
+          await sendVaToAiReview(
+            va,
+            run.id,
+            "Na 2 volledig verse profielpogingen geen geldige fighter-header gevonden.",
+            { profielGevonden: false, step: "pending_review" }
+          );
+          console.log(`[fp-total] 🧠 ${label} VA ${va}: na 2 pogingen naar AI Controle`);
           continue;
         }
 
@@ -2637,6 +2647,17 @@ async function main() {
             );
             continue;
           }
+
+          processed++;
+          lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
+          await sendVaToAiReview(
+            va,
+            run.id,
+            `UITSLAGEN kon na 2 verse pogingen niet betrouwbaar worden verwerkt: ${reason}`,
+            { profielGevonden: true, step: "results_pending_review" }
+          );
+          console.log(`[fp-total] 🧠 ${label} VA ${va}: UITSLAGEN na 2 pogingen naar AI Controle`);
+          continue;
         }
 
         loginRetryCounts.delete(String(va));
@@ -2705,17 +2726,15 @@ async function main() {
             }
           } catch (loginError) {
             processed++;
-            errors++;
             lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
             const loginMsg = loginError?.message ?? String(loginError);
-            await upsertSyncItem(run.id, va, {
-              status: "error",
-              profiel_gevonden: false,
-              error_step: "login_recovery_failed",
-              error_message: loginMsg,
-              finished_at: new Date().toISOString(),
-            });
-            console.log(`[fp-total] ❌ ${label} loginherstel mislukt bij VA ${va}:`, loginMsg);
+            await sendVaToAiReview(
+              va,
+              run.id,
+              `Login/sessie kon na 2 pogingen niet betrouwbaar worden hersteld: ${loginMsg}`,
+              { profielGevonden: false, step: "login_pending_review" }
+            );
+            console.log(`[fp-total] 🧠 ${label} VA ${va}: login na 2 pogingen naar AI Controle`);
           }
         } else if (isBrowserConnectionError(msg)) {
           console.log(`[fp-total] 🔌 ${label} browserverbinding weg bij VA ${va}: ${msg}`);
@@ -2752,17 +2771,15 @@ async function main() {
             }
           } catch (restartError) {
             processed++;
-            errors++;
             lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
             const restartMsg = restartError?.message ?? String(restartError);
-            await upsertSyncItem(run.id, va, {
-              status: "error",
-              profiel_gevonden: false,
-              error_step: "browser_restart_failed",
-              error_message: restartMsg,
-              finished_at: new Date().toISOString(),
-            });
-            console.log(`[fp-total] ❌ browserherstart mislukt bij VA ${va}:`, restartMsg);
+            await sendVaToAiReview(
+              va,
+              run.id,
+              `Browserverbinding kon na 2 verse pogingen niet worden hersteld: ${restartMsg}`,
+              { profielGevonden: false, step: "browser_pending_review" }
+            );
+            console.log(`[fp-total] 🧠 ${label} VA ${va}: browserprobleem na 2 pogingen naar AI Controle`);
           }
         } else {
           // Geen lange reparatie op een verdachte/vaste tab: alles wordt in finally
@@ -2771,21 +2788,19 @@ async function main() {
 
           if (!requeued) {
             processed++;
-            errors++;
             lastProcessedVa = Math.max(Number(lastProcessedVa || 0), Number(va));
 
-            await upsertSyncItem(run.id, va, {
-              status: "error", profiel_gevonden: false,
-              error_step: String(msg).startsWith("HARD TIMEOUT") ? "timeout" : "scrape_or_save",
-              error_message:
-                `${msg} (definitief na ${MAX_TRANSIENT_RETRIES_PER_VA + 1} verse pogingen)`,
-              finished_at: new Date().toISOString(),
-            });
-
-            console.log(
-              `[fp-total] ❌ ${label} VA ${va} definitief fout na ` +
-              `${MAX_TRANSIENT_RETRIES_PER_VA + 1} verse pogingen: ${msg}`
+            await sendVaToAiReview(
+              va,
+              run.id,
+              `${msg} (na 2 volledig verse pogingen)`,
+              {
+                profielGevonden: false,
+                step: String(msg).startsWith("HARD TIMEOUT") ? "timeout_pending_review" : "scrape_pending_review",
+              }
             );
+
+            console.log(`[fp-total] 🧠 ${label} VA ${va}: na 2 pogingen naar AI Controle: ${msg}`);
           }
         }
       } finally {
