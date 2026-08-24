@@ -72,14 +72,14 @@ function splitRange(startVa: number, endVa: number, requestedProcesses = REQUEST
 }
 
 async function resolveDynamicEndVa() {
-  // Bepaal bij iedere NIEUWE ronde het hoogste VA-nummer dat al in de centrale
-  // database staat en controleer ook een buffer daarboven. Zo groeit het bereik
-  // automatisch mee wanneer FightPassport nieuwe VA-nummers uitgeeft.
+  // Bepaal bij iedere NIEUWE ronde het hoogste numerieke VA-nummer dat al in de
+  // centrale database staat en controleer ook een buffer daarboven. Zo groeit het
+  // bereik automatisch mee wanneer FightPassport nieuwe VA-nummers uitgeeft.
   const { data, error } = await supabaseAdmin
     .from("fightpassport_fighters")
-    .select("va_nummer")
-    .not("va_nummer", "is", null)
-    .order("va_nummer", { ascending: false })
+    .select("va_nummer, va_nummer_sort")
+    .not("va_nummer_sort", "is", null)
+    .order("va_nummer_sort", { ascending: false })
     .limit(1);
 
   if (error) {
@@ -87,12 +87,21 @@ async function resolveDynamicEndVa() {
     return FALLBACK_END_VA;
   }
 
-  const highestKnownVa = Number(data?.[0]?.va_nummer);
+  const highestKnownVa = Number(data?.[0]?.va_nummer_sort);
   if (!Number.isInteger(highestKnownVa) || highestKnownVa < START_VA) {
     return FALLBACK_END_VA;
   }
 
-  return Math.max(FALLBACK_END_VA, highestKnownVa + END_BUFFER);
+  const dynamicEndVa = highestKnownVa + END_BUFFER;
+  const endVa = Math.max(FALLBACK_END_VA, dynamicEndVa);
+
+  console.log("[cron-fp-total] Dynamisch eindbereik", {
+    highest_known_va: highestKnownVa,
+    buffer: END_BUFFER,
+    end_va: endVa,
+  });
+
+  return endVa;
 }
 
 export async function POST(req: Request) {

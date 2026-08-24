@@ -93,9 +93,85 @@ function launch(run: any) {
   return child.pid ?? null;
 }
 
+// Houd bij een volledige historische run altijd maximaal 3 processen actief.
+// Zodra een proces klaar is, neemt een nieuw helperproces een deel van de grootste
+// nog lopende range over. De reeds afgeronde items worden via itemstatus overgeslagen.
+async function rebalanceHistoricalProcesses() {
+  const { data: running, error: runningError } = await supabaseAdmin
+    .from("fighter_startverbod_history_runs")
+    .select("*")
+    .eq("status", "running")
+    .order("created_at", { ascending: true });
+  if (runningError) throw runningError;
+
+  const active = running ?? [];
+  if (active.length === 0 || active.length >= HISTORICAL_FULL_PROCESSES) return;
+
+  const { data: completed, error: completedError } = await supabaseAdmin
+    .from("fighter_startverbod_history_runs")
+    .select("id")
+    .in("status", ["completed", "completed_with_errors"]);
+  if (completedError) throw completedError;
+
+  // Alleen bij de 3x10 full-run bijspringen; handmatige enkelvoudige runs niet splitsen.
+  if ((completed ?? []).length === 0) return;
+
+  const slots = HISTORICAL_FULL_PROCESSES - active.length;
+  for (let slot = 0; slot < slots; slot++) {
+    const candidates = active
+      .filter((run: any) => Number(run.workers) === HISTORICAL_WORKERS_PER_PROCESS)
+      .sort((a: any, b: any) =>
+        (Number(b.end_va) - Number(b.last_processed_va || b.start_va - 1)) -
+        (Number(a.end_va) - Number(a.last_processed_va || a.start_va - 1))
+      );
+    const donor = candidates[0];
+    if (!donor) break;
+
+    const donorNext = Math.max(Number(donor.start_va), Number(donor.last_processed_va || donor.start_va - 1) + 1);
+    const donorEnd = Number(donor.end_va);
+    if (donorEnd - donorNext < 200) break;
+
+    const helperStart = Math.floor((donorNext + donorEnd) / 2) + 1;
+    const helperEnd = donorEnd;
+
+    // Kort de donor in. Een VA die al door de donor geclaimd is kan incidenteel nog
+    // doorlopen; de helper gebruikt een eigen run-id en start pas in de bovenste helft.
+    const { error: trimError } = await supabaseAdmin
+      .from("fighter_startverbod_history_runs")
+      .update({ end_va: helperStart - 1, updated_at: new Date().toISOString() })
+      .eq("id", donor.id)
+      .eq("status", "running");
+    if (trimError) throw trimError;
+    donor.end_va = helperStart - 1;
+
+    const now = new Date().toISOString();
+    const { data: helper, error: insertError } = await supabaseAdmin
+      .from("fighter_startverbod_history_runs")
+      .insert({
+        status: "idle",
+        start_va: helperStart,
+        end_va: helperEnd,
+        workers: HISTORICAL_WORKERS_PER_PROCESS,
+      })
+      .select("*")
+      .single();
+    if (insertError) throw insertError;
+
+    const pid = launch(helper);
+    await supabaseAdmin
+      .from("fighter_startverbod_history_runs")
+      .update({ status: "running", pid, started_at: now, updated_at: now })
+      .eq("id", helper.id);
+
+    active.push({ ...helper, status: "running", pid });
+    console.log(`[historical-startverbod] ⚖️ helper gestart: VA ${helperStart}-${helperEnd} (${pid})`);
+  }
+}
+
 export async function GET(req: Request) {
   try {
     await requireRole(req, ["admin", "superadmin"]);
+    await rebalanceHistoricalProcesses();
     const url = new URL(req.url);
     const runId = url.searchParams.get("run_id");
     const [runs, items] = await Promise.all([
