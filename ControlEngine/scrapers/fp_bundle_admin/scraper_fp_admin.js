@@ -1,4 +1,4 @@
-// ControlEngine/scrapers/fp_bundle_officials/scraper_fp_officials.js
+// ControlEngine/scrapers/fp_bundle_admin/scraper_fp_admin.js
 //
 // Gebaseerd op de actuele fp_total worker/session-flow.
 // Verschil met fp_total is ALLEEN wat per VA wordt uitgelezen:
@@ -16,7 +16,7 @@
 //   - EXACT Total: 1 masterpage blijft open; fresh session + actuele mastercookies alleen in memory
 //
 // Start:
-// node scraper_fp_officials.js <matchmaking_id> <controle_run_id> <va1> <va2> ...
+// node scraper_fp_admin.js <matchmaking_id> <controle_run_id> <va1> <va2> ...
 
 import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import { openFighterPageVerified } from "../utils/fightPassportFighterNavigation.js";
@@ -164,7 +164,7 @@ const INITIAL_VA_LIST = [
 ];
 
 const WORKERS_RAW = Number(
-  process.env.FP_OFFICIALS_WORKERS ?? process.env.WORKERS ?? "10",
+  process.env.FP_ADMIN_WORKERS ?? process.env.WORKERS ?? "10",
 );
 const WORKERS =
   Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
@@ -175,21 +175,21 @@ const WORKERS =
 const STAGGER = Math.max(0, Number(process.env.STAGGER_MS ?? "450"));
 const WORKER_DRIFT_MAX_MS = Math.max(
   0,
-  Number(process.env.FP_OFFICIALS_WORKER_DRIFT_MAX_MS ?? "250"),
+  Number(process.env.FP_ADMIN_WORKER_DRIFT_MAX_MS ?? "250"),
 );
 
 const MAX_LOGIN_RETRIES_PER_VA = Math.max(
   1,
-  Number(process.env.FP_OFFICIALS_LOGIN_RETRIES ?? "1"),
+  Number(process.env.FP_ADMIN_LOGIN_RETRIES ?? "1"),
 );
 
 const MAX_TRANSIENT_RETRIES_PER_VA = Math.max(
   0,
-  Number(process.env.FP_OFFICIALS_TRANSIENT_RETRIES ?? "1"),
+  Number(process.env.FP_ADMIN_TRANSIENT_RETRIES ?? "1"),
 );
 
 const SCRAPE_TIMEOUT_RAW = Number(
-  process.env.FP_OFFICIALS_TIMEOUT_MS ?? "120000",
+  process.env.FP_ADMIN_TIMEOUT_MS ?? "120000",
 );
 const SCRAPE_TIMEOUT_MS = Number.isFinite(SCRAPE_TIMEOUT_RAW)
   ? Math.max(30000, SCRAPE_TIMEOUT_RAW)
@@ -199,7 +199,7 @@ const SCRAPE_TIMEOUT_MS = Number.isFinite(SCRAPE_TIMEOUT_RAW)
 // herstelronde of de totale check compleet is. Een child mag dus partieel
 // eindigen zonder de hele route al af te breken.
 const ALLOW_INCOMPLETE_EXIT =
-  String(process.env.FP_OFFICIALS_ALLOW_INCOMPLETE_EXIT ?? "0") === "1";
+  String(process.env.FP_ADMIN_ALLOW_INCOMPLETE_EXIT ?? "0") === "1";
 
 let stopRequested = false;
 
@@ -208,7 +208,7 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
     if (!stopRequested) {
       stopRequested = true;
       console.log(
-        `[fp-officials] ⏸️ ${signal} ontvangen: geen nieuwe VA's meer uitdelen; lopende workers ronden af.`,
+        `[fp-admin] ⏸️ ${signal} ontvangen: geen nieuwe VA's meer uitdelen; lopende workers ronden af.`,
       );
     }
   });
@@ -592,7 +592,7 @@ async function saveError(va, message) {
     error_message: message,
   }).catch((error) => {
     console.error(
-      `[fp-officials] foutstatus opslaan VA ${va}:`,
+      `[fp-admin] foutstatus opslaan VA ${va}:`,
       error?.message ?? error,
     );
   });
@@ -641,12 +641,12 @@ async function scrapeOne(page, va, signal = null) {
 async function run() {
   if (!MATCHMAKING_ID || !CONTROLE_RUN_ID) {
     throw new Error(
-      "Gebruik: node scraper_fp_officials.js <matchmaking_id> <controle_run_id> <va...>",
+      "Gebruik: node scraper_fp_admin.js <matchmaking_id> <controle_run_id> <va...>",
     );
   }
 
   if (!INITIAL_VA_LIST.length) {
-    console.log("[fp-officials] Geen VA-nummers ontvangen.");
+    console.log("[fp-admin] Geen VA-nummers ontvangen.");
     return;
   }
 
@@ -669,7 +669,7 @@ async function run() {
   } catch {}
 
   console.log(
-    "[fp-officials] ✅ Schone master-sessie gestart; masterpage blijft open; workers delen actuele sessiecookies",
+    "[fp-admin] ✅ Schone master-sessie gestart; masterpage blijft open; workers delen actuele sessiecookies",
   );
 
   async function restartBrowserLocked(reason = "") {
@@ -680,7 +680,7 @@ async function run() {
 
     browserRestartPromise = (async () => {
       console.log(
-        `[fp-officials] 🔄 volledige browser opnieuw starten ${reason ? `(${reason})` : ""}`,
+        `[fp-admin] 🔄 volledige browser opnieuw starten ${reason ? `(${reason})` : ""}`,
       );
 
       try {
@@ -710,7 +710,7 @@ async function run() {
       browserGeneration++;
 
       console.log(
-        `[fp-officials] ✅ browser hersteld; generatie ${browserGeneration}`,
+        `[fp-admin] ✅ browser hersteld; generatie ${browserGeneration}`,
       );
 
       return browserGeneration;
@@ -735,7 +735,7 @@ async function run() {
 
     masterRefreshPromise = (async () => {
       console.log(
-        `[fp-officials] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`,
+        `[fp-admin] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`,
       );
 
       await ensureLoggedIn(masterPage, {
@@ -751,7 +751,7 @@ async function run() {
       } catch {}
 
       console.log(
-        "[fp-officials] ✅ master refreshed (cookies updated)",
+        "[fp-admin] ✅ master refreshed (cookies updated)",
       );
 
       return cookies;
@@ -788,7 +788,7 @@ async function run() {
     vaList.push(key);
 
     console.log(
-      `[fp-officials] ♻️ ${label} VA ${va} achteraan opnieuw ingepland ` +
+      `[fp-admin] ♻️ ${label} VA ${va} achteraan opnieuw ingepland ` +
         `(poging ${retryNr + 1}/${MAX_TRANSIENT_RETRIES_PER_VA + 1}). Oorzaak: ${reason}`,
     );
 
@@ -831,7 +831,7 @@ async function run() {
       let page = null;
 
       try {
-        console.log(`[fp-officials] 🤖 ${label} → VA ${va}`);
+        console.log(`[fp-admin] 🤖 ${label} → VA ${va}`);
 
         page = await openFighterPageVerified(
           browser,
@@ -863,7 +863,7 @@ async function run() {
 
           if (requeued) {
             console.log(
-              `[fp-officials] 🚪 ${label} VA ${va}: mislukte verse page gesloten; later volledig vers opnieuw`,
+              `[fp-admin] 🚪 ${label} VA ${va}: mislukte verse page gesloten; later volledig vers opnieuw`,
             );
             continue;
           }
@@ -876,7 +876,7 @@ async function run() {
         const result = await withTimeout(
           (signal) => scrapeOne(page, va, signal),
           SCRAPE_TIMEOUT_MS,
-          `fp-officials ${va}`,
+          `fp-admin ${va}`,
           async () => {
             await hardClosePage(page).catch(() => {});
             page = null;
@@ -888,7 +888,7 @@ async function run() {
         successCount++;
 
         console.log(
-          `[fp-officials] ✅ ${label} VA ${va} ` +
+          `[fp-admin] ✅ ${label} VA ${va} ` +
             `licentie=${result.licentie_ok ? "Ja" : "Nee"} | ` +
             `startverbod=${result.startverbod_actief ? "Ja" : "Nee"} | ` +
             `keurmerk=${result.keurmerk_ok ? "Ja" : "Nee"}`,
@@ -908,13 +908,13 @@ async function run() {
 
           if (retryNr <= MAX_LOGIN_RETRIES_PER_VA) {
             console.log(
-              `[fp-officials] 🔐 ${label} LOGIN_PAGE bij VA ${va}; ` +
+              `[fp-admin] 🔐 ${label} LOGIN_PAGE bij VA ${va}; ` +
                 `verse page dicht → alleen master-login herstellen ` +
                 `(herstel ${retryNr}/${MAX_LOGIN_RETRIES_PER_VA})`,
             );
           } else {
             console.warn(
-              `[fp-officials] ⚠️ ${label} LOGIN_PAGE bij VA ${va}; ` +
+              `[fp-admin] ⚠️ ${label} LOGIN_PAGE bij VA ${va}; ` +
                 `interne login-herstelpoging al gebruikt. VA blijft incompleet voor de verse herstelronde.`,
             );
           }
@@ -945,7 +945,7 @@ async function run() {
               await restartBrowserLocked(`${label} VA ${va}`);
             } else {
               console.log(
-                `[fp-officials] ♻️ ${label} gebruikte oude browsergeneratie ${vaBrowserGeneration}; ` +
+                `[fp-admin] ♻️ ${label} gebruikte oude browsergeneratie ${vaBrowserGeneration}; ` +
                   `actuele generatie is ${browserGeneration}. Geen extra browserherstart.`,
               );
             }
@@ -980,7 +980,7 @@ async function run() {
             await saveError(va, message);
 
             console.error(
-              `[fp-officials] ❌ ${label} VA ${va}: ${message}`,
+              `[fp-admin] ❌ ${label} VA ${va}: ${message}`,
             );
           }
         }
@@ -1045,7 +1045,7 @@ async function run() {
   );
 
   console.log(
-    `[fp-officials] 🏁 klaar: ${complete.length}/${originalVaSet.length} VA's compleet`,
+    `[fp-admin] 🏁 klaar: ${complete.length}/${originalVaSet.length} VA's compleet`,
   );
 
   if (
@@ -1053,11 +1053,11 @@ async function run() {
     complete.length !== originalVaSet.length
   ) {
     const message =
-      `Officials live-check niet compleet: ${complete.length}/${originalVaSet.length} succesvol.`;
+      `Admin live-check niet compleet: ${complete.length}/${originalVaSet.length} succesvol.`;
 
     if (ALLOW_INCOMPLETE_EXIT) {
       console.warn(
-        `[fp-officials] ⚠️ ${message} Start-route bepaalt de ontbrekende VA's en doet zo nodig de verse herstelronde.`,
+        `[fp-admin] ⚠️ ${message} Start-route bepaalt de ontbrekende VA's en doet zo nodig de verse herstelronde.`,
       );
       return;
     }
@@ -1068,7 +1068,7 @@ async function run() {
 
 run().catch((error) => {
   console.error(
-    "[fp-officials] ❌ fatale fout:",
+    "[fp-admin] ❌ fatale fout:",
     error?.stack ?? error,
   );
   process.exit(1);

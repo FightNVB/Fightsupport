@@ -230,45 +230,55 @@ async function findVisibleExcelButton(page, timeoutMs = 30000) {
 }
 
 async function downloadStartverbodenExcel(page, browser) {
-  const downloadDir = path.resolve(__dirname, "downloads");
+  const downloadDir = path.resolve(
+    __dirname,
+    "downloads",
+    `startverbod_${crypto.randomUUID().slice(0, 8)}`
+  );
   fs.mkdirSync(downloadDir, { recursive: true });
-
-  // Restanten van eerdere runs verwijderen.
-  for (const name of fs.readdirSync(downloadDir)) {
-    if (/\.(xlsx|xls|crdownload)$/i.test(name)) {
-      fs.rmSync(path.join(downloadDir, name), { force: true });
-    }
-  }
 
   const before = new Set(listExcelFiles(downloadDir));
 
+  const client = await page.target().createCDPSession();
+  await client.send("Page.enable").catch(() => {});
+  await client.send("Page.setDownloadBehavior", {
+    behavior: "allow",
+    downloadPath: downloadDir,
+  });
+
   try {
-    const client = await page.target().createCDPSession();
-    await client.send("Page.setDownloadBehavior", {
-      behavior: "allow",
-      downloadPath: downloadDir,
-    });
+    const button = await findVisibleExcelButton(page);
+    if (!button) throw new Error("Excel-downloadknop van STARTVERBODEN niet gevonden");
+
+    await button.frame.evaluate((element) => {
+      element.scrollIntoView?.({ block: "center" });
+      element.click();
+    }, button.handle);
+
+    console.log("[startverbod] ⬇️ Download gestart in scraper-map", downloadDir);
+
+    const file = await waitForReadableExcel(downloadDir, before);
+    return { file, downloadDir };
+  } catch (error) {
+    cleanupStartverbodDownloadDir(downloadDir);
+    throw error;
+  } finally {
+    await client.detach().catch(() => {});
+  }
+}
+
+function cleanupStartverbodDownloadDir(dir) {
+  if (!dir) return;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
   } catch {}
 
   try {
-    const client = await browser.target().createCDPSession();
-    await client.send("Browser.setDownloadBehavior", {
-      behavior: "allow",
-      downloadPath: downloadDir,
-      eventsEnabled: true,
-    });
+    const root = path.resolve(__dirname, "downloads");
+    if (fs.existsSync(root) && fs.readdirSync(root).length === 0) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   } catch {}
-
-  const button = await findVisibleExcelButton(page);
-  if (!button) throw new Error("Excel-downloadknop van STARTVERBODEN niet gevonden");
-
-  await button.frame.evaluate((element) => {
-    element.scrollIntoView?.({ block: "center" });
-    element.click();
-  }, button.handle);
-
-  console.log("[startverbod] ⬇️ Download gestart");
-  return await waitForReadableExcel(downloadDir, before);
 }
 
 async function parseStartverbodenExcel(filePath) {
@@ -616,6 +626,7 @@ export async function scraperStartverbod() {
   const runId = await createRun();
   let browser = null;
   let downloadedFile = null;
+  let downloadedDir = null;
 
   try {
     const login = await loginFightPassport();
@@ -626,7 +637,9 @@ export async function scraperStartverbod() {
     console.log("[startverbod] 1️⃣ centrale STARTVERBODEN-tegel openen (één browserflow voor Excel)");
     await clickStartverbodenTile(page);
     console.log("[startverbod] 1️⃣ Excel-downloadknop zoeken en rapport downloaden");
-    downloadedFile = await downloadStartverbodenExcel(page, browser);
+    const downloaded = await downloadStartverbodenExcel(page, browser);
+    downloadedFile = downloaded.file;
+    downloadedDir = downloaded.downloadDir;
 
     const parsed = await parseStartverbodenExcel(downloadedFile);
     const [fighters, confirmedDeletedVaNumbers] = await Promise.all([
@@ -858,9 +871,10 @@ export async function scraperStartverbod() {
         : null,
     });
 
-    // Pas na geslaagde databaseverwerking verwijderen.
-    fs.rmSync(downloadedFile, { force: true });
+    // Na geslaagde verwerking de volledige tijdelijke downloadmap verwijderen.
+    cleanupStartverbodDownloadDir(downloadedDir);
     downloadedFile = null;
+    downloadedDir = null;
 
     console.log("🎉 Startverbod scrape compleet", {
       excel: parsed.length,
@@ -886,7 +900,11 @@ export async function scraperStartverbod() {
     throw error;
   } finally {
     if (browser) await browser.close().catch(() => {});
-    // Bij fout blijft het Excelbestand bewust staan voor controle.
+    if (downloadedDir) {
+      cleanupStartverbodDownloadDir(downloadedDir);
+      downloadedFile = null;
+      downloadedDir = null;
+    }
   }
 }
 

@@ -22,10 +22,12 @@ export async function POST(req: Request) {
     const naam = s(body?.naam);
     const datum = s(body?.datum);
     const bondteam = s(body?.bondteam);
+    const aantalUren = Number(body?.aantal_uren);
 
     if (!naam) return NextResponse.json({ error: "Naam is verplicht." }, { status: 400 });
     if (!datum) return NextResponse.json({ error: "Datum is verplicht." }, { status: 400 });
     if (!bondteam) return NextResponse.json({ error: "Bondteam is verplicht." }, { status: 400 });
+    if (![6, 7, 8].includes(aantalUren)) return NextResponse.json({ error: "Aantal uren moet 6, 7 of 8 zijn." }, { status: 400 });
 
     const userId = auth.userId;
     const profile = auth.profile;
@@ -37,6 +39,7 @@ export async function POST(req: Request) {
       locatie: s(body?.locatie) || null,
       promotor: s(body?.promotor) || null,
       bondteam,
+      aantal_uren: aantalUren,
       bron_type: "matchmaker_app",
       stadium: "concept_matchmaking",
       status: "concept_matchmaking",

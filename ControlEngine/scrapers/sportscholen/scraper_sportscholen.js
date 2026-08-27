@@ -1,65 +1,187 @@
-// scrapers/sportscholen/scraper_sportscholen.js
+// ControlEngine/scrapers/sportscholen/scraper_sportscholen.js
+//
+// COMPLETE SPORTSCHOLEN-SYNC volgens het actuele Total-model:
+// - route downloadt eerst 1x de volledige sportscholenlijst
+// - route verdeelt organisation-keys over 3 processen
+// - ieder proces draait standaard 10 workers
+// - iedere sportschool krijgt een volledig verse page
+// - direct naar #organisation/<key>
+// - DETAILS -> alle keurmerkregels -> exact sluiten via #sluit_inr_detail
+// - daarna VECHTERS -> Excel -> fightpassport_school_fighters
+// - page daarna sluiten
 
-import { loginFightPassport } from "../utils/loginFightPassport.js";
+
+import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
 import supabase from "../utils/supabaseClient.js";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-//////////////////////////////////////////////////////////////
-// Helpers
-//////////////////////////////////////////////////////////////
-function parseDate(raw) {
-  if (!raw) return null;
+const EXPLICIT_SCHOOL_KEYS = [
+  ...new Set(
+    String(process.env.FP_SPORTSCHOLEN_KEYS || "")
+      .split(",")
+      .map((value) =>
+        String(value ?? "")
+          .trim()
+          .replace(/\D/g, "")
+          .replace(/^0+/, "")
+      )
+      .filter(Boolean)
+  ),
+];
+const EXPLICIT_SCHOOL_KEY_SET = new Set(EXPLICIT_SCHOOL_KEYS);
 
-  // Format DD-MM-YYYY
-  if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) {
-    const [dd, mm, yyyy] = raw.split("-");
-    return `${yyyy}-${mm}-${dd}`;
-  }
+process.on("unhandledRejection", (err) => {
+  console.error("❌ UNHANDLED REJECTION:", err?.stack ?? err);
+  process.exitCode = 1;
+});
 
-  // Format YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-
-  // Excel date number
-  if (!isNaN(raw)) {
-    const d = XLSX.SSF.parse_date_code(raw);
-    if (d) {
-      const mm = String(d.m).padStart(2, "0");
-      const dd = String(d.d).padStart(2, "0");
-      return `${d.y}-${mm}-${dd}`;
-    }
-  }
-
-  return null;
-}
-
-function detectColumn(columns, possibleNames) {
-  return columns.find((col) =>
-    possibleNames.some((p) => col.toLowerCase().includes(p))
-  );
-}
-
-function normalizeAliasText(raw) {
-  return String(raw ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['’`´]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+process.on("uncaughtException", (err) => {
+  console.error("❌ UNCAUGHT EXCEPTION:", err?.stack ?? err);
+  process.exitCode = 1;
+});
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function hardClosePage(page) {
+  if (!page) return;
+
+  try {
+    const client = await page.target().createCDPSession();
+    await client.send("Page.stopLoading").catch(() => {});
+    await client.detach().catch(() => {});
+  } catch {}
+
+  try {
+    await page.close({ runBeforeUnload: true }).catch(() => {});
+  } catch {}
+}
+
+
+async function waitForMasterLoginReady(page, timeoutMs = 120000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = await page.evaluate(() => {
+      const visible = (el) => {
+        if (!el) return false;
+        const style = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0" &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
+      const loginInput = document.querySelector("input.gebruikersnaam");
+      const body = String(document.body?.innerText || "").toLowerCase();
+      const href = String(location.href || "").toLowerCase();
+
+      return {
+        loginVisible: !!loginInput && visible(loginInput),
+        loggedInSignal:
+          body.includes("afmelden") ||
+          body.includes("uitloggen") ||
+          body.includes("fightpassport"),
+        href,
+      };
+    }).catch(() => null);
+
+    if (
+      state &&
+      !state.loginVisible &&
+      !state.href.includes("#login") &&
+      !state.href.includes("/login") &&
+      state.loggedInSignal
+    ) {
+      console.log(
+        "🔐 Master-tab aantoonbaar ingelogd; workers mogen starten:",
+        page.url()
+      );
+      return;
+    }
+
+    await sleep(500);
+  }
+
+  throw new Error(
+    `Master-tab niet aantoonbaar ingelogd binnen ${Math.round(
+      timeoutMs / 1000
+    )} seconden`
+  );
+}
+
+async function createWorkerContext(browser) {
+  if (browser && typeof browser.createBrowserContext === "function") {
+    return await browser.createBrowserContext();
+  }
+
+  if (browser && typeof browser.createIncognitoBrowserContext === "function") {
+    return await browser.createIncognitoBrowserContext();
+  }
+
+  return null;
+}
+
+async function closeWorkerContext(ctx) {
+  if (!ctx) return;
+
+  try {
+    const pages = await ctx.pages().catch(() => []);
+    for (const p of pages) {
+      await hardClosePage(p).catch(() => {});
+    }
+  } catch {}
+
+  try {
+    await ctx.close().catch(() => {});
+  } catch {}
+}
+
+function normalizeText(raw) {
+  return String(raw ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeVa(raw) {
+  if (!raw) return null;
+
+  const cleaned = String(raw)
+    .toUpperCase()
+    .replace(/^VA/, "")
+    .replace(/\D/g, "")
+    .replace(/^0+/, "");
+
+  return cleaned || null;
+}
+
+function normalizeSportschoolKey(raw) {
+  return (
+    String(raw ?? "")
+      .trim()
+      .replace(/\D/g, "")
+      .replace(/^0+/, "") || null
+  );
+}
+
+function organisationUrl(key) {
+  return `https://fightpassport.nl/#organisation/${normalizeSportschoolKey(key)}`;
+}
+
 function listExcelFiles(downloadDir) {
+  if (!fs.existsSync(downloadDir)) return [];
+
   return fs
     .readdirSync(downloadDir)
     .filter((f) => {
@@ -75,48 +197,380 @@ async function waitForNewExcel(downloadDir, timeoutMs = 60000) {
 
   while (Date.now() - start < timeoutMs) {
     const now = listExcelFiles(downloadDir);
-
-    // nieuw bestand = niet in before
     const newly = now.find((p) => !before.has(p));
+
     if (newly) {
-      // wacht tot file “stabiel” is (niet meer groeit)
       let lastSize = -1;
       let stable = 0;
 
-      for (let i = 0; i < 80; i++) {
+      for (let i = 0; i < 100; i++) {
         if (!fs.existsSync(newly)) break;
-        const s = fs.statSync(newly).size;
 
-        if (s > 0 && s === lastSize) {
+        const size = fs.statSync(newly).size;
+
+        if (size > 0 && size === lastSize) {
           stable++;
           if (stable >= 3) return newly;
         } else {
           stable = 0;
-          lastSize = s;
+          lastSize = size;
         }
+
         await sleep(250);
       }
 
       return newly;
     }
 
+    const files = fs.existsSync(downloadDir) ? fs.readdirSync(downloadDir) : [];
+    const hasCrdownload = files.some((f) =>
+      f.toLowerCase().endsWith(".crdownload")
+    );
+
+    if (hasCrdownload) {
+      await sleep(300);
+      continue;
+    }
+
     await sleep(300);
   }
 
-  // debug
-  const after = listExcelFiles(downloadDir);
+  throw new Error(`Geen nieuwe Excel gevonden in ${downloadDir}`);
+}
+
+async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    for (const frame of page.frames()) {
+      for (const selector of selectors) {
+        try {
+          const el = await frame.$(selector);
+          if (el) return { frame, selector };
+        } catch {}
+      }
+    }
+
+    await sleep(250);
+  }
+
+  return null;
+}
+
+async function waitForFunctionInAnyFrame(
+  page,
+  fn,
+  timeoutMs = 30000,
+  label = "functie"
+) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    for (const frame of page.frames()) {
+      try {
+        const result = await frame.evaluate(fn);
+        if (result) return { frame, result };
+      } catch {}
+    }
+
+    await sleep(300);
+  }
+
+  throw new Error(`${label} niet gevonden binnen ${timeoutMs}ms`);
+}
+
+async function getPageDebug(page) {
+  try {
+    return await page.evaluate(() => ({
+      url: window.location.href,
+      hash: window.location.hash,
+      title: document.title,
+      body: String(document.body?.innerText || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 1200),
+      titles: Array.from(
+        document.querySelectorAll("div[title],img[title],button[title],a[title]")
+      )
+        .map((x) => x.getAttribute("title"))
+        .filter(Boolean)
+        .slice(0, 120),
+      tileHeaders: Array.from(document.querySelectorAll(".tileHeader"))
+        .map((x) => String(x.innerText || "").trim())
+        .filter(Boolean)
+        .slice(0, 40),
+    }));
+  } catch (e) {
+    return { error: e?.message ?? String(e), url: page.url() };
+  }
+}
+
+async function setDownloadBehavior(page, browser, downloadDir) {
+  // Bij één browser met meerdere tabs mag Browser.setDownloadBehavior NIET
+  // per tab opnieuw gezet worden: dat is browser-breed en tabs zouden elkaars
+  // downloadmap overschrijven. Daarom alleen target/page-level instellen.
+  try {
+    const client = await page.target().createCDPSession();
+
+    await client.send("Page.setDownloadBehavior", {
+      behavior: "allow",
+      downloadPath: downloadDir,
+    });
+
+    await client.detach().catch(() => {});
+  } catch (e) {
+    console.log("⚠️ Page.setDownloadBehavior fout:", e?.message ?? e);
+    throw e;
+  }
+}
+
+
+async function setBrowserDownloadFallback(browser) {
+  // Vang downloads die buiten de page-scoped VECHTERS-target vallen
+  // op binnen de scraper zelf, nooit in Windows Downloads.
+  const fallbackDir = path.resolve(
+    __dirname,
+    "downloads",
+    `_browser_${process.pid}`
+  );
+
+  fs.mkdirSync(fallbackDir, { recursive: true });
+
+  const client = await browser.target().createCDPSession();
+  try {
+    await client.send("Browser.setDownloadBehavior", {
+      behavior: "allow",
+      downloadPath: fallbackDir,
+      eventsEnabled: true,
+    });
+
+    console.log(
+      `[sportscholen] 📁 browser download-fallback → ${fallbackDir}`
+    );
+  } finally {
+    await client.detach().catch(() => {});
+  }
+
+  return fallbackDir;
+}
+
+function cleanupBrowserDownloadFallback(fallbackDir) {
+  if (!fallbackDir) return;
+
+  try {
+    fs.rmSync(fallbackDir, { recursive: true, force: true });
+  } catch {}
+
+  try {
+    const root = path.resolve(__dirname, "downloads");
+    if (fs.existsSync(root) && fs.readdirSync(root).length === 0) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  } catch {}
+}
+
+async function cleanupDownloadDir(downloadDir) {
+  fs.mkdirSync(downloadDir, { recursive: true });
+
+  for (const f of fs.readdirSync(downloadDir)) {
+    const low = f.toLowerCase();
+
+    if (
+      low.endsWith(".xlsx") ||
+      low.endsWith(".xls") ||
+      low.endsWith(".crdownload") ||
+      low.endsWith(".tmp")
+    ) {
+      try {
+        fs.unlinkSync(path.join(downloadDir, f));
+      } catch {}
+    }
+  }
+}
+
+async function removeDownloadedExcel(filePath) {
+  if (!filePath) return;
+
+  try {
+    const dir = path.dirname(filePath);
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log("🗑️ Excel verwijderd:", filePath);
+    }
+
+    if (dir.includes(`${path.sep}downloads${path.sep}`) && fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+
+    const tmpRoot = path.resolve(__dirname, "downloads");
+    if (fs.existsSync(tmpRoot) && fs.readdirSync(tmpRoot).length === 0) {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  } catch (e) {
+    console.log("⚠️ Excel/tijdelijke map verwijderen mislukt:", e?.message ?? e);
+  }
+}
+
+async function closeWrongVechtersPopup(page) {
+  const closed = await page.evaluate(() => {
+    const body = document.body?.innerText || "";
+
+    if (!body.includes("Actuele vechters")) return false;
+
+    const closeButtons = [
+      ...document.querySelectorAll(
+        '.window_close, .close, [title="Sluiten"], [title="SLUITEN"], button, input[type="button"]'
+      ),
+    ];
+
+    const btn = closeButtons.find((el) => {
+      const txt = (el.innerText || el.value || el.getAttribute("title") || "")
+        .trim()
+        .toUpperCase();
+
+      return txt.includes("SLUITEN") || txt === "×" || txt === "X";
+    });
+
+    if (btn) {
+      btn.click();
+      return true;
+    }
+
+    const x = [...document.querySelectorAll("div, span")].find((el) => {
+      const txt = (el.innerText || "").trim();
+      const rect = el.getBoundingClientRect();
+      return (txt === "x" || txt === "×") && rect.width < 40 && rect.height < 40;
+    });
+
+    if (x) {
+      x.click();
+      return true;
+    }
+
+    return false;
+  });
+
+  if (closed) {
+    console.log("↩️ Verkeerde popup 'Actuele vechters' gesloten");
+    await sleep(1000);
+  }
+}
+
+async function waitForOrganisationPage(page, expectedKey, sportschool) {
+  const key = normalizeSportschoolKey(expectedKey);
+  const expectedHash = `#organisation/${key}`;
+  console.log("🔍 Exact controleren of sportschoolpagina geladen is...", {
+    key,
+  });
+
+  const start = Date.now();
+  let forceCount = 0;
+
+  while (Date.now() - start < 60000) {
+    await closeWrongVechtersPopup(page);
+
+    const state = await page.evaluate(() => {
+      const bodyText = document.body?.innerText || "";
+      const hash = window.location.hash || "";
+      const href = window.location.href || "";
+
+      const detailTile =
+        document.querySelector('.tile[title="DETAILS"]') ||
+        [...document.querySelectorAll(".tileHeader")]
+          .find(
+            (el) => (el.innerText || "").trim().toUpperCase() === "DETAILS"
+          )
+          ?.closest(".tile");
+
+      const vechtersTile =
+        document.querySelector('.tile[title="VECHTERS"]') ||
+        [...document.querySelectorAll(".tileHeader")]
+          .find(
+            (el) => (el.innerText || "").trim().toUpperCase() === "VECHTERS"
+          )
+          ?.closest(".tile");
+
+      return {
+        href,
+        hash,
+        body: bodyText.replace(/\s+/g, " ").trim().slice(0, 1200),
+        hasDetailsTile: !!detailTile,
+        hasVechtersTile: !!vechtersTile,
+        hasWrongPopup: bodyText.includes("Actuele vechters"),
+        tileHeaders: [...document.querySelectorAll(".tileHeader")]
+          .map((el) => (el.innerText || "").trim())
+          .filter(Boolean)
+          .slice(0, 30),
+      };
+    });
+
+    const hashOk =
+      state.hash === expectedHash ||
+      state.href.includes(`/#organisation/${key}`) ||
+      state.href.includes(`#organisation/${key}`);
+
+    const bodyUpper = normalizeText(state.body).toUpperCase();
+    const tilesOk =
+      (state.hasDetailsTile && state.hasVechtersTile) ||
+      (bodyUpper.includes("DETAILS") && bodyUpper.includes("VECHTERS"));
+
+    if (hashOk && tilesOk && !state.hasWrongPopup) {
+      console.log("✅ Exact juiste sportschoolpagina bevestigd:", {
+        hash: state.hash,
+        key,
+        headers: state.tileHeaders,
+      });
+
+      return;
+    }
+
+    console.log("⏳ Nog niet op juiste sportschoolpagina:", {
+      hash: state.hash,
+      hashOk,
+      tilesOk,
+      wrongPopup: state.hasWrongPopup,
+      headers: state.tileHeaders,
+    });
+
+    if (!hashOk && forceCount < 6 && Date.now() - start > 2500) {
+      forceCount++;
+
+      console.log("🔨 Hash opnieuw forceren:", {
+        poging: forceCount,
+        expectedHash,
+      });
+
+      try {
+        await page.evaluate((hash) => {
+          window.location.hash = hash;
+        }, `organisation/${key}`);
+
+        await sleep(1200);
+      } catch {}
+    }
+
+    await sleep(750);
+  }
+
+  const debug = await getPageDebug(page);
+
   throw new Error(
-    `Geen nieuwe Excel gevonden in ${downloadDir} binnen ${Math.round(
-      timeoutMs / 1000
-    )}s. After=${JSON.stringify(after)}`
+    `Niet exact op sportschoolpagina organisation/${key}. Debug=${JSON.stringify(
+      debug
+    )}`
   );
 }
 
-//////////////////////////////////////////////////////////////
-// 1. FightPassport navigatie
-//////////////////////////////////////////////////////////////
-async function waitForDashboard(page) {
-  for (let i = 0; i < 60; i++) {
+async function forceExactOrganisationUrl(page, key, sportschool, timeoutMs = 30000) {
+  const requestedKey = normalizeSportschoolKey(key);
+  const url = organisationUrl(requestedKey);
+  const wantedHash = `#organisation/${requestedKey}`;
+  const startedAt = Date.now();
+  let lastForcedAt = 0;
+  let hardReloads = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
     const state = await page.evaluate(() => {
       function isVisible(el) {
         if (!el) return false;
@@ -131,324 +585,1337 @@ async function waitForDashboard(page) {
         );
       }
 
-      const pincode =
-        document.querySelector("input.pincode") ||
-        document.querySelector("input.target_input.pincode") ||
-        document.querySelector("input[class*='pincode']");
-
-      const login = document.querySelector("input.gebruikersnaam");
-
-      const txt = String(document.body?.innerText || "").toLowerCase();
+      const loginEl = document.querySelector("input.gebruikersnaam");
+      const body = String(document.body?.innerText || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+      const headers = [...document.querySelectorAll(".tileHeader")]
+        .map((el) => String(el.innerText || "").trim().toUpperCase());
 
       return {
-        isUnlock: !!(pincode && isVisible(pincode)),
-        isLogin: !!(login && isVisible(login)),
-        hasDashboardText: txt.includes("fightpassport") && txt.includes("afmelden"),
-        hasSportscholenTile:
-          !!document.querySelector('[title="SPORTSCHOLEN"]') ||
-          Array.from(document.querySelectorAll(".tileHeader")).some(
-            (t) => String(t.innerText || "").trim().toUpperCase() === "SPORTSCHOLEN"
-          ),
+        loginVisible: !!loginEl && isVisible(loginEl),
+        href: String(location.href || ""),
+        hash: String(location.hash || ""),
+        body,
+        headers,
       };
-    });
+    }).catch(() => null);
 
-    if (state.isUnlock) {
-      throw new Error("UNLOCK_REQUIRED: FightPassport vraagt om een unlockcode.");
+    if (
+      state?.loginVisible ||
+      String(state?.href || "").toLowerCase().includes("#login") ||
+      String(state?.href || "").toLowerCase().includes("/login")
+    ) {
+      throw new Error("LOGIN_PAGE");
     }
 
-    if (state.isLogin) {
-      throw new Error("LOGIN_PAGE: FightPassport loginpagina staat open.");
+    const exactIdentity =
+      state &&
+      state.hash === wantedHash &&
+      (
+        (state.headers.includes("DETAILS") && state.headers.includes("VECHTERS")) ||
+        (state.body.includes("details") && state.body.includes("vechters"))
+      );
+
+    if (exactIdentity) {
+      await sleep(500);
+
+      const confirm = await page.evaluate((forcedHash) => {
+        const body = String(document.body?.innerText || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+        const headers = [...document.querySelectorAll(".tileHeader")]
+          .map((el) => String(el.innerText || "").trim().toUpperCase());
+
+        return (
+          String(location.hash || "") === forcedHash &&
+          (
+            (headers.includes("DETAILS") && headers.includes("VECHTERS")) ||
+            (body.includes("details") && body.includes("vechters"))
+          )
+        );
+      }, wantedHash).catch(() => false);
+
+      if (confirm) return true;
     }
 
-    if (state.hasDashboardText && state.hasSportscholenTile) return true;
+    const now = Date.now();
 
-    await sleep(500);
+    const hashAlreadyCorrect = state?.hash === wantedHash;
+
+    // Staat de tab al exact op de gevraagde organisation-hash, dan NIET opnieuw
+    // forceren. FightPassport krijgt eerst tijd om DETAILS en VECHTERS te renderen.
+    if (!hashAlreadyCorrect && now - lastForcedAt >= 1200) {
+      lastForcedAt = now;
+
+      await page.evaluate((forcedUrl, forcedHash) => {
+        if (location.hash !== forcedHash) {
+          location.hash = forcedHash;
+        }
+
+        if (location.href !== forcedUrl) {
+          history.replaceState(null, "", forcedUrl);
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+        }
+      }, url, wantedHash).catch(() => {});
+
+      await sleep(600);
+
+      const afterForce = await page.evaluate((forcedHash) => {
+        const body = String(document.body?.innerText || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+        const headers = [...document.querySelectorAll(".tileHeader")]
+          .map((el) => String(el.innerText || "").trim().toUpperCase());
+
+        return (
+          String(location.hash || "") === forcedHash &&
+          (
+            (headers.includes("DETAILS") && headers.includes("VECHTERS")) ||
+            (body.includes("details") && body.includes("vechters"))
+          )
+        );
+      }, wantedHash).catch(() => false);
+
+      if (!afterForce && hardReloads < 3) {
+        hardReloads++;
+
+        await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: 25000,
+        }).catch(() => {});
+
+        await sleep(1200);
+      }
+    }
+
+    await sleep(250);
   }
 
-  throw new Error("Dashboard niet gevonden");
+  console.log(`[sportscholen] ❌ organisation/${requestedKey} kon niet hard op juiste URL worden vastgezet`, {
+    urlNow: page.url(),
+    debug: await getPageDebug(page).catch(() => null),
+  });
+
+  return false;
 }
 
-async function clickSportscholenTile(page) {
-  console.log("🔍 Tile 'SPORTSCHOLEN' zoeken…");
+async function openOrganisation(page, key, sportschool) {
+  const cleanKey = normalizeSportschoolKey(key);
+  const url = organisationUrl(cleanKey);
 
-  // 1) Eerst jouw originele aanpak
-  const clickedOld = await page.evaluate(() => {
-    const tiles = [...document.querySelectorAll(".tileHeader")];
-    const tile = tiles.find((t) => (t.innerText || "").trim().toUpperCase() === "SPORTSCHOLEN");
-    if (tile) {
-      tile.closest(".tile")?.click();
-      return true;
-    }
+  const forced = await forceExactOrganisationUrl(
+    page,
+    cleanKey,
+    sportschool,
+    30000
+  ).catch((e) => {
+    if (e?.message === "LOGIN_PAGE") throw e;
     return false;
   });
 
-  if (clickedOld) {
-    await sleep(800);
-    return;
-  }
-
-  // 2) Fallback: click op title="SPORTSCHOLEN" (jij ziet dit letterlijk in je titles list)
-  const clickedTitle = await page.evaluate(() => {
-    const el =
-      document.querySelector('[title="SPORTSCHOLEN"]') ||
-      document.querySelector('div[title="SPORTSCHOLEN"]') ||
-      document.querySelector('a[title="SPORTSCHOLEN"]') ||
-      document.querySelector('button[title="SPORTSCHOLEN"]');
-
-    if (el) {
-      (el).click();
-      return true;
-    }
-    return false;
-  });
-
-  if (!clickedTitle) {
-    const titles = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("div[title],a[title],button[title]"))
-        .map((x) => x.getAttribute("title"))
-        .filter(Boolean)
-        .slice(0, 80)
+  if (!forced) {
+    throw new Error(
+      `Sportschoolpagina organisation/${cleanKey} niet exact bevestigd`
     );
-    throw new Error("SPORTSCHOLEN tile niet gevonden. titles=" + JSON.stringify(titles));
   }
 
+  await sleep(1500);
+  await waitForOrganisationPage(page, cleanKey, sportschool);
+}
+
+async function openVechtersTile(page, key, sportschool) {
+  await closeWrongVechtersPopup(page);
+
+  await waitForOrganisationPage(page, key, sportschool);
   await sleep(800);
+
+  console.log("🔍 VECHTERS tegel zoeken op bevestigde sportschoolpagina...");
+
+  const clicked = await page.evaluate((expectedKey) => {
+    const expectedHash = `#organisation/${expectedKey}`;
+
+    if (
+      window.location.hash !== expectedHash &&
+      !window.location.href.includes(`#organisation/${expectedKey}`)
+    ) {
+      return {
+        ok: false,
+        reason: "Niet op juiste organisation-url",
+        hash: window.location.hash,
+        href: window.location.href,
+      };
+    }
+
+    const header = [...document.querySelectorAll("div.tileHeader.enabled")].find(
+      (el) => String(el.innerText || "").trim().toUpperCase() === "VECHTERS"
+    );
+
+    if (!header) {
+      return {
+        ok: false,
+        reason: "Exacte div.tileHeader.enabled VECHTERS niet gevonden",
+        headers: [...document.querySelectorAll("div.tileHeader")]
+          .map((el) => ({
+            text: String(el.innerText || "").trim(),
+            className: String(el.className || ""),
+          }))
+          .slice(0, 30),
+      };
+    }
+
+    header.scrollIntoView?.({ block: "center", inline: "center" });
+    header.click();
+
+    return {
+      ok: true,
+      method: "exact div.tileHeader.enabled met tekst VECHTERS",
+      hash: window.location.hash,
+      text: String(header.innerText || "").trim(),
+      className: String(header.className || ""),
+    };
+  }, normalizeSportschoolKey(key));
+
+  if (!clicked?.ok) {
+    const debug = await getPageDebug(page);
+    throw new Error(
+      `VECHTERS tegel niet exact aangeklikt. Result=${JSON.stringify(
+        clicked
+      )}. Debug=${JSON.stringify(debug)}`
+    );
+  }
+
+  console.log("✅ Exacte VECHTERS tegel aangeklikt:", clicked);
+
+  await waitForVechtersRapport(page, key);
 }
 
-async function downloadExcel(page, browser) {
-  console.log("📥 Excel downloaden…");
+async function waitForVechtersRapport(page, key) {
+  console.log("🔍 Controleren of rapport Vechters bij sportschool geladen is...");
 
-  // ✅ precies zoals je origineel: vaste map
-  const downloadDir = path.resolve(__dirname, "downloads");
-  if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
+  const result = await waitForFunctionInAnyFrame(
+    page,
+    () => {
+      const bodyText = document.body?.innerText || "";
+      const textOk = bodyText.includes("Rapport: Vechters bij sportschool");
 
-  // ✅ precies zoals je origineel: oude excel opruimen
-  const existing = fs.readdirSync(downloadDir);
-  for (const f of existing) {
-    if (f.toLowerCase().endsWith(".xlsx") || f.toLowerCase().endsWith(".xls")) {
-      try {
-        fs.unlinkSync(path.join(downloadDir, f));
-      } catch {}
+      const excelOk =
+        !!document.querySelector('[title="download als excel"]') ||
+        !!document.querySelector('[title*="download"][title*="excel"]') ||
+        !!document.querySelector('svg use[href*="#img_41"]');
+
+      if (textOk) {
+        return {
+          url: window.location.href,
+          hash: window.location.hash,
+          hasExcelButton: excelOk,
+          preview: bodyText.replace(/\s+/g, " ").trim().slice(0, 500),
+        };
+      }
+
+      return false;
+    },
+    35000,
+    "Rapport: Vechters bij sportschool"
+  ).catch(async (e) => {
+    const debug = await getPageDebug(page);
+
+    throw new Error(
+      `${e.message}. Verwacht rapport voor sportschool ${key}. Debug=${JSON.stringify(
+        debug
+      )}`
+    );
+  });
+
+  console.log("✅ Rapport Vechters bij sportschool gevonden", result.result);
+}
+
+async function ensureReadyForVechtersDownload(page, key) {
+  await closeWrongVechtersPopup(page);
+
+  const current = page.url();
+
+  if (!current.includes(`#organisation/${key}`)) {
+    const debug = await getPageDebug(page);
+
+    throw new Error(
+      `Download geblokkeerd: niet op organisation/${key}. Huidige url=${current}. Debug=${JSON.stringify(
+        debug
+      )}`
+    );
+  }
+
+  await waitForVechtersRapport(page, key);
+}
+
+
+async function findVechtersDownloadControl(page, timeoutMs = 45000) {
+  const start = Date.now();
+  const selectors = ['[title="download als excel"]', '[title*="download"][title*="excel"]'];
+
+  while (Date.now() - start < timeoutMs) {
+    for (const frame of page.frames()) {
+      for (const selector of selectors) {
+        let handles = [];
+        try {
+          handles = await frame.$$(selector);
+        } catch {
+          handles = [];
+        }
+
+        for (const handle of handles) {
+          const verdict = await frame.evaluate((el) => {
+            const visible = (node) => {
+              if (!node) return false;
+              const r = node.getBoundingClientRect();
+              const st = getComputedStyle(node);
+              return (
+                r.width > 0 &&
+                r.height > 0 &&
+                st.display !== "none" &&
+                st.visibility !== "hidden"
+              );
+            };
+
+            if (!visible(el)) return { ok: false };
+
+            const container =
+              el.closest(".outer, .modal, [role=dialog], .ui-dialog, .tile, body") ||
+              document.body;
+
+            const contextText = String(container.innerText || document.body.innerText || "")
+              .replace(/\u00a0/g, " ")
+              .toUpperCase();
+
+            const looksLikeVechters =
+              contextText.includes("RAPPORT: VECHTERS BIJ SPORTSCHOOL") ||
+              contextText.includes("RAPPORT: VECHTERS BIJ SPORTSSCHOOL");
+
+            return { ok: looksLikeVechters };
+          }, handle).catch(() => ({ ok: false }));
+
+          if (verdict?.ok) {
+            return { frame, selector, handle };
+          }
+        }
+      }
     }
+
+    await sleep(300);
   }
 
-  // ✅ download behavior zetten (2 lagen)
-  // 1) Page.setDownloadBehavior (jouw origineel)
-  try {
-    const client = await page.target().createCDPSession();
-    await client.send("Page.setDownloadBehavior", {
-      behavior: "allow",
-      downloadPath: downloadDir,
-    });
-  } catch (e) {
-    console.log("⚠️ Page.setDownloadBehavior faalde:", e?.message ?? e);
-  }
+  return null;
+}
 
-  // 2) Browser.setDownloadBehavior (extra zekerheid)
-  try {
-    const bClient = await browser.target().createCDPSession();
-    await bClient.send("Browser.setDownloadBehavior", {
-      behavior: "allow",
-      downloadPath: downloadDir,
-      eventsEnabled: true,
-    });
-  } catch (e) {
-    // niet elke Chromium build ondersteunt dit; geen probleem
-  }
+async function downloadVechtersExcel(page, browser, sportschoolKey) {
+  const key = normalizeSportschoolKey(sportschoolKey);
 
-  // ✅ selectors: eerst jouw originele IMG (exact), daarna jouw echte DIV
-  const excelSelImg = 'img[title="download als excel"]';
-  const excelSelDiv = 'div[title="download als excel"]';
+  await ensureReadyForVechtersDownload(page, key);
 
-  // wachten tot view klaar is (knop verschijnt)
-  // probeer img, anders div
-  const hasImg = await page.$(excelSelImg);
-  const hasDiv = await page.$(excelSelDiv);
+  console.log("📥 Excel downloaden vanaf rapport Vechters bij sportschool...");
 
-  if (!hasImg && !hasDiv) {
-    // wacht op één van beide
+  // LETTERLIJK hetzelfde downloadmodel als fp_total:
+  // eigen downloads/<key_uuid>-map naast deze scraper,
+  // page-scoped CDP downloadBehavior, events volgen, daarna cleanup.
+  const dir = path.resolve(
+    __dirname,
+    "downloads",
+    `${key}_${crypto.randomUUID().slice(0, 8)}`
+  );
+  fs.mkdirSync(dir, { recursive: true });
+
+  const client = await page.target().createCDPSession();
+  await client.send("Page.enable").catch(() => {});
+  await client.send("Page.setDownloadBehavior", {
+    behavior: "allow",
+    downloadPath: dir,
+  });
+
+  const found = await findVechtersDownloadControl(page, 45000);
+
+  if (!found) {
+    await client.detach().catch(() => {});
     try {
-      await page.waitForSelector(excelSelImg, { timeout: 8000 });
-    } catch {
-      await page.waitForSelector(excelSelDiv, { timeout: 25000 });
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    throw new Error("Exacte Excel-knop van Vechters-rapport niet gevonden");
+  }
+
+  let downloadStarted = null;
+  let downloadProgress = null;
+
+  const onDownloadWillBegin = (event) => {
+    downloadStarted = {
+      guid: event?.guid || null,
+      suggestedFilename: event?.suggestedFilename || null,
+      at: Date.now(),
+    };
+    console.log(
+      `[sportscholen] 🚀 ${key} Chrome bevestigt downloadstart: ` +
+      `${event?.suggestedFilename || "bestand"}`
+    );
+  };
+
+  const onDownloadProgress = (event) => {
+    if (!downloadStarted?.guid || event?.guid === downloadStarted.guid) {
+      downloadProgress = event || null;
     }
-  }
+  };
 
-  // klik
-  const btnImg = await page.$(excelSelImg);
-  if (btnImg) {
-    await page.click(excelSelImg);
-  } else {
-    await page.click(excelSelDiv);
-  }
+  client.on("Page.downloadWillBegin", onDownloadWillBegin);
+  client.on("Page.downloadProgress", onDownloadProgress);
 
-  // ✅ wacht op nieuwe excel (geen vaste 6s)
-  const file = await waitForNewExcel(downloadDir, 60000);
-  return file;
-}
+  const clickDownload = async () => {
+    if (found.handle) {
+      await found.frame.evaluate((el) => {
+        el?.scrollIntoView?.({ block: "center" });
+        el?.click?.();
+      }, found.handle);
+      return;
+    }
 
-//////////////////////////////////////////////////////////////
-// 2. Excel-parser — headers op rij 5, data vanaf rij 6
-//////////////////////////////////////////////////////////////
-async function parseExcel(filePath) {
-  console.log("📊 Excel verwerken…", filePath);
+    await found.frame.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      el?.scrollIntoView?.({ block: "center" });
+      el?.click?.();
+    }, found.selector);
+  };
 
-  // ✅ Vervangt XLSX.readFile + sheet_to_json
-  // Geeft array-of-arrays terug, net als header:1
-  const aoaRaw = await readXlsxToRows(filePath, { sheetIndex: 0 });
+  const listFiles = () => {
+    try {
+      return fs.readdirSync(dir);
+    } catch {
+      return [];
+    }
+  };
 
-  // defval: null gedrag nadoen: lege strings -> null
-  const aoa = (aoaRaw || []).map((row) =>
-    (row || []).map((v) => {
-      const s = typeof v === "string" ? v.trim() : v;
-      return s === "" ? null : s;
-    })
+  const getExcel = () => {
+    return (
+      listFiles()
+        .filter((f) => {
+          const low = f.toLowerCase();
+          return low.endsWith(".xlsx") || low.endsWith(".xls");
+        })
+        .map((f) => path.join(dir, f))
+        .filter((f) => {
+          try {
+            return fs.statSync(f).size > 0;
+          } catch {
+            return false;
+          }
+        })
+        .sort((a, b) => {
+          try {
+            return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+          } catch {
+            return 0;
+          }
+        })[0] || null
+    );
+  };
+
+  const cleanupDir = () => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+
+    try {
+      const root = path.resolve(__dirname, "downloads");
+      if (fs.existsSync(root) && fs.readdirSync(root).length === 0) {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    } catch {}
+  };
+
+  const startTimeoutMs = Math.max(
+    1000,
+    Number(process.env.FP_SPORTSCHOLEN_DOWNLOAD_START_TIMEOUT_MS ?? "6000")
   );
 
-  if (!aoa || aoa.length < 6) {
-    console.log("❌ Excel bevat te weinig rijen");
-    return [];
+  const completeTimeoutMs = Math.max(
+    5000,
+    Number(process.env.FP_SPORTSCHOLEN_DOWNLOAD_COMPLETE_TIMEOUT_MS ?? "60000")
+  );
+
+  try {
+    console.log(
+      `[sportscholen] ⬇️ ${key} VECHTERS downloadklik → ${dir}`
+    );
+
+    await clickDownload();
+
+    const startAt = Date.now();
+    while (Date.now() - startAt < startTimeoutMs) {
+      const candidate = getExcel();
+
+      if (downloadStarted || candidate) {
+        break;
+      }
+
+      await sleep(50);
+    }
+
+    if (!downloadStarted && !getExcel()) {
+      console.log(
+        `[sportscholen] ❌ ${key} geen downloadstart binnen ${startTimeoutMs}ms`,
+        { dir, files: listFiles() }
+      );
+      cleanupDir();
+      throw new Error(
+        `VECHTERS_EXCEL_START_TIMEOUT: sportschool ${key} na ` +
+        `${Math.round(startTimeoutMs / 1000)}s geen downloadstart`
+      );
+    }
+
+    const completeAt = Date.now();
+
+    while (Date.now() - completeAt < completeTimeoutMs) {
+      const filesNow = listFiles();
+      const candidate = getExcel();
+      const stillDownloading = filesNow.some((f) =>
+        f.toLowerCase().endsWith(".crdownload")
+      );
+
+      if (candidate && !stillDownloading) {
+        try {
+          await readXlsxToRows(candidate, { sheetIndex: 0 });
+
+          console.log(
+            `[sportscholen] ✅ ${key} Vechters Excel volledig binnen ` +
+            `(${fs.statSync(candidate).size} bytes) → ${candidate}`
+          );
+
+          // Parser + removeDownloadedExcel ruimen bestand en submap daarna op.
+          return candidate;
+        } catch {
+          // Bestand net zichtbaar maar nog niet volledig geflusht.
+        }
+      }
+
+      if (downloadProgress?.state === "canceled") {
+        cleanupDir();
+        throw new Error(
+          `VECHTERS_EXCEL_CANCELED: sportschool ${key}`
+        );
+      }
+
+      await sleep(50);
+    }
+
+    console.log(
+      `[sportscholen] ❌ ${key} download gestart maar Excel niet tijdig leesbaar`,
+      {
+        dir,
+        files: listFiles(),
+        progress: downloadProgress?.state || null,
+      }
+    );
+
+    cleanupDir();
+    throw new Error(
+      `VECHTERS_EXCEL_COMPLETE_TIMEOUT: sportschool ${key}`
+    );
+  } finally {
+    client.off("Page.downloadWillBegin", onDownloadWillBegin);
+    client.off("Page.downloadProgress", onDownloadProgress);
+    await client.detach().catch(() => {});
   }
-
-  const headerRowIndex = 4; // rij 5
-  const dataStartIndex = 5; // rij 6
-
-  const headers = (aoa[headerRowIndex] || []).map((h) => String(h || "").trim());
-  console.log("🔍 Headers (rij 5):", headers);
-
-  const dataRows = aoa.slice(dataStartIndex);
-  if (!dataRows.length) {
-    console.log("❌ Geen data rijen gevonden");
-    return [];
-  }
-
-  const colNaam = detectColumn(headers, ["naam"]);
-  const colPlaats = detectColumn(headers, ["plaats"]);
-  const colLand = detectColumn(headers, ["land"]);
-  const colStart = detectColumn(headers, ["start"]);
-  const colEinde = detectColumn(headers, ["einde"]);
-  const colKey = detectColumn(headers, ["key"]);
-
-  if (!colNaam || !colKey) {
-    console.log("❌ Vereiste kolommen ontbreken (Naam / Key)");
-    return [];
-  }
-
-  const idx = (col) => headers.indexOf(col);
-
-  const cleaned = dataRows
-    .filter((row) => row && row[idx(colKey)] != null)
-    .map((row) => ({
-      sportschool_id: Number(row[idx(colKey)]),
-      naam: row[idx(colNaam)] || null,
-      plaats: colPlaats ? row[idx(colPlaats)] || null : null,
-      land: colLand ? row[idx(colLand)] || null : null,
-      keurmerk_start: colStart ? parseDate(row[idx(colStart)]) : null,
-      keurmerk_einde: colEinde ? parseDate(row[idx(colEinde)]) : null,
-      updated_at: new Date().toISOString(),
-    }));
-
-  console.log(`📌 ${cleaned.length} sportscholen gevonden`);
-  return cleaned;
 }
 
-//////////////////////////////////////////////////////////////
-// 3. Save to Supabase → juiste tabel
-//////////////////////////////////////////////////////////////
-async function loadSportschoolAliases() {
-  const aliases = [];
-  const pageSize = 1000;
-  let from = 0;
+async function parseVechtersExcel(filePath, sportschool) {
+  console.log("📊 Excel verwerken:", filePath);
 
-  while (true) {
-    const { data, error } = await supabase
-      .from("sportschool_aliases")
-      .select("alias_text,sportschool_id")
-      .range(from, from + pageSize - 1);
+  const rows = await readXlsxToRows(filePath, {
+    sheetIndex: 0,
+  });
 
-    if (error) throw error;
-
-    const batch = data ?? [];
-    aliases.push(...batch);
-
-    if (batch.length < pageSize) break;
-    from += pageSize;
+  if (!rows?.length) {
+    console.log("✅ Lege Vechters Excel: 0 vechters voor deze sportschool");
+    return [];
   }
 
-  return aliases;
+  const headerRowIndex = findHeaderRowIndex(rows);
+
+  if (headerRowIndex === -1) {
+    const reportTitle = String(rows?.[0]?.[0] ?? "").trim();
+    const groupTitle = String(rows?.[1]?.[0] ?? "").trim();
+
+    // Een geldig leeg Vechters-rapport bevat alleen de rapporttitel en groep,
+    // maar geen headerregel op rij 5 en dus ook geen vechters vanaf rij 6.
+    if (
+      reportTitle === "Rapport: Vechters bij sportschool" &&
+      groupTitle === "Groep: Vechters"
+    ) {
+      console.log("✅ Geldig leeg Vechters-rapport: 0 vechters");
+      return [];
+    }
+
+    const preview = rows
+      .slice(0, 12)
+      .map((r) => (r || []).map((c) => String(c ?? "").trim()).join(" | "));
+
+    throw new Error(
+      `Headerregel niet gevonden in Excel. Preview=${JSON.stringify(preview)}`
+    );
+  }
+
+  const headers = (rows[headerRowIndex] || []).map((h) =>
+    String(h || "").trim()
+  );
+
+  console.log("📑 Headerregel gevonden:", {
+    headerRowIndex,
+    headers,
+  });
+
+  const idxNaam = findHeaderIndex(headers, [
+    "Naam vechter",
+    "Naam",
+    "Vechter",
+    "Volledige naam",
+  ]);
+
+  const idxVa = findHeaderIndex(headers, [
+    "VA-nummer",
+    "VA nummer",
+    "VA",
+    "VAnummer",
+    "VA nr",
+    "Relatienummer",
+    "Nummer",
+  ]);
+
+  const idxGeslacht = findHeaderIndex(headers, ["Geslacht", "M/V", "Gender"]);
+  const idxVervaldatum = findHeaderIndex(headers, [
+    "Vervaldatum",
+    "Verloopdatum",
+    "Licentie geldig tot",
+    "Geldig tot",
+  ]);
+
+  if (idxVa === -1) {
+    throw new Error(`Kolom VA-nummer niet gevonden: ${JSON.stringify(headers)}`);
+  }
+
+  const now = new Date().toISOString();
+  const seen = new Set();
+  const out = [];
+
+  for (let r = headerRowIndex + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const va = normalizeVa(row?.[idxVa]);
+
+    if (!va || seen.has(va)) continue;
+
+    seen.add(va);
+
+    const naam = idxNaam !== -1 ? normalizeText(row[idxNaam]) || null : null;
+    const naamParts = splitNaam(naam);
+
+    out.push({
+      sportschool_id: Number(sportschool.sportschool_id),
+      va_nummer: va,
+      naam,
+      geslacht:
+        idxGeslacht !== -1 ? normalizeText(row[idxGeslacht]) || null : null,
+      actief: true,
+      bron: "fightpassport_vechters_excel",
+      last_seen_at: now,
+      updated_at: now,
+    });
+  }
+
+  console.log(`✅ ${out.length} vechters gevonden`);
+
+  // Een geldige Vechters-Excel zonder vechters is geen scraperfout.
+  return out;
 }
 
-function canonicalizeSportscholen(rows, aliases) {
-  const aliasMap = new Map();
+async function saveSportschoolFighterLinks(sportschoolKey, fighters) {
+  const key = Number(sportschoolKey);
+  const now = new Date().toISOString();
 
-  for (const alias of aliases ?? []) {
-    const normalized = normalizeAliasText(alias?.alias_text);
-    const canonicalId = Number(alias?.sportschool_id);
+  // Na iedere succesvolle Excel-parse eerst oude koppelingen voor deze sportschool
+  // inactief zetten. Bij een lege Excel blijven er terecht 0 actieve koppelingen over.
+  const { error: deactivateError } = await supabase
+    .from("fightpassport_school_fighters")
+    .update({
+      actief: false,
+      updated_at: now,
+    })
+    .eq("sportschool_id", key)
+    .eq("actief", true);
 
-    if (!normalized || !Number.isFinite(canonicalId)) continue;
-    aliasMap.set(normalized, canonicalId);
+  if (deactivateError) throw deactivateError;
+
+  if (!fighters.length) return [];
+
+  const payload = fighters.map((fighter) => ({
+    ...fighter,
+    sportschool_id: key,
+    actief: true,
+    last_seen_at: now,
+    updated_at: now,
+  }));
+
+  const { error } = await supabase
+    .from("fightpassport_school_fighters")
+    .upsert(payload, {
+      onConflict: "sportschool_id,va_nummer",
+    });
+
+  if (error) throw error;
+
+  return payload.map((f) => f.va_nummer);
+}
+
+async function updateSportschoolSyncStatus(key, status, errorMessage = null) {
+  const payload = {
+    team_sync_status: status,
+    team_sync_error: errorMessage ? String(errorMessage).slice(0, 1000) : null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (status === "klaar") {
+    payload.last_team_sync_at = new Date().toISOString();
   }
 
-  const grouped = new Map();
+  await supabase
+    .from("sportscholen")
+    .update(payload)
+    .eq("sportschool_id", Number(key));
+}
 
-  for (const row of rows ?? []) {
-    const originalId = Number(row?.sportschool_id);
-    if (!Number.isFinite(originalId)) continue;
+async function pageIsExactOrganisation(page, key, sportschool) {
+  const cleanKey = normalizeSportschoolKey(key);
+  const expectedHash = `#organisation/${cleanKey}`;
 
-    const normalizedName = normalizeAliasText(row?.naam);
-    const aliasTargetId = normalizedName ? aliasMap.get(normalizedName) : null;
-    const canonicalId = Number.isFinite(Number(aliasTargetId))
-      ? Number(aliasTargetId)
-      : originalId;
+  const state = await page.evaluate(() => {
+    const body = String(document.body?.innerText || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    const headers = [...document.querySelectorAll(".tileHeader")]
+      .map((el) => String(el.innerText || "").trim().toUpperCase());
 
-    const candidate = {
-      ...row,
-      sportschool_id: canonicalId,
-      _original_sportschool_id: originalId,
-      _is_canonical_source: originalId === canonicalId,
+    return {
+      hash: String(location.hash || ""),
+      body,
+      headers,
     };
+  }).catch(() => null);
 
-    const current = grouped.get(canonicalId);
+  return !!(
+    state &&
+    state.hash === expectedHash &&
+    (
+      (state.headers.includes("DETAILS") && state.headers.includes("VECHTERS")) ||
+      (state.body.includes("details") && state.body.includes("vechters"))
+    )
+  );
+}
 
-    if (!current) {
-      grouped.set(canonicalId, candidate);
+async function openTabToOrganisationVerified(browser, context, cookies, key, sportschool, opts) {
+  const {
+    maxAttempts = 5,
+    softWaitMs = 1500,
+    betweenAttemptsMs = 1200,
+    workerLabel = "",
+  } = opts ?? {};
+
+  const cleanKey = normalizeSportschoolKey(key);
+  const url = organisationUrl(cleanKey);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const p = context ? await context.newPage() : await browser.newPage();
+    await p.setCacheEnabled(false).catch(() => {});
+
+    try {
+      if (Array.isArray(cookies) && cookies.length) {
+        await p.setCookie(...cookies);
+      }
+    } catch {}
+
+    await p.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 25000,
+    }).catch(() => {});
+
+    let forced = false;
+    try {
+      forced = await forceExactOrganisationUrl(
+        p,
+        cleanKey,
+        sportschool,
+        30000
+      );
+    } catch (e) {
+      if (e?.message === "LOGIN_PAGE") {
+        // Page is in deze helper gemaakt. Direct sluiten vóór LOGIN_PAGE
+        // naar de worker gaat, zodat geen loginvenster kan blijven hangen.
+        await hardClosePage(p).catch(() => {});
+        throw e;
+      }
+      forced = false;
+    }
+
+    if (!forced) {
+      await hardClosePage(p).catch(() => {});
+      await sleep(betweenAttemptsMs);
       continue;
     }
 
-    // Als zowel de echte/canonieke FightPassport-ID als een oude alias-ID
-    // aanwezig zijn, krijgt de echte ID altijd voorrang.
-    const preferred =
-      candidate._is_canonical_source && !current._is_canonical_source
-        ? candidate
-        : current;
+    await sleep(softWaitMs);
 
-    const fallback = preferred === candidate ? current : candidate;
+    const verified = await pageIsExactOrganisation(
+      p,
+      cleanKey,
+      sportschool
+    ).catch(() => false);
 
-    grouped.set(canonicalId, {
-      ...preferred,
-      naam: preferred.naam || fallback.naam || null,
-      plaats: preferred.plaats || fallback.plaats || null,
-      land: preferred.land || fallback.land || null,
-      keurmerk_start: preferred.keurmerk_start || fallback.keurmerk_start || null,
-      keurmerk_einde: preferred.keurmerk_einde || fallback.keurmerk_einde || null,
-      updated_at: new Date().toISOString(),
+    if (verified) {
+      return p;
+    }
+
+    console.log(`[sportscholen] ↪️ worker-tab niet op gevraagde sportschool ${workerLabel}`, {
+      requested: cleanKey,
+      attempt,
+      urlNow: p.url(),
     });
+
+    await hardClosePage(p).catch(() => {});
+    await sleep(betweenAttemptsMs);
   }
 
-  return [...grouped.values()].map(
-    ({ _original_sportschool_id, _is_canonical_source, ...row }) => row
+  return null;
+}
+
+
+function parseNlDateStrict(value) {
+  const s = String(value ?? "").trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+}
+
+async function openDetailsTile(page, key) {
+  const cleanKey = normalizeSportschoolKey(key);
+
+  const clicked = await page.evaluate((expectedKey) => {
+    const expectedHash = `#organisation/${expectedKey}`;
+    if (String(location.hash || "") !== expectedHash) {
+      return { ok: false, reason: "verkeerde organisation hash", hash: location.hash };
+    }
+
+    const header = [...document.querySelectorAll("div.tileHeader.enabled, div.tileHeader")]
+      .find((el) => String(el.innerText || "").trim().toUpperCase() === "DETAILS");
+
+    if (!header) {
+      return {
+        ok: false,
+        reason: "DETAILS header niet gevonden",
+        headers: [...document.querySelectorAll("div.tileHeader")]
+          .map((el) => String(el.innerText || "").trim())
+          .filter(Boolean)
+          .slice(0, 30),
+      };
+    }
+
+    const tile = header.closest(".tile");
+    (tile || header).scrollIntoView?.({ block: "center" });
+    (tile || header).click();
+    return { ok: true };
+  }, cleanKey);
+
+  if (!clicked?.ok) {
+    throw new Error(`DETAILS tegel niet geopend voor sportschool ${cleanKey}: ${JSON.stringify(clicked)}`);
+  }
+
+  await sleep(600);
+}
+
+async function readKeurmerkPeriods(page, key) {
+  const cleanKey = normalizeSportschoolKey(key);
+  const startedAt = Date.now();
+  let lastState = null;
+
+  while (Date.now() - startedAt < 15000) {
+    const state = await page.evaluate(() => {
+      const visible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const st = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 &&
+          st.display !== "none" &&
+          st.visibility !== "hidden" &&
+          st.opacity !== "0";
+      };
+
+      const clean = (v) =>
+        String(v ?? "")
+          .replace(/\u00a0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const bodies = [...document.querySelectorAll("#overview_table_body")].filter(visible);
+      let rows = [];
+      for (const body of bodies) {
+        const candidateRows = [...body.querySelectorAll("tr.flexlist_row")]
+          .filter((row) => !row.classList.contains("filler") && visible(row));
+        if (candidateRows.length > rows.length) rows = candidateRows;
+      }
+
+      if (!rows.length) {
+        // fallback: elke zichtbare tabel binnen de open DETAILS-overlay
+        const tables = [...document.querySelectorAll("table")].filter(visible);
+        for (const table of tables) {
+          const candidateRows = [...table.querySelectorAll("tr.flexlist_row")]
+            .filter((row) => !row.classList.contains("filler") && visible(row));
+          if (candidateRows.length > rows.length) rows = candidateRows;
+        }
+      }
+
+      const parsed = rows.map((row) => {
+        const cells = [...row.querySelectorAll("td")]
+          .map((td) => clean(td.textContent));
+        return cells;
+      }).filter((cells) => cells.length >= 4);
+
+      return {
+        ready: parsed.length > 0,
+        rows: parsed,
+        body: clean(document.body?.innerText).slice(0, 1000),
+      };
+    }).catch(() => null);
+
+    lastState = state;
+
+    if (state?.ready) {
+      const periods = [];
+      for (const cells of state.rows) {
+        const toegevoegdDoor = String(cells?.[0] ?? "").trim() || null;
+        const toegevoegdOp = parseNlDateStrict(cells?.[1]);
+        const start = parseNlDateStrict(cells?.[2]);
+        const einde = parseNlDateStrict(cells?.[3]);
+
+        if (!start && !einde) continue;
+
+        periods.push({
+          toegevoegd_door: toegevoegdDoor,
+          toegevoegd_op: toegevoegdOp,
+          start,
+          einde,
+        });
+      }
+      return periods;
+    }
+
+    await sleep(150);
+  }
+
+  throw new Error(
+    `DETAILS keurmerktabel niet tijdig leesbaar voor sportschool ${cleanKey}. ` +
+    `Laatste state=${JSON.stringify(lastState)}`
   );
 }
 
-async function loadExistingSportschoolIds() {
-  const ids = [];
+async function closeDetailsExact(page, key) {
+  const cleanKey = normalizeSportschoolKey(key);
+
+  const clicked = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll("button#sluit_inr_detail")];
+    const button = buttons.find((el) => {
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      return (
+        r.width > 0 &&
+        r.height > 0 &&
+        st.display !== "none" &&
+        st.visibility !== "hidden" &&
+        st.opacity !== "0"
+      );
+    });
+
+    if (!button) return false;
+    button.scrollIntoView?.({ block: "center" });
+    button.click();
+    return true;
+  }).catch(() => false);
+
+  if (!clicked) {
+    throw new Error(
+      `DETAILS sluitknop #sluit_inr_detail niet gevonden voor sportschool ${cleanKey}`
+    );
+  }
+
+  console.log(`[sportscholen] ↩️ ${cleanKey} DETAILS sluiten aangeklikt`);
+
+  // Alleen controleren of de DETAILS-popup verdwijnt.
+  // NIET wachten op VECHTERS of eisen dat de organisation-page al volledig
+  // opnieuw is vrijgegeven: FightPassport rendert die tegels asynchroon en
+  // daardoor ontstonden onterechte retries terwijl DETAILS al was opgeslagen.
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 3000) {
+    const detailsStillVisible = await page.evaluate(() => {
+      const visible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const st = getComputedStyle(el);
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          st.display !== "none" &&
+          st.visibility !== "hidden" &&
+          st.opacity !== "0"
+        );
+      };
+
+      return [...document.querySelectorAll("button#sluit_inr_detail")].some(visible);
+    }).catch(() => false);
+
+    if (!detailsStillVisible) {
+      await sleep(250);
+      return true;
+    }
+
+    await sleep(100);
+  }
+
+  // Geen scraperfout van maken. openVechtersTile()/waitForOrganisationPage()
+  // controleert hierna zelf of de juiste organisation-page bruikbaar is.
+  console.log(
+    `[sportscholen] ⚠️ ${cleanKey} DETAILS-sluitknop bleef langer zichtbaar; doorgaan naar VECHTERS-controle`
+  );
+  return true;
+}
+
+function deriveKeurmerkSummary(periods) {
+  const cleaned = (periods ?? [])
+    .filter((p) => p && (p.start || p.einde))
+    .map((p) => ({
+      toegevoegd_door: p.toegevoegd_door ?? null,
+      toegevoegd_op: p.toegevoegd_op ?? null,
+      start: p.start ?? null,
+      einde: p.einde ?? null,
+    }))
+    .sort((a, b) =>
+      String(a.start || a.toegevoegd_op || "").localeCompare(
+        String(b.start || b.toegevoegd_op || "")
+      )
+    );
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const current =
+    cleaned.find((p) =>
+      (!p.start || p.start <= today) &&
+      (!p.einde || p.einde >= today)
+    ) ?? null;
+
+  const future =
+    cleaned
+      .filter((p) => p.start && p.start > today)
+      .sort((a, b) => String(a.start).localeCompare(String(b.start)))[0] ?? null;
+
+  const latestEnd =
+    cleaned
+      .map((p) => p.einde)
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? null;
+
+  return {
+    periods: cleaned,
+    current,
+    future,
+    latestEnd,
+  };
+}
+
+async function saveKeurmerkPeriods(sportschoolKey, periods) {
+  const key = Number(normalizeSportschoolKey(sportschoolKey));
+  if (!Number.isFinite(key)) {
+    throw new Error("Ongeldige sportschool key bij keurmerk-save");
+  }
+
+  const summary = deriveKeurmerkSummary(periods);
+  const now = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("sportscholen")
+    .update({
+      keurmerk_start: summary.current?.start ?? null,
+      keurmerk_einde: summary.current?.einde ?? null,
+      keurmerk_volgende_start: summary.future?.start ?? null,
+      keurmerk_volgende_einde: summary.future?.einde ?? null,
+      keurmerk_laatste_einde: summary.latestEnd,
+      keurmerk_periodes: summary.periods,
+      keurmerk_checked_at: now,
+      updated_at: now,
+    })
+    .eq("sportschool_id", key);
+
+  if (error) throw error;
+
+  return {
+    aantal: summary.periods.length,
+    current: summary.current,
+    future: summary.future,
+    latestEnd: summary.latestEnd,
+  };
+}
+
+async function scrapeKeurmerkDetails(page, sportschool) {
+  const key = normalizeSportschoolKey(sportschool?.sportschool_id);
+  if (!key) throw new Error("sportschoolKey ontbreekt voor DETAILS");
+
+  await openDetailsTile(page, key);
+
+  let result;
+  try {
+    const periods = await readKeurmerkPeriods(page, key);
+    result = await saveKeurmerkPeriods(key, periods);
+
+    console.log(`[sportscholen] ✅ ${key} keurmerk DETAILS opgeslagen`, {
+      sportschool: sportschool?.naam ?? null,
+      periodes: result.aantal,
+      huidig_einde: result.current?.einde ?? null,
+      volgende_start: result.future?.start ?? null,
+      volgende_einde: result.future?.einde ?? null,
+      laatste_einde: result.latestEnd ?? null,
+    });
+  } finally {
+    // Expliciet exact sluiten zoals FightPassport bedoeld heeft.
+    await closeDetailsExact(page, key);
+  }
+
+  return result;
+}
+
+
+async function scrapeSportschoolWithPage(page, browser, sportschool) {
+  const key = normalizeSportschoolKey(sportschool?.sportschool_id);
+
+  if (!key) {
+    throw new Error("sportschoolKey ontbreekt");
+  }
+
+  let downloadedExcelFile = null;
+
+  try {
+    await updateSportschoolSyncStatus(key, "bezig");
+
+    // De verse worker-page is al exact op #organisation/<key> bevestigd.
+    await waitForOrganisationPage(page, key, sportschool);
+
+    // 1) DETAILS -> alle keurmerkregels -> exact sluiten via #sluit_inr_detail.
+    const keurmerkResult = await scrapeKeurmerkDetails(page, sportschool);
+
+    // 2) Daarna VECHTERS op dezelfde organisation-page.
+    await waitForOrganisationPage(page, key, sportschool);
+    await openVechtersTile(page, key, sportschool);
+
+    downloadedExcelFile = await downloadVechtersExcel(page, browser, key);
+
+    const fighters = await parseVechtersExcel(downloadedExcelFile, sportschool);
+    const vaList = await saveSportschoolFighterLinks(key, fighters);
+
+    await updateSportschoolSyncStatus(key, "klaar");
+
+    console.log("✅ Sportschool volledig opgeslagen", {
+      sportschool: sportschool.naam,
+      sportschool_id: Number(key),
+      keurmerk_periodes: keurmerkResult?.aantal ?? 0,
+      aantal_vechters: vaList.length,
+    });
+
+    return {
+      vaList,
+      keurmerkResult,
+    };
+  } catch (err) {
+    await updateSportschoolSyncStatus(
+      key,
+      "mislukt",
+      err?.message ?? String(err)
+    ).catch(() => {});
+
+    console.error("❌ Sportschool scrape fout:", err?.stack ?? err);
+    throw err;
+  } finally {
+    await removeDownloadedExcel(downloadedExcelFile);
+
+    try {
+      await page.goto("about:blank", {
+        waitUntil: "domcontentloaded",
+        timeout: 10000,
+      });
+    } catch {}
+  }
+}
+
+export async function scraperFightcrew(sportschoolKey) {
+  const key = normalizeSportschoolKey(sportschoolKey);
+
+  if (!key) {
+    throw new Error("sportschoolKey ontbreekt");
+  }
+
+  const { data: sportschool, error } = await supabase
+    .from("sportscholen")
+    .select("*")
+    .eq("sportschool_id", Number(key))
+    .single();
+
+  if (error) throw error;
+
+  if (!sportschool) {
+    throw new Error(`Sportschool niet gevonden: ${key}`);
+  }
+
+  const { browser, page } = await loginFightPassport();
+
+  try {
+    return await scrapeSportschoolWithPage(page, browser, sportschool);
+  } finally {
+    try {
+      await browser.close();
+    } catch {}
+  }
+}
+
+
+async function createTeamSyncRun(totalSchools, tabCount) {
+  const now = new Date().toISOString();
+
+  // Nieuwe 3x10 sportscholen-run:
+  // de API-route bewaakt de volledige run al met de globale FightPassport scraper-lock.
+  // De drie deelprocessen mogen elkaars actieve runrecords dus NIET als stale/failed
+  // markeren. De oude team-scraper cleanup is hier bewust verwijderd.
+
+  const { data, error } = await supabase
+    .from("fightpassport_sync_runs")
+    .insert({
+      start_va: 1,
+      end_va: Math.max(1, Number(totalSchools) || 1),
+      run_type: "team",
+      status: "running",
+      processed_count: 0,
+      found_count: 0,
+      licensed_count: 0,
+      error_count: 0,
+      meta: {
+        kind: "sportscholen",
+        total_schools: Number(totalSchools) || 0,
+        succeeded: 0,
+        failed: 0,
+        fighter_links: 0,
+        tabs: tabCount,
+        pid: process.pid,
+        started_at: now,
+      },
+    })
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function upsertTeamSyncItem(runId, sportschool, patch = {}) {
+  if (!runId) return;
+
+  const sportschoolId = Number(sportschool?.sportschool_id);
+  if (!Number.isFinite(sportschoolId)) return;
+
+  const now = new Date().toISOString();
+
+  const payload = {
+    sync_run_id: runId,
+    sportschool_id: sportschoolId,
+    sportschool_naam: sportschool?.naam ?? null,
+    plaats: sportschool?.plaats ?? null,
+    status: patch.status ?? "running",
+    error_message: patch.error_message ?? null,
+    attempts: Number(patch.attempts ?? 1),
+    fighter_links: Number(patch.fighter_links ?? 0),
+    started_at: patch.started_at ?? now,
+    finished_at: patch.finished_at ?? null,
+    updated_at: now,
+  };
+
+  const { error } = await supabase
+    .from("fightpassport_team_sync_items")
+    .upsert(payload, {
+      onConflict: "sync_run_id,sportschool_id",
+    });
+
+  if (error) {
+    console.log(
+      `⚠️ Team-run item opslaan mislukt voor sportschool ${sportschoolId}:`,
+      error.message
+    );
+  }
+}
+
+async function updateTeamSyncRun(runId, {
+  totalSchools,
+  processed,
+  succeeded,
+  failed,
+  fighterLinks,
+  tabCount,
+  status = "running",
+  finishedAt = null,
+  errorMessage = null,
+}) {
+  if (!runId) return;
+
+  const { error } = await supabase
+    .from("fightpassport_sync_runs")
+    .update({
+      status,
+      processed_count: processed,
+      found_count: succeeded,
+      licensed_count: fighterLinks,
+      error_count: failed,
+      finished_at: finishedAt,
+      error_message: errorMessage,
+      last_processed_va: processed || null,
+      meta: {
+        kind: "sportscholen",
+        total_schools: totalSchools,
+        succeeded,
+        failed,
+        fighter_links: fighterLinks,
+        tabs: tabCount,
+        pid: status === "running" ? process.pid : null,
+        updated_at: new Date().toISOString(),
+      },
+    })
+    .eq("id", runId);
+
+  if (error) {
+    console.log("⚠️ Team-run voortgang opslaan mislukt:", error.message);
+  }
+}
+
+async function loadAllSportscholen() {
+  const allSchools = [];
   const pageSize = 1000;
   let from = 0;
 
   while (true) {
     const { data, error } = await supabase
       .from("sportscholen")
-      .select("sportschool_id")
+      .select(
+        "sportschool_id, naam, plaats, land, last_team_sync_at, team_sync_status, team_sync_error"
+      )
       .not("sportschool_id", "is", null)
       .order("sportschool_id", { ascending: true })
       .range(from, from + pageSize - 1);
@@ -456,131 +1923,638 @@ async function loadExistingSportschoolIds() {
     if (error) throw error;
 
     const batch = data ?? [];
-    ids.push(
-      ...batch
-        .map((row) => Number(row?.sportschool_id))
-        .filter(Number.isFinite)
-    );
+    allSchools.push(...batch);
+
+    console.log("🏫 Sportscholen uit database geladen", {
+      batch_vanaf: from,
+      batch_aantal: batch.length,
+      totaal_geladen: allSchools.length,
+    });
 
     if (batch.length < pageSize) break;
     from += pageSize;
   }
 
-  return ids;
+  return allSchools;
 }
 
-async function deleteStaleSportscholen(currentIds) {
-  // Veiligheidsstop: de normale FightPassport-lijst bevat duizenden sportscholen.
-  // Bij een kapotte of onvolledige Excel mag er absoluut niets verwijderd worden.
-  if (!Array.isArray(currentIds) || currentIds.length < 1000) {
-    throw new Error(
-      `Veiligheidsstop: slechts ${currentIds?.length ?? 0} actuele sportscholen gevonden; oude sportscholen worden niet verwijderd`
-    );
+export async function scraperFightcrewAll(options = {}) {
+  const failedOnly = options?.failedOnly === true;
+
+  const { data: schools, error } = await supabase
+    .from("sportscholen")
+    .select(
+      "sportschool_id, naam, plaats, land, team_sync_status, team_sync_error"
+    )
+    .order("sportschool_id", { ascending: true });
+
+  if (error) throw error;
+
+  const tabsRaw = Number(
+    process.env.FP_SPORTSCHOLEN_WORKERS ??
+    process.env.WORKERS ??
+    "10"
+  );
+
+  const tabCount =
+    Number.isFinite(tabsRaw) && tabsRaw > 0
+      ? Math.min(20, Math.max(1, Math.floor(tabsRaw)))
+      : 10;
+
+  const baseSchoolList = EXPLICIT_SCHOOL_KEY_SET.size > 0
+    ? (schools ?? []).filter((sportschool) =>
+        EXPLICIT_SCHOOL_KEY_SET.has(normalizeSportschoolKey(sportschool?.sportschool_id))
+      )
+    : (schools ?? []);
+
+  const schoolList = failedOnly
+    ? baseSchoolList.filter((sportschool) => {
+        const status = String(sportschool?.team_sync_status ?? "").trim().toLowerCase();
+        return status === "fout" || status === "mislukt";
+      })
+    : baseSchoolList;
+
+  if (failedOnly) {
+    console.log("🔁 Alleen mislukte sportscholen opnieuw verwerken", {
+      aantal: schoolList.length,
+      statuses: ["fout", "mislukt"],
+    });
   }
 
-  const currentSet = new Set(currentIds.map(Number));
-  const existingIds = await loadExistingSportschoolIds();
-  const staleIds = existingIds.filter((id) => !currentSet.has(Number(id)));
+  const results = [];
+  let processedCount = 0;
+  let succeededCount = 0;
+  let failedCount = 0;
+  let fighterLinksCount = 0;
 
-  if (!staleIds.length) {
-    console.log("✅ Geen vervallen sportschool-IDs gevonden");
+  const teamRun = await createTeamSyncRun(schoolList.length, tabCount);
+
+  console.log(
+    failedOnly
+      ? "🔁 Herkansing mislukte sportscholen gestart"
+      : "🏫 Volledige sportscholenscrape gestart",
+    {
+      gevonden_sportscholen: schoolList.length,
+      browsers: 1,
+      parallelle_tabs: tabCount,
+      max_pogingen_per_sportschool: 2,
+      doel: "DETAILS keurmerk + VECHTERS Excel",
+      worker_model: "EXACT Total worker/session/retry model",
+    }
+  );
+
+  if (!schoolList.length) {
+    await updateTeamSyncRun(teamRun.id, {
+      totalSchools: 0,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      fighterLinks: 0,
+      tabCount,
+      status: "completed",
+      finishedAt: new Date().toISOString(),
+    });
     return [];
   }
 
-  console.log("🗑️ Vervallen sportschool-IDs worden verwijderd", {
-    aantal: staleIds.length,
-    ids: staleIds,
+  // EXACT Total-model: schone master-sessie, trusted-device herkenning via login-helper,
+  // oude PHPSESSID niet hergebruiken, niets naar disk schrijven.
+  let { browser, page: masterPage } = await loginFightPassport({
+    freshSession: true,
+    saveCookiesToDisk: false,
   });
 
-  // In kleine batches verwijderen om URL/query-limieten van PostgREST te vermijden.
-  const batchSize = 100;
+  // Eén browserbrede fallback per child-proces.
+  // Worker-downloads houden hun eigen downloads/<school_uuid>-map.
+  let browserDownloadFallbackDir = await setBrowserDownloadFallback(browser);
 
-  for (let i = 0; i < staleIds.length; i += batchSize) {
-    const batch = staleIds.slice(i, i + batchSize);
+  let browserGeneration = 1;
+  let browserRestartPromise = null;
 
-    const { error } = await supabase
-      .from("sportscholen")
-      .delete()
-      .in("sportschool_id", batch);
+  let cookies = [];
+  try {
+    cookies = await masterPage.cookies();
+  } catch {}
 
-    if (error) throw error;
+  console.log(
+    "[sportscholen] ✅ Schone master-sessie gestart; workers delen browser + actuele sessiecookies"
+  );
+
+  function isBrowserConnectionError(message) {
+    return /Connection closed|Target closed|Session closed|Protocol error|browser has disconnected|Not connected to DevTools/i.test(
+      String(message || "")
+    );
   }
 
-  console.log("✅ Vervallen sportscholen verwijderd", {
-    aantal: staleIds.length,
-  });
+  async function restartBrowserLocked(reason = "") {
+    if (browserRestartPromise) {
+      await browserRestartPromise;
+      return browserGeneration;
+    }
 
-  return staleIds;
-}
+    browserRestartPromise = (async () => {
+      console.log(
+        `[sportscholen] 🔄 volledige browser opnieuw starten ${
+          reason ? `(${reason})` : ""
+        }`
+      );
 
-async function saveToSupabase(data) {
-  const aliases = await loadSportschoolAliases();
-  const canonicalData = canonicalizeSportscholen(data, aliases);
+      cleanupBrowserDownloadFallback(browserDownloadFallbackDir);
+      browserDownloadFallbackDir = null;
 
-  console.log("🔗 Sportschool-aliassen toegepast", {
-    bron_rijen: data?.length ?? 0,
-    aliasregels: aliases.length,
-    unieke_canonieke_sportscholen: canonicalData.length,
-  });
+      try { await masterPage?.close(); } catch {}
+      try { await browser?.close(); } catch {}
 
-  // Eerst de actuele lijst volledig en succesvol opslaan.
-  const { error } = await supabase.from("sportscholen").upsert(canonicalData, {
-    onConflict: "sportschool_id",
-  });
+      const fresh = await loginFightPassport({
+        freshSession: true,
+        saveCookiesToDisk: false,
+      });
 
-  if (error) {
-    throw error;
+      browser = fresh.browser;
+      masterPage = fresh.page;
+      browserDownloadFallbackDir = await setBrowserDownloadFallback(browser);
+
+      try {
+        cookies = await masterPage.cookies();
+      } catch {
+        cookies = [];
+      }
+
+      browserGeneration++;
+
+      console.log(
+        `[sportscholen] ✅ browser hersteld; generatie ${browserGeneration}`
+      );
+
+      return browserGeneration;
+    })();
+
+    try {
+      return await browserRestartPromise;
+    } finally {
+      browserRestartPromise = null;
+    }
   }
 
-  console.log("✅ Sportscholen opgeslagen in Supabase");
+  let masterRefreshPromise = null;
 
-  // Pas NA een geslaagde upsert oude IDs verwijderen die niet meer in de
-  // actuele, reeds gecanonicaliseerde FightPassport-lijst voorkomen.
-  const currentIds = canonicalData
-    .map((row) => Number(row?.sportschool_id))
-    .filter(Number.isFinite);
+  async function refreshMasterSessionLocked(reason = "") {
+    if (masterRefreshPromise) {
+      try { await masterRefreshPromise; } catch {}
+      return cookies;
+    }
 
-  const staleIds = await deleteStaleSportscholen(currentIds);
+    masterRefreshPromise = (async () => {
+      console.log(
+        `[sportscholen] 🔁 master ensureLoggedIn(force) start ${
+          reason ? `(${reason})` : ""
+        }`
+      );
 
-  return {
-    ok: true,
-    opgeslagen: canonicalData.length,
-    verwijderd: staleIds.length,
-  };
-}
+      await ensureLoggedIn(masterPage, {
+        force: true,
+        saveCookiesToDisk: false,
+        useStoredCookies: false,
+      });
 
-//////////////////////////////////////////////////////////////
-// 4. MAIN SCRAPER
-//////////////////////////////////////////////////////////////
-export async function scraperSportscholen() {
-  console.log("🏁 START: Sportscholen-scraper");
+      try {
+        cookies = await masterPage.cookies();
+      } catch {}
 
-  const { browser, page } = await loginFightPassport();
+      console.log("[sportscholen] ✅ master refreshed (cookies updated)");
+      return cookies;
+    })();
+
+    try {
+      return await masterRefreshPromise;
+    } finally {
+      masterRefreshPromise = null;
+    }
+  }
+
+  // Exact dezelfde defaults als huidige Total-route.
+  const STAGGER = Math.max(
+    0,
+    Number(
+      process.env.STAGGER_MS ??
+      process.env.FP_SPORTSCHOLEN_STAGGER_MS ??
+      "2500"
+    )
+  );
+
+  const WORKER_DRIFT_MAX_MS = Math.max(
+    0,
+    Number(process.env.FP_SPORTSCHOLEN_WORKER_DRIFT_MAX_MS ?? "250")
+  );
+
+  const TAB_ATTEMPTS = Math.max(
+    1,
+    Number(process.env.TAB_ATTEMPTS ?? "3")
+  );
+
+  const SOFT_WAIT_MS = Math.max(
+    0,
+    Number(process.env.SOFT_WAIT_MS ?? "1500")
+  );
+
+  const BETWEEN_ATTEMPTS_MS = Math.max(
+    0,
+    Number(process.env.BETWEEN_ATTEMPTS_MS ?? "700")
+  );
+
+  let idx = 0;
+  let activeAttempts = 0;
+
+  // Exact Total-gedrag: een fout item achteraan opnieuw plannen.
+  const schoolQueue = [...schoolList];
+
+  const loginRetryCounts = new Map();
+  const MAX_LOGIN_RETRIES_PER_SCHOOL = Math.max(
+    1,
+    Number(process.env.FP_SPORTSCHOLEN_LOGIN_RETRIES ?? "1")
+  );
+
+  const transientRetryCounts = new Map();
+  const MAX_TRANSIENT_RETRIES_PER_SCHOOL = Math.max(
+    0,
+    Number(process.env.FP_SPORTSCHOLEN_TRANSIENT_RETRIES ?? "1")
+  );
+
+  async function finalizeProgress() {
+    await updateTeamSyncRun(teamRun.id, {
+      totalSchools: schoolList.length,
+      processed: processedCount,
+      succeeded: succeededCount,
+      failed: failedCount,
+      fighterLinks: fighterLinksCount,
+      tabCount,
+    });
+  }
+
+  async function requeueTransientSchool(sportschool, label, reason) {
+    const key = normalizeSportschoolKey(sportschool?.sportschool_id);
+    const retryNr = (transientRetryCounts.get(key) || 0) + 1;
+
+    if (retryNr > MAX_TRANSIENT_RETRIES_PER_SCHOOL) {
+      return false;
+    }
+
+    transientRetryCounts.set(key, retryNr);
+
+    await updateSportschoolSyncStatus(
+      key,
+      "bezig",
+      `Tijdelijke fout; volledig verse poging ${
+        retryNr + 1
+      }/${MAX_TRANSIENT_RETRIES_PER_SCHOOL + 1}. Oorzaak: ${reason}`
+    ).catch(() => {});
+
+    schoolQueue.push(sportschool);
+
+    console.log(
+      `[sportscholen] ♻️ ${label} sportschool ${key} achteraan opnieuw ingepland ` +
+      `(verse poging ${retryNr + 1}/${MAX_TRANSIENT_RETRIES_PER_SCHOOL + 1}): ${reason}`
+    );
+
+    return true;
+  }
+
+  async function markPermanentFailure(sportschool, message, startedAt) {
+    const key = normalizeSportschoolKey(sportschool?.sportschool_id);
+
+    await updateSportschoolSyncStatus(key, "fout", message).catch(() => {});
+
+    await upsertTeamSyncItem(teamRun.id, sportschool, {
+      status: "error",
+      attempts:
+        (transientRetryCounts.get(key) || 0) +
+        (loginRetryCounts.get(key) || 0) +
+        1,
+      fighter_links: 0,
+      error_message: message,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+    });
+
+    results.push({
+      sportschool_id: Number(key),
+      sportschool_naam: sportschool?.naam ?? null,
+      ok: false,
+      error: message,
+    });
+
+    processedCount++;
+    failedCount++;
+    await finalizeProgress();
+  }
+
+  async function workerLoop(workerIdx) {
+    const workerStartDelay = workerIdx * STAGGER;
+    if (workerStartDelay > 0) {
+      await sleep(workerStartDelay);
+    }
+
+    // Exact Total: worker is alleen async taakverdeler.
+    // Geen eigen incognito/browsercontext; iedere sportschool krijgt een verse page.
+    while (true) {
+      if (idx >= schoolQueue.length) {
+        if (activeAttempts > 0) {
+          await sleep(100);
+          continue;
+        }
+        break;
+      }
+
+      const myIdx = idx++;
+      if (myIdx >= schoolQueue.length) {
+        await sleep(50);
+        continue;
+      }
+
+      activeAttempts++;
+
+      const sportschool = schoolQueue[myIdx];
+      const key = normalizeSportschoolKey(sportschool?.sportschool_id);
+      const label = `worker${workerIdx + 1}/${tabCount}`;
+      const startedAt = new Date().toISOString();
+      const schoolBrowserGeneration = browserGeneration;
+
+      let page = null;
+
+      try {
+        if (!key) {
+          throw new Error("Ongeldige sportschool_id");
+        }
+
+        console.log(
+          `🏫 [sportscholen] 🤖 ${label} → sportschool ${key} (${sportschool?.naam ?? "-"})`
+        );
+
+        await upsertTeamSyncItem(teamRun.id, sportschool, {
+          status: "running",
+          attempts:
+            (transientRetryCounts.get(key) || 0) +
+            (loginRetryCounts.get(key) || 0) +
+            1,
+          fighter_links: 0,
+          error_message: null,
+          started_at: startedAt,
+          finished_at: null,
+        });
+
+        // EXACT Total-navigationmodel: verse page, actuele mastercookies,
+        // retry-parameters vanuit dezelfde env/defaults als Total.
+        page = await openTabToOrganisationVerified(
+          browser,
+          null,
+          cookies,
+          key,
+          sportschool,
+          {
+            maxAttempts: TAB_ATTEMPTS,
+            softWaitMs: SOFT_WAIT_MS,
+            betweenAttemptsMs: BETWEEN_ATTEMPTS_MS,
+            workerLabel: `[${label}]`,
+          }
+        );
+
+        if (!page) {
+          const requeued = await requeueTransientSchool(
+            sportschool,
+            label,
+            "organisation-url/profiel niet betrouwbaar geopend"
+          );
+
+          if (requeued) {
+            continue;
+          }
+
+          throw new Error(
+            `Na ${MAX_TRANSIENT_RETRIES_PER_SCHOOL + 1} volledig verse pogingen geen geldige organisation-page gevonden.`
+          );
+        }
+
+        const schoolResult = await scrapeSportschoolWithPage(
+          page,
+          browser,
+          sportschool
+        );
+
+        const vaList = schoolResult?.vaList ?? [];
+
+        loginRetryCounts.delete(key);
+        transientRetryCounts.delete(key);
+
+        results.push({
+          sportschool_id: Number(key),
+          sportschool_naam: sportschool?.naam ?? null,
+          ok: true,
+          count: vaList.length,
+          keurmerk_periodes: schoolResult?.keurmerkResult?.aantal ?? 0,
+        });
+
+        await upsertTeamSyncItem(teamRun.id, sportschool, {
+          status: "success",
+          attempts: 1,
+          fighter_links: vaList.length,
+          error_message: null,
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+        });
+
+        processedCount++;
+        succeededCount++;
+        fighterLinksCount += Number(vaList.length || 0);
+
+        await finalizeProgress();
+
+        console.log(
+          `[sportscholen] ✅ ${label} sportschool ${key} volledig klaar ` +
+          `(keurmerk=${schoolResult?.keurmerkResult?.aantal ?? 0}, vechters=${vaList.length})`
+        );
+      } catch (error) {
+        const message = error?.message ?? String(error);
+
+        if (message === "LOGIN_PAGE") {
+          await hardClosePage(page).catch(() => {});
+          page = null;
+
+          const retryNr = (loginRetryCounts.get(key) || 0) + 1;
+          loginRetryCounts.set(key, retryNr);
+
+          if (retryNr <= MAX_LOGIN_RETRIES_PER_SCHOOL) {
+            console.log(
+              `[sportscholen] 🔐 ${label} LOGIN_PAGE bij sportschool ${key}; ` +
+              `verse page dicht → alleen master-login herstellen ` +
+              `(herstel ${retryNr}/${MAX_LOGIN_RETRIES_PER_SCHOOL})`
+            );
+
+            try {
+              await refreshMasterSessionLocked(
+                `LOGIN_PAGE from ${label} sportschool ${key}`
+              );
+
+              // Exact Total: hetzelfde item achteraan; volgende poging is volledig verse page.
+              schoolQueue.push(sportschool);
+            } catch (loginError) {
+              await markPermanentFailure(
+                sportschool,
+                loginError?.message ?? String(loginError),
+                startedAt
+              );
+            }
+          } else {
+            await markPermanentFailure(
+              sportschool,
+              `LOGIN_PAGE bleef terugkomen na ${MAX_LOGIN_RETRIES_PER_SCHOOL} herstelpoging(en).`,
+              startedAt
+            );
+          }
+        } else if (isBrowserConnectionError(message)) {
+          await hardClosePage(page).catch(() => {});
+          page = null;
+
+          try {
+            if (schoolBrowserGeneration === browserGeneration) {
+              await restartBrowserLocked(`${label} sportschool ${key}`);
+            } else {
+              console.log(
+                `[sportscholen] ♻️ ${label} gebruikte oude browsergeneratie ${schoolBrowserGeneration}; ` +
+                `actuele generatie is ${browserGeneration}. Geen extra browserherstart.`
+              );
+            }
+
+            const requeued = await requeueTransientSchool(
+              sportschool,
+              label,
+              `browserverbinding hersteld: ${message}`
+            );
+
+            if (!requeued) {
+              await markPermanentFailure(
+                sportschool,
+                `Browserverbinding bleef fout na ${
+                  MAX_TRANSIENT_RETRIES_PER_SCHOOL + 1
+                } verse pogingen: ${message}`,
+                startedAt
+              );
+            }
+          } catch (restartError) {
+            await markPermanentFailure(
+              sportschool,
+              restartError?.message ?? String(restartError),
+              startedAt
+            );
+          }
+        } else {
+          const requeued = await requeueTransientSchool(
+            sportschool,
+            label,
+            message
+          );
+
+          if (!requeued) {
+            await markPermanentFailure(sportschool, message, startedAt);
+
+            console.error(
+              `[sportscholen] ❌ ${label} sportschool ${key}: ${message}`
+            );
+          }
+        }
+      } finally {
+        if (page) {
+          await hardClosePage(page).catch(() => {});
+        }
+
+        activeAttempts = Math.max(0, activeAttempts - 1);
+
+        if (WORKER_DRIFT_MAX_MS > 0) {
+          const n = Number(key) || 0;
+          const driftMs =
+            ((workerIdx + 1) * 37 + (n % 97)) %
+            (WORKER_DRIFT_MAX_MS + 1);
+
+          if (driftMs > 0) {
+            await sleep(driftMs);
+          }
+        }
+      }
+    }
+  }
 
   try {
-    await waitForDashboard(page);
-    await clickSportscholenTile(page);
-
-    const file = await downloadExcel(page, browser);
-    const parsed = await parseExcel(file);
-
-    await saveToSupabase(parsed);
-
-    console.log("🎉 Sportscholen scrape compleet!");
-  } catch (err) {
-    console.log("❌ Fout:", err.message);
-    // laat hem falen zodat je API route 500 kan geven
-    throw err;
+    await Promise.all(
+      Array.from({ length: Math.min(tabCount, Math.max(1, schoolList.length)) }, (_, i) =>
+        workerLoop(i)
+      )
+    );
   } finally {
-    await browser.close();
+    cleanupBrowserDownloadFallback(browserDownloadFallbackDir);
+    browserDownloadFallbackDir = null;
+
+    try { await masterPage?.close(); } catch {}
+    try { await browser?.close(); } catch {}
   }
+
+  const succeeded = results.filter((row) => row.ok).length;
+  const failed = results.filter((row) => !row.ok).length;
+  const fighters = results
+    .filter((row) => row.ok)
+    .reduce((sum, row) => sum + Number(row.count || 0), 0);
+
+  await updateTeamSyncRun(teamRun.id, {
+    totalSchools: schoolList.length,
+    processed: processedCount,
+    succeeded: succeededCount,
+    failed: failedCount,
+    fighterLinks: fighterLinksCount,
+    tabCount,
+    status: "completed",
+    finishedAt: new Date().toISOString(),
+  });
+
+  console.log(
+    failedOnly
+      ? "✅ Herkansing mislukte sportscholen afgerond"
+      : "✅ Volledige sportscholenscrape afgerond",
+    {
+      totaal_sportscholen: schoolList.length,
+      geslaagd: succeeded,
+      mislukt: failed,
+      totaal_vechters_verwerkt: fighters,
+      browsers: 1,
+      parallelle_tabs: tabCount,
+      sync_run_id: teamRun.id,
+      worker_model: "EXACT Total worker/session/retry model",
+    }
+  );
+
+  return results;
 }
 
-if (["run", "run-all"].includes(process.argv[2])) {
-  scraperSportscholen()
+if (process.argv[2] === "run") {
+  scraperFightcrew(process.argv[3])
     .then(() => process.exit(0))
-    .catch((error) => {
-      console.error(error?.stack ?? error);
+    .catch((e) => {
+      console.error(e?.stack ?? e);
+      process.exit(1);
+    });
+}
+
+if (process.argv[2] === "run-all") {
+  scraperFightcrewAll()
+    .then(() => process.exit(0))
+    .catch((e) => {
+      console.error(e?.stack ?? e);
+      process.exit(1);
+    });
+}
+
+if (process.argv[2] === "run-errors") {
+  scraperFightcrewAll({ failedOnly: true })
+    .then(() => process.exit(0))
+    .catch((e) => {
+      console.error(e?.stack ?? e);
       process.exit(1);
     });
 }

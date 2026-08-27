@@ -546,8 +546,13 @@ function HeaderBadge({
     | "gray"
     | "green"
     | "white"
+    | "purple"
     | "blue"
-    | "purple";
+    | "pink"
+    | "indigo"
+    | "teal"
+    | "cyan"
+    | "rose";
 }) {
   const cls =
     tone === "red"
@@ -562,6 +567,16 @@ function HeaderBadge({
               ? "bg-blue-700 text-white"
               : tone === "purple"
                 ? "bg-purple-700 text-white"
+                : tone === "pink"
+                  ? "bg-pink-600 text-white"
+                  : tone === "indigo"
+                    ? "bg-indigo-600 text-white"
+                    : tone === "teal"
+                      ? "bg-teal-600 text-white"
+                      : tone === "cyan"
+                        ? "bg-cyan-600 text-white"
+                        : tone === "rose"
+                          ? "bg-rose-600 text-white"
                 : tone === "white"
                   ? "bg-white/90 text-black"
                   : "bg-gray-500 text-zinc-900";
@@ -589,7 +604,12 @@ function Chip({
     | "green"
     | "white"
     | "purple"
-    | "blue";
+    | "blue"
+    | "pink"
+    | "indigo"
+    | "teal"
+    | "cyan"
+    | "rose";
 }) {
   const cls =
     tone === "red"
@@ -604,6 +624,16 @@ function Chip({
               ? "bg-purple-700 text-white"
               : tone === "blue"
                 ? "bg-blue-700 text-white"
+                : tone === "pink"
+                  ? "bg-pink-600 text-white"
+                  : tone === "indigo"
+                    ? "bg-indigo-600 text-white"
+                    : tone === "teal"
+                      ? "bg-teal-600 text-white"
+                      : tone === "cyan"
+                        ? "bg-cyan-600 text-white"
+                        : tone === "rose"
+                          ? "bg-rose-600 text-white"
                 : tone === "white"
                   ? "bg-white/90 text-black"
                   : "bg-gray-500 text-zinc-900";
@@ -629,53 +659,35 @@ function StatusBadge({ status }: { status: PartijStatus }) {
 
 type DispDecisionStatus = "pending" | "approved" | "rejected";
 
-
-function normalizeDispIdentityText(value: any): string {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
-
-function normalizeDispEventDate(value: any): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (m) return m[1];
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return raw.toLowerCase();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function normalizeDispVa(value: any): string {
   return String(value ?? "").trim().toUpperCase();
 }
 
 function dispIdentityKey(args: {
   matchmakingId: any;
+  boutId?: any;
   vaRood: any;
   vaBlauw: any;
-  eventNaam: any;
-  eventDatum: any;
 }): string | null {
   const matchmaking = String(args.matchmakingId ?? "").trim();
+  if (!matchmaking) return null;
+
   const pair = [normalizeDispVa(args.vaRood), normalizeDispVa(args.vaBlauw)]
     .filter(Boolean)
     .sort();
-  const eventNaam = normalizeDispIdentityText(args.eventNaam);
-  const eventDatum = normalizeDispEventDate(args.eventDatum);
-  if (!matchmaking || pair.length !== 2 || !eventNaam || !eventDatum) return null;
-  return [matchmaking, pair[0], pair[1], eventNaam, eventDatum].join("|");
+
+  // De twee VA-nummers zijn leidend: een nieuwe controlerun of gewijzigd
+  // partij_nr verbreekt de dispensatiekoppeling niet, maar een andere vechter wel.
+  if (pair.length === 2) return `${matchmaking}|va:${pair[0]}|${pair[1]}`;
+
+  const boutId = String(args.boutId ?? "").trim();
+  return boutId ? `${matchmaking}|bout:${boutId}` : null;
 }
 
-function dispIdentityFromContext(
-  matchmakingId: any,
-  row: AnyRow,
-  fallbackEventNaam?: any,
-  fallbackEventDatum?: any,
-): string | null {
+function dispIdentityFromContext(matchmakingId: any, row: AnyRow): string | null {
   return dispIdentityKey({
     matchmakingId,
+    boutId: row?.bout_id,
     vaRood: firstFilled(
       row?.rood_va_mm,
       row?.rood_va_fp,
@@ -692,27 +704,38 @@ function dispIdentityFromContext(
       row?.blauw_va_nummer,
       row?.blauw_fighter_id,
     ),
-    eventNaam: firstFilled(row?.evenement_naam, row?.event_naam, fallbackEventNaam),
-    eventDatum: firstFilled(row?.evenement_datum, row?.event_datum, fallbackEventDatum),
   });
 }
 
 function dispIdentityFromRequest(request: AnyRow): string | null {
   return dispIdentityKey({
     matchmakingId: request?.matchmaking_id,
+    boutId: request?.bout_id,
     vaRood: request?.va_rood,
     vaBlauw: request?.va_blauw,
-    eventNaam: firstFilled(request?.evenement_naam, request?.event_naam),
-    eventDatum: firstFilled(request?.evenement_datum, request?.event_datum),
   });
 }
 
 function normalizeDispDecision(row: AnyRow | null | undefined): DispDecisionStatus {
   const raw = String(
-    row?.decision ?? row?.beslissing ?? row?.besluit ?? row?.final_decision ?? row?.status ?? "",
-  ).trim().toLowerCase();
-  if (["approved", "approve", "goedgekeurd", "akkoord", "accepted", "geaccepteerd"].includes(raw)) return "approved";
-  if (["rejected", "reject", "afgewezen", "afgekeurd", "denied", "declined"].includes(raw)) return "rejected";
+    row?.decision ??
+      row?.beslissing ??
+      row?.besluit ??
+      row?.final_decision ??
+      row?.status ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+
+  if (
+    ["approved", "approve", "goedgekeurd", "akkoord", "accepted", "geaccepteerd"].includes(raw)
+  )
+    return "approved";
+  if (
+    ["rejected", "reject", "afgewezen", "afgekeurd", "denied", "declined"].includes(raw)
+  )
+    return "rejected";
   return "pending";
 }
 
@@ -724,9 +747,11 @@ function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
 }
 
 function DispDecisionBadge({ status }: { status: DispDecisionStatus }) {
-  if (status === "approved") return <Chip label="DISPENSATIE GOEDGEKEURD" tone="green" />;
-  if (status === "rejected") return <Chip label="DISPENSATIE AFGEWEZEN" tone="red" />;
-  return <Chip label="DISPENSATIE IN BEHANDELING" tone="orange" />;
+  if (status === "approved")
+    return <Chip label="DISPENSATIE GOEDGEKEURD" tone="teal" />;
+  if (status === "rejected")
+    return <Chip label="DISPENSATIE AFGEWEZEN" tone="rose" />;
+  return <Chip label="DISPENSATIE AANGEVRAAGD" tone="cyan" />;
 }
 
 function FilterButton({
@@ -750,7 +775,12 @@ function FilterButton({
     | "white"
     | "neutral"
     | "purple"
-    | "blue";
+    | "blue"
+    | "pink"
+    | "indigo"
+    | "teal"
+    | "cyan"
+    | "rose";
   disabled?: boolean;
 }) {
   const base =
@@ -769,6 +799,16 @@ function FilterButton({
               ? "bg-purple-700 text-white border-purple-700"
               : tone === "blue"
                 ? "bg-blue-700 text-white border-blue-700"
+                : tone === "pink"
+                  ? "bg-pink-600 text-white border-pink-600"
+                  : tone === "indigo"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : tone === "teal"
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : tone === "cyan"
+                        ? "bg-cyan-600 text-white border-cyan-600"
+                        : tone === "rose"
+                          ? "bg-rose-600 text-white border-rose-600"
                 : tone === "white"
                   ? "bg-white text-black border-white"
                   : tone === "gray"
@@ -788,6 +828,16 @@ function FilterButton({
               ? "bg-white text-purple-700 border-purple-700/60 hover:bg-purple-700/15"
               : tone === "blue"
                 ? "bg-white text-blue-700 border-blue-500/60 hover:bg-blue-500/15"
+                : tone === "pink"
+                  ? "bg-white text-pink-700 border-pink-500/60 hover:bg-pink-500/15"
+                  : tone === "indigo"
+                    ? "bg-white text-indigo-700 border-indigo-500/60 hover:bg-indigo-500/15"
+                    : tone === "teal"
+                      ? "bg-white text-teal-700 border-teal-500/60 hover:bg-teal-500/15"
+                      : tone === "cyan"
+                        ? "bg-white text-cyan-700 border-cyan-500/60 hover:bg-cyan-500/15"
+                        : tone === "rose"
+                          ? "bg-white text-rose-700 border-rose-500/60 hover:bg-rose-500/15"
                 : tone === "white"
                   ? "bg-white text-zinc-900 border-zinc-400 hover:bg-zinc-100"
                   : tone === "gray"
@@ -1109,29 +1159,63 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
     }
 
     const deelnemers = fighterKeys.size;
-    const berekendePartijen = deelnemers >= 2 ? deelnemers - 1 : 0;
-    const fallbackPartijen = groupRows.length;
-    const partijCount =
-      berekendePartijen > 0 ? berekendePartijen : fallbackPartijen;
+    const verwachtAantalPartijen = deelnemers >= 2 ? deelnemers - 1 : groupRows.length;
 
-    const eersteMetKlasse = groupRows.find(
-      (row) => String(row?.klasse_mm ?? row?.klasse ?? "").trim() !== "",
+    // Bestaande pairings tellen we individueel. Dat is belangrijk bij jeugd:
+    // beide vechters 16+ = 1,5 minuut rondes; zodra één vechter 15 of jonger is = 1 minuut rondes.
+    const pairingMinutes: number[] = [];
+    for (const row of groupRows) {
+      const klasse = String(row?.klasse_mm ?? row?.klasse ?? "").trim();
+      const discipline = String(row?.discipline ?? "").trim();
+      const match = matchKlasseDuur(klasse, discipline, row);
+      const label = match
+        ? `Toernooi ${toernooiKey} - ${match.label}`
+        : klasse
+          ? `Toernooi ${toernooiKey} (${klasse})`
+          : `Toernooi ${toernooiKey}`;
+
+      if (match) {
+        addBreakdown(label, 1, match.mins);
+        pairingMinutes.push(match.mins);
+      } else if (label) {
+        unknownSet.add(label);
+      }
+    }
+
+    // Bij een knock-outtoernooi zijn er altijd deelnemers - 1 partijen.
+    // Als een finale/latere ronde nog niet als pairing bestaat, reserveren we
+    // de langste reeds geldige partijduur zodat we de galaduur niet onderschatten.
+    const ontbrekendePartijen = Math.max(
+      0,
+      verwachtAantalPartijen - groupRows.length,
     );
-    const klasse = String(
-      eersteMetKlasse?.klasse_mm ?? eersteMetKlasse?.klasse ?? "",
-    ).trim();
-    const discipline = String(
-      eersteMetKlasse?.discipline ?? groupRows[0]?.discipline ?? "",
-    ).trim();
-    const match = matchKlasseDuur(klasse, discipline, eersteMetKlasse ?? groupRows[0]);
-    const label = match
-      ? `Toernooi ${toernooiKey} - ${match.label}`
-      : klasse
-        ? `Toernooi ${toernooiKey} (${klasse})`
-        : `Toernooi ${toernooiKey}`;
 
-    if (match) addBreakdown(label, partijCount, match.mins);
-    else if (label) unknownSet.add(label);
+    if (ontbrekendePartijen > 0) {
+      const fallbackMins =
+        pairingMinutes.length > 0 ? Math.max(...pairingMinutes) : null;
+      const eersteMetKlasse = groupRows.find(
+        (row) => String(row?.klasse_mm ?? row?.klasse ?? "").trim() !== "",
+      );
+      const klasse = String(
+        eersteMetKlasse?.klasse_mm ?? eersteMetKlasse?.klasse ?? "",
+      ).trim();
+      const discipline = String(
+        eersteMetKlasse?.discipline ?? groupRows[0]?.discipline ?? "",
+      ).trim();
+      const fallbackMatch =
+        fallbackMins == null
+          ? matchKlasseDuur(
+              klasse,
+              discipline,
+              eersteMetKlasse ?? groupRows[0],
+            )
+          : null;
+      const mins = fallbackMins ?? fallbackMatch?.mins ?? null;
+      const label = `Toernooi ${toernooiKey} - nog te bepalen ronde`;
+
+      addBreakdown(label, ontbrekendePartijen, mins);
+      if (mins == null) unknownSet.add(label);
+    }
   }
 
   return {
@@ -1142,71 +1226,126 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
   };
 }
 
-function buildGalaDuurFromMins(totalMins: number) {
-  const approvalMin = 390;
-  const maxMin = 510;
-  const needsApproval = totalMins > approvalMin;
-  const overMax = totalMins > maxMin;
+function getGalaDuurPolicy(
+  totalMins: number,
+  aantalUren: number | null,
+  evenementDatum: string | null,
+) {
+  const doelMinuten =
+    aantalUren != null && [6, 7, 8].includes(aantalUren)
+      ? aantalUren * 60
+      : null;
 
-  let extra = "";
-  if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
-  else if (needsApproval)
-    extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
-  else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
+  const eventDate = parseISODateOnly(evenementDatum);
+  const now = new Date();
+
+  // Er is alleen een evenementdatum beschikbaar, geen exacte aanvangstijd.
+  // Daarom geldt "1 dag voor het gala" vanaf 00:00 op de kalenderdag vóór het gala.
+  const binnenLaatsteDag = eventDate
+    ? now.getTime() >=
+      new Date(
+        eventDate.getFullYear(),
+        eventDate.getMonth(),
+        eventDate.getDate() - 1,
+        0,
+        0,
+        0,
+        0,
+      ).getTime()
+    : false;
+
+  const margeMinuten = binnenLaatsteDag ? 15 : 30;
+  const toegestaanTot =
+    doelMinuten == null ? null : doelMinuten + margeMinuten;
+  const overschrijding =
+    doelMinuten == null ? null : Math.max(0, totalMins - doelMinuten);
+
+  // Absolute eventgrens: boven 8,5 uur is altijd expliciete goedkeuring nodig,
+  // ook wanneer bij de matchmaking geen 6/7/8 uur is ingesteld.
+  const maxGalaMinuten = 8.5 * 60; // 510 minuten
+  const overMax = totalMins > maxGalaMinuten;
+  const bovenIngesteldeMarge =
+    toegestaanTot != null && totalMins > toegestaanTot;
+  const needsApproval = overMax || bovenIngesteldeMarge;
+
+  let statusText = "";
+  if (overMax && doelMinuten == null) {
+    statusText =
+      "⚠️ Langer dan 8,5 uur en geen galaduur ingesteld. Goedkeuring door hoofdofficial of superadmin vereist.";
+  } else if (overMax) {
+    statusText =
+      "⚠️ Langer dan de maximale galaduur van 8,5 uur. Goedkeuring door hoofdofficial of superadmin vereist.";
+  } else if (doelMinuten == null) {
+    statusText =
+      "Ingestelde galaduur ontbreekt. Kies bij de matchmaking 6, 7 of 8 uur.";
+  } else if (bovenIngesteldeMarge) {
+    statusText = `⚠️ ${formatDurationExact(
+      totalMins,
+    )} is meer dan ${margeMinuten} minuten boven de ingestelde ${aantalUren} uur. Goedkeuring door hoofdofficial of superadmin vereist.`;
+  } else if (totalMins > doelMinuten) {
+    statusText = `Binnen de toegestane marge: ${formatDurationExact(
+      totalMins,
+    )} bij ingesteld ${aantalUren} uur (maximaal +${margeMinuten} min ${
+      binnenLaatsteDag ? "vanaf 1 dag voor het gala" : "tot 1 dag voor het gala"
+    }).`;
+  } else {
+    statusText = `Binnen de ingestelde galaduur van ${aantalUren} uur.`;
+  }
 
   return {
     mins: totalMins,
+    aantalUren,
+    doelMinuten,
+    margeMinuten,
+    toegestaanTot,
+    overschrijding,
     needsApproval,
     overMax,
+    binnenLaatsteDag,
     text: `Geschatte gala-duur: ${formatDurationExact(totalMins)} (${String(
       Math.round(totalMins * 10) / 10,
-    ).replace(".", ",")} min). ${extra}`,
+    ).replace(".", ",")} min). ${statusText}`,
   };
+}
+
+function buildGalaDuurFromMins(
+  totalMins: number,
+  aantalUren: number | null,
+  evenementDatum: string | null,
+) {
+  return getGalaDuurPolicy(totalMins, aantalUren, evenementDatum);
 }
 
 function buildCompactRunMeldingen(
   runMeldingen: ResRow[],
-  galaDuurMinsOverride?: number,
+  galaDuurMinsOverride: number | undefined,
+  aantalUren: number | null,
+  evenementDatum: string | null,
 ): ResRow[] {
   const galaRows = (runMeldingen ?? []).filter(isGalaDuurRow);
   const rest = (runMeldingen ?? []).filter((r) => !isGalaDuurRow(r));
 
-  const mins: number | null =
-    galaDuurMinsOverride != null
-      ? galaDuurMinsOverride
-      : galaRows.length > 0
-        ? null
-        : null;
+  if (galaDuurMinsOverride == null && galaRows.length === 0) {
+    return runMeldingen ?? [];
+  }
 
-  if (mins === null && galaRows.length === 0) return runMeldingen ?? [];
+  if (galaDuurMinsOverride == null) {
+    return [galaRows[0], ...rest].filter(Boolean) as ResRow[];
+  }
 
-  const approvalMin = 390;
-  const maxMin = 510;
-  const needsApproval = mins != null ? mins > approvalMin : true;
-  const overMax = mins != null ? mins > maxMin : false;
-  const resultaat = overMax ? "afgekeurd" : needsApproval ? "actie" : "ok";
-
-  const compactMsg =
-    mins != null
-      ? `Geschatte gala-duur: ${formatDurationExact(mins)} (${String(
-          Math.round(mins * 10) / 10,
-        ).replace(".", ",")} min). ${
-          overMax
-            ? "Overschrijdt max 8.5 uur — AFKEUR."
-            : needsApproval
-              ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
-              : "Binnen 6.5 uur (geen goedkeuring nodig)."
-        }`
-      : (galaRows.find((r) => r?.boodschap)?.boodschap ??
-        "Gala-duur kon niet worden berekend.");
+  const policy = getGalaDuurPolicy(
+    galaDuurMinsOverride,
+    aantalUren,
+    evenementDatum,
+  );
 
   const merged: ResRow = {
     partij_nr: null,
     hoek: null,
     rule: "Gala tijdsduur",
     rule_code: "GALA_DUUR",
-    resultaat,
-    boodschap: compactMsg,
+    resultaat: policy.needsApproval ? "actie" : "ok",
+    boodschap: policy.text,
   };
 
   return [merged, ...rest];
@@ -2300,6 +2439,7 @@ export default function ControleMatchmakingPage() {
   const [run, setRun] = useState<ControleRun | null>(null);
   const [evenementNaam, setEvenementNaam] = useState<string | null>(null);
   const [evenementDatum, setEvenementDatum] = useState<string | null>(null);
+  const [aantalUren, setAantalUren] = useState<number | null>(null);
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [orderedRows, setOrderedRows] = useState<AnyRow[]>([]);
   const [lineupMode, setLineupMode] = useState(false);
@@ -2873,6 +3013,7 @@ export default function ControleMatchmakingPage() {
         setRun(null);
         setEvenementNaam(null);
         setEvenementDatum(null);
+        setAantalUren(null);
         setStatusByPartij({});
         setRunMeldingen([]);
         setHasDispByPartij({});
@@ -2886,7 +3027,7 @@ export default function ControleMatchmakingPage() {
       try {
         const { data: mm, error: mmErr } = await supabase
           .from("matchmakings")
-          .select("naam, datum, event_id")
+          .select("naam, datum, event_id, aantal_uren")
           .eq("id", matchmakingId)
           .maybeSingle();
 
@@ -2895,6 +3036,8 @@ export default function ControleMatchmakingPage() {
         let naam = String((mm as any)?.naam ?? "").trim() || null;
         let datum = String((mm as any)?.datum ?? "").trim() || null;
         const eventId = String((mm as any)?.event_id ?? "").trim() || null;
+        const urenRaw = Number((mm as any)?.aantal_uren);
+        setAantalUren([6, 7, 8].includes(urenRaw) ? urenRaw : null);
 
         if (eventId && (!naam || !datum)) {
           const { data: ev, error: evErr } = await supabase
@@ -2930,6 +3073,7 @@ export default function ControleMatchmakingPage() {
       } catch {
         setEvenementNaam(null);
         setEvenementDatum(null);
+        setAantalUren(null);
       }
 
       const { data: fetchedRunRows, error: runErr } = await supabase
@@ -3050,8 +3194,6 @@ export default function ControleMatchmakingPage() {
         const key = dispIdentityFromContext(
           matchmakingId,
           ctxRow,
-          resolvedEventNaam,
-          resolvedEventDatum,
         );
         if (!key) continue;
         const requests = dispRowsByIdentity[key] ?? [];
@@ -3228,9 +3370,14 @@ export default function ControleMatchmakingPage() {
   }, [rows]);
 
   const galaDuur = useMemo(() => {
-    if (galaDuurCalc) return buildGalaDuurFromMins(galaDuurCalc.totalMins);
+    if (galaDuurCalc)
+      return buildGalaDuurFromMins(
+        galaDuurCalc.totalMins,
+        aantalUren,
+        evenementDatum,
+      );
     return null;
-  }, [galaDuurCalc]);
+  }, [galaDuurCalc, aantalUren, evenementDatum]);
 
   const missingLicentieByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
@@ -3646,7 +3793,7 @@ export default function ControleMatchmakingPage() {
                   </span>
                   <DarkActionButton
                     label={
-                      headerBusy === "admin" ? "Bezig..." : "Stuur naar admin"
+                      headerBusy === "admin" ? "Bezig..." : "Stuur naar NVB"
                     }
                     tone="purple"
                     icon={<RotateCcw className="h-3.5 w-3.5" />}
@@ -3655,12 +3802,12 @@ export default function ControleMatchmakingPage() {
                     title={
                       lineupMode
                         ? "Sla eerst de lineup-volgorde op of annuleer."
-                        : "Stuur deze matchmaking naar admin voor controle."
+                        : "Stuur deze matchmaking naar de NVB voor controle."
                     }
                   />
                   <DarkActionButton
                     label={
-                      headerBusy === "bond" ? "Bezig..." : "Stuur naar bond"
+                      headerBusy === "bond" ? "Bezig..." : "Stuur naar Official"
                     }
                     tone="blue"
                     icon={<Send className="h-3.5 w-3.5" />}
@@ -3669,7 +3816,7 @@ export default function ControleMatchmakingPage() {
                     title={
                       lineupMode
                         ? "Sla eerst de lineup-volgorde op of annuleer."
-                        : "Stuur deze matchmaking naar de bond."
+                        : "Stuur deze matchmaking naar Official."
                     }
                   />
                 </div>
@@ -4007,7 +4154,13 @@ export default function ControleMatchmakingPage() {
                 </div>
 
                 {galaDuur?.text ? (
-                  <div className="rounded-xl border border-zinc-300 bg-white/80 overflow-hidden">
+                  <div
+                    className={`rounded-xl border overflow-hidden ${
+                      galaDuur.needsApproval
+                        ? "border-amber-500 bg-amber-50"
+                        : "border-emerald-300 bg-white/80"
+                    }`}
+                  >
                     <button
                       type="button"
                       onClick={() => setShowGalaBreakdown((v) => !v)}
@@ -4023,6 +4176,17 @@ export default function ControleMatchmakingPage() {
                       </div>
 
                       <div className="shrink-0 flex items-center gap-2">
+                        <span
+                          className={`px-2 py-1 rounded text-[11px] font-black ${
+                            galaDuur.needsApproval
+                              ? "bg-amber-300 text-amber-950"
+                              : "bg-emerald-500 text-emerald-950"
+                          }`}
+                        >
+                          {galaDuur.needsApproval
+                            ? "GOEDKEURING NODIG"
+                            : "DUUR OK"}
+                        </span>
                         <span className="text-xs text-zinc-600 font-semibold">
                           {showGalaBreakdown ? "Inklappen" : "Uitklappen"}
                         </span>
@@ -4037,6 +4201,14 @@ export default function ControleMatchmakingPage() {
                     {showGalaBreakdown ? (
                       <div className="border-t border-zinc-300 px-3 py-3 text-sm text-zinc-800">
                         <div>{galaDuur.text}</div>
+                        <div className="mt-2 text-xs font-semibold text-zinc-700">
+                          Ingesteld: {galaDuur.aantalUren ?? "-"} uur
+                          {galaDuur.toegestaanTot != null
+                            ? ` • grens nu: ${formatDurationExact(
+                                galaDuur.toegestaanTot,
+                              )} • marge: +${galaDuur.margeMinuten} min`
+                            : ""}
+                        </div>
 
                         {galaDuurCalc?.countsByKlasse &&
                         Object.keys(galaDuurCalc.countsByKlasse).length > 0 ? (
@@ -4241,7 +4413,7 @@ export default function ControleMatchmakingPage() {
                                 {groep.totaalBelgieCheck > 0 ? (
                                   <Chip
                                     label={`BELGIË CHECK ${groep.totaalBelgieCheck}`}
-                                    tone="blue"
+                                    tone="indigo"
                                   />
                                 ) : null}
                                 {isOpen ? (
@@ -4378,7 +4550,7 @@ export default function ControleMatchmakingPage() {
                                             {deelnemer.heeftBelgieCheck ? (
                                               <Chip
                                                 label="BELGIË CHECK"
-                                                tone="blue"
+                                                tone="indigo"
                                               />
                                             ) : null}
                                           </div>
@@ -4665,7 +4837,7 @@ export default function ControleMatchmakingPage() {
                                   {!!r?.__swapped_corners ? (
                                     <Chip
                                       label="HOEKEN GEWISSELD"
-                                      tone="orange"
+                                      tone="gray"
                                     />
                                   ) : null}
 

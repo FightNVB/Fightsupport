@@ -545,27 +545,14 @@ if (scopedPartijNr != null) {
 
   const vaList = [...vas];
 
+  // Total is de centrale FightPassport-bron. Geen per-matchmaking fighters_raw snapshot meer.
   const fighterByVa = new Map<string, any>();
   if (vaList.length > 0) {
-    const vaListAsNumbers = vaList
-      .map((v) => Number(v))
-      .filter((n) => Number.isFinite(n));
-
-    let fightersQ = supabaseAdmin
-      .from("fighters_raw")
+    const { data: fighters, error: fErr } = await supabaseAdmin
+      .from("fightpassport_fighters")
       .select("*")
-      .eq("matchmaking_id", matchmaking_id)
+      .in("va_nummer", vaList)
       .order("updated_at", { ascending: false });
-
-    // fighters_raw.va_nummer is bij jou numeriek. Numeriek zoeken voorkomt dat
-    // toernooi- en partijvechters niet verrijkt worden terwijl de scraper-row er wel is.
-    if (vaListAsNumbers.length > 0) {
-      fightersQ = fightersQ.in("va_nummer", vaListAsNumbers);
-    } else {
-      fightersQ = fightersQ.in("va_nummer", vaList);
-    }
-
-    const { data: fighters, error: fErr } = await fightersQ;
 
     if (fErr) throw fErr;
 
@@ -574,7 +561,7 @@ if (scopedPartijNr != null) {
       fighterByVa.set(va, row);
     }
 
-    console.log("[buildControleBoutContext] fighters loaded", {
+    console.log("[buildControleBoutContext] Total fighters loaded", {
       matchmaking_id,
       requested_vas: vaList.length,
       fighter_rows: fighters?.length ?? 0,
@@ -582,15 +569,44 @@ if (scopedPartijNr != null) {
     });
   }
 
+  // Actuele live-status is één actuele rij per matchmaking + VA.
+  // controle_run_id is hier bewust GEEN filter: controle_fighter_actueel
+  // betekent de laatst bekende live status voor deze matchmaking/vechter.
+  const liveFighterByVa = new Map<string, any>();
+  if (vaList.length > 0) {
+    const { data: liveRows, error: liveErr } = await supabaseAdmin
+      .from("controle_fighter_actueel")
+      .select(
+        "va_nummer,licentie_ok,startverbod_actief,sportschool,land,keurmerk_schild_gevonden,error_message,checked_at"
+      )
+      .eq("matchmaking_id", matchmaking_id)
+      .in("va_nummer", vaList)
+      .order("checked_at", { ascending: false });
+
+    if (liveErr) throw liveErr;
+
+    const newestLive = pickNewestByVa(liveRows ?? []);
+    for (const [va, row] of newestLive.entries()) {
+      if ((row as any)?.error_message) continue;
+      liveFighterByVa.set(va, row);
+    }
+
+    console.log("[buildControleBoutContext] actuele live-status loaded", {
+      matchmaking_id,
+      requested_vas: vaList.length,
+      live_rows: liveRows?.length ?? 0,
+      unique_live: liveFighterByVa.size,
+    });
+  }
+
+  // Uitslagenhistorie komt rechtstreeks uit de centrale Total-snapshot.
   const uitslagenByVa = new Map<string, any[]>();
   if (vaList.length > 0) {
     const { data: uitslagen, error: uErr } = await supabaseAdmin
-      .from("uitslagen_raw")
+      .from("fightpassport_results")
       .select("*")
-      .eq("matchmaking_id", matchmaking_id)
       .in("va_nummer", vaList)
-      .order("datum", { ascending: false })
-      .order("created_at", { ascending: false });
+      .order("datum", { ascending: false });
 
     if (uErr) throw uErr;
 
@@ -790,6 +806,8 @@ if (scopedPartijNr != null) {
 
     const fr = vaR ? fighterByVa.get(vaR) : null;
     const fb = vaB ? fighterByVa.get(vaB) : null;
+    const liveR = vaR ? liveFighterByVa.get(vaR) : null;
+    const liveB = vaB ? liveFighterByVa.get(vaB) : null;
 
     const currentClass = partij?.klasse ?? partij?.klasse_mm ?? null;
     const recRClass = buildClassAwareRecord(uitslagenR, currentClass);
@@ -856,7 +874,7 @@ if (scopedPartijNr != null) {
       evenement_naam: evenement_naam ?? null,
       evenement_datum: evenement_datum ?? null,
 
-      // Fightpaspoort/fighters_raw is de waarheid. MM-data blijft apart in *_mm.
+      // Total/fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
       rood_naam_fp: toNullableStr(fr?.naam),
       rood_geboortedatum_fp: fr?.geboortedatum
         ? toIsoDateOnly(fr.geboortedatum)
@@ -864,7 +882,7 @@ if (scopedPartijNr != null) {
       rood_geslacht: normGender(fr?.geslacht) ?? normGender(partij?.rood_geslacht),
       rood_leeftijd_event,
 
-      // Fightpaspoort/fighters_raw is de waarheid. MM-data blijft apart in *_mm.
+      // Total/fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
       blauw_naam_fp: toNullableStr(fb?.naam),
       blauw_geboortedatum_fp: fb?.geboortedatum
         ? toIsoDateOnly(fb.geboortedatum)
@@ -891,17 +909,29 @@ if (scopedPartijNr != null) {
       blauw_gewonnen_scrape:
         fb?.gewonnen ?? fb?.wins ?? fb?.gewonnen_scrape ?? null,
 
-      rood_licentie: fr?.licentie ?? null,
+      // Voor admin en officials zijn licentie en startverbod actueel.
+      // Alleen als er nog geen geldige live-row is vallen we terug op de centrale Total-snapshot.
+      rood_licentie:
+        typeof liveR?.licentie_ok === "boolean"
+          ? (liveR.licentie_ok ? "Ja" : "Nee")
+          : (typeof fr?.licentie_actief === "boolean" ? (fr.licentie_actief ? "Ja" : "Nee") : null),
       rood_heeft_startverbod:
-        toNullableBool(fr?.heeft_startverbod) ??
-        toNullableBool(fr?.startverbod_actief) ??
-        null,
+        typeof liveR?.startverbod_actief === "boolean"
+          ? liveR.startverbod_actief
+          : toNullableBool(fr?.heeft_startverbod) ??
+            toNullableBool(fr?.startverbod_actief) ??
+            null,
 
-      blauw_licentie: fb?.licentie ?? null,
+      blauw_licentie:
+        typeof liveB?.licentie_ok === "boolean"
+          ? (liveB.licentie_ok ? "Ja" : "Nee")
+          : (typeof fb?.licentie_actief === "boolean" ? (fb.licentie_actief ? "Ja" : "Nee") : null),
       blauw_heeft_startverbod:
-        toNullableBool(fb?.heeft_startverbod) ??
-        toNullableBool(fb?.startverbod_actief) ??
-        null,
+        typeof liveB?.startverbod_actief === "boolean"
+          ? liveB.startverbod_actief
+          : toNullableBool(fb?.heeft_startverbod) ??
+            toNullableBool(fb?.startverbod_actief) ??
+            null,
 
       rood_nulmeting_totaal: fr?.nulmeting_totaal ?? null,
       rood_nulmeting_opmerking: fr?.nulmeting_opmerking ?? null,
@@ -1367,28 +1397,16 @@ export async function buildToernooiContext(
     ),
   ];
 
-  // 4) Scrape-data ophalen uit fighters_raw.
+  // 4) Persoonsdata rechtstreeks uit de centrale Total-snapshot.
   const fighterByVa = new Map<string, any>();
 
   if (vaList.length > 0) {
-    const vaListAsNumbers = vaList
-      .map((v) => Number(v))
-      .filter((n) => Number.isFinite(n));
-
-    let fighterQuery = supabaseAdmin
-      .from("fighters_raw")
+    const { data: fighters, error: fightersErr } = await supabaseAdmin
+      .from("fightpassport_fighters")
       .select("*")
-      .eq("matchmaking_id", matchmaking_id)
+      .in("va_nummer", vaList)
       .order("updated_at", { ascending: false });
 
-    // In jouw fighters_raw is va_nummer numeriek. Daarom numeriek zoeken.
-    if (vaListAsNumbers.length > 0) {
-      fighterQuery = fighterQuery.in("va_nummer", vaListAsNumbers);
-    } else {
-      fighterQuery = fighterQuery.in("va_nummer", vaList);
-    }
-
-    const { data: fighters, error: fightersErr } = await fighterQuery;
     if (fightersErr) throw fightersErr;
 
     const newestFighters = pickNewestByVa(fighters ?? []);
@@ -1396,7 +1414,7 @@ export async function buildToernooiContext(
       fighterByVa.set(va, row);
     }
 
-    console.log("[buildToernooiContext] fighters loaded", {
+    console.log("[buildToernooiContext] Total fighters loaded", {
       matchmaking_id,
       requested_vas: vaList.length,
       fighter_rows: fighters?.length ?? 0,
@@ -1404,14 +1422,42 @@ export async function buildToernooiContext(
     });
   }
 
-  // 5) Uitslagen ophalen uit uitslagen_raw.
+  // Ook toernooideelnemers gebruiken de actuele live-status voor
+  // licentie/startverbod. De matchmaker-sportschool blijft leidend.
+  const liveFighterByVa = new Map<string, any>();
+  if (vaList.length > 0) {
+    const { data: liveRows, error: liveErr } = await supabaseAdmin
+      .from("controle_fighter_actueel")
+      .select(
+        "va_nummer,licentie_ok,startverbod_actief,sportschool,land,keurmerk_schild_gevonden,error_message,checked_at"
+      )
+      .eq("matchmaking_id", matchmaking_id)
+      .in("va_nummer", vaList)
+      .order("checked_at", { ascending: false });
+
+    if (liveErr) throw liveErr;
+
+    const newestLive = pickNewestByVa(liveRows ?? []);
+    for (const [va, row] of newestLive.entries()) {
+      if ((row as any)?.error_message) continue;
+      liveFighterByVa.set(va, row);
+    }
+
+    console.log("[buildToernooiContext] actuele live-status loaded", {
+      matchmaking_id,
+      requested_vas: vaList.length,
+      live_rows: liveRows?.length ?? 0,
+      unique_live: liveFighterByVa.size,
+    });
+  }
+
+  // 5) Uitslagen rechtstreeks uit de centrale Total-snapshot.
   const uitslagenByVa = new Map<string, any[]>();
 
   if (vaList.length > 0) {
     const { data: uitslagen, error: uitslagenErr } = await supabaseAdmin
-      .from("uitslagen_raw")
+      .from("fightpassport_results")
       .select("*")
-      .eq("matchmaking_id", matchmaking_id)
       .in("va_nummer", vaList)
       .order("datum", { ascending: false });
 
@@ -1464,6 +1510,7 @@ export async function buildToernooiContext(
 
     const rawSource = rawSourceByKey.get(`${tCode}:${va}`) ?? null;
     const fr = fighterByVa.get(va) ?? null;
+    const live = liveFighterByVa.get(va) ?? null;
     const uitslagen = uitslagenByVa.get(va) ?? [];
     const latestUitslag = latestUitslagByDatum(uitslagen);
 
@@ -1475,11 +1522,11 @@ export async function buildToernooiContext(
 
     // Toernooi-uitslagen worden NIET opnieuw naar controle_uitslagen gekopieerd.
     // buildControleBoutContext heeft dezelfde uitslagen voor deze matchmaking al uit
-    // uitslagen_raw gesnapshot. De UNIQUE constraint op controle_uitslagen kijkt niet
+    // fightpassport_results gesnapshot. De UNIQUE constraint op controle_uitslagen kijkt niet
     // naar controle_run_id/partij_nr/toernooi_code, dus opnieuw inserten vanuit
     // buildToernooiContext veroorzaakt 23505 duplicaten.
-    // Voor toernooi-records gebruiken we hieronder direct de rows uit uitslagen_raw
-    // via uitslagenByVa; uitslagen_raw blijft daarmee de waarheid.
+    // Voor toernooi-records gebruiken we hieronder direct de rows uit fightpassport_results
+    // via uitslagenByVa; fightpassport_results blijft daarmee de waarheid.
 
     const basisKlasse =
       row?.klasse_mm ??
@@ -1556,9 +1603,7 @@ export async function buildToernooiContext(
       sportschool:
         row?.sportschool ??
         rawSource?.sportschool ??
-        fr?.sportschool ??
-        fr?.sportschool_naam ??
-        latestUitslag?.sportschool ??
+                latestUitslag?.sportschool ??
         null,
       sportschool_mm:
         row?.sportschool_mm ??
@@ -1572,8 +1617,7 @@ export async function buildToernooiContext(
       gewicht:
         toNullableNumber(row?.gewicht) ??
         toNullableNumber(rawSource?.gewicht) ??
-        toNullableNumber(fr?.gewicht) ??
-        toNullableNumber(fr?.gewicht_kg) ??
+        toNullableNumber(fr?.nulmeting_gewicht) ??
         null,
 
       discipline:
@@ -1586,7 +1630,7 @@ export async function buildToernooiContext(
         row?.klasse ??
         rawSource?.klasse ??
         latestUitslag?.klasse ??
-        fr?.klasse ??
+        fr?.berekende_klasse ??
         fr?.nulmeting_klasse ??
         null,
       klasse_mm:
@@ -1595,12 +1639,17 @@ export async function buildToernooiContext(
         row?.klasse ??
         null,
 
-      licentie: fr?.licentie ?? row?.licentie ?? null,
+      licentie:
+        typeof live?.licentie_ok === "boolean"
+          ? (live.licentie_ok ? "Ja" : "Nee")
+          : (typeof fr?.licentie_actief === "boolean" ? (fr.licentie_actief ? "Ja" : "Nee") : row?.licentie ?? null),
       heeft_startverbod:
-        toNullableBool(fr?.heeft_startverbod) ??
-        toNullableBool(fr?.startverbod_actief) ??
-        toNullableBool(row?.heeft_startverbod) ??
-        null,
+        typeof live?.startverbod_actief === "boolean"
+          ? live.startverbod_actief
+          : toNullableBool(fr?.heeft_startverbod) ??
+            toNullableBool(fr?.startverbod_actief) ??
+            toNullableBool(row?.heeft_startverbod) ??
+            null,
 
       nulmeting_totaal: fr?.nulmeting_totaal ?? row?.nulmeting_totaal ?? null,
       nulmeting_klasse: fr?.nulmeting_klasse ?? row?.nulmeting_klasse ?? null,

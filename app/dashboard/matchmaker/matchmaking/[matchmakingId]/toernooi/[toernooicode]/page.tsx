@@ -599,37 +599,56 @@ export default function ToernooiDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.14),transparent_28%),linear-gradient(180deg,#181514_0%,#0b0b0c_42%,#030303_100%)] p-3 text-white md:p-5">
-      <div className="mx-auto max-w-7xl space-y-4">
-        <header className="overflow-hidden rounded-[24px] border-[5px] border-[#d9d6d0] bg-[linear-gradient(135deg,#25211d,#101010_52%,#050505)] shadow-[0_0_0_1px_#5a534d,0_0_0_5px_rgba(255,255,255,0.18),0_20px_55px_rgba(0,0,0,0.82),inset_0_2px_0_rgba(255,255,255,0.44)]">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3 md:px-5">
-            <div>
-              <div className="text-[11px] font-black uppercase tracking-[0.24em] text-orange-200/90">
-                FightSupport toernooi controle
-              </div>
-              <h1 className="mt-1 text-2xl font-black md:text-3xl">
-                Toernooi {toernooiCode}
-              </h1>
-            </div>
+    <div className="min-h-screen bg-[linear-gradient(180deg,#24282c_0%,#30353a_45%,#1d2023_100%)] p-[18px] text-white max-md:p-0">
+      <div className="mx-auto max-w-[1560px] space-y-4">
+        <header className="relative overflow-hidden border border-[#9da3a8] bg-black shadow-[0_18px_42px_rgba(20,24,28,.24),0_2px_8px_rgba(0,0,0,.18)] aspect-[16/10] min-h-[650px] max-h-[940px] max-md:min-h-0 max-md:aspect-auto">
+          <img
+            src="/branding/fightsupport/fighter-hero.png"
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full object-cover object-center max-md:relative max-md:h-auto max-md:object-contain"
+          />
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,.08),transparent_28%,transparent_68%,rgba(0,0,0,.28))]" />
 
+          <div className="absolute right-5 top-5 z-20 max-md:right-2 max-md:top-2">
             <button
               onClick={() => router.push(`/dashboard/admin/controle/${matchmakingId}`)}
-              className="rounded-xl border-2 border-[#ff7a3d] bg-black/55 px-4 py-2 text-sm font-black uppercase tracking-wide text-orange-100 shadow-lg transition hover:bg-orange-500/15"
+              className="inline-flex h-[38px] items-center justify-center border border-white/40 bg-black/70 px-3 text-sm font-black text-white shadow-lg backdrop-blur-md max-md:h-[34px] max-md:text-xs"
             >
               ← Terug naar controle
             </button>
           </div>
 
-          <div className="relative px-4 py-4 md:px-6">
-            <div className="mx-auto max-w-2xl rounded-[20px] border-[6px] border-[#d6d1cb] bg-[linear-gradient(180deg,#1a1714,#050505)] p-2 shadow-[0_0_0_2px_#5a534d,0_0_0_8px_rgba(255,255,255,0.28),0_18px_36px_rgba(0,0,0,0.88),inset_0_2px_0_rgba(255,255,255,0.65),inset_0_-2px_0_rgba(0,0,0,0.92)]">
-              <img
-                src={LOGO_SRC}
-                alt="FightSupport Toernooi"
-                className="mx-auto block h-[110px] w-auto max-w-full object-contain drop-shadow-[0_8px_18px_rgba(0,0,0,0.65)]"
-              />
-            </div>
+          <div className="absolute left-[4.2%] top-[31%] z-10 w-[48%] text-shadow max-md:hidden">
+            <div className="text-[clamp(13px,1.15vw,20px)] font-black uppercase tracking-[0.14em] text-[#ff641f]">FightSupport toernooi controle</div>
+            <h1 className="mt-2 text-[clamp(32px,3.25vw,58px)] font-black uppercase leading-none text-white drop-shadow-[0_4px_14px_#000]">Toernooi {toernooiCode}</h1>
+          </div>
+
+          <div className="absolute bottom-[27.2%] left-[6.8%] z-10 grid w-[45.5%] grid-cols-4 gap-2 text-[clamp(11px,.92vw,16px)] font-black uppercase text-white drop-shadow-[0_2px_7px_#000] max-md:hidden">
+            <div>{stats.deelnemers} deelnemers</div>
+            <div>{stats.open} open</div>
+            <div>{stats.licentie} licentie</div>
+            <div>{stats.startverbod} startverbod</div>
+          </div>
+
+          <div className="absolute bottom-[9.6%] left-[3.35%] right-[5.2%] z-10 grid h-[13.8%] grid-cols-4 gap-[1.35%] max-md:hidden">
+            <TournamentHeroStatus title="KEURMERK" value={`${stats.keurmerk} melding${stats.keurmerk===1?"":"en"}`} />
+            <TournamentHeroStatus title="VECHTER" value={`${stats.vechter} melding${stats.vechter===1?"":"en"}`} />
+            <TournamentHeroStatus title="DEELNEMERS" value={`${stats.deelnemers} totaal`} />
+            <TournamentHeroStatus title="STATUS" value={stats.open?`${stats.open} open melding${stats.open===1?"":"en"}`:"Geen open meldingen"} ok={!stats.open} />
           </div>
         </header>
+
+        <div className="hidden mx-[10px] mt-0 mb-3 border border-[#555d64] border-t-[3px] border-t-[#ff4d00] bg-[linear-gradient(145deg,#33383d,#262b2f)] p-4 max-md:block">
+          <h1 className="m-0 text-[26px] font-black uppercase leading-none text-white">Toernooi {toernooiCode}</h1>
+          <div className="mt-2 text-xs font-black uppercase tracking-wide text-[#ff6a2a]">FightSupport toernooi controle</div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <MobileTournamentField label="Deelnemers" value={stats.deelnemers} />
+            <MobileTournamentField label="Open meldingen" value={stats.open} />
+            <MobileTournamentField label="Licentie" value={stats.licentie} />
+            <MobileTournamentField label="Startverbod" value={stats.startverbod} />
+          </div>
+        </div>
 
         {error ? (
           <div className="rounded-xl border border-red-400/50 bg-red-950/35 p-3 text-sm font-bold text-red-100">
@@ -721,6 +740,9 @@ export default function ToernooiDetailPage() {
     </div>
   );
 }
+
+function TournamentHeroStatus({title,value,ok=false}:{title:string;value:string;ok?:boolean}){return <div className="flex min-w-0 items-center pl-[76px] pr-3"><div className="min-w-0"><div className="text-[clamp(9px,.75vw,12px)] font-black uppercase tracking-[.1em] text-white drop-shadow-[0_2px_5px_#000]">{title}</div><div className={`mt-1 truncate text-[clamp(10px,.82vw,13px)] font-black ${ok?"text-[#a8e0b5]":"text-[#f1f3f5]"} drop-shadow-[0_2px_5px_#000]`}>{value}</div></div></div>}
+function MobileTournamentField({label,value}:{label:string;value:string|number}){return <div className="border border-[#596168] bg-[#3a4045] p-2.5"><span className="mb-1 block text-[9px] font-black uppercase tracking-wide text-[#aeb6bd]">{label}</span><b className="text-sm text-white">{value}</b></div>}
 
 function StatCard({ label, value, accent = false }: { label: string; value: number; accent?: boolean }) {
   return (

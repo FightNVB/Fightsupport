@@ -1198,6 +1198,23 @@ function buildGeenFightPassportInfoHit(opts: {
   };
 }
 
+const FP_SCHOOL_MISMATCH_MARKER = "[FP_SPORTSCHOOL_AFWIJKING]";
+
+function extractFpSchoolMismatch(reason: any): string | null {
+  const lines = String(reason ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const line = lines.find((value) =>
+    value.startsWith(FP_SCHOOL_MISMATCH_MARKER)
+  );
+
+  return line
+    ? line.slice(FP_SCHOOL_MISMATCH_MARKER.length).trim()
+    : null;
+}
+
 function isBelgischeSportschoolReason(v: any): boolean {
   const s = String(v ?? "").toLowerCase().trim();
   if (!s) return false;
@@ -1706,6 +1723,34 @@ async function runTournamentRules(opts: {
     const kB = ctx?.keurmerk_blauw;
     const redenR = String(ctx?.keurmerk_reden_rood ?? "").trim();
     const redenB = String(ctx?.keurmerk_reden_blauw ?? "").trim();
+    const schoolMismatchR = extractFpSchoolMismatch(redenR);
+    const schoolMismatchB = extractFpSchoolMismatch(redenB);
+
+    if (!skipLicentieEnKeurmerk && hasRood && schoolMismatchR) {
+      pushTournamentUniquePersonHit(ctx, "rood", {
+        matchmaking_id,
+        bout_id,
+        partij_nr: null,
+        rule: "Sportschool wijkt af van FightPassport",
+        rule_code: "TOERNOOI_SPORTSCHOOL_AFWIJKING_FIGHTPASSPORT",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: `${naamR}: ${schoolMismatchR}`,
+      });
+    }
+
+    if (!skipLicentieEnKeurmerk && hasBlauw && schoolMismatchB) {
+      pushTournamentUniquePersonHit(ctx, "blauw", {
+        matchmaking_id,
+        bout_id,
+        partij_nr: null,
+        rule: "Sportschool wijkt af van FightPassport",
+        rule_code: "TOERNOOI_SPORTSCHOOL_AFWIJKING_FIGHTPASSPORT",
+        resultaat: "ACTIE",
+        severity: "warning",
+        boodschap: `${naamB}: ${schoolMismatchB}`,
+      });
+    }
 
     if (!skipLicentieEnKeurmerk && hasRood && isBelgischeSportschoolCtx(ctx, "rood")) {
       pushTournamentUniquePersonHit(ctx, "rood", {
@@ -2468,6 +2513,48 @@ export async function rulesEngine(opts: {
       const kB = ctx?.keurmerk_blauw;
       const redenR = String(ctx?.keurmerk_reden_rood ?? "").trim();
       const redenB = String(ctx?.keurmerk_reden_blauw ?? "").trim();
+      const schoolMismatchR = extractFpSchoolMismatch(redenR);
+      const schoolMismatchB = extractFpSchoolMismatch(redenB);
+
+      if (!skipLicentieEnKeurmerk && hasRood && roodHeeftFightPassportInfo && schoolMismatchR) {
+        const naam = getFighterDisplayName(ctx, "rood");
+        pushTournamentPersonHit(
+          hits,
+          tournamentSeen,
+          {
+            matchmaking_id,
+            partij_nr,
+            bout_id,
+            rule: "Sportschool wijkt af van FightPassport",
+            rule_code: "SPORTSCHOOL_AFWIJKING_FIGHTPASSPORT",
+            resultaat: "ACTIE",
+            severity: "warning",
+            boodschap: `${naam}: ${schoolMismatchR}`,
+          },
+          ctx,
+          "rood"
+        );
+      }
+
+      if (!skipLicentieEnKeurmerk && hasBlauw && blauwHeeftFightPassportInfo && schoolMismatchB) {
+        const naam = getFighterDisplayName(ctx, "blauw");
+        pushTournamentPersonHit(
+          hits,
+          tournamentSeen,
+          {
+            matchmaking_id,
+            partij_nr,
+            bout_id,
+            rule: "Sportschool wijkt af van FightPassport",
+            rule_code: "SPORTSCHOOL_AFWIJKING_FIGHTPASSPORT",
+            resultaat: "ACTIE",
+            severity: "warning",
+            boodschap: `${naam}: ${schoolMismatchB}`,
+          },
+          ctx,
+          "blauw"
+        );
+      }
 
       if (!skipLicentieEnKeurmerk && hasRood && roodHeeftFightPassportInfo && isBelgischeSportschoolCtx(ctx, "rood")) {
         const naam = getFighterDisplayName(ctx, "rood");

@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -18,6 +19,8 @@ import {
   Repeat,
   ChevronDown,
   ChevronUp,
+  Check,
+  X,
 } from "lucide-react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
@@ -525,9 +528,11 @@ function statusFromResultaten(resultaten: ResRow[]): PartijStatus {
 
 function statusFromResultatenOrOk(
   resultaten: ResRow[] | undefined,
-  ctxRow: AnyRow,
+  _ctxRow: AnyRow,
 ): PartijStatus {
-  if (!isContextCompleet(ctxRow)) return "geen_info";
+  // De rules-engine is leidend voor de partijstatus:
+  // geen melding = OK. Een ontbrekend oud/scrape-veld mag niet zelfstandig
+  // een groene partij veranderen in "GEEN INFO".
   if (!resultaten || resultaten.length === 0) return "ok";
   return statusFromResultaten(resultaten);
 }
@@ -546,8 +551,13 @@ function HeaderBadge({
     | "gray"
     | "green"
     | "white"
+    | "purple"
     | "blue"
-    | "purple";
+    | "pink"
+    | "indigo"
+    | "teal"
+    | "cyan"
+    | "rose";
 }) {
   const cls =
     tone === "red"
@@ -562,6 +572,16 @@ function HeaderBadge({
               ? "bg-blue-700 text-white"
               : tone === "purple"
                 ? "bg-purple-700 text-white"
+                : tone === "pink"
+                  ? "bg-pink-600 text-white"
+                  : tone === "indigo"
+                    ? "bg-indigo-600 text-white"
+                    : tone === "teal"
+                      ? "bg-teal-600 text-white"
+                      : tone === "cyan"
+                        ? "bg-cyan-600 text-white"
+                        : tone === "rose"
+                          ? "bg-rose-600 text-white"
                 : tone === "white"
                   ? "bg-white/90 text-black"
                   : "bg-gray-500 text-zinc-900";
@@ -589,7 +609,12 @@ function Chip({
     | "green"
     | "white"
     | "purple"
-    | "blue";
+    | "blue"
+    | "pink"
+    | "indigo"
+    | "teal"
+    | "cyan"
+    | "rose";
 }) {
   const cls =
     tone === "red"
@@ -604,6 +629,16 @@ function Chip({
               ? "bg-purple-700 text-white"
               : tone === "blue"
                 ? "bg-blue-700 text-white"
+                : tone === "pink"
+                  ? "bg-pink-600 text-white"
+                  : tone === "indigo"
+                    ? "bg-indigo-600 text-white"
+                    : tone === "teal"
+                      ? "bg-teal-600 text-white"
+                      : tone === "cyan"
+                        ? "bg-cyan-600 text-white"
+                        : tone === "rose"
+                          ? "bg-rose-600 text-white"
                 : tone === "white"
                   ? "bg-white/90 text-black"
                   : "bg-gray-500 text-zinc-900";
@@ -623,6 +658,103 @@ function StatusBadge({ status }: { status: PartijStatus }) {
   if (status === "actie") return <Chip label="ACTIE" tone="yellow" />;
   if (status === "ok") return <Chip label="OK" tone="green" />;
   return <Chip label="GEEN INFO" tone="white" />;
+}
+
+type DispDecisionStatus = "pending" | "approved" | "rejected";
+
+function normalizeDispVa(value: any): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function dispIdentityKey(args: {
+  matchmakingId: any;
+  boutId?: any;
+  vaRood: any;
+  vaBlauw: any;
+}): string | null {
+  const matchmaking = String(args.matchmakingId ?? "").trim();
+  if (!matchmaking) return null;
+
+  const pair = [normalizeDispVa(args.vaRood), normalizeDispVa(args.vaBlauw)]
+    .filter(Boolean)
+    .sort();
+
+  // De twee VA-nummers zijn leidend: een nieuwe controlerun of gewijzigd
+  // partij_nr verbreekt de dispensatiekoppeling niet, maar een andere vechter wel.
+  if (pair.length === 2) return `${matchmaking}|va:${pair[0]}|${pair[1]}`;
+
+  const boutId = String(args.boutId ?? "").trim();
+  return boutId ? `${matchmaking}|bout:${boutId}` : null;
+}
+
+function dispIdentityFromContext(matchmakingId: any, row: AnyRow): string | null {
+  return dispIdentityKey({
+    matchmakingId,
+    boutId: row?.bout_id,
+    vaRood: firstFilled(
+      row?.rood_va_mm,
+      row?.rood_va_fp,
+      row?.rood_va,
+      row?.va_rood,
+      row?.rood_va_nummer,
+      row?.rood_fighter_id,
+    ),
+    vaBlauw: firstFilled(
+      row?.blauw_va_mm,
+      row?.blauw_va_fp,
+      row?.blauw_va,
+      row?.va_blauw,
+      row?.blauw_va_nummer,
+      row?.blauw_fighter_id,
+    ),
+  });
+}
+
+function dispIdentityFromRequest(request: AnyRow): string | null {
+  return dispIdentityKey({
+    matchmakingId: request?.matchmaking_id,
+    boutId: request?.bout_id,
+    vaRood: request?.va_rood,
+    vaBlauw: request?.va_blauw,
+  });
+}
+
+function normalizeDispDecision(row: AnyRow | null | undefined): DispDecisionStatus {
+  const raw = String(
+    row?.decision ??
+      row?.beslissing ??
+      row?.besluit ??
+      row?.final_decision ??
+      row?.status ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+
+  if (
+    ["approved", "approve", "goedgekeurd", "akkoord", "accepted", "geaccepteerd"].includes(raw)
+  )
+    return "approved";
+  if (
+    ["rejected", "reject", "afgewezen", "afgekeurd", "denied", "declined"].includes(raw)
+  )
+    return "rejected";
+  return "pending";
+}
+
+function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
+  const states = (rows ?? []).map(normalizeDispDecision);
+  if (states.some((state) => state === "rejected")) return "rejected";
+  if (states.some((state) => state === "pending")) return "pending";
+  return states.length > 0 ? "approved" : "pending";
+}
+
+function DispDecisionBadge({ status }: { status: DispDecisionStatus }) {
+  if (status === "approved")
+    return <Chip label="DISPENSATIE GOEDGEKEURD" tone="teal" />;
+  if (status === "rejected")
+    return <Chip label="DISPENSATIE AFGEWEZEN" tone="rose" />;
+  return <Chip label="DISPENSATIE AANGEVRAAGD" tone="cyan" />;
 }
 
 function FilterButton({
@@ -646,7 +778,12 @@ function FilterButton({
     | "white"
     | "neutral"
     | "purple"
-    | "blue";
+    | "blue"
+    | "pink"
+    | "indigo"
+    | "teal"
+    | "cyan"
+    | "rose";
   disabled?: boolean;
 }) {
   const base =
@@ -665,6 +802,16 @@ function FilterButton({
               ? "bg-purple-700 text-white border-purple-700"
               : tone === "blue"
                 ? "bg-blue-700 text-white border-blue-700"
+                : tone === "pink"
+                  ? "bg-pink-600 text-white border-pink-600"
+                  : tone === "indigo"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : tone === "teal"
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : tone === "cyan"
+                        ? "bg-cyan-600 text-white border-cyan-600"
+                        : tone === "rose"
+                          ? "bg-rose-600 text-white border-rose-600"
                 : tone === "white"
                   ? "bg-white text-black border-white"
                   : tone === "gray"
@@ -684,6 +831,16 @@ function FilterButton({
               ? "bg-white text-purple-700 border-purple-700/60 hover:bg-purple-700/15"
               : tone === "blue"
                 ? "bg-white text-blue-700 border-blue-500/60 hover:bg-blue-500/15"
+                : tone === "pink"
+                  ? "bg-white text-pink-700 border-pink-500/60 hover:bg-pink-500/15"
+                  : tone === "indigo"
+                    ? "bg-white text-indigo-700 border-indigo-500/60 hover:bg-indigo-500/15"
+                    : tone === "teal"
+                      ? "bg-white text-teal-700 border-teal-500/60 hover:bg-teal-500/15"
+                      : tone === "cyan"
+                        ? "bg-white text-cyan-700 border-cyan-500/60 hover:bg-cyan-500/15"
+                        : tone === "rose"
+                          ? "bg-white text-rose-700 border-rose-500/60 hover:bg-rose-500/15"
                 : tone === "white"
                   ? "bg-white text-zinc-900 border-zinc-400 hover:bg-zinc-100"
                   : tone === "gray"
@@ -1038,25 +1195,70 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
   };
 }
 
-function buildGalaDuurFromMins(totalMins: number) {
-  const approvalMin = 390;
-  const maxMin = 510;
-  const needsApproval = totalMins > approvalMin;
-  const overMax = totalMins > maxMin;
+function getGalaDuurMarge(eventDateRaw: string | null): 15 | 30 {
+  const match = String(eventDateRaw ?? "").trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return 15;
+
+  const eventDay = Math.floor(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86_400_000,
+  );
+  const todayParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Amsterdam",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type: string) => todayParts.find((p) => p.type === type)?.value ?? "";
+  const todayDay = Math.floor(
+    Date.UTC(Number(get("year")), Number(get("month")) - 1, Number(get("day"))) / 86_400_000,
+  );
+  return todayDay >= eventDay - 1 ? 15 : 30;
+}
+
+function buildGalaDuurFromMins(
+  totalMins: number,
+  aantalUren: 6 | 7 | 8 | null,
+  eventDate: string | null,
+) {
+  const basisMin = aantalUren != null ? aantalUren * 60 : null;
+  const margeMinuten = getGalaDuurMarge(eventDate);
+  const toegestaneMinuten = basisMin != null ? basisMin + margeMinuten : null;
+
+  // 8,5 uur is de absolute eventgrens. Ook zonder ingestelde 6/7/8 uur
+  // moet een gala boven deze grens expliciet worden goedgekeurd.
+  const maxGalaMinuten = 8.5 * 60; // 510 minuten
+  const overMax = totalMins > maxGalaMinuten;
+  const bovenIngesteldeMarge =
+    toegestaneMinuten != null && totalMins > toegestaneMinuten;
+  const needsApproval = overMax || bovenIngesteldeMarge;
+
+  const overschrijdingMinuten =
+    basisMin != null ? Math.round((totalMins - basisMin) * 10) / 10 : null;
 
   let extra = "";
-  if (overMax) extra = "⚠️ Overschrijdt max 8.5 uur (510 min) — AFKEUR.";
-  else if (needsApproval)
-    extra = "⚠️ Boven 6.5 uur: Superadmin-goedkeuring nodig.";
-  else extra = "Binnen 6.5 uur (geen goedkeuring nodig).";
+  if (overMax && aantalUren == null) {
+    extra =
+      "⚠️ Langer dan 8,5 uur en geen galaduur ingesteld — goedkeuring door hoofdofficial/superadmin vereist.";
+  } else if (overMax) {
+    extra =
+      "⚠️ Langer dan de maximale galaduur van 8,5 uur — goedkeuring door hoofdofficial/superadmin vereist.";
+  } else if (aantalUren == null) {
+    extra = "⚠️ Geen geldig aantal uren ingesteld.";
+  } else if (bovenIngesteldeMarge) {
+    extra = `⚠️ Meer dan ${margeMinuten} minuten boven ${aantalUren} uur — goedkeuring door hoofdofficial/superadmin nodig.`;
+  } else {
+    extra = `Binnen de toegestane marge van ${aantalUren} uur (+${margeMinuten} min).`;
+  }
 
   return {
     mins: totalMins,
+    basisMin,
+    margeMinuten,
+    toegestaneMinuten,
     needsApproval,
     overMax,
-    text: `Geschatte gala-duur: ${formatDurationExact(totalMins)} (${String(
-      Math.round(totalMins * 10) / 10,
-    ).replace(".", ",")} min). ${extra}`,
+    overschrijdingMinuten,
+    text: `Geschatte gala-duur: ${formatDurationExact(totalMins)}. ${extra}`,
   };
 }
 
@@ -1080,7 +1282,7 @@ function buildCompactRunMeldingen(
   const maxMin = 510;
   const needsApproval = mins != null ? mins > approvalMin : true;
   const overMax = mins != null ? mins > maxMin : false;
-  const resultaat = overMax ? "afgekeurd" : needsApproval ? "actie" : "ok";
+  const resultaat = needsApproval ? "actie" : "ok";
 
   const compactMsg =
     mins != null
@@ -1088,7 +1290,7 @@ function buildCompactRunMeldingen(
           Math.round(mins * 10) / 10,
         ).replace(".", ",")} min). ${
           overMax
-            ? "Overschrijdt max 8.5 uur — AFKEUR."
+            ? "Langer dan 8,5 uur — goedkeuring door hoofdofficial/superadmin vereist."
             : needsApproval
               ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
               : "Binnen 6.5 uur (geen goedkeuring nodig)."
@@ -2186,6 +2388,33 @@ async function enrichRowsWithUitslagenClasses(
   });
 }
 
+function pickFilled(...vals: any[]) {
+  for (const v of vals) if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  return null;
+}
+
+
+async function loadActueleFighterChecks(matchmakingId:string, controleRunId:string, vaNumbers:any[]) {
+  const vas=[...new Set(vaNumbers.map(v=>String(v??"").trim()).filter(Boolean))];
+  if (!matchmakingId || !controleRunId || !vas.length) return new Map<string,any>();
+  const {data,error}=await supabase.from("controle_fighter_actueel")
+    .select("matchmaking_id,controle_run_id,va_nummer,licentie_ok,startverbod_actief,keurmerk_ok,sportschool,land,keurmerk_schild_gevonden,checked_at,error_message")
+    .eq("matchmaking_id",matchmakingId).eq("controle_run_id",controleRunId).in("va_nummer",vas);
+  if(error) throw error;
+  return new Map((data??[]).map((r:any)=>[String(r.va_nummer??"").trim(),r]));
+}
+function liveVa(row:AnyRow,side:"rood"|"blauw"):string {
+  return String(pickFilled(row?.[`${side}_va_mm`],row?.[`${side}_va_fp`],row?.[`${side}_va`],row?.[`va_${side}`],row?.[`${side}_va_nummer`],row?.[`${side}_fighter_id`])??"").trim();
+}
+function mergeLive(row:AnyRow,side:"rood"|"blauw",live:any):AnyRow {
+  if(!row||!live||live?.error_message) return row;
+  return {...row,
+    [`${side}_licentie`]:typeof live.licentie_ok==="boolean"?(live.licentie_ok?"Ja":"Nee"):row?.[`${side}_licentie`],
+    [`${side}_heeft_startverbod`]:typeof live.startverbod_actief==="boolean"?String(live.startverbod_actief):row?.[`${side}_heeft_startverbod`],
+    [`keurmerk_${side}`]:typeof live.keurmerk_ok==="boolean"?live.keurmerk_ok:row?.[`keurmerk_${side}`],
+    [`${side}_live_check`]:live};
+}
+
 export default function ControleMatchmakingPage() {
   const params = useParams();
   const router = useRouter();
@@ -2212,7 +2441,7 @@ export default function ControleMatchmakingPage() {
     Record<number, boolean>
   >({});
   const [dispRequestByPartij, setDispRequestByPartij] = useState<
-    Record<number, boolean>
+    Record<number, DispDecisionStatus>
   >({});
   const [countByPartij, setCountByPartij] = useState<Record<number, number>>(
     {},
@@ -2229,6 +2458,11 @@ export default function ControleMatchmakingPage() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
   const [showGalaBreakdown, setShowGalaBreakdown] = useState(false);
+  const [aantalUren, setAantalUren] = useState<6 | 7 | 8 | null>(null);
+  const [duurGoedkeuring, setDuurGoedkeuring] = useState<any | null>(null);
+  const [duurGoedkeuringLoading, setDuurGoedkeuringLoading] = useState(false);
+  const [duurGoedkeuringBusy, setDuurGoedkeuringBusy] = useState(false);
+  const [canApproveDuur, setCanApproveDuur] = useState(false);
   const [openToernooien, setOpenToernooien] = useState<Record<string, boolean>>(
     {},
   );
@@ -2250,9 +2484,9 @@ export default function ControleMatchmakingPage() {
   const [fMaxKg, setFMaxKg] = useState("");
 
   const [presenceUsers, setPresenceUsers] = useState<MatchmakingPresenceUser[]>([]);
-  const [currentPresenceUserId, setCurrentPresenceUserId] = useState<string | null>(
-    null,
-  );
+  const [hasEditLock, setHasEditLock] = useState(false);
+  const [presenceUserId, setPresenceUserId] = useState<string | null>(null);
+  const lockTokenRef = useRef<string | null>(null);
 
   async function getAccessToken(): Promise<string | null> {
     const { data } = await supabase.auth.getSession();
@@ -2260,51 +2494,10 @@ export default function ControleMatchmakingPage() {
   }
 
 
-  async function refreshPresence() {
-    if (!matchmakingId) return;
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token ?? null;
-      const userId = sessionData.session?.user?.id ?? null;
-      if (!token) return;
-      if (userId) setCurrentPresenceUserId(userId);
-
-      const resp = await authedFetch(
-        `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}&page=admin_controle`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            matchmakingId,
-            page: "admin_controle",
-          }),
-        },
-      );
-
-      const json = await resp.json().catch(() => ({}));
-      if (resp.ok) {
-        setPresenceUsers((json?.users ?? []) as MatchmakingPresenceUser[]);
-      }
-    } catch {
-      // Presence mag de controlepagina nooit blokkeren.
-    }
-  }
-
-  const otherPresenceUsers = useMemo(
-    () =>
-      presenceUsers.filter((u) => {
-        if (!u?.user_id || u.user_id === currentPresenceUserId) return false;
-        const seen = new Date(u.last_seen ?? 0).getTime();
-        return Number.isFinite(seen) && Date.now() - seen < 90_000;
-      }),
-    [presenceUsers, currentPresenceUserId],
+  const otherPresenceUsers = presenceUsers.filter(
+    (u) => !presenceUserId || String(u.user_id) !== String(presenceUserId),
   );
-
-  const isReadOnly = otherPresenceUsers.length > 0;
+  const isReadOnly = !hasEditLock;
 
   function blockReadOnlyInteraction(event: React.SyntheticEvent) {
     if (!isReadOnly) return;
@@ -2312,14 +2505,10 @@ export default function ControleMatchmakingPage() {
     const control = target?.closest("button, input, select, textarea");
     if (!control) return;
     if (control.getAttribute("data-readonly-allowed") === "true") return;
-
     event.preventDefault();
     event.stopPropagation();
-    setMsg(
-      `🔒 Alleen-lezen: ${otherPresenceUsers
-        .map((u) => safeText(u.user_name, "een andere official"))
-        .join(", ")} heeft deze matchmaking geopend.`,
-    );
+    const names = otherPresenceUsers.map((u) => safeText(u.user_name, "een andere gebruiker")).join(", ");
+    setMsg(names ? `🔒 Alleen-lezen: ${names} heeft deze matchmaking al geopend.` : "🔒 Alleen-lezen: er is geen bewerk-lock voor deze sessie. Open de matchmaking opnieuw.");
   }
 
   const subtitle = useMemo(() => {
@@ -2869,6 +3058,60 @@ export default function ControleMatchmakingPage() {
     });
   }
 
+  async function loadDuurGoedkeuring(berekendeMinuten?: number | null) {
+    if (!matchmakingId) return;
+    setDuurGoedkeuringLoading(true);
+    try {
+      const query = berekendeMinuten != null
+        ? `?berekende_minuten=${encodeURIComponent(String(Math.round(berekendeMinuten * 10) / 10))}`
+        : "";
+      const resp = await authedFetch(
+        `/api/matchmaking/${encodeURIComponent(matchmakingId)}/duur-goedkeuring${query}`,
+      );
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Duurgoedkeuring ophalen mislukt.");
+      setDuurGoedkeuring(json);
+      setCanApproveDuur(json?.can_approve === true);
+    } catch (e: any) {
+      console.warn("[officials page] duurgoedkeuring ophalen mislukt:", e);
+      setDuurGoedkeuring(null);
+      setCanApproveDuur(false);
+    } finally {
+      setDuurGoedkeuringLoading(false);
+    }
+  }
+
+  async function wijzigDuurGoedkeuring(action: "approve" | "revoke") {
+    if (!matchmakingId || !galaDuurCalc) return;
+    setDuurGoedkeuringBusy(true);
+    setError(null);
+    setMsg("");
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Niet ingelogd.");
+      const resp = await authedFetch(
+        `/api/matchmaking/${encodeURIComponent(matchmakingId)}/duur-goedkeuring`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            action,
+            berekende_minuten: galaDuurCalc.totalMins,
+            approval_id: duurGoedkeuring?.latest_approval?.id ?? null,
+          }),
+        },
+      );
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error ?? "Duurgoedkeuring verwerken mislukt.");
+      setMsg(json?.message ?? "Duurgoedkeuring verwerkt.");
+      await loadDuurGoedkeuring(galaDuurCalc.totalMins);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setDuurGoedkeuringBusy(false);
+    }
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -2881,6 +3124,9 @@ export default function ControleMatchmakingPage() {
         setRun(null);
         setEvenementNaam(null);
         setEvenementDatum(null);
+        setAantalUren(null);
+        setDuurGoedkeuring(null);
+        setCanApproveDuur(false);
         setStatusByPartij({});
         setRunMeldingen([]);
         setHasDispByPartij({});
@@ -2895,7 +3141,7 @@ export default function ControleMatchmakingPage() {
       try {
         const { data: mm, error: mmErr } = await supabase
           .from("matchmakings")
-          .select("naam, datum, event_id")
+          .select("naam, datum, event_id, aantal_uren")
           .eq("id", matchmakingId)
           .maybeSingle();
 
@@ -2904,6 +3150,8 @@ export default function ControleMatchmakingPage() {
         let naam = String((mm as any)?.naam ?? "").trim() || null;
         let datum = String((mm as any)?.datum ?? "").trim() || null;
         const eventId = String((mm as any)?.event_id ?? "").trim() || null;
+        const urenRaw = Number((mm as any)?.aantal_uren);
+        setAantalUren(urenRaw === 6 || urenRaw === 7 || urenRaw === 8 ? urenRaw : null);
 
         if (eventId && (!naam || !datum)) {
           const { data: ev, error: evErr } = await supabase
@@ -3021,6 +3269,8 @@ export default function ControleMatchmakingPage() {
       );
 
       ctxList = await enrichRowsWithUitslagenClasses(matchmakingId, ctxList);
+      const liveChecks = await loadActueleFighterChecks(matchmakingId, latestControleRunId ?? "", ctxList.flatMap((r: AnyRow) => [liveVa(r, "rood"), liveVa(r, "blauw")]));
+      ctxList=ctxList.map((r:AnyRow)=>mergeLive(mergeLive(r,"rood",liveChecks.get(liveVa(r,"rood"))),"blauw",liveChecks.get(liveVa(r,"blauw"))));
       setRows(ctxList);
       syncOrderedRowsFromRows(ctxList);
 
@@ -3034,11 +3284,39 @@ export default function ControleMatchmakingPage() {
         map[pn] = isContextCompleet(r) ? "ok" : "geen_info";
       }
 
+      const { data: dispReqRows, error: dispReqErr } = await supabase
+        .from("dispensatie_requests")
+        .select("*")
+        .eq("matchmaking_id", matchmakingId);
+      if (dispReqErr) throw dispReqErr;
+
+      // Dispensatiebesluiten blijven gekoppeld over controleruns heen.
+      // Niet partij_nr of controle_run_id, maar matchmaking + beide VA's is leidend.
+      const dispRowsByIdentity: Record<string, AnyRow[]> = {};
+      for (const request of (dispReqRows ?? []) as AnyRow[]) {
+        const key = dispIdentityFromRequest(request);
+        if (!key) continue;
+        (dispRowsByIdentity[key] ??= []).push(request);
+      }
+
+      const dispRequestMap: Record<number, DispDecisionStatus> = {};
+      for (const ctxRow of ctxList) {
+        const pn = Number(ctxRow?.partij_nr);
+        if (!Number.isFinite(pn) || pn <= 0) continue;
+        const key = dispIdentityFromContext(matchmakingId, ctxRow);
+        if (!key) continue;
+        const requests = dispRowsByIdentity[key] ?? [];
+        if (requests.length > 0) {
+          dispRequestMap[pn] = aggregateDispDecision(requests);
+        }
+      }
+      setDispRequestByPartij(dispRequestMap);
+
       if (!latestControleRunId) {
         setStatusByPartij(map);
         setRunMeldingen([]);
         setHasDispByPartij({});
-        setDispRequestByPartij({});
+        setDispRequestByPartij(dispRequestMap);
         setCountByPartij({});
         setVerbodByPartij({});
         setResultatenByPartij({});
@@ -3166,7 +3444,7 @@ export default function ControleMatchmakingPage() {
       setCountByPartij(countMap);
       setApprovedLicentieByPartij(approvedLicentieMap);
       setHasDispByPartij(dispMap);
-      setDispRequestByPartij({});
+      setDispRequestByPartij(dispRequestMap);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -3181,12 +3459,100 @@ export default function ControleMatchmakingPage() {
 
 
   useEffect(() => {
-    refreshPresence();
-    const interval = window.setInterval(() => {
-      refreshPresence();
-    }, 30000);
+    let cancelled = false;
+    let claimedByThisPage = false;
+    let claimInFlight = false;
 
-    return () => window.clearInterval(interval);
+    const claimPresence = async () => {
+      if (cancelled || claimInFlight || !matchmakingId) return;
+      claimInFlight = true;
+
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData.session;
+        const token = session?.access_token ?? null;
+        const uid = session?.user?.id ?? null;
+
+        if (cancelled) return;
+        setPresenceUserId(uid);
+
+        if (!token) {
+          setHasEditLock(false);
+          return;
+        }
+
+        lockTokenRef.current = token;
+
+        const resp = await authedFetch(
+          `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}&page=officials_controle`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              matchmakingId,
+              page: "officials_controle",
+            }),
+          },
+        );
+
+        const json = await resp.json().catch(() => ({}));
+        if (cancelled) return;
+
+        claimedByThisPage = resp.ok && json?.editable === true;
+        setHasEditLock(claimedByThisPage);
+        setPresenceUsers(
+          Array.isArray(json?.users)
+            ? (json.users as MatchmakingPresenceUser[])
+            : [],
+        );
+      } catch {
+        if (!cancelled) setHasEditLock(false);
+      } finally {
+        claimInFlight = false;
+      }
+    };
+
+    void claimPresence();
+
+    // Browser terug/vooruit kan deze pagina uit de bfcache herstellen.
+    // Vraag dan opnieuw aan de server wie de bewerk-lock heeft.
+    const onPageShow = () => {
+      void claimPresence();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void claimPresence();
+      }
+    };
+
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+
+      const token = lockTokenRef.current;
+      if (!claimedByThisPage || !token || !matchmakingId) return;
+
+      void fetch(
+        `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}`,
+        {
+          method: "DELETE",
+          keepalive: true,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ matchmakingId }),
+        },
+      ).catch(() => undefined);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchmakingId]);
 
@@ -3202,9 +3568,23 @@ export default function ControleMatchmakingPage() {
   }, [rows]);
 
   const galaDuur = useMemo(() => {
-    if (galaDuurCalc) return buildGalaDuurFromMins(galaDuurCalc.totalMins);
+    if (galaDuurCalc)
+      return buildGalaDuurFromMins(galaDuurCalc.totalMins, aantalUren, evenementDatum);
     return null;
-  }, [galaDuurCalc]);
+  }, [galaDuurCalc, aantalUren, evenementDatum]);
+
+  useEffect(() => {
+    if (!galaDuurCalc) {
+      setDuurGoedkeuring(null);
+      setCanApproveDuur(false);
+      return;
+    }
+
+    // Ook zonder ingestelde 6/7/8 uur moet de goedkeuringsstatus worden geladen.
+    // Boven 8,5 uur is altijd expliciete goedkeuring vereist.
+    loadDuurGoedkeuring(galaDuurCalc.totalMins);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [galaDuurCalc?.totalMins, aantalUren, evenementDatum, matchmakingId]);
 
   const missingLicentieByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
@@ -3466,7 +3846,7 @@ export default function ControleMatchmakingPage() {
 
   return (
     <Shell>
-      <div style={metalFrameStyle("orange")} className="p-3 md:p-4">
+      <div style={metalFrameStyle("orange")} className="p-3 md:p-4" onClickCapture={blockReadOnlyInteraction} onSubmitCapture={blockReadOnlyInteraction}>
         <div style={metalInnerStyle()} className="p-4 md:p-5">
           <div
             className="rounded-2xl px-4 py-4 md:px-6 md:py-5"
@@ -4074,12 +4454,23 @@ export default function ControleMatchmakingPage() {
                       className="w-full px-3 py-3 text-sm text-left flex items-center justify-between gap-3 hover:bg-zinc-50 transition"
                     >
                       <div className="min-w-0">
-                        <span className="font-semibold text-zinc-900">
-                          Gala duur:
-                        </span>{" "}
-                        <span className="text-zinc-800">
-                          {formatDurationExact(galaDuur.mins)}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold text-zinc-900">Gala duur:</span>
+                          <span className="text-zinc-800 font-black">{formatDurationExact(galaDuur.mins)}</span>
+                          {aantalUren != null ? (
+                            <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-[11px] font-black text-white">Ingesteld: {aantalUren} uur</span>
+                          ) : (
+                            <span className="rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-black text-white">Uren niet ingesteld</span>
+                          )}
+                          {galaDuur.needsApproval ? (
+                            <span className="rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-black text-white">GOEDKEURING NODIG</span>
+                          ) : (
+                            <span className="rounded-full bg-green-600 px-2.5 py-1 text-[11px] font-black text-white">BINNEN NORM</span>
+                          )}
+                          {duurGoedkeuring?.goedkeuring_geldig ? (
+                            <span className="rounded-full bg-teal-600 px-2.5 py-1 text-[11px] font-black text-white">GOEDGEKEURD</span>
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="shrink-0 flex items-center gap-2">
@@ -4097,6 +4488,46 @@ export default function ControleMatchmakingPage() {
                     {showGalaBreakdown ? (
                       <div className="border-t border-zinc-300 px-3 py-3 text-sm text-zinc-800">
                         <div>{galaDuur.text}</div>
+
+                        {galaDuur?.basisMin != null ? (
+                          <div className="mt-2 text-xs text-zinc-600">
+                            Toegestaan nu: <span className="font-black">{galaDuur.toegestaneMinuten != null ? formatDurationExact(galaDuur.toegestaneMinuten) : "-"}</span>{" "}
+                            ({aantalUren} uur + {galaDuur.margeMinuten} min marge).
+                            {galaDuur.overschrijdingMinuten != null && galaDuur.overschrijdingMinuten > 0 ? (
+                              <> Overschrijding boven basis: <span className="font-black text-red-700">+{formatDurationExact(galaDuur.overschrijdingMinuten)}</span>.</>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {galaDuur?.needsApproval ? (
+                          <div className="mt-3 rounded-xl border-2 p-3" style={{
+                            borderColor: duurGoedkeuring?.goedkeuring_geldig ? "rgba(13,148,136,0.55)" : "rgba(220,38,38,0.45)",
+                            background: duurGoedkeuring?.goedkeuring_geldig ? "rgba(204,251,241,0.55)" : "rgba(254,226,226,0.65)",
+                          }}>
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <div className="font-black text-zinc-900">
+                                  {duurGoedkeuring?.goedkeuring_geldig ? "Deze overschrijding is goedgekeurd." : "Goedkeuring van de galaduur vereist."}
+                                </div>
+                                <div className="mt-1 text-xs text-zinc-700">
+                                  Alleen een superadmin of hoofdofficial kan deze overschrijding goedkeuren.
+                                  {duurGoedkeuring?.latest_approval?.approved_at ? (
+                                    <> Laatste goedkeuring: {new Date(duurGoedkeuring.latest_approval.approved_at).toLocaleString("nl-NL")}.</>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {canApproveDuur ? (
+                                <div className="flex flex-wrap gap-2 shrink-0">
+                                  {!duurGoedkeuring?.goedkeuring_geldig ? (
+                                    <DarkActionButton label={duurGoedkeuringBusy ? "Bezig..." : "Goedkeuren"} tone="green" icon={<Check className="h-3.5 w-3.5" />} onClick={() => wijzigDuurGoedkeuring("approve")} disabled={duurGoedkeuringBusy || duurGoedkeuringLoading} />
+                                  ) : (
+                                    <DarkActionButton label={duurGoedkeuringBusy ? "Bezig..." : "Goedkeuring intrekken"} tone="red" icon={<X className="h-3.5 w-3.5" />} onClick={() => wijzigDuurGoedkeuring("revoke")} disabled={duurGoedkeuringBusy || duurGoedkeuringLoading} />
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
 
                         {galaDuurCalc?.countsByKlasse &&
                         Object.keys(galaDuurCalc.countsByKlasse).length > 0 ? (
@@ -4301,7 +4732,7 @@ export default function ControleMatchmakingPage() {
                                 {groep.totaalBelgieCheck > 0 ? (
                                   <Chip
                                     label={`BELGIË CHECK ${groep.totaalBelgieCheck}`}
-                                    tone="blue"
+                                    tone="indigo"
                                   />
                                 ) : null}
                                 {isOpen ? (
@@ -4438,7 +4869,7 @@ export default function ControleMatchmakingPage() {
                                             {deelnemer.heeftBelgieCheck ? (
                                               <Chip
                                                 label="BELGIË CHECK"
-                                                tone="blue"
+                                                tone="indigo"
                                               />
                                             ) : null}
                                           </div>
@@ -4663,9 +5094,10 @@ export default function ControleMatchmakingPage() {
                         const heeftAfkeur = Number.isFinite(originalPn)
                           ? !!hasAfkeurByPartij[originalPn]
                           : false;
-                        const heeftDispRequest = Number.isFinite(originalPn)
-                          ? !!dispRequestByPartij[originalPn]
-                          : false;
+                        const dispRequestStatus = Number.isFinite(originalPn)
+                          ? dispRequestByPartij[originalPn]
+                          : undefined;
+                        const heeftDispRequest = !!dispRequestStatus;
                         const heeftDispensatie = Number.isFinite(originalPn)
                           ? !!hasDispByPartij[originalPn] || heeftDispRequest
                           : false;
@@ -4725,12 +5157,12 @@ export default function ControleMatchmakingPage() {
                                   {!!r?.__swapped_corners ? (
                                     <Chip
                                       label="HOEKEN GEWISSELD"
-                                      tone="orange"
+                                      tone="gray"
                                     />
                                   ) : null}
 
-                                  {heeftDispRequest ? (
-                                    <Chip label="NAAR DISPENSATIE" tone="purple" />
+                                  {heeftDispRequest && dispRequestStatus ? (
+                                    <DispDecisionBadge status={dispRequestStatus} />
                                   ) : (
                                     <StatusBadge status={status} />
                                   )}
@@ -4968,7 +5400,7 @@ export default function ControleMatchmakingPage() {
                                 <Link
                                   href={`/dashboard/officials/controle/${encodeURIComponent(
                                     matchmakingId,
-                                  )}/partij/${encodeURIComponent(String(r.partij_nr ?? ""))}`}
+                                  )}/partij/${encodeURIComponent(String(originalPn))}`}
                                   className="px-3 py-1.5 rounded font-extrabold text-sm"
                                   style={{
                                     background: "rgba(0,0,0,0.55)",

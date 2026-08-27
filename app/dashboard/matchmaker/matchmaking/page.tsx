@@ -624,6 +624,7 @@ function MatchmakingPageContent() {
   const [locatie, setLocatie] = useState("");
   const [promotor, setPromotor] = useState("");
   const [bondteam, setBondteam] = useState("");
+  const [aantalUren, setAantalUren] = useState("");
 
   const [uploadNaam, setUploadNaam] = useState("");
   const [uploadDatum, setUploadDatum] = useState("");
@@ -664,6 +665,7 @@ function MatchmakingPageContent() {
     setLocatie("");
     setPromotor("");
     setBondteam(normalizeBondteam(profileData?.bondteam ?? ""));
+    setAantalUren("");
     setCreateMsg("");
   }
 
@@ -801,6 +803,7 @@ function MatchmakingPageContent() {
       if (!naam.trim()) return setCreateMsg("⚠️ Naam is verplicht.");
       if (!datum.trim()) return setCreateMsg("⚠️ Datum is verplicht.");
       if (!bondteam.trim()) return setCreateMsg("⚠️ Bondteam is verplicht.");
+      if (!["6", "7", "8"].includes(aantalUren)) return setCreateMsg("⚠️ Kies het aantal uren: 6, 7 of 8 uur.");
 
       setCreating(true);
 
@@ -813,6 +816,7 @@ function MatchmakingPageContent() {
           locatie: locatie.trim() || null,
           promotor: promotor.trim() || null,
           bondteam: normalizeBondteam(bondteam),
+          aantal_uren: Number(aantalUren),
           matchmaker_naam: profile?.full_name?.trim() || null,
         }),
       });
@@ -1487,7 +1491,7 @@ function MatchmakingPageContent() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-5">
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-6">
                           <input
                             type="date"
                             value={datum}
@@ -1523,6 +1527,16 @@ function MatchmakingPageContent() {
                                 {option}
                               </option>
                             ))}
+                          </select>
+                          <select
+                            value={aantalUren}
+                            onChange={(e) => setAantalUren(e.target.value)}
+                            className="orange-input h-10 w-full"
+                          >
+                            <option value="">Kies aantal uren *</option>
+                            <option value="6">6 uur</option>
+                            <option value="7">7 uur</option>
+                            <option value="8">8 uur</option>
                           </select>
                         </div>
 

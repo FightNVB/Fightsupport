@@ -60,7 +60,12 @@ function resolveScriptPath(...parts: string[]) {
   throw new Error(`Script niet gevonden:\n- ${candidates.join("\n- ")}`);
 }
 
-function runNodeScript(scriptPath: string, args: string[], cwd?: string): Promise<void> {
+function runNodeScript(
+  scriptPath: string,
+  args: string[],
+  cwd?: string,
+  extraEnv: Record<string, string> = {}
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const nodeBin = process.execPath;
     const proc = spawn(nodeBin, [scriptPath, ...args], {
@@ -87,6 +92,8 @@ function runNodeScript(scriptPath: string, args: string[], cwd?: string): Promis
 
         SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
         ComSpec: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
+
+        ...extraEnv,
       },
     });
 
@@ -96,6 +103,29 @@ function runNodeScript(scriptPath: string, args: string[], cwd?: string): Promis
       else reject(new Error(`Script failed: ${path.basename(scriptPath)} (exit code ${code})`));
     });
   });
+}
+
+async function runTotalForVaList(vaList: string[]) {
+  const uniqueVaList = [...new Set(vaList.map((v) => toVaStrict(v)).filter(Boolean) as string[])];
+  if (!uniqueVaList.length) return;
+
+  const totalPath = resolveScriptPath("scrapers", "fp_total", "scraper_fp_total.js");
+
+  console.log(`[bout-rescrape] 🔄 Total-rescrape voor VA: ${uniqueVaList.join(", ")}`);
+
+  await runNodeScript(
+    totalPath,
+    [],
+    path.dirname(totalPath),
+    {
+      // fp_total ondersteunt een expliciete VA-lijst. Daardoor wordt alleen
+      // deze partij/toernooivechter opnieuw opgehaald en niet een volledig bereik.
+      FP_TOTAL_VA_LIST: uniqueVaList.join(","),
+      FP_TOTAL_RUN_KIND: "retry",
+      FP_TOTAL_WORKERS: String(Math.max(1, Math.min(uniqueVaList.length, 2))),
+      FP_TOTAL_RESULTS: "true",
+    }
+  );
 }
 
 async function getLatestControleRunId(matchmaking_id: string): Promise<string | null> {
@@ -303,8 +333,7 @@ export async function POST(req: Request) {
     }
 
     if (isToernooiRequest) {
-      const bundlePath = resolveScriptPath("scrapers", "fp_bundle", "scraper_fp_bundle.js");
-      await runNodeScript(bundlePath, [matchmaking_id, controle_run_id, fighter_id_in], path.dirname(bundlePath));
+      await runTotalForVaList([fighter_id_in]);
 
       const toernooiRows = await buildToernooiContext(matchmaking_id, controle_run_id, {
         toernooi_code,
@@ -351,7 +380,7 @@ export async function POST(req: Request) {
         toernooi_code,
         fighter_id: fighter_id_in,
         toernooi_rows: Array.isArray(toernooiRows) ? toernooiRows.length : 0,
-        used_bundle: true,
+        used_total: true,
         ms: Date.now() - t0,
       });
     }
@@ -406,8 +435,7 @@ export async function POST(req: Request) {
     const vaList = [vaRood, vaBlauw].filter(Boolean) as string[];
 
     if (vaList.length > 0) {
-      const bundlePath = resolveScriptPath("scrapers", "fp_bundle", "scraper_fp_bundle.js");
-      await runNodeScript(bundlePath, [matchmaking_id, controle_run_id, ...vaList], path.dirname(bundlePath));
+      await runTotalForVaList(vaList);
     }
 
     await buildControleBoutContext(matchmaking_id, controle_run_id, { partij_nr });
@@ -448,7 +476,7 @@ export async function POST(req: Request) {
       partij_nr,
       bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
       vaList,
-      used_bundle: vaList.length > 0,
+      used_total: vaList.length > 0,
       ms: Date.now() - t0,
     });
   } catch (e: any) {

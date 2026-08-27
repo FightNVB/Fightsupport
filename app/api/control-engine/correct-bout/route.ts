@@ -7,6 +7,7 @@ import {
 } from "@/lib/control/buildControleBoutContext";
 import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
 import { rulesEngine } from "@/lib/rulesEngine";
+import { assertHasMatchmakingEditLock } from "@/lib/matchmakingEditLock";
 import {
   assertCanAccessMatchmaking,
   requireUserWithRole,
@@ -547,6 +548,7 @@ export async function POST(req: Request) {
     }
 
     await assertCanCorrectBout({ matchmaking_id, userId, role });
+    await assertHasMatchmakingEditLock(matchmaking_id, userId);
 
     // Toernooi-flow: geen partij_nr, maar wel toernooi_code + VA.
     if (toernooi_code && !Number.isFinite(partij_nr)) {
@@ -842,7 +844,7 @@ export async function POST(req: Request) {
     console.error("correct-bout error:", e);
     return NextResponse.json(
       { error: e?.message ?? "Onbekende fout" },
-      { status: 500 }
+      { status: Number(e?.status ?? 500) }
     );
   }
 }

@@ -1026,6 +1026,48 @@ function normResultaat(v: any): string {
   return s;
 }
 
+type DispDecisionStatus = "none" | "pending" | "approved" | "rejected";
+
+
+function firstFilled(...vals: any[]) {
+  for (const v of vals) if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  return null;
+}
+
+function normalizeDispVa(value:any):string{return String(value??"").trim().toUpperCase();}
+function dispIdentityKey(args:{matchmakingId:any;boutId?:any;vaRood:any;vaBlauw:any}):string|null{
+ const m=String(args.matchmakingId??"").trim(); if(!m)return null;
+ const p=[normalizeDispVa(args.vaRood),normalizeDispVa(args.vaBlauw)].filter(Boolean).sort();
+ if(p.length===2)return `${m}|va:${p[0]}|${p[1]}`;
+ const b=String(args.boutId??"").trim(); return b?`${m}|bout:${b}`:null;
+}
+function dispIdentityFromContext(matchmakingId:any,row:AnyRow|null|undefined):string|null{if(!row)return null;return dispIdentityKey({matchmakingId,boutId:row?.bout_id,vaRood:firstFilled(row?.rood_va_mm,row?.rood_va_fp,row?.rood_va,row?.va_rood,row?.rood_va_nummer,row?.rood_fighter_id),vaBlauw:firstFilled(row?.blauw_va_mm,row?.blauw_va_fp,row?.blauw_va,row?.va_blauw,row?.blauw_va_nummer,row?.blauw_fighter_id)});}
+function dispIdentityFromRequest(request:AnyRow):string|null{return dispIdentityKey({matchmakingId:request?.matchmaking_id,boutId:request?.bout_id,vaRood:request?.va_rood,vaBlauw:request?.va_blauw});}
+
+function normalizeDispDecision(row: AnyRow | null | undefined): DispDecisionStatus {
+  if (!row) return "none";
+  const raw = String(
+    firstFilled(
+      row?.decision,
+      row?.beslissing,
+      row?.besluit,
+      row?.final_decision,
+      row?.status,
+    ) ?? "",
+  ).trim().toLowerCase();
+  if (["approved", "approve", "goedgekeurd", "akkoord", "accepted", "geaccepteerd"].includes(raw)) return "approved";
+  if (["rejected", "reject", "afgewezen", "afgekeurd", "denied", "declined"].includes(raw)) return "rejected";
+  return raw ? "pending" : "pending";
+}
+
+function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
+  if (!rows?.length) return "none";
+  const states = rows.map(normalizeDispDecision);
+  if (states.some((state) => state === "rejected")) return "rejected";
+  if (states.some((state) => state === "pending")) return "pending";
+  return "approved";
+}
+
 function asUuid(v: any): string | null {
   if (v == null) return null;
   const s = String(v).trim();
@@ -1280,6 +1322,33 @@ function UitslagenTable({
   );
 }
 
+function pickFilled(...vals: any[]) {
+  for (const v of vals) if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  return null;
+}
+
+
+async function loadActueleFighterChecks(matchmakingId:string, controleRunId:string, vaNumbers:any[]) {
+  const vas=[...new Set(vaNumbers.map(v=>String(v??"").trim()).filter(Boolean))];
+  if (!matchmakingId || !controleRunId || !vas.length) return new Map<string,any>();
+  const {data,error}=await supabase.from("controle_fighter_actueel")
+    .select("matchmaking_id,controle_run_id,va_nummer,licentie_ok,startverbod_actief,keurmerk_ok,sportschool,land,keurmerk_schild_gevonden,checked_at,error_message")
+    .eq("matchmaking_id",matchmakingId).eq("controle_run_id",controleRunId).in("va_nummer",vas);
+  if(error) throw error;
+  return new Map((data??[]).map((r:any)=>[String(r.va_nummer??"").trim(),r]));
+}
+function liveVa(row:AnyRow,side:"rood"|"blauw"):string {
+  return String(pickFilled(row?.[`${side}_va_mm`],row?.[`${side}_va_fp`],row?.[`${side}_va`],row?.[`va_${side}`],row?.[`${side}_va_nummer`],row?.[`${side}_fighter_id`])??"").trim();
+}
+function mergeLive(row:AnyRow,side:"rood"|"blauw",live:any):AnyRow {
+  if(!row||!live||live?.error_message) return row;
+  return {...row,
+    [`${side}_licentie`]:typeof live.licentie_ok==="boolean"?(live.licentie_ok?"Ja":"Nee"):row?.[`${side}_licentie`],
+    [`${side}_heeft_startverbod`]:typeof live.startverbod_actief==="boolean"?String(live.startverbod_actief):row?.[`${side}_heeft_startverbod`],
+    [`keurmerk_${side}`]:typeof live.keurmerk_ok==="boolean"?live.keurmerk_ok:row?.[`keurmerk_${side}`],
+    [`${side}_live_check`]:live};
+}
+
 export default function PartijDetailPage() {
   const [allPartijNrs, setAllPartijNrs] = useState<number[]>([]);
   const noteDraftRef = useRef<Record<string, string>>({});
@@ -1329,6 +1398,7 @@ export default function PartijDetailPage() {
   const [showLoader, setShowLoader] = useState(false);
   const [sendingDisp, setSendingDisp] = useState(false);
   const [dispSent, setDispSent] = useState(false);
+  const [dispDecisionStatus, setDispDecisionStatus] = useState<DispDecisionStatus>("none");
 
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const isSuperadmin = useMemo(
@@ -1873,6 +1943,7 @@ export default function PartijDetailPage() {
           setUitslagenBlauw([]);
           setAllPartijNrs([]);
           setDispSent(false);
+          setDispDecisionStatus("none");
           return;
         }
 
@@ -1904,23 +1975,28 @@ export default function PartijDetailPage() {
         if (ctxErr) throw ctxErr;
 
         const row = (ctxRows?.[0] ?? null) as AnyRow | null;
-        setCtx(row);
-
-        const boutIdForDisp = String((row as any)?.bout_id ?? "").trim();
-        let dispReqQuery = supabase
-          .from("dispensatie_requests")
-          .select("id")
-          .eq("matchmaking_id", matchmakingId)
-          .eq("partij_nr", partijNr)
-          .limit(1);
-
-        if (boutIdForDisp) {
-          dispReqQuery = dispReqQuery.eq("bout_id", boutIdForDisp);
+        let rowWithLive=row;
+        if(row){
+          const liveChecks=await loadActueleFighterChecks(matchmakingId,String(latestRun.id),[liveVa(row,"rood"),liveVa(row,"blauw")]);
+          rowWithLive=mergeLive(mergeLive(row,"rood",liveChecks.get(liveVa(row,"rood"))),"blauw",liveChecks.get(liveVa(row,"blauw")));
         }
+        setCtx(rowWithLive);
 
-        const { data: dispReqRows, error: dispReqErr } = await dispReqQuery;
+        // Dispensatiebesluit blijft aan dezelfde partij-identiteit hangen, ook als
+        // partij_nr of controle_run_id later verandert.
+        const { data: dispReqRows, error: dispReqErr } = await supabase
+          .from("dispensatie_requests")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId);
         if (dispReqErr) throw dispReqErr;
-        setDispSent((dispReqRows ?? []).length > 0);
+
+        const currentIdentity = dispIdentityFromContext(matchmakingId, rowWithLive);
+        const dispRequests = ((dispReqRows ?? []) as AnyRow[]).filter(
+          (request) =>
+            !!currentIdentity && dispIdentityFromRequest(request) === currentIdentity,
+        );
+        setDispSent(dispRequests.length > 0);
+        setDispDecisionStatus(aggregateDispDecision(dispRequests));
 
         {
           const rows = await fetchRegelsVoorPartij({
@@ -2473,6 +2549,7 @@ export default function PartijDetailPage() {
       if (!r.ok) throw new Error(j?.error ?? "Naar dispensatie sturen mislukt");
 
       setDispSent(true);
+      setDispDecisionStatus("pending");
       setMsg("✅ Naar dispensatie gestuurd.");
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -3299,8 +3376,20 @@ export default function PartijDetailPage() {
               )}
 
               {dispSent ? (
-                <div className="mt-4 rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-950">
-                  Deze partij is al naar dispensatie gestuurd.
+                <div
+                  className={`mt-4 rounded-xl border px-4 py-3 text-sm font-extrabold ${
+                    dispDecisionStatus === "approved"
+                      ? "border-green-300 bg-green-50 text-green-900"
+                      : dispDecisionStatus === "rejected"
+                        ? "border-red-300 bg-red-50 text-red-900"
+                        : "border-orange-300 bg-orange-50 text-orange-950"
+                  }`}
+                >
+                  {dispDecisionStatus === "approved"
+                    ? "✓ DISPENSATIE GOEDGEKEURD"
+                    : dispDecisionStatus === "rejected"
+                      ? "✕ DISPENSATIE AFGEWEZEN"
+                      : "DISPENSATIE IN BEHANDELING"}
                 </div>
               ) : null}
 

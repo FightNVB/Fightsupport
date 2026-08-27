@@ -88,32 +88,41 @@ export default function FighterDossierPage(){
   else if(/draw|onbeslist|gelijk/.test(u))acc.o++;
   return acc;
  },{w:0,v:0,o:0});
- return <main style={s.page}><div style={s.wrap}>
-  <header style={s.hero}>
-    <div style={s.heroGlow}/>
-    <div style={s.heroTop}>
-      <button style={s.silver} onClick={()=>router.push(`/dashboard/admin/controle/${matchmakingId}`)}><ArrowLeft size={16}/>Terug</button>
-      <div style={s.logoWrap}>
-        <img src="/branding/fightsupport/excel-logo.png" alt="FightSupport" style={s.logo}/>
-      </div>
-<button style={s.silver} onClick={load}><RefreshCw size={16}/>Hercheck</button>
-    </div>
-    <div style={s.heroBottom}>
-      <div style={s.heroIdentity}>
-        <div style={s.eyebrow}>VECHTERDOSSIER</div>
-        <h1 style={s.title}>{f.naam||"Onbekende vechter"}</h1>
-        <div style={s.identityStrip}>
-          <span style={s.identityChip}><b>VA</b> {f.va_nummer}</span>
-          <span style={s.identityChip}>{f.primary_discipline||f.nulmeting_discipline||"Discipline onbekend"}</span>
-          <span style={s.identityChip}>{f.mma_level||f.berekende_klasse||f.nulmeting_klasse||"Klasse onbekend"}</span>
-          <span style={s.identityChip}>Sync {fmt(f.last_scraped_at)}</span>
-        </div>
-      </div>
-    </div>
+ return <main style={s.page} className="fighter-dossier-page"><div style={s.wrap}>
+  <style>{`
+   .fighter-data-table thead th{background:#111!important;color:#fff!important;border-bottom:2px solid #ff4d00!important}
+   .fighter-data-table tbody td{background:#fff!important;color:#111!important;border-bottom:1px solid #d3d6d9!important}
+   .fighter-data-table tbody tr:nth-child(even) td{background:#f3f0ed!important}
+   @media(max-width:760px){.fighter-dossier-page{padding:0!important}.fighter-dossier-hero{min-height:0!important;aspect-ratio:auto!important}.fighter-dossier-hero-image{position:relative!important;width:100%!important;height:auto!important;object-fit:contain!important}.fighter-desktop-overlay{display:none!important}.fighter-mobile-summary{display:block!important}.fighter-grid{grid-template-columns:1fr!important}}
+  `}</style>
+  <header style={s.hero} className="fighter-dossier-hero">
+   <img src="/branding/fightsupport/fighter-hero.png" alt="" aria-hidden="true" style={s.heroImage} className="fighter-dossier-hero-image"/>
+   <div style={s.heroShade}/>
+   <div style={s.heroToolbar}>
+    <button style={s.glassButton} onClick={()=>router.push(`/dashboard/admin/controle/${matchmakingId}`)}><ArrowLeft size={16}/>Terug</button>
+    <button style={s.glassButton} onClick={load}><RefreshCw size={16}/>Hercheck</button>
+   </div>
+   <div style={s.fighterNameBlock} className="fighter-desktop-overlay">
+    <div style={s.fighterName}>{f.naam||"Onbekende vechter"}</div>
+    <div style={s.fighterGym}>{(data.sportscholen||data.gyms||[])[0]?.naam||(data.sportscholen||data.gyms||[])[0]?.organisatie_naam||""}</div>
+   </div>
+   <div style={s.heroIdentityValues} className="fighter-desktop-overlay">
+    <div>{f.va_nummer||"-"}</div><div>{f.primary_discipline||f.nulmeting_discipline||"-"}</div><div>{f.mma_level||f.berekende_klasse||f.nulmeting_klasse||"-"}</div><div>{f.geslacht||"-"}</div>
+   </div>
+   <div style={s.heroStatusGrid} className="fighter-desktop-overlay">
+    <HeroStatus title={f.heeft_startverbod?"STARTVERBOD":"FIT TO FIGHT"} value={f.heeft_startverbod?"Actief startverbod":"Geen actief startverbod"} tone={f.heeft_startverbod?"danger":"ok"}/>
+    <HeroStatus title="LICENTIE" value={f.licentie_actief?"Geldig":"Geen geldige licentie"} tone={f.licentie_actief?"ok":"danger"}/>
+    <HeroStatus title="WEDSTRIJDEN" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${record.w}-${record.v}-${record.o}`} tone="info"/>
+    <HeroStatus title="EVENTDATUM" value={eventDate?new Date(eventDate).toLocaleDateString("nl-NL"):"-"} tone="neutral"/>
+   </div>
   </header>
- <div style={s.summary}><Card title="Licentie" value={f.licentie_actief?"Geldig":"Geen geldige licentie"}/><Card title="Status" value={f.heeft_startverbod?"STARTVERBOD":"Fit to fight"} danger={f.heeft_startverbod}/><Card title="Wedstrijden" value={`${f.totaal_wedstrijden??data.results.length} totaal · ${f.gewonnen??"?"} gewonnen`}/></div>
+  <div className="fighter-mobile-summary" style={s.mobileSummary}>
+   <h1 style={s.mobileName}>{f.naam||"Onbekende vechter"}</h1>
+   <div style={s.mobileGym}>{(data.sportscholen||data.gyms||[])[0]?.naam||(data.sportscholen||data.gyms||[])[0]?.organisatie_naam||""}</div>
+   <div style={s.mobileGrid}><MobileField label="VA-nummer" value={f.va_nummer||"-"}/><MobileField label="Discipline" value={f.primary_discipline||f.nulmeting_discipline||"-"}/><MobileField label="Klasse" value={f.mma_level||f.berekende_klasse||f.nulmeting_klasse||"-"}/><MobileField label="Geslacht" value={f.geslacht||"-"}/></div>
+  </div>
  <Section title="Profiel & contact"><Grid rows={[["Naam",f.naam],["E-mail",f.email],["Geboortedatum",f.geboortedatum],["Geslacht",f.geslacht]]}/></Section>
- <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Leeftijd",calcAge(f.geboortedatum,eventDate)],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden",f.nulmeting_totaal],["W / V / O",`${record.w} / ${record.v} / ${record.o}`],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
+ <Section title="Nulmeting & klasse"><Grid rows={[["Discipline",f.nulmeting_discipline],["Nulmeting klasse",f.nulmeting_klasse],["Berekende klasse",f.berekende_klasse],["MMA niveau",f.mma_level],["Leeftijd",calcAge(f.geboortedatum,eventDate)],["Gewicht",f.nulmeting_gewicht],["Aantal wedstrijden toegevoegd",f.nulmeting_totaal],["W / V / O",`${record.w} / ${record.v} / ${record.o}`],["Opmerking",f.nulmeting_opmerking,"full"]]}/></Section>
  <Section title={`Sportscholen (${(data.sportscholen||data.gyms||[]).length})`}><Table headers={["Sportschool","Plaats","Land","Sportschool ID","Laatste synchronisatie"]} rows={(data.sportscholen||data.gyms||[]).map((r:any)=>[r.naam||r.organisatie_naam,r.plaats,r.land,r.sportschool_id||r.organisatie_id||"-",fmt(r.last_team_sync_at||r.last_seen_at)])}/></Section>
  <Section title={`Wedstrijdhistorie (${data.results.length})`}><Table headers={["Datum","Evenement","Discipline","Klasse","Tegenstander","Sportschool","Uitslag"]} rows={data.results.map((r:any)=>[r.datum,r.evenement,r.discipline,r.klasse,r.tegenstander,r.sportschool,r.uitslag])}/></Section>
  <Section title={`Meldingen (${meldingen.length})`}>
@@ -143,6 +152,8 @@ export default function FighterDossierPage(){
  {Array.isArray(data.startbans)&&data.startbans.length>0&&<Section title={`Startverboden (${data.startbans.length})`}><Table headers={["Soort","Ingang","Einde","Actief","Reden","Evenement"]} rows={data.startbans.map((r:any)=>[r.soort,r.ingang,r.einde,r.actief?"Ja":"Nee",r.reden,r.evenement])}/></Section>}
  </div></main>
 }
+function HeroStatus({title,value,tone="neutral"}:any){const color=tone==="danger"?"#ff6b57":tone==="ok"?"#a8e0b5":tone==="info"?"#ffd0ad":"#f1f3f5";return <div style={s.heroStatusCard}><div><div style={s.heroStatusTitle}>{title}</div><div style={{...s.heroStatusValue,color}}>{value||"-"}</div></div></div>}
+function MobileField({label,value}:any){return <div style={s.mobileField}><span style={s.mobileLabel}>{label}</span><b>{value||"-"}</b></div>}
 function mapResultLevel(severity:any,resultaat:any){
  const sev=String(severity??"").trim().toLowerCase();
  const res=String(resultaat??"").trim().toLowerCase();
@@ -168,8 +179,8 @@ function noticeStyle(level:string){
 }
 function Card({title,value,danger}:any){return <div style={s.card}><div style={s.cardTitle}>{title}</div><div style={{fontSize:18,fontWeight:900,color:danger?"#ff654d":"#eee"}}>{value}</div></div>}
 function Section({title,children}:any){return <section style={s.section}><h2 style={{margin:"0 0 14px",color:"#ff7440"}}>{title}</h2>{children}</section>}
-function Grid({rows}:any){return <div style={s.grid}>{rows.map((r:any,i:number)=><div key={i} style={{...s.field,...(r[2]==="wide"?s.fieldWide:{}),...(r[2]==="full"?s.fieldFull:{})}}><span style={s.muted}>{r[0]}</span><b style={{wordBreak:"break-word",lineHeight:1.35}}>{r[1]??"-"}</b></div>)}</div>}
-function Table({headers,rows}:any){return <div style={{overflowX:"auto",border:"1px solid #444b52"}}><table style={s.table}><thead><tr>{headers.map((h:any)=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{rows.map((r:any,i:number)=>{const light=i%2===1;return <tr key={i}>{r.map((v:any,j:number)=><td key={j} style={{...s.td,...(light?s.tdLight:s.tdDark)}}>{v??"-"}</td>)}</tr>})}{!rows.length&&<tr><td style={{...s.td,...s.tdDark}} colSpan={headers.length}>Geen gegevens.</td></tr>}</tbody></table></div>}
+function Grid({rows}:any){return <div style={s.grid} className="fighter-grid">{rows.map((r:any,i:number)=><div key={i} style={{...s.field,...(r[2]==="wide"?s.fieldWide:{}),...(r[2]==="full"?s.fieldFull:{})}}><span style={s.muted}>{r[0]}</span><b style={{wordBreak:"break-word",lineHeight:1.35}}>{r[1]??"-"}</b></div>)}</div>}
+function Table({headers,rows}:any){return <div style={{overflowX:"auto",border:"1px solid #444b52"}}><table style={s.table} className="fighter-data-table"><thead><tr>{headers.map((h:any)=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{rows.map((r:any,i:number)=>{const light=i%2===1;return <tr key={i}>{r.map((v:any,j:number)=><td key={j} style={{...s.td,...(light?s.tdLight:s.tdDark)}}>{v??"-"}</td>)}</tr>})}{!rows.length&&<tr><td style={{...s.td,...s.tdDark}} colSpan={headers.length}>Geen gegevens.</td></tr>}</tbody></table></div>}
 function fmt(v:any){return v?new Date(v).toLocaleString("nl-NL"):"-"}
 function calcAge(v:any,at:any){
  const birth=new Date(v);
@@ -181,9 +192,9 @@ function calcAge(v:any,at:any){
  return age;
 }
 const s:any={
-page:{minHeight:"100vh",background:"radial-gradient(circle at 50% -10%,rgba(255,77,0,.16),transparent 34%),linear-gradient(180deg,#060708 0%,#0b0f13 48%,#050607 100%)",color:"white",padding:20},
-wrap:{maxWidth:1460,margin:"0 auto"},
-hero:{position:"relative",overflow:"hidden",marginBottom:16,border:"1px solid #4a5057",borderTop:"3px solid #ff4d00",background:"linear-gradient(145deg,#1b2026 0%,#0b0e12 55%,#15191e 100%)",boxShadow:"0 16px 34px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.05)"},
+page:{minHeight:"100vh",background:"linear-gradient(180deg,#24282c 0%,#30353a 45%,#1d2023 100%)",color:"#f3f4f5",padding:18},
+wrap:{maxWidth:1560,margin:"0 auto"},
+hero:{position:"relative",overflow:"hidden",aspectRatio:"16 / 10",minHeight:650,maxHeight:940,marginBottom:18,border:"1px solid #9da3a8",background:"#111",boxShadow:"0 18px 42px rgba(20,24,28,.24),0 2px 8px rgba(0,0,0,.18)"},
 heroGlow:{position:"absolute",inset:0,pointerEvents:"none",background:"radial-gradient(circle at 50% 10%,rgba(255,77,0,.14),transparent 24%)"},
 heroTop:{position:"relative",display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",gap:14,padding:"10px 14px",borderBottom:"1px solid #353b42"},
 logoWrap:{display:"flex",justifyContent:"center",alignItems:"center",height:92,minWidth:760},
@@ -219,5 +230,13 @@ table:{width:"100%",borderCollapse:"collapse",fontSize:13},
 th:{textAlign:"left",padding:"9px 10px",borderBottom:"2px solid #ff4d00",background:"#20262c",color:"#f3f3f3",whiteSpace:"nowrap"},
 td:{padding:"9px 10px",borderBottom:"1px solid #31373d",verticalAlign:"top"},
 tdDark:{background:"#11161a",color:"#f3f3f3"},
-tdLight:{background:"#ececec",color:"#111"}
+tdLight:{background:"#ececec",color:"#111"},
+heroImage:{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",objectPosition:"center"},
+heroShade:{position:"absolute",inset:0,pointerEvents:"none",background:"linear-gradient(180deg,rgba(0,0,0,.08),transparent 28%,transparent 72%,rgba(0,0,0,.18))"},
+heroToolbar:{position:"absolute",zIndex:4,top:18,right:20,display:"flex",gap:9},
+glassButton:{display:"inline-flex",gap:7,alignItems:"center",justifyContent:"center",height:38,padding:"0 13px",color:"#fff",background:"rgba(10,12,14,.72)",border:"1px solid rgba(255,255,255,.42)",backdropFilter:"blur(8px)",fontWeight:900,cursor:"pointer",boxShadow:"0 5px 16px rgba(0,0,0,.3)"},
+fighterNameBlock:{position:"absolute",zIndex:3,left:"4.2%",top:"31%",width:"41%",textShadow:"0 4px 14px #000"},fighterName:{color:"#fff",fontSize:"clamp(30px,3.25vw,58px)",lineHeight:.98,fontWeight:950,letterSpacing:.3,textTransform:"uppercase"},fighterGym:{marginTop:10,color:"#ff641f",fontSize:"clamp(13px,1.15vw,20px)",fontWeight:900,letterSpacing:1.4,textTransform:"uppercase"},
+heroIdentityValues:{position:"absolute",zIndex:3,left:"6.8%",bottom:"27.2%",width:"45.5%",display:"grid",gridTemplateColumns:"1.08fr 1.28fr .9fr .95fr",gap:10,color:"#fff",fontSize:"clamp(11px,.92vw,16px)",fontWeight:900,textTransform:"uppercase",textShadow:"0 2px 7px #000"},
+heroStatusGrid:{position:"absolute",zIndex:3,left:"3.35%",right:"5.2%",bottom:"9.6%",height:"13.8%",display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:"1.35%"},heroStatusCard:{minWidth:0,display:"flex",alignItems:"center",padding:"10px 12px 10px 76px"},heroStatusTitle:{color:"#fff",fontSize:"clamp(9px,.75vw,12px)",fontWeight:950,letterSpacing:1.1,textShadow:"0 2px 5px #000"},heroStatusValue:{marginTop:4,fontSize:"clamp(10px,.82vw,13px)",lineHeight:1.25,fontWeight:850,textShadow:"0 2px 5px #000"},
+mobileSummary:{display:"none",margin:"0 10px 12px",padding:14,background:"linear-gradient(145deg,#33383d,#262b2f)",border:"1px solid #555d64",borderTop:"3px solid #ff4d00"},mobileName:{margin:0,fontSize:26,textTransform:"uppercase"},mobileGym:{marginTop:7,color:"#ff6a2a",fontWeight:900,textTransform:"uppercase"},mobileGrid:{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8,marginTop:14},mobileField:{padding:10,background:"#3a4045",border:"1px solid #596168"},mobileLabel:{display:"block",color:"#aeb6bd",fontSize:9,fontWeight:850,textTransform:"uppercase",marginBottom:4},
 };

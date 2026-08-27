@@ -380,18 +380,6 @@ export default function ControleOverzichtPage() {
   }, []);
 
   useEffect(() => {
-    if (rows.length === 0) return;
-
-    const timer = window.setInterval(() => {
-      void loadPresenceForRows(rows);
-    }, 30000);
-
-    return () => window.clearInterval(timer);
-  }, [rows]);
-
-
-
-  useEffect(() => {
     if (!scrapeOverlayOpen) return;
 
     void checkFightPassportSession();
@@ -528,12 +516,7 @@ export default function ControleOverzichtPage() {
           if (!res.ok) return [row.id, []] as const;
 
           const json = await res.json().catch(() => ({}));
-          const users = (Array.isArray(json?.users) ? json.users : []).filter(
-            (u: MatchmakingPresenceUser) => {
-              const seen = new Date(u?.last_seen ?? 0).getTime();
-              return Number.isFinite(seen) && Date.now() - seen < 90_000;
-            },
-          );
+          const users = Array.isArray(json?.users) ? json.users : [];
 
           return [row.id, users] as const;
         } catch {
@@ -760,7 +743,7 @@ export default function ControleOverzichtPage() {
         sub: "Deze matchmaking wordt nu gecontroleerd. Dit kan even duren.",
       });
 
-      const res = await authedFetch("/api/control-engine/start", {
+      const res = await authedFetch("/api/control-engine/admin/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

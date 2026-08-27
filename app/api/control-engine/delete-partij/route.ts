@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
+import { assertHasMatchmakingEditLock } from "@/lib/matchmakingEditLock";
 
 export const runtime = "nodejs";
 
@@ -85,6 +86,7 @@ export async function POST(req: NextRequest) {
       userId,
       role,
     });
+    await assertHasMatchmakingEditLock(matchmaking_id, userId);
 
     const controleRunIds = await getControleRunIds(matchmaking_id, controle_run_id);
 
@@ -358,6 +360,6 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
+    return NextResponse.json({ error: e?.message ?? String(e) }, { status: Number(e?.status ?? 500) });
   }
 }

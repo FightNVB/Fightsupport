@@ -218,6 +218,7 @@ async function fetchExistingBoutUidIndex(matchmaking_id: string) {
 }
 
 const ALLOWED_BONDTEAMS = new Set([
+  "NVB",
   "IRO",
   "NKF",
   "WPKL",
@@ -226,6 +227,7 @@ const ALLOWED_BONDTEAMS = new Set([
   "FOG",
   "MMAAN",
   "MON",
+  "UMC",
 ]);
 
 function bad(error: string, status = 400) {

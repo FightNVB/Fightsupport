@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { assertHasMatchmakingEditLock } from "@/lib/matchmakingEditLock";
 
 export const runtime = "nodejs";
 
@@ -642,6 +643,8 @@ export async function POST(req: NextRequest) {
       return jsonError("Je hebt geen toegang tot deze matchmaking.", 403);
     }
 
+    await assertHasMatchmakingEditLock(matchmakingId, user.id);
+
     const latestControleRunId = await getLatestControleRunId(matchmakingId);
     if (!latestControleRunId) {
       return jsonError(
@@ -896,6 +899,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: any) {
     console.error("controle/reorder-partijen POST error:", e);
-    return jsonError(e?.message ?? "Onbekende fout bij controle reorder-partijen.", 500);
+    return jsonError(e?.message ?? "Onbekende fout bij controle reorder-partijen.", Number(e?.status ?? 500));
   }
 }

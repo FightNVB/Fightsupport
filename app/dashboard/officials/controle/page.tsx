@@ -18,7 +18,8 @@ import NvbDarkButton from "@/components/NvbDarkButton";
 const NVB_ORANGE = "#ff4d00";
 
 const API_OVERVIEW = "/api/officials/matchmakings-overzicht";
-const API_START_CONTROLE = "/api/control-engine/officials/start";
+const API_START_CONTROLE = "/api/officials/start";
+const API_ACTUELE_CHECK = "/api/control-engine/officials/live-check";
 const API_DELETE_MATCHMAKING = "/api/control-engine/delete-matchmaking";
 const API_NAAR_UITSLAGEN = "/api/matchmaking/naar-uitslagen";
 const API_VERPLAATS_NAAR_ADMIN_ARCHIEF = "/api/officials/archive";
@@ -303,10 +304,10 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className="px-4 py-2 text-sm font-extrabold tracking-[0.02em] transition"
+      className="whitespace-nowrap px-3 py-1.5 text-xs font-extrabold tracking-[0.01em] transition"
       style={{
         borderRadius: 0,
-        minWidth: 240,
+        minWidth: 0,
         background: active
           ? "linear-gradient(180deg, #ff6a14 0%, #ff4d00 55%, #df3f00 100%)"
           : "linear-gradient(180deg, #f2f2f2 0%, #cfcfcf 48%, #a8a8a8 100%)",
@@ -386,6 +387,7 @@ function ActionSquare({
 const ACTION_COLORS = {
   matchmaking: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
   controle: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
+  actueel: "linear-gradient(180deg, #0f9f8a 0%, #087265 100%)",
   weegstation: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
   uitslagen: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
   archief: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
@@ -427,17 +429,6 @@ export default function OfficialsOverzichtPage() {
     void load();
   }, []);
 
-  useEffect(() => {
-    if (rows.length === 0) return;
-
-    const timer = window.setInterval(() => {
-      void loadPresenceForRows(rows);
-    }, 30000);
-
-    return () => window.clearInterval(timer);
-  }, [rows]);
-
-
 
   async function loadPresenceForRows(matchmakings: MatchmakingRow[]) {
     const results = await Promise.all(
@@ -451,12 +442,7 @@ export default function OfficialsOverzichtPage() {
           if (!res.ok) return [row.id, []] as const;
 
           const json = await res.json().catch(() => ({}));
-          const users = (Array.isArray(json?.users) ? json.users : []).filter(
-            (u: MatchmakingPresenceUser) => {
-              const seen = new Date(u?.last_seen ?? 0).getTime();
-              return Number.isFinite(seen) && Date.now() - seen < 90_000;
-            },
-          );
+          const users = Array.isArray(json?.users) ? json.users : [];
 
           return [row.id, users] as const;
         } catch {
@@ -566,23 +552,6 @@ export default function OfficialsOverzichtPage() {
     }
   }
 
-  useEffect(() => {
-    if (loading) return;
-    if (isBusy) return;
-
-    const hasRunning = rows.some((r) =>
-      isRunningStatus(r.laatste_run?.status ?? r.stadium ?? r.status)
-    );
-
-    if (!hasRunning) return;
-
-    const timer = window.setInterval(() => {
-      void load();
-    }, 5000);
-
-    return () => window.clearInterval(timer);
-  }, [rows, loading, isBusy]);
-
   async function startControle(matchmakingId: string) {
     try {
       setIsBusy(true);
@@ -631,6 +600,56 @@ export default function OfficialsOverzichtPage() {
       }
 
       setOverlayMessage("De resultaten worden verwerkt...");
+      await load();
+    } finally {
+      setBusyId(null);
+      setIsBusy(false);
+      setOverlayOpen(false);
+      setOverlayMessage("");
+      setOverlayTitle("Even wachten");
+      setOverlaySubMessage(
+        "Sluit deze pagina niet af totdat de resultaten zijn geladen."
+      );
+    }
+  }
+
+  async function startActueleCheck(matchmakingId: string) {
+    try {
+      setIsBusy(true);
+      setBusyId(matchmakingId);
+      setOverlayTitle("Actuele check");
+      setOverlayMessage(
+        "FightPassport controleert nu alleen licentie, startverbod en keurmerk..."
+      );
+      setOverlaySubMessage(
+        "De volledige databasecontrole wordt hierbij niet opnieuw opgebouwd."
+      );
+      setOverlayOpen(true);
+
+      const res = await authedFetch(API_ACTUELE_CHECK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchmaking_id: matchmakingId,
+          workers: 8,
+          stagger_ms: 250,
+          tab_attempts: 8,
+          soft_wait_ms: 900,
+          between_attempts_ms: 450,
+          live_timeout_ms: 45000,
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        alert(json?.error ?? "Actuele FightPassport-check mislukt.");
+        return;
+      }
+
+      setOverlayMessage(
+        "Actuele licentie-, startverbod- en keurmerkgegevens zijn bijgewerkt."
+      );
       await load();
     } finally {
       setBusyId(null);
@@ -1065,7 +1084,7 @@ export default function OfficialsOverzichtPage() {
                 style={silverBackplate}
               >
                 <div className="px-2 py-2 md:px-3">
-                  <div className="mb-5 flex flex-wrap items-center justify-center gap-3">
+                  <div className="mb-5 flex flex-wrap items-center justify-center gap-2 xl:flex-nowrap">
                     <TabButton
                       active={activeTab === "received"}
                       label="Ontvangen matchmakings"
@@ -1245,6 +1264,9 @@ export default function OfficialsOverzichtPage() {
                         <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Start controle / uitslagen
                       </span>
                       <span className="inline-flex items-center gap-1">
+                        <span className="h-3 w-3 rounded-sm bg-[#0f9f8a]" /> Actuele FP-check
+                      </span>
+                      <span className="inline-flex items-center gap-1">
                         <span className="h-3 w-3 rounded-sm bg-[#8b4ab8]" /> Inzien / archief
                       </span>
                       <span className="inline-flex items-center gap-1">
@@ -1379,6 +1401,15 @@ export default function OfficialsOverzichtPage() {
                                           color={activeTab === "weegstation" ? ACTION_COLORS.weegstation : ACTION_COLORS.matchmaking}
                                         >
                                           {activeTab === "weegstation" ? "⚖" : "M"}
+                                        </ActionSquare>
+
+                                        <ActionSquare
+                                          onClick={() => startActueleCheck(r.id)}
+                                          disabled={rowBusy || isBusy}
+                                          title="Actuele FightPassport-check: licentie, startverbod en keurmerk"
+                                          color={ACTION_COLORS.actueel}
+                                        >
+                                          {rowBusy && isBusy ? "…" : "✓"}
                                         </ActionSquare>
 
                                         {activeTab === "uploaded" ? (

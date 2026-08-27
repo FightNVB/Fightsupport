@@ -103,3 +103,4 @@ ControlEngine/scrapers/.fightpassport-chrome-profile/
 
 # Tijdelijke FightPassport downloads
 ControlEngine/scrapers/fp_total/downloads/
+ControlEngine/scrapers/sportscholen/.tmp_fightcrew_download/

@@ -138,6 +138,135 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
   if (existingRes.error) throw existingRes.error;
 
   const nowIso = new Date().toISOString();
+
+  /*
+   * BELANGRIJK:
+   * - Bij een BESTAANDE matchmaking betekent `undefined`: NIET AANRAKEN.
+   * - Alleen expliciet meegegeven velden worden bijgewerkt.
+   * - Expliciet `null` mag een veld wel leegmaken.
+   *
+   * Dit voorkomt dat ensureLifecycleRecord bestaande masterdata zoals
+   * bondteam, event_id, matchmaker_id, naam, datum enz. per ongeluk op NULL zet.
+   */
+  if (existingRes.data?.id) {
+    const current = existingRes.data as Record<string, any>;
+    const patch: Record<string, any> = {
+      last_updated_at: nowIso,
+      last_updated_by: s(input.actorUserId),
+    };
+
+    if (input.naam !== undefined) patch.naam = s(input.naam);
+    if (input.datum !== undefined) patch.datum = s(input.datum);
+    if (input.locatie !== undefined) patch.locatie = s(input.locatie);
+    if (input.promotorId !== undefined) patch.promotor_id = s(input.promotorId);
+
+    if (input.matchmakerId !== undefined || input.makerUserId !== undefined) {
+      patch.matchmaker_id = s(input.matchmakerId ?? input.makerUserId);
+    }
+
+    if (input.makerType !== undefined) {
+      patch.maker_type = s(input.makerType);
+    }
+
+    if (input.makerUserId !== undefined || input.matchmakerId !== undefined) {
+      patch.maker_user_id = s(input.makerUserId ?? input.matchmakerId);
+    }
+
+    if (input.bondteam !== undefined) {
+      patch.bondteam = s(input.bondteam);
+    }
+
+    if (input.eventId !== undefined) {
+      patch.event_id = s(input.eventId);
+    }
+
+    if (input.bronType !== undefined) {
+      patch.bron_type = s(input.bronType);
+    }
+
+    if (input.stage !== undefined && input.stage !== null) {
+      patch.stadium = s(input.stage);
+      patch.status = s(input.stage);
+    }
+
+    const shouldUpdateOwner =
+      input.stage !== undefined ||
+      input.ownerType !== undefined ||
+      input.ownerUserId !== undefined ||
+      input.ownerBondteam !== undefined ||
+      input.matchmakerId !== undefined ||
+      input.bondteam !== undefined;
+
+    if (shouldUpdateOwner) {
+      const effectiveStage =
+        (input.stage ??
+          current.stadium ??
+          current.status ??
+          "concept_matchmaking") as MatchmakingStage;
+
+      const ownerPatch = ownerFieldsForStage({
+        stage: effectiveStage,
+        ownerType:
+          input.ownerType !== undefined
+            ? input.ownerType
+            : (current.huidige_eigenaar_type as MatchmakingOwnerType | null),
+        ownerUserId:
+          input.ownerUserId !== undefined
+            ? input.ownerUserId
+            : current.huidige_eigenaar_user_id,
+        ownerBondteam:
+          input.ownerBondteam !== undefined
+            ? input.ownerBondteam
+            : current.huidige_eigenaar_bondteam,
+        matchmakerId:
+          input.matchmakerId !== undefined || input.makerUserId !== undefined
+            ? s(input.matchmakerId ?? input.makerUserId)
+            : s(current.matchmaker_id ?? current.maker_user_id),
+        bondteam:
+          input.bondteam !== undefined ? input.bondteam : current.bondteam,
+      });
+
+      Object.assign(patch, ownerPatch);
+    }
+
+    if (input.previousOwnerType !== undefined) {
+      patch.vorige_eigenaar_type = s(input.previousOwnerType);
+
+      if (
+        input.previousOwnerType === "matchmaker" ||
+        input.previousOwnerType === "matchmaker_upload" ||
+        input.previousOwnerType === "admin"
+      ) {
+        patch.vorige_eigenaar_user_id = s(input.previousOwnerUserId);
+        patch.vorige_eigenaar_bondteam = null;
+      } else if (input.previousOwnerType === "bondteam") {
+        patch.vorige_eigenaar_user_id = null;
+        patch.vorige_eigenaar_bondteam = s(input.previousOwnerBondteam);
+      } else {
+        patch.vorige_eigenaar_user_id = null;
+        patch.vorige_eigenaar_bondteam = null;
+      }
+    } else {
+      if (input.previousOwnerUserId !== undefined) {
+        patch.vorige_eigenaar_user_id = s(input.previousOwnerUserId);
+      }
+      if (input.previousOwnerBondteam !== undefined) {
+        patch.vorige_eigenaar_bondteam = s(input.previousOwnerBondteam);
+      }
+    }
+
+    const { data, error } = await supabaseAdminLifecycle
+      .from("matchmakings")
+      .update(patch)
+      .eq("id", input.matchmakingId)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  // Nieuwe matchmaking/lifecycle-row: hier mogen defaults wél worden gezet.
   const stage = input.stage ?? "concept_matchmaking";
   const resolvedMatchmakerId = s(input.matchmakerId ?? input.makerUserId);
 
@@ -150,7 +279,9 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
     bondteam: input.bondteam ?? null,
   });
 
-  const patch = {
+  const insertPayload = {
+    id: input.matchmakingId,
+    created_at: nowIso,
     naam: s(input.naam),
     datum: s(input.datum),
     locatie: s(input.locatie),
@@ -181,24 +312,6 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
     last_updated_by: s(input.actorUserId),
   } as Record<string, any>;
 
-  if (existingRes.data?.id) {
-    const { data, error } = await supabaseAdminLifecycle
-      .from("matchmakings")
-      .update(patch)
-      .eq("id", input.matchmakingId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
-  }
-
-  const insertPayload = {
-    id: input.matchmakingId,
-    created_at: nowIso,
-    ...patch,
-  };
-
   const { data, error } = await supabaseAdminLifecycle
     .from("matchmakings")
     .insert(insertPayload)
@@ -210,10 +323,10 @@ export async function ensureLifecycleRecord(input: EnsureLifecycleInput) {
   await logMatchmakingFlow({
     matchmakingId: input.matchmakingId,
     actieType: "created",
-    naarStadium: patch.stadium,
-    naarEigenaarType: patch.huidige_eigenaar_type,
-    naarEigenaarUserId: patch.huidige_eigenaar_user_id,
-    naarEigenaarBondteam: patch.huidige_eigenaar_bondteam,
+    naarStadium: insertPayload.stadium,
+    naarEigenaarType: insertPayload.huidige_eigenaar_type,
+    naarEigenaarUserId: insertPayload.huidige_eigenaar_user_id,
+    naarEigenaarBondteam: insertPayload.huidige_eigenaar_bondteam,
     actorUserId: s(input.actorUserId),
     actorRole: s(input.actorRole),
     opmerking: "Lifecycle-record aangemaakt",

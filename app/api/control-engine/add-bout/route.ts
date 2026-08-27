@@ -12,6 +12,7 @@ import {
 import { buildControleBoutContext } from "@/lib/control/buildControleBoutContext";
 import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
 import { rulesEngine } from "@/lib/rulesEngine";
+import { assertHasMatchmakingEditLock } from "@/lib/matchmakingEditLock";
 
 export const runtime = "nodejs";
 
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest) {
     if (!matchmaking_id) throw new Error("matchmaking_id ontbreekt");
 
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+    await assertHasMatchmakingEditLock(matchmaking_id, userId);
 
     // ===== insert bout =====
     const { data: last } = await supabaseAdmin
@@ -207,7 +209,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       { ok: false, error: err?.message || "Bout toevoegen mislukt" },
-      { status: 500 }
+      { status: Number(err?.status ?? 500) }
     );
   }
 }
