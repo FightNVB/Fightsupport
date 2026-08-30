@@ -631,6 +631,7 @@ function MatchmakingPageContent() {
   const [uploadLocatie, setUploadLocatie] = useState("");
   const [uploadPromotor, setUploadPromotor] = useState("");
   const [uploadBondteam, setUploadBondteam] = useState("");
+  const [uploadAantalUren, setUploadAantalUren] = useState("6");
 
   const [viewTab, setViewTab] = useState<ViewTab>("zelf");
   const [filterMonth, setFilterMonth] = useState("");
@@ -675,6 +676,7 @@ function MatchmakingPageContent() {
     setUploadLocatie("");
     setUploadPromotor("");
     setUploadBondteam(normalizeBondteam(profileData?.bondteam ?? ""));
+    setUploadAantalUren("6");
     setUploadFile(null);
     setUploadMsg("");
   }
@@ -864,6 +866,8 @@ function MatchmakingPageContent() {
       if (!uploadDatum.trim()) return setUploadMsg("⚠️ Datum is verplicht.");
       if (!uploadBondteam.trim())
         return setUploadMsg("⚠️ Bondteam is verplicht.");
+      if (!["6", "7", "8"].includes(uploadAantalUren))
+        return setUploadMsg("⚠️ Kies het aantal uren: 6, 7 of 8 uur.");
       if (!uploadFile) return setUploadMsg("⚠️ Kies eerst een Excel-bestand.");
 
       setUploading(true);
@@ -893,6 +897,7 @@ function MatchmakingPageContent() {
           evenement_datum: norm(uploadDatum),
           locatie: norm(uploadLocatie) || null,
           bondteam: normalizeBondteam(uploadBondteam),
+          aantal_uren: Number(uploadAantalUren),
           matchmaker: profile?.full_name?.trim() || null,
           promotor: norm(uploadPromotor) || null,
           hoofdofficial: null,
@@ -1577,7 +1582,7 @@ function MatchmakingPageContent() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-5">
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-6">
                           <input
                             type="date"
                             value={uploadDatum}
@@ -1613,6 +1618,15 @@ function MatchmakingPageContent() {
                                 {option}
                               </option>
                             ))}
+                          </select>
+                          <select
+                            value={uploadAantalUren}
+                            onChange={(e) => setUploadAantalUren(e.target.value)}
+                            className="orange-input h-10 w-full"
+                          >
+                            <option value="6">6 uur</option>
+                            <option value="7">7 uur</option>
+                            <option value="8">8 uur</option>
                           </select>
                         </div>
 
