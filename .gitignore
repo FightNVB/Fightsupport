@@ -70,6 +70,7 @@ ControlEngine/scrapers/config/login_master.json
 ControlEngine/scrapers/fp_bundle/downloads/
 ControlEngine/scrapers/fp_bundle_mm/downloads/
 ControlEngine/scrapers/sportscholen/downloads/
+ControlEngine/scrapers/fp_bundle_mm_control/downloads/
 
 # Temp / scraper output
 ControlEngine/scrapers/tmp/

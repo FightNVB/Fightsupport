@@ -698,21 +698,45 @@ async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
   try {
     const { data: matchmaking, error: matchmakingErr } = await supabase
       .from("matchmakings")
-      .select("id, naam, datum, locatie, promotor, bondteam, matchmaker_naam, matchmaker_id")
+      .select("id, naam, datum, locatie, promotor, bondteam, matchmaker_naam, matchmaker_id, maker_user_id, uploaded_by")
       .eq("id", matchmaking_id)
       .maybeSingle();
 
     if (!matchmakingErr && matchmaking) {
+      let matchmakerNaam =
+        safeRaw((matchmaking as any).matchmaker_naam) ||
+        safeRaw((matchmaking as any).matchmaker);
+
+      // Oudere matchmakings hebben vaak nog geen matchmaker_naam opgeslagen.
+      // Haal de naam dan op uit user_profiles via de gebruiker die de matchmaking bezit/uploadde.
+      if (!matchmakerNaam) {
+        const profielId =
+          safeRaw((matchmaking as any).matchmaker_id) ||
+          safeRaw((matchmaking as any).maker_user_id) ||
+          safeRaw((matchmaking as any).uploaded_by);
+
+        if (profielId) {
+          const { data: profiel, error: profielErr } = await supabase
+            .from("user_profiles")
+            .select("full_name")
+            .eq("id", profielId)
+            .maybeSingle();
+
+          if (!profielErr) {
+            matchmakerNaam = safeRaw((profiel as any)?.full_name);
+          } else {
+            console.warn("matchmakernaam uit user_profiles laden mislukt:", profielErr.message);
+          }
+        }
+      }
+
       return {
         id: String((matchmaking as any).id ?? matchmaking_id),
         event_id: null,
         naam: (matchmaking as any).naam ?? null,
         datum: (matchmaking as any).datum ?? null,
         bondteam: (matchmaking as any).bondteam ?? null,
-        matchmaker:
-          (matchmaking as any).matchmaker_naam ??
-          (matchmaking as any).matchmaker ??
-          null,
+        matchmaker: matchmakerNaam || null,
         promotor: (matchmaking as any).promotor ?? null,
         locatie: (matchmaking as any).locatie ?? null,
         source: "matchmakings",

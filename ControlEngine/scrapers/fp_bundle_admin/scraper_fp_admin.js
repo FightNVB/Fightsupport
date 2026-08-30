@@ -71,61 +71,6 @@ async function hardClosePage(page) {
 }
 
 
-async function waitForMasterDashboardReady(page, timeoutMs = 120000) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const state = await page.evaluate(() => {
-      const visible = (el) => {
-        if (!el) return false;
-        const style = getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          style.opacity !== "0" &&
-          rect.width > 0 &&
-          rect.height > 0
-        );
-      };
-
-      const loginInput = document.querySelector("input.gebruikersnaam");
-      const unlockInput =
-        document.querySelector("input.pincode") ||
-        document.querySelector("input.target_input.pincode") ||
-        document.querySelector("input[class*='pincode']");
-
-      const body = String(document.body?.innerText || "").toLowerCase();
-      const href = String(location.href || "").toLowerCase();
-
-      return {
-        loginVisible: !!loginInput && visible(loginInput),
-        unlockVisible: !!unlockInput && visible(unlockInput),
-        dashboardSignal:
-          body.includes("afmelden") ||
-          body.includes("uitloggen") ||
-          [...document.querySelectorAll(".tileHeader")].some((el) => visible(el)),
-        href,
-      };
-    }).catch(() => null);
-
-    if (
-      state &&
-      !state.loginVisible &&
-      !state.unlockVisible &&
-      !state.href.includes("#login") &&
-      !state.href.includes("/login") &&
-      state.dashboardSignal
-    ) {
-      return true;
-    }
-
-    await sleep(250);
-  }
-
-  throw new Error("MASTER_NOT_READY: masterpage niet stabiel op dashboard");
-}
-
 async function closeAnyModal(page) {
   const selectors = [
     "button#sluit_inr_detail",
@@ -169,7 +114,7 @@ const WORKERS_RAW = Number(
 const WORKERS =
   Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
     ? Math.min(20, Math.max(1, Math.floor(WORKERS_RAW)))
-    : 10;
+    : 8;
 
 // Zelfde model/defaults als actuele Total.
 const STAGGER = Math.max(0, Number(process.env.STAGGER_MS ?? "450"));
@@ -235,272 +180,128 @@ async function readHeaderVa(page) {
 
 async function readLicenseAndStartverbod(page, va, signal = null) {
   const startedAt = Date.now();
+  let last = null;
 
-  while (Date.now() - startedAt < 12000) {
+  // Zelfde leesstrategie als Total: lees de zichtbare VA-tab als geheel en
+  // beslis zodra de benodigde velden aanwezig zijn. Geen 12s wachten op
+  // exact losse <p>-elementen als FightPassport de tekst al heeft gerenderd.
+  while (Date.now() - startedAt < 18000) {
     throwIfAborted(signal, va);
 
-    const result = await page
-      .evaluate((requestedVa) => {
-        const tab = document.querySelector(
-          `.internal_tab.va_vechter_${requestedVa}`,
-        );
-        if (!tab) return null;
+    last = await page.evaluate((requestedVa) => {
+      const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+      if (!tab) return null;
 
-        const paragraphs = [...tab.querySelectorAll("p")]
-          .map((el) =>
-            String(el.textContent || "")
-              .replace(/\s+/g, " ")
-              .trim(),
-          )
-          .filter(Boolean);
+      const text = String(tab.innerText || tab.textContent || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
-        const licentieJa = paragraphs.some((text) =>
-          /^licentie\s*:\s*ja$/i.test(text),
-        );
+      const licentieJa = /\blicentie\s*:\s*ja\b/i.test(text);
+      const licentieNee = /\blicentie\s*:\s*nee\b/i.test(text);
+      const startverbod = /\bstartverbod\b/i.test(text);
+      const fitToFight = /\bfit\s*to\s*fight\b/i.test(text);
 
-        const licentieNee = paragraphs.some((text) =>
-          /^licentie\s*:\s*nee$/i.test(text),
-        );
+      return {
+        licentie_ok: licentieJa ? true : licentieNee ? false : null,
+        startverbod_actief: startverbod ? true : fitToFight ? false : null,
+        ready: (licentieJa || licentieNee) && (startverbod || fitToFight),
+      };
+    }, String(va)).catch(() => null);
 
-        const startverbod = paragraphs.some(
-          (text) => text.toLowerCase() === "startverbod",
-        );
-
-        const fitToFight = paragraphs.some(
-          (text) => text.toLowerCase() === "fit to fight",
-        );
-
-        return {
-          licentie_ok: licentieJa ? true : licentieNee ? false : null,
-          startverbod_actief: startverbod
-            ? true
-            : fitToFight
-              ? false
-              : null,
-        };
-      }, String(va))
-      .catch(() => null);
-
-    if (
-      result &&
-      typeof result.licentie_ok === "boolean" &&
-      typeof result.startverbod_actief === "boolean"
-    ) {
-      return result;
+    if (last?.ready) {
+      return {
+        licentie_ok: last.licentie_ok,
+        startverbod_actief: last.startverbod_actief,
+      };
     }
 
-    await sleep(150);
+    await sleep(250);
   }
 
-  throw new Error(
-    `Licentie/startverbod niet volledig leesbaar voor VA ${va}`,
-  );
+  throw new Error(`Licentie/startverbod niet volledig leesbaar voor VA ${va}`);
 }
 
-async function openSportscholenTile(page, va, signal = null) {
+async function clickTileLikeTotal(page, va, title, signal = null) {
   throwIfAborted(signal, va);
-
-  // Zelfde gedrag als Total clickTile(): eerst bestaande overlay weg,
-  // tegel op exact deze VA-tab aanklikken, daarna FP tijd geven om te renderen.
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(80);
 
-  const startedAt = Date.now();
+  const clicked = await page.evaluate((requestedVa, wantedTitle) => {
+    const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+    if (!tab) return false;
+    const header = [...tab.querySelectorAll(".tileHeader.enabled, .tileHeader")].find(
+      (el) => String(el.innerText || "").trim().toUpperCase() === wantedTitle.toUpperCase(),
+    );
+    const tile = header?.closest(".tile");
+    if (!tile) return false;
+    tile.click();
+    return true;
+  }, String(va), title).catch(() => false);
 
-  while (Date.now() - startedAt < 10000) {
-    throwIfAborted(signal, va);
-
-    const clicked = await page.evaluate((requestedVa) => {
-      const tab = document.querySelector(
-        `.internal_tab.va_vechter_${requestedVa}`,
-      );
-      if (!tab) return false;
-
-      const header = [
-        ...tab.querySelectorAll(".tileHeader.enabled, .tileHeader"),
-      ].find(
-        (el) =>
-          String(el.innerText || el.textContent || "")
-            .trim()
-            .toUpperCase() === "SPORTSCHOLEN",
-      );
-
-      const tile = header?.closest(".tile");
-      if (!tile) return false;
-
-      tile.scrollIntoView?.({ block: "center" });
-      tile.click();
-      return true;
-    }, String(va)).catch(() => false);
-
-    if (clicked) {
-      // Total wacht na clickTile 700ms en scrapeTileTable nog 400ms.
-      // Zelfde renderbudget hier vóór het pollen van de echte rijen.
-      await sleep(1100);
-      return true;
-    }
-
-    await sleep(100);
-  }
-
-  return false;
+  if (clicked) await sleep(700);
+  return clicked;
 }
 
 async function readCurrentSportschool(page, va, signal = null) {
-  const opened = await openSportscholenTile(page, va, signal);
+  const opened = await clickTileLikeTotal(page, va, "SPORTSCHOLEN", signal);
+  if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
 
-  if (!opened) {
-    throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
-  }
+  // Exact Total-tempo: na tile-click nog 400 ms renderbudget en daarna één
+  // uitleesactie op de zichtbare tabel. Geen extra 12s polling-loop.
+  await sleep(400);
+  throwIfAborted(signal, va);
 
-  // Niet op .dialog_header vertrouwen. Total leest zichtbare tabellen/rijen
-  // rechtstreeks; lokaal zie je de rijen ook al terwijl die header-check soms faalt.
-  //
-  // Poll daarom de echte niet-filler rijen totdat de ONDERSTE rij compleet is:
-  // kolom 0 = keurmerkschild
-  // kolom 1 = sportschoolnaam (altijd gevuld)
-  // kolom 2 = plaats (mag leeg zijn)
-  // één-na-laatste = land (altijd gevuld)
-  // laatste = type
-  const startedAt = Date.now();
-  let lastState = null;
+  const state = await page.evaluate(() => {
+    const clean = (value) => String(value || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  while (Date.now() - startedAt < 12000) {
-    throwIfAborted(signal, va);
+    const visible = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      return r.width > 200 && r.height > 30 && st.display !== "none" && st.visibility !== "hidden";
+    };
 
-    const state = await page.evaluate(() => {
-      const clean = (value) =>
-        String(value || "")
-          .replace(/\u00a0/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
+    const tables = [...document.querySelectorAll("table")].filter(visible);
+    for (const table of tables) {
+      const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
+        .filter((row) => !row.classList.contains("filler"));
+      if (!rows.length) continue;
 
-      const isVisible = (element) => {
-        if (!element) return false;
-        const style = getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          style.opacity !== "0" &&
-          rect.width > 0 &&
-          rect.height > 0
-        );
-      };
+      const candidates = rows.map((row) => ({
+        row,
+        cells: [...row.querySelectorAll("td")],
+      })).filter((entry) => entry.cells.length >= 4);
+      if (!candidates.length) continue;
 
-      // SYS42 kan meerdere overview_table_body's in de DOM laten staan.
-      // Pak een zichtbare body met echte rijen; val daarna terug op zichtbare tabellen.
-      const bodies = [...document.querySelectorAll("#overview_table_body")];
-      let body =
-        bodies.find((candidate) => {
-          if (!isVisible(candidate)) return false;
-          return [...candidate.querySelectorAll("tr.flexlist_row")]
-            .some((row) => !row.classList.contains("filler"));
-        }) ||
-        bodies.find(isVisible) ||
-        null;
-
-      let realRows = body
-        ? [...body.querySelectorAll("tr.flexlist_row")]
-            .filter((row) => !row.classList.contains("filler"))
-        : [];
-
-      // Total gebruikt generieke zichtbare tabellen. Als SYS42 de body niet
-      // netjes onder #overview_table_body hangt, zoek dezelfde echte datarijen
-      // binnen alle zichtbare tabellen.
-      if (!realRows.length) {
-        const visibleTables = [...document.querySelectorAll("table")]
-          .filter(isVisible);
-
-        for (const table of visibleTables) {
-          const candidates = [...table.querySelectorAll("tr.flexlist_row")]
-            .filter((row) => !row.classList.contains("filler"));
-          if (candidates.length) {
-            realRows = candidates;
-            break;
-          }
-        }
-      }
-
-      if (!realRows.length) {
-        return {
-          ok: false,
-          reason: "nog_geen_echte_rijen",
-          realRowCount: 0,
-        };
-      }
-
-      const currentRow = realRows[realRows.length - 1];
-      const cells = [...currentRow.querySelectorAll("td")];
-
-      if (cells.length < 4) {
-        return {
-          ok: false,
-          reason: "onderste_rij_te_weinig_kolommen",
-          cellCount: cells.length,
-          realRowCount: realRows.length,
-        };
-      }
-
+      const { row, cells } = candidates[candidates.length - 1];
       const sportschool = clean(cells[1]?.textContent);
       const plaats = clean(cells[2]?.textContent);
       const land = clean(cells[cells.length - 2]?.textContent);
-      const iconHtml = String(cells[0]?.innerHTML || "");
-
-      if (!sportschool || !land) {
-        return {
-          ok: false,
-          reason: !sportschool
-            ? "sportschool_kolom_2_nog_leeg"
-            : "land_een_na_laatste_nog_leeg",
-          sportschool: sportschool || null,
-          plaats: plaats || null,
-          land: land || null,
-          cellCount: cells.length,
-          realRowCount: realRows.length,
-        };
-      }
+      if (!sportschool || !land) continue;
 
       return {
         ok: true,
         sportschool,
         plaats: plaats || null,
         land,
-        keurmerk_schild_gevonden:
-          /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(iconHtml),
-        cellCount: cells.length,
-        realRowCount: realRows.length,
+        keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || "")),
       };
-    }).catch(() => ({
-      ok: false,
-      reason: "evaluate_fout",
-    }));
-
-    lastState = state;
-
-    if (
-      state?.ok &&
-      state?.sportschool &&
-      state?.land
-    ) {
-      await closeAnyModal(page).catch(() => {});
-      return state;
     }
 
-    await sleep(150);
+    return { ok: false };
+  }).catch(() => ({ ok: false }));
+
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(100);
+
+  if (!state?.ok) {
+    throw new Error(`Sportschooltabel niet compleet voor VA ${va}`);
   }
-
-  await closeAnyModal(page).catch(() => {});
-
-  throw new Error(
-    `Sportschooltabel niet tijdig compleet voor VA ${va} ` +
-    `(${lastState?.reason || "unknown"}; ` +
-    `naam=${lastState?.sportschool ?? "-"}; ` +
-    `plaats=${lastState?.plaats ?? "-"}; ` +
-    `land=${lastState?.land ?? "-"}; ` +
-    `rijen=${lastState?.realRowCount ?? "?"}; ` +
-    `kolommen=${lastState?.cellCount ?? "?"})`,
-  );
+  return state;
 }
 
 function calculateKeurmerkOk(land, shield) {
@@ -658,7 +459,6 @@ async function run() {
 
   // Master is de vaste anker-tab van dit child-proces.
   // Eerst volledig/stabiel inloggen en op dashboard blijven; pas daarna workers starten.
-  await waitForMasterDashboardReady(masterPage);
 
   let browserGeneration = 1;
   let browserRestartPromise = null;
@@ -699,8 +499,7 @@ async function run() {
       browser = fresh.browser;
       masterPage = fresh.page;
 
-      await waitForMasterDashboardReady(masterPage);
-
+    
       try {
         cookies = await masterPage.cookies();
       } catch {
@@ -744,8 +543,7 @@ async function run() {
         useStoredCookies: false,
       });
 
-      await waitForMasterDashboardReady(masterPage);
-
+    
       try {
         cookies = await masterPage.cookies();
       } catch {}
@@ -829,6 +627,7 @@ async function run() {
 
       // Per VA ALTIJD verse page; nooit hergebruiken.
       let page = null;
+      const vaPages = new Set();
 
       try {
         console.log(`[fp-admin] 🤖 ${label} → VA ${va}`);
@@ -854,6 +653,8 @@ async function run() {
           },
         );
 
+        if (page) vaPages.add(page);
+
         if (!page) {
           const requeued = await requeueTransientVa(
             va,
@@ -878,7 +679,9 @@ async function run() {
           SCRAPE_TIMEOUT_MS,
           `fp-admin ${va}`,
           async () => {
-            await hardClosePage(page).catch(() => {});
+            for (const p of vaPages) {
+              await hardClosePage(p).catch(() => {});
+            }
             page = null;
           },
         );
@@ -897,7 +700,9 @@ async function run() {
         const message = error?.message ?? String(error);
 
         if (message === "LOGIN_PAGE") {
-          await hardClosePage(page).catch(() => {});
+          for (const p of vaPages) {
+            await hardClosePage(p).catch(() => {});
+          }
           page = null;
 
           const retryKey = String(va);
@@ -987,9 +792,9 @@ async function run() {
       } finally {
         // CRUCIAAL: iedere VA-page weg.
         // De volgende VA krijgt altijd een volledig nieuwe page.
-        if (page) {
-          await closeAnyModal(page).catch(() => {});
-          await hardClosePage(page).catch(() => {});
+        for (const p of vaPages) {
+          await closeAnyModal(p).catch(() => {});
+          await hardClosePage(p).catch(() => {});
         }
 
         activeAttempts = Math.max(0, activeAttempts - 1);

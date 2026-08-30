@@ -18,6 +18,10 @@ import {
   Repeat,
   ChevronDown,
   ChevronUp,
+  Globe2,
+  Eye,
+  Unlink,
+  ShieldAlert,
 } from "lucide-react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
@@ -123,13 +127,7 @@ type ToernooiGroep = {
   totaalBelgieCheck: number;
 };
 
-type MatchmakingPresenceUser = {
-  user_id: string;
-  user_name: string | null;
-  user_role: string | null;
-  page: string | null;
-  last_seen: string;
-};
+
 
 function metalFrameStyle(accent: "none" | "orange" = "orange"): CSSProperties {
   const accentGlow =
@@ -224,19 +222,6 @@ function minAgeAtEvent(ctx: AnyRow): number {
 function safeText(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
   return s.length ? s : fallback;
-}
-
-function formatPresenceAge(lastSeen: string): string {
-  const t = new Date(lastSeen).getTime();
-  if (!Number.isFinite(t)) return "zojuist";
-  const diffSeconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (diffSeconds < 60) return "zojuist";
-  const minutes = Math.floor(diffSeconds / 60);
-  if (minutes === 1) return "1 minuut geleden";
-  if (minutes < 60) return `${minutes} minuten geleden`;
-  const hours = Math.floor(minutes / 60);
-  if (hours === 1) return "1 uur geleden";
-  return `${hours} uur geleden`;
 }
 
 function licenseValueToOk(v: any): boolean | null {
@@ -2478,8 +2463,11 @@ export default function ControleMatchmakingPage() {
   );
 
   const [showAdd, setShowAdd] = useState(false);
+  const [showMoreMatchmakingActions, setShowMoreMatchmakingActions] = useState(false);
   const [showWeegstationModal, setShowWeegstationModal] = useState(false);
   const [headerBusy, setHeaderBusy] = useState<string | null>(null);
+  const [publication, setPublication] = useState<Record<string, any> | null>(null);
+  const hasSnapshotPublication = publication?.trainer_is_published === true;
   const [addBusy, setAddBusy] = useState(false);
   const [fDiscipline, setFDiscipline] = useState("");
   const [fKlasse, setFKlasse] = useState("");
@@ -2493,7 +2481,83 @@ export default function ControleMatchmakingPage() {
   const [fBlauwKg, setFBlauwKg] = useState("");
   const [fMaxKg, setFMaxKg] = useState("");
 
-  const [presenceUsers, setPresenceUsers] = useState<MatchmakingPresenceUser[]>([]);
+  useEffect(() => {
+    if (!matchmakingId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const resp = await authedFetch(
+          `/api/matchmaker/public-matchmaking?matchmakingId=${encodeURIComponent(matchmakingId)}`,
+        );
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(json?.error || "Publicatiestatus laden mislukt");
+        }
+        if (!cancelled) setPublication(json?.publication ?? null);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? "Publicatiestatus laden mislukt");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [matchmakingId]);
+
+  function openPublishedPage(token: unknown) {
+    const value = String(token ?? "").trim();
+    if (!value) throw new Error("De beveiligde link bevat geen token.");
+    window.open(
+      `${window.location.origin}/openbare-matchmaking/${value}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  async function manageShareLink(action: "publish_live" | "publish_trainers" | "offline") {
+    if (!matchmakingId) return;
+
+    await withHeaderBusy(`public-${action}`, async () => {
+      const wasLineupPublished =
+        action === "publish_live" &&
+        publication?.is_enabled === true &&
+        !!String(publication?.public_token ?? "").trim();
+
+      const wasSnapshotPublished = hasSnapshotPublication;
+      const resp = await authedFetch("/api/matchmaker/public-matchmaking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmakingId, action }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.error || "Publicatie verwerken mislukt");
+
+      const nextPublication = json?.publication ?? null;
+      setPublication(nextPublication);
+
+      if (action === "offline") {
+        setMsg("Line-up- en snapshotlink zijn offline gezet.");
+        return;
+      }
+
+      const token =
+        action === "publish_trainers"
+          ? nextPublication?.trainer_token
+          : nextPublication?.public_token;
+      openPublishedPage(token);
+
+      setMsg(
+        action === "publish_live"
+          ? wasLineupPublished
+            ? "Line-up is bijgewerkt en geopend."
+            : "Line-up is gepubliceerd en geopend."
+          : wasSnapshotPublished
+            ? "Snapshot is bijgewerkt en geopend."
+            : "Snapshot is gepubliceerd en geopend.",
+      );
+    });
+  }
 
   async function getAccessToken(): Promise<string | null> {
     const { data } = await supabase.auth.getSession();
@@ -2501,36 +2565,7 @@ export default function ControleMatchmakingPage() {
   }
 
 
-  async function refreshPresence() {
-    if (!matchmakingId) return;
 
-    try {
-      const token = await getAccessToken();
-      if (!token) return;
-
-      const resp = await authedFetch(
-        `/api/matchmaking-presence?matchmakingId=${encodeURIComponent(matchmakingId)}&page=admin_controle`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            matchmakingId,
-            page: "admin_controle",
-          }),
-        },
-      );
-
-      const json = await resp.json().catch(() => ({}));
-      if (resp.ok) {
-        setPresenceUsers((json?.users ?? []) as MatchmakingPresenceUser[]);
-      }
-    } catch {
-      // Presence mag de controlepagina nooit blokkeren.
-    }
-  }
 
   const subtitle = useMemo(() => {
     const naam = (evenementNaam ?? "").trim();
@@ -2575,8 +2610,51 @@ export default function ControleMatchmakingPage() {
     await authedDownload(`/api/rapport/official-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "official.xlsx");
   }
 
-  async function openSportdataCsv() {
-    await authedDownload(`/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "sportdata.csv");
+  function openOfficialReport() {
+    router.push(
+      `/dashboard/matchmaker/matchmaking/${encodeURIComponent(matchmakingId)}/official-rapport`,
+    );
+  }
+
+  async function waitForFinalControle(controleRunId: string) {
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      const res = await authedFetch(
+        `/api/officials/eindcontrole/start?controle_run_id=${encodeURIComponent(controleRunId)}&matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+        { method: "GET", cache: "no-store" },
+      );
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || "Status eindcontrole ophalen mislukt.");
+
+      const status = String(payload?.run?.status ?? "").toLowerCase();
+      if (["klaar", "done", "completed", "ok"].includes(status)) return payload?.run;
+      if (["failed", "mislukt", "error", "aborted"].includes(status)) {
+        throw new Error(payload?.run?.foutmelding || "Laatste eindcontrole is mislukt.");
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+    }
+    throw new Error("Laatste eindcontrole duurt langer dan verwacht. Controleer de status opnieuw.");
+  }
+
+  async function startFinalControle() {
+    setMsg("Laatste FightPassport-eindcontrole gestart. Licentie, startverbod en keurmerk worden live gecontroleerd.");
+
+    const res = await authedFetch("/api/officials/eindcontrole/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matchmaking_id: matchmakingId }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || payload?.ok === false) {
+      throw new Error(payload?.error || "Laatste eindcontrole starten mislukt.");
+    }
+
+    const controleRunId = String(payload?.controle_run_id ?? "").trim();
+    if (!controleRunId) throw new Error("Eindcontrole gestart, maar controle_run_id ontbreekt.");
+
+    await waitForFinalControle(controleRunId);
+    await load();
+    setMsg("✅ Eindcontrole afgerond. Het Eindrapport is nu gereed.");
   }
 
   function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
@@ -2982,10 +3060,10 @@ export default function ControleMatchmakingPage() {
 
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok)
-        throw new Error(json?.error ?? "Sturen naar admin mislukt.");
+        throw new Error(json?.error ?? "Sturen naar NVB mislukt.");
 
       setMsg(
-        json?.message ?? "✅ Matchmaking is doorgestuurd naar admin.",
+        json?.message ?? "✅ Matchmaking is doorgestuurd naar de NVB.",
       );
       setReloadTick((x) => x + 1);
     });
@@ -3347,21 +3425,14 @@ export default function ControleMatchmakingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchmakingId, reloadTick]);
 
-
-  useEffect(() => {
-    refreshPresence();
-    const interval = window.setInterval(() => {
-      refreshPresence();
-    }, 30000);
-
-    return () => window.clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchmakingId]);
-
   useEffect(() => {
     if (!lineupMode) syncOrderedRowsFromRows(rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
+
+  const eindrapportReady =
+    String(run?.run_type ?? "").toLowerCase() === "official_eindcontrole" &&
+    ["klaar", "done", "completed", "ok"].includes(String(run?.status ?? "").toLowerCase());
 
   const galaDuurCalc = useMemo(() => {
     if (rows.length === 0) return null;
@@ -3717,7 +3788,7 @@ export default function ControleMatchmakingPage() {
               </div>
             </div>
             <div
-              className="mt-3 rounded-2xl px-3 py-2"
+              className="mt-3 rounded-2xl px-3 py-3"
               style={{
                 background:
                   "linear-gradient(180deg, rgba(255,255,255,0.055) 0%, rgba(0,0,0,0.18) 100%)",
@@ -3725,101 +3796,194 @@ export default function ControleMatchmakingPage() {
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
               }}
             >
-              <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/55">
-                    Feedback
-                  </span>
-                  <DarkActionButton
-                    label={headerBusy === "rapport" ? "Bezig..." : "Rapport"}
-                    tone="silver"
-                    icon={<FileText className="h-3.5 w-3.5" />}
-                    onClick={() =>
-                      withHeaderBusy("rapport", async () =>
-                        Promise.resolve(openRapport()),
-                      )
-                    }
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Niet tijdens lineup bouwen."
-                        : "Feedbackrapport openen."
-                    }
-                  />
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/55">
+                      Matchmaking acties
+                    </span>
 
-                  <span className="mx-1 hidden h-6 w-px bg-white/15 sm:inline-block" />
-                  <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-blue-100/70">
-                    Matchmaking
-                  </span>
-                  <DarkActionButton
-                    label={headerBusy === "official" ? "Bezig..." : "Info"}
-                    tone="blue"
-                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
-                    onClick={() =>
-                      withHeaderBusy("official", async () =>
-                        openOfficialExcel(),
-                      )
-                    }
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Niet tijdens lineup bouwen."
-                        : "Matchmaking info export."
-                    }
-                  />
-                  <DarkActionButton
-                    label={
-                      headerBusy === "sportdata" ? "Bezig..." : "Sportdata"
-                    }
-                    tone="green"
-                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
-                    onClick={() =>
-                      withHeaderBusy("sportdata", async () =>
-                        openSportdataCsv(),
-                      )
-                    }
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Niet tijdens lineup bouwen."
-                        : "Sportdata export."
-                    }
-                  />
+
+
+                    <DarkActionButton
+                      label={headerBusy === "rapport" ? "Bezig..." : "Rapport"}
+                      tone="silver"
+                      icon={<FileText className="h-3.5 w-3.5" />}
+                      onClick={() =>
+                        withHeaderBusy("rapport", async () =>
+                          Promise.resolve(openRapport()),
+                        )
+                      }
+                      disabled={lineupMode || !!headerBusy}
+                      title={
+                        lineupMode
+                          ? "Niet tijdens lineup bouwen."
+                          : "Feedbackrapport openen."
+                      }
+                    />
+
+                    <DarkActionButton
+                      label={headerBusy === "eindcontrole" ? "Eindcontrole..." : "Eindcontrole"}
+                      tone="red"
+                      icon={<ShieldAlert className="h-3.5 w-3.5" />}
+                      onClick={() =>
+                        withHeaderBusy("eindcontrole", async () => startFinalControle())
+                      }
+                      disabled={lineupMode || !!headerBusy || rows.length === 0}
+                      title={
+                        lineupMode
+                          ? "Niet tijdens lineup bouwen."
+                          : "Start de laatste live FightPassport-controle."
+                      }
+                    />
+
+                    <DarkActionButton
+                      label={
+                        headerBusy === "public-publish_live"
+                          ? "Bezig..."
+                          : publication?.is_enabled
+                            ? "Update line-up"
+                            : "Publiceer line-up"
+                      }
+                      tone="green"
+                      icon={<Globe2 className="h-3.5 w-3.5" />}
+                      onClick={() => manageShareLink("publish_live")}
+                      disabled={lineupMode || !!headerBusy || rows.length === 0}
+                      title={
+                        publication?.is_enabled
+                          ? "Werk de bestaande openbare line-up bij met de huidige matchmaking."
+                          : "Publiceer de line-up en maak de openbare link actief."
+                      }
+                    />
+
+
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreMatchmakingActions((value) => !value)}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-black/35 px-3 py-2 text-xs font-extrabold text-white/85 transition hover:bg-white/10"
+                    aria-expanded={showMoreMatchmakingActions}
+                    title={showMoreMatchmakingActions ? "Minder acties tonen" : "Meer acties tonen"}
+                  >
+                    <span>{showMoreMatchmakingActions ? "Minder acties" : "Meer acties"}</span>
+                    {showMoreMatchmakingActions ? (
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    )}
+                  </button>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-2 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0">
-                  <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/55">
-                    Acties
-                  </span>
-                  <DarkActionButton
-                    label={
-                      headerBusy === "admin" ? "Bezig..." : "Stuur naar NVB"
-                    }
-                    tone="purple"
-                    icon={<RotateCcw className="h-3.5 w-3.5" />}
-                    onClick={stuurUploadNaarAdmin}
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Sla eerst de lineup-volgorde op of annuleer."
-                        : "Stuur deze matchmaking naar de NVB voor controle."
-                    }
-                  />
-                  <DarkActionButton
-                    label={
-                      headerBusy === "bond" ? "Bezig..." : "Stuur naar Official"
-                    }
-                    tone="blue"
-                    icon={<Send className="h-3.5 w-3.5" />}
-                    onClick={handleSendToBond}
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Sla eerst de lineup-volgorde op of annuleer."
-                        : "Stuur deze matchmaking naar Official."
-                    }
-                  />
-                </div>
+                {showMoreMatchmakingActions && (
+                  <div className="grid gap-3 border-t border-white/10 pt-3 md:grid-cols-3">
+                    <div className="min-w-0">
+                      <div className="mb-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/45">
+                        Documenten
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+
+                        <DarkActionButton
+                          label={headerBusy === "official" ? "Bezig..." : "Info"}
+                          tone="blue"
+                          icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
+                          onClick={() =>
+                            withHeaderBusy("official", async () =>
+                              openOfficialExcel(),
+                            )
+                          }
+                          disabled={lineupMode || !!headerBusy}
+                          title={
+                            lineupMode
+                              ? "Niet tijdens lineup bouwen."
+                              : "Matchmaking info export."
+                          }
+                        />
+                        <DarkActionButton
+                          label={headerBusy === "eindrapport" ? "Bezig..." : "Eindrapport"}
+                          tone={eindrapportReady ? "green" : "silver"}
+                          icon={<FileText className="h-3.5 w-3.5" />}
+                          onClick={() =>
+                            withHeaderBusy("eindrapport", async () =>
+                              Promise.resolve(openOfficialReport()),
+                            )
+                          }
+                          disabled={lineupMode || !!headerBusy || !eindrapportReady}
+                          title={
+                            lineupMode
+                              ? "Niet tijdens lineup bouwen."
+                              : eindrapportReady
+                                ? "Open het eindrapport voor de dienstdoende hoofdofficial."
+                                : "Beschikbaar nadat de eindcontrole is afgerond."
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="mb-2 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-100/60">
+                        Publicatie
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {publication?.is_enabled && publication?.public_token ? (
+                          <DarkActionButton
+                            label="Open line-up"
+                            tone="green"
+                            icon={<Globe2 className="h-3.5 w-3.5" />}
+                            onClick={() => openPublishedPage(publication.public_token)}
+                            disabled={lineupMode || !!headerBusy}
+                            title="Open de huidige openbare line-up zonder opnieuw te publiceren."
+                          />
+                        ) : null}
+
+                        <DarkActionButton
+                          label={headerBusy === "public-offline" ? "Bezig..." : "Offline"}
+                          tone="silver"
+                          icon={<Unlink className="h-3.5 w-3.5" />}
+                          onClick={() => manageShareLink("offline")}
+                          disabled={
+                            lineupMode ||
+                            !!headerBusy ||
+                            publication?.is_enabled !== true
+                          }
+                          title="Zet de line-up- en snapshotlink offline."
+                        />
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="mb-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/45">
+                        Doorsturen
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <DarkActionButton
+                          label={headerBusy === "admin" ? "Bezig..." : "Naar NVB"}
+                          tone="purple"
+                          icon={<RotateCcw className="h-3.5 w-3.5" />}
+                          onClick={stuurUploadNaarAdmin}
+                          disabled={lineupMode || !!headerBusy}
+                          title={
+                            lineupMode
+                              ? "Sla eerst de lineup-volgorde op of annuleer."
+                              : "Stuur deze matchmaking naar de NVB voor controle."
+                          }
+                        />
+                        <DarkActionButton
+                          label={headerBusy === "bond" ? "Bezig..." : "Naar Official"}
+                          tone="blue"
+                          icon={<Send className="h-3.5 w-3.5" />}
+                          onClick={handleSendToBond}
+                          disabled={lineupMode || !!headerBusy}
+                          title={
+                            lineupMode
+                              ? "Sla eerst de lineup-volgorde op of annuleer."
+                              : "Stuur deze matchmaking naar Official."
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3914,33 +4078,6 @@ export default function ControleMatchmakingPage() {
               </button>
             </div>
 
-            {presenceUsers.length > 0 && (
-              <div
-                className="mx-auto mt-4 max-w-4xl rounded-xl px-4 py-3 text-sm"
-                style={{
-                  background:
-                    "linear-gradient(180deg, rgba(255,244,190,0.96) 0%, rgba(255,230,150,0.96) 100%)",
-                  border: "1px solid rgba(180,120,0,0.45)",
-                  boxShadow: "0 10px 22px rgba(0,0,0,0.10)",
-                  color: "#2a1c00",
-                }}
-              >
-                <div className="font-black">
-                  ⚠️ Deze matchmaking is ook geopend door:
-                </div>
-                <div className="mt-1 flex flex-wrap gap-2 font-semibold">
-                  {presenceUsers.map((u) => (
-                    <span
-                      key={u.user_id}
-                      className="rounded-full bg-white/70 px-3 py-1"
-                    >
-                      {safeText(u.user_name, "Onbekende gebruiker")}
-                      {u.user_role ? ` · ${u.user_role}` : ""} · {formatPresenceAge(u.last_seen)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
               <div

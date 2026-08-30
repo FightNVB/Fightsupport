@@ -1374,11 +1374,37 @@ function sortPartijLabel(a: string, b: string) {
   return String(a).localeCompare(String(b), "nl", { numeric: true });
 }
 
+function isSportschoolMismatchMelding(row: ControleMeldingRow) {
+  const text = normalizeText(
+    [
+      row?.regel,
+      row?.rule,
+      row?.regel_code,
+      row?.rule_code,
+      row?.boodschap,
+      row?.melding,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  // Alleen bedoeld voor de admincontrole, niet voor het official Excel-rapport.
+  // Voorbeeld:
+  // "Sportschool wijkt af: matchmaking \"Gym 053\" · FightPassport \"Angelo Gym / Centurion Sports\"."
+  return (
+    text.includes("sportschool wijkt af") ||
+    (text.includes("matchmaking") &&
+      text.includes("fightpassport") &&
+      text.includes("sportschool"))
+  );
+}
+
 function openMeldingen(meldingen: ControleMeldingRow[]) {
   return (meldingen ?? [])
     .filter((m) => normalizeResultaat(m?.resultaat) !== "OK")
     .filter((m) => !isApprovedMelding(m))
-    .filter((m) => !isLicentieMelding(m));
+    .filter((m) => !isLicentieMelding(m))
+    .filter((m) => !isSportschoolMismatchMelding(m));
 }
 
 function getMeldingenByPartij(meldingen: ControleMeldingRow[]) {

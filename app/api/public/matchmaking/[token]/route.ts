@@ -338,6 +338,136 @@ function genderLabel(value: unknown) {
   return "—";
 }
 
+
+function normalizeLineupClass(value: unknown, disciplineValue: unknown) {
+  const raw = s(value).toLowerCase();
+  const compact = raw
+    .replace(/\b(?:klasse|class|clas)\b/g, " ")
+    .replace(/[._/\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const discipline = s(disciplineValue).toLowerCase();
+
+  if (discipline.includes("mma") || discipline.includes("mixed martial")) {
+    if (compact.includes("jeugd") || compact.includes("youth") || compact.includes("junior") || compact === "j") return "J";
+    if (compact.includes("pro") || compact.includes("professional")) return "Pro";
+    return "Ama";
+  }
+
+  if (raw.includes("j+") || compact.includes("j plus") || compact.includes("talentstatus") || compact.includes("talent status")) return "J+";
+  if (compact === "j" || compact.includes("jeugd") || compact.includes("youth") || compact.includes("junior")) return "J";
+  if (compact === "d" || compact.includes("demo") || compact.includes("demonstratie")) return "D";
+  if (compact === "r" || compact.includes("recreant") || compact.includes("recreatief")) return "R";
+  if (compact === "n" || compact.includes("nieuweling") || compact.includes("novice") || compact.includes("newcomer")) return "N";
+  if (/(^| )c( |$)/.test(compact)) return "C";
+  if (/(^| )b( |$)/.test(compact)) return "B";
+  if (/(^| )a( |$)/.test(compact) || compact.includes("elite")) return "A";
+  return s(value) || "—";
+}
+
+function genderFromValues(...values: unknown[]) {
+  for (const value of values) {
+    const label = genderLabel(value);
+    if (label !== "—") return label;
+  }
+  return "—";
+}
+
+function cleanStoredRoundTimes(value: unknown) {
+  const explicit = s(value);
+  if (!explicit) return "";
+  return explicit
+    .replace(/\s*\/\s*\d+(?:[,.]\d+)?\s*(?:sec(?:onden?)?|min(?:uten?)?)\s*rust.*$/i, "")
+    .replace(/\s*[-–—]\s*rust.*$/i, "")
+    .replace(/\s+rust.*$/i, "")
+    .trim();
+}
+
+function lineupRoundTimes(args: {
+  row: AnyRow;
+  raw: AnyRow;
+  controle?: AnyRow;
+  discipline: string;
+  klasse: string;
+  eventDate: unknown;
+  redBirth?: unknown;
+  blueBirth?: unknown;
+  redAge?: unknown;
+  blueAge?: unknown;
+}) {
+  const { row, raw, controle, discipline, klasse, eventDate } = args;
+  const explicit = cleanStoredRoundTimes(first(
+    row.ronde_tijden, row.rondetijden, row.partijduur, row.rondes,
+    raw.ronde_tijden, raw.rondetijden, raw.partijduur, raw.rondes,
+  ));
+  if (explicit) return explicit;
+
+  const d = s(discipline).toLowerCase();
+  const k = s(klasse);
+  const rawDescription = s(first(row.omschrijving, raw.omschrijving, row.partij_label, raw.partij_label)).toLowerCase();
+  const titleFight = rawDescription.includes("titel") || rawDescription.includes("championship") || rawDescription.includes("kampioenschap");
+
+  if (d.includes("mma") || d.includes("mixed martial")) {
+    if (k === "J") return "2 x 3 min";
+    if (k === "Pro") return titleFight ? "5 x 5 min" : "3 x 5 min";
+    return titleFight ? "5 x 3 min" : "3 x 3 min";
+  }
+
+  if (titleFight && k === "A") return "5 x 3 min";
+  if (rawDescription.includes("4oz") || rawDescription.includes("4 oz")) return "3 x 3 min";
+  if (k === "D") return "2 x 1 min";
+
+  if (k === "J" || k === "J+") {
+    const parseAge = (direct: unknown, birth: unknown) => {
+      const n = Number(direct);
+      if (Number.isFinite(n) && n >= 0) return n;
+      return ageOnDate(birth, eventDate);
+    };
+    const redAge = parseAge(args.redAge, args.redBirth);
+    const blueAge = parseAge(args.blueAge, args.blueBirth);
+    return redAge !== null && blueAge !== null && redAge >= 16 && blueAge >= 16
+      ? "3 x 1,5 min"
+      : "3 x 1 min";
+  }
+
+  if (k === "R") return "3 x 1 min";
+  if (k === "N") return "3 x 1,5 min";
+  if (k === "C") return "3 x 2 min";
+  if (k === "B") return "3 x 3 min";
+  if (k === "A") return "3 x 3 min";
+  return "—";
+}
+
+function galaMinutesForBout(klasse: string, discipline: string, rondeTijden: string) {
+  const d = s(discipline).toLowerCase();
+  const k = s(klasse).toUpperCase();
+  const rounds = s(rondeTijden).toLowerCase();
+
+  // Zelfde vaste partijminuten als de gala-duurberekening in matchmakingId.
+  if (d.includes("mma") || d.includes("mixed martial")) return 17;
+  if (rounds.includes("5 x 3") && k === "A") return 31;
+  if (k === "A") return 21;
+  if (k === "B") return 14;
+  if (k === "C") return 13;
+  if (k === "N") return 11.5;
+  if (k === "J+") return 10.5;
+  if (k === "J") return rounds.includes("1,5") || rounds.includes("1.5") ? 10.5 : 8.5;
+  if (k === "R") return 8.5;
+  if (k === "D") return 6;
+  if (d.includes("boksen") || d.includes("boxing")) return 10;
+  return 0;
+}
+
+function formatGalaDuration(mins: number) {
+  const rounded = Math.round(mins * 10) / 10;
+  const hours = Math.floor(rounded / 60);
+  const minutes = Math.round((rounded - hours * 60) * 10) / 10;
+  const fmt = (value: number) => Number.isInteger(value) ? String(value) : String(value).replace(".", ",");
+  if (hours <= 0) return `${fmt(minutes)} min`;
+  if (minutes === 0) return `${hours} uur`;
+  return `${hours} uur ${fmt(minutes)} min`;
+}
+
 function weightLabel(value: unknown) {
   const raw = s(value).replace(/\s*kg\s*$/i, "");
   if (!raw) return "—";
@@ -396,7 +526,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
 
     if (!publication) {
       return NextResponse.json(
-        { error: "Deze matchmakinglink is niet beschikbaar" },
+        { error: "Deze line-uplink is niet beschikbaar" },
         { status: 404 },
       );
     }
@@ -414,7 +544,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     }
 
     const matchmakingId = s(publication.matchmaking_id);
-    const [mmRes, boutsRes, contextsRes] = await Promise.all([
+    const [mmRes, boutsRes, contextsRes, controleRes] = await Promise.all([
       supabaseAdmin.from("matchmakings").select("*").eq("id", matchmakingId).single(),
       supabaseAdmin
         .from("matchmaking_bouts_raw")
@@ -425,11 +555,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
         .from("matchmaker_fighter_context")
         .select("*")
         .eq("matchmaking_id", matchmakingId),
+      supabaseAdmin
+        .from("controle_bout_context")
+        .select("*")
+        .eq("matchmaking_id", matchmakingId)
+        .order("updated_at", { ascending: false }),
     ]);
 
     if (mmRes.error) throw mmRes.error;
     if (boutsRes.error) throw boutsRes.error;
     if (contextsRes.error) throw contextsRes.error;
+    if (controleRes.error) throw controleRes.error;
 
     // Exact dezelfde recordbron als tab Matchmaking: de centrale
     // FightPassport-uitslagenhistorie, niet matchmaker_uitslagen_raw.
@@ -462,6 +598,54 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
       if (aanmeldingId && !contextByRegistrationId.has(aanmeldingId)) {
         contextByRegistrationId.set(aanmeldingId, context);
       }
+    }
+
+    const controleByBoutId = new Map<string, AnyRow>();
+    const controleByPartijNr = new Map<number, AnyRow>();
+    const controleVaNumbers = new Set<string>();
+    for (const controle of controleRes.data ?? []) {
+      const boutId = s(controle.bout_id);
+      const partijNr = Number(controle.partij_nr);
+      if (boutId && !controleByBoutId.has(boutId)) controleByBoutId.set(boutId, controle);
+      if (Number.isFinite(partijNr) && !controleByPartijNr.has(partijNr)) controleByPartijNr.set(partijNr, controle);
+      const rv = digits(controle.rood_va_mm);
+      const bv = digits(controle.blauw_va_mm);
+      if (rv) controleVaNumbers.add(rv);
+      if (bv) controleVaNumbers.add(bv);
+    }
+
+    const boutVaNumbers = new Set<string>();
+    for (const row of boutsRes.data ?? []) {
+      const raw = obj(row.raw_json);
+      const red = obj(raw.rood);
+      const blue = obj(raw.blauw);
+      const rv = digits(first(row.va_rood, row.rood_va, red.va_nummer, red.va));
+      const bv = digits(first(row.va_blauw, row.blauw_va, blue.va_nummer, blue.va));
+      if (rv) boutVaNumbers.add(rv);
+      if (bv) boutVaNumbers.add(bv);
+    }
+
+    const allVaNumbers = Array.from(new Set([...controleVaNumbers, ...boutVaNumbers]));
+    let fightpassportFighters: AnyRow[] = [];
+    if (allVaNumbers.length) {
+      const { data, error } = await supabaseAdmin
+        .from("fightpassport_fighters")
+        .select("va_nummer,geslacht,geboortedatum,naam")
+        .in("va_nummer", allVaNumbers);
+      if (error) throw error;
+      fightpassportFighters = (data ?? []) as AnyRow[];
+    }
+    const fighterByVa = new Map<string, AnyRow>();
+    for (const fighter of fightpassportFighters) {
+      const va = digits(fighter.va_nummer);
+      if (va && !fighterByVa.has(va)) fighterByVa.set(va, fighter);
+    }
+
+    function controleForBout(row: AnyRow, raw: AnyRow) {
+      const boutId = s(first(row.bout_uid, row.bout_id, raw.bout_uid, raw.bout_id));
+      if (boutId && controleByBoutId.has(boutId)) return controleByBoutId.get(boutId);
+      const partijNr = Number(first(row.partij_nr, raw.partij_nr));
+      return Number.isFinite(partijNr) ? controleByPartijNr.get(partijNr) : undefined;
     }
 
     function contextForCorner(row: AnyRow, raw: AnyRow, corner: "rood" | "blauw") {
@@ -535,73 +719,99 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
         const raw = obj(row.raw_json);
         const red = obj(raw.rood);
         const blue = obj(raw.blauw);
-
         const redContext = contextForCorner(row, raw, "rood");
         const blueContext = contextForCorner(row, raw, "blauw");
+        const controle = controleForBout(row, raw);
         const status = normalizeStatus(first(row.status, row.partij_status, row.bout_status, raw.status));
+
+        const redVa = digits(first(row.va_rood, row.rood_va, controle?.rood_va_mm, red.va_nummer, red.va));
+        const blueVa = digits(first(row.va_blauw, row.blauw_va, controle?.blauw_va_mm, blue.va_nummer, blue.va));
+        const redFp = redVa ? fighterByVa.get(redVa) : undefined;
+        const blueFp = blueVa ? fighterByVa.get(blueVa) : undefined;
+
+        const discipline = s(first(
+          row.discipline,
+          raw.discipline,
+          controle?.discipline,
+          contextDiscipline(redContext),
+          contextDiscipline(blueContext),
+        )) || "—";
+        const rawKlasse = first(
+          row.klasse,
+          row.klasse_mm,
+          raw.klasse,
+          controle?.klasse_mm,
+          contextClass(redContext),
+          contextClass(blueContext),
+        );
+        const klasse = normalizeLineupClass(rawKlasse, discipline);
+
+        const redBirth = first(
+          controle?.rood_geboortedatum_fp,
+          controle?.rood_geboortedatum_mm,
+          redFp?.geboortedatum,
+          redContext?.geboortedatum,
+          redContext?.fp_geboortedatum,
+          row.rood_geboortedatum,
+        );
+        const blueBirth = first(
+          controle?.blauw_geboortedatum_fp,
+          controle?.blauw_geboortedatum_mm,
+          blueFp?.geboortedatum,
+          blueContext?.geboortedatum,
+          blueContext?.fp_geboortedatum,
+          row.blauw_geboortedatum,
+        );
+
+        const geslacht = genderFromValues(
+          row.geslacht,
+          raw.geslacht,
+          controle?.rood_geslacht,
+          controle?.blauw_geslacht,
+          redFp?.geslacht,
+          blueFp?.geslacht,
+          redContext?.geslacht,
+          redContext?.fp_geslacht,
+          blueContext?.geslacht,
+          blueContext?.fp_geslacht,
+        );
+
+        const rondeTijden = lineupRoundTimes({
+          row,
+          raw,
+          controle,
+          discipline,
+          klasse,
+          eventDate,
+          redBirth,
+          blueBirth,
+          redAge: controle?.rood_leeftijd_event,
+          blueAge: controle?.blauw_leeftijd_event,
+        });
 
         return {
           id: s(row.id),
           partijNr: Number(first(row.partij_nr, raw.partij_nr)) || null,
-          // De gekoppelde context is actueel na iedere Terminator-run.
-          // Boutvelden blijven fallback voor partij-specifieke of oudere gegevens.
-          klasse: s(first(
-            contextClass(redContext),
-            contextClass(blueContext),
-            row.klasse,
-            row.klasse_mm,
-            raw.klasse,
-          )) || "—",
-          geslacht: genderLabel(first(
-            redContext?.geslacht,
-            redContext?.fp_geslacht,
-            blueContext?.geslacht,
-            blueContext?.fp_geslacht,
-            row.geslacht,
-            raw.geslacht,
-          )),
-          discipline: s(first(
-            contextDiscipline(redContext),
-            contextDiscipline(blueContext),
-            row.discipline,
-            raw.discipline,
-          )) || "—",
-          maxGewicht: displayMaxWeight(row, raw),
-          status,
-          sortAge: Math.min(
-            ...[
-              ageOnDate(
-                first(redContext?.geboortedatum, redContext?.fp_geboortedatum, redContext?.geboortedatum_input),
-                first(redContext?.evenement_datum, eventDate),
-              ),
-              ageOnDate(
-                first(blueContext?.geboortedatum, blueContext?.fp_geboortedatum, blueContext?.geboortedatum_input),
-                first(blueContext?.evenement_datum, eventDate),
-              ),
-            ].filter((value): value is number => value !== null),
+          klasse,
+          geslacht,
+          discipline,
+          maxGewicht: displayMaxWeight(
+            { ...row, max_gewicht: first(row.max_gewicht, controle?.max_gewicht), max_gewicht_notatie: first(row.max_gewicht_notatie, controle?.max_gewicht_notatie) },
+            raw,
           ),
+          rondeTijden,
+          galaMinuten: galaMinutesForBout(klasse, discipline, rondeTijden),
+          status,
           red: {
             ...fighterView(redContext, red, row, "rood", resultRows),
             starred: priorityIds.has(registrationId(first(
-              redContext?.inschrijving_id,
-              redContext?.aanmelding_id,
-              row.rood_aanmelding_id,
-              row.rood_inschrijving_id,
-              red.aanmelding_id,
-              red.inschrijving_id,
-              red.id,
+              redContext?.inschrijving_id, redContext?.aanmelding_id, row.rood_aanmelding_id, row.rood_inschrijving_id, red.aanmelding_id, red.inschrijving_id, red.id,
             ))),
           },
           blue: {
             ...fighterView(blueContext, blue, row, "blauw", resultRows),
             starred: priorityIds.has(registrationId(first(
-              blueContext?.inschrijving_id,
-              blueContext?.aanmelding_id,
-              row.blauw_aanmelding_id,
-              row.blauw_inschrijving_id,
-              blue.aanmelding_id,
-              blue.inschrijving_id,
-              blue.id,
+              blueContext?.inschrijving_id, blueContext?.aanmelding_id, row.blauw_aanmelding_id, row.blauw_inschrijving_id, blue.aanmelding_id, blue.inschrijving_id, blue.id,
             ))),
           },
         };
@@ -610,32 +820,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
         if (bout.status === "onder_voorbehoud" && publication.show_pending === false) return false;
         return bout.status !== "tegenstander_gezocht";
       })
+      // De openbare line-up volgt exact de opgeslagen partijvolgorde.
       .sort((a: AnyRow, b: AnyRow) => {
-        // Zelfde zichtbare volgorde als tab Matchmaking:
-        // A -> B -> C -> N -> J+ -> R -> J.
-        const klasseDiff = classRank(a.klasse) - classRank(b.klasse);
-        if (klasseDiff !== 0) return klasseDiff;
-
-        // Binnen iedere klasse: lichtste maximale gewicht bovenaan.
-        const gewichtDiff = weightSortValue(a.maxGewicht) - weightSortValue(b.maxGewicht);
-        if (gewichtDiff !== 0) return gewichtDiff;
-
-        // Bij gelijk gewicht: jongste partij eerst.
-        const ageA = Number.isFinite(a.sortAge) ? a.sortAge : Number.POSITIVE_INFINITY;
-        const ageB = Number.isFinite(b.sortAge) ? b.sortAge : Number.POSITIVE_INFINITY;
-        if (ageA !== ageB) return ageA - ageB;
-
-        // Alleen als stabiele laatste terugval; bepaalt niet de zichtbare nummering.
-        const partijA = Number.isFinite(a.partijNr) ? a.partijNr : Number.POSITIVE_INFINITY;
-        const partijB = Number.isFinite(b.partijNr) ? b.partijNr : Number.POSITIVE_INFINITY;
-        return partijA - partijB;
-      })
-      .map((bout: AnyRow, index: number, sorted: AnyRow[]) => ({
-        ...bout,
-        // Bovenaan staat de main card en die wordt als laatste gevochten.
-        // Daarom krijgt de bovenste partij het hoogste nummer en de onderste jeugdpartij nummer 1.
-        partijNr: sorted.length - index,
-      }));
+        const pa = Number.isFinite(a.partijNr) ? a.partijNr : Number.POSITIVE_INFINITY;
+        const pb = Number.isFinite(b.partijNr) ? b.partijNr : Number.POSITIVE_INFINITY;
+        return pa - pb;
+      });
 
     const searching = publication.show_opponent_search === false
       ? []
@@ -686,6 +876,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
             return a.naam.localeCompare(b.naam, "nl");
           });
 
+    const galaDuurMinuten = bouts.reduce(
+      (total: number, bout: AnyRow) => total + (Number(bout.galaMinuten) || 0),
+      0,
+    );
+    // Alleen intern nodig voor de som; niet als los veld per partij naar de browser sturen.
+    const publicBouts = bouts.map(({ galaMinuten, ...bout }: AnyRow) => bout);
+
     const updatedAt = [...(boutsRes.data ?? []), ...(contextsRes.data ?? [])].reduce(
       (latest: string, row: AnyRow) => {
         const candidate = s(first(row.laatste_bewerking_op, row.updated_at, row.created_at));
@@ -699,12 +896,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
         ok: true,
         audience: "promoter",
         event: {
-          title: s(publication.public_title) || s(first(mm.event_naam, mm.naam, mm.titel)) || "Matchmaking",
+          title: s(publication.public_title) || s(first(mm.event_naam, mm.naam, mm.titel)) || "Line-up",
           date: eventDate,
           location: s(publication.public_location) || s(first(mm.event_locatie, mm.locatie, mm.plaats, mm.stadium)),
           disciplines: s(publication.public_disciplines) || s(first(mm.discipline, mm.disciplines)),
-          phase: "Live meekijken voor promotor",
+          phase: "Line-up",
           updatedAt,
+          galaDuur: galaDuurMinuten > 0 ? formatGalaDuration(galaDuurMinuten) : "",
         },
         counts: {
           total: bouts.length,
@@ -712,14 +910,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
           pending: bouts.filter((b: AnyRow) => b.status === "onder_voorbehoud").length,
           searching: searching.length,
         },
-        bouts,
+        bouts: publicBouts,
         searching,
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } },
     );
   } catch (error: any) {
     return NextResponse.json(
-      { error: s(error?.message) || "Openbare matchmaking laden mislukt" },
+      { error: s(error?.message) || "Line-up laden mislukt" },
       { status: 500 },
     );
   }

@@ -483,6 +483,7 @@ export async function POST(req: Request) {
     let bondteam: string | null = null;
     let hoofdofficial: string | null = null;
     let promotor: string | null = null;
+    let aantal_uren = 6;
 
     let uploaded_by = "";
 
@@ -522,6 +523,7 @@ export async function POST(req: Request) {
         ? String(body.hoofdofficial).trim()
         : null;
       promotor = body.promotor ? String(body.promotor).trim() : null;
+      aantal_uren = Number(body.aantal_uren ?? 6);
 
       matchmaking_id = body.matchmaking_id
         ? String(body.matchmaking_id).trim()
@@ -564,6 +566,7 @@ export async function POST(req: Request) {
 
       hoofdofficial = String(form.get("hoofdofficial") ?? "").trim() || null;
       promotor = String(form.get("promotor") ?? "").trim() || null;
+      aantal_uren = Number(form.get("aantal_uren") ?? 6);
 
       matchmaking_id = String(form.get("matchmaking_id") ?? "").trim() || null;
       force_new = String(form.get("force_new") ?? "false") === "true";
@@ -653,6 +656,9 @@ export async function POST(req: Request) {
     }
     if (!normalizedBondteam) {
       return bad("Bondteam is verplicht.");
+    }
+    if (![6, 7, 8].includes(aantal_uren)) {
+      return bad("aantal_uren moet 6, 7 of 8 zijn.");
     }
     if (!ALLOWED_BONDTEAMS.has(normalizedBondteam)) {
       return bad(`Onbekend bondteam: ${normalizedBondteam}.`);
@@ -768,11 +774,13 @@ export async function POST(req: Request) {
           datum: evenement_datum,
           locatie,
           bondteam: normalizedBondteam,
+          aantal_uren,
 
           maker_type: makerType,
           maker_user_id: makerUserId,
 
           matchmaker_id: matchmakerIdForRow,
+          matchmaker_naam: mm,
           status: lifecycleStage,
           bron_type: lifecycleBronType,
           stadium: lifecycleStage,
@@ -805,11 +813,13 @@ export async function POST(req: Request) {
           datum: evenement_datum,
           locatie,
           bondteam: normalizedBondteam,
+          aantal_uren,
 
           maker_type: makerType,
           maker_user_id: makerUserId,
 
           matchmaker_id: matchmakerIdForRow,
+          matchmaker_naam: mm,
           created_at: now,
           status: lifecycleStage,
           bron_type: lifecycleBronType,

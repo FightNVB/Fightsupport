@@ -364,7 +364,7 @@ function ActionLegend() {
         <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Start controle / matchen
       </span>
       <span className="inline-flex items-center gap-1">
-        <span className="h-3 w-3 rounded-sm bg-[#8b4ab8]" /> Aanmeldingen / naar admin
+        <span className="h-3 w-3 rounded-sm bg-[#8b4ab8]" /> Aanmeldingen / naar NVB
       </span>
       <span className="inline-flex items-center gap-1">
         <span className="h-3 w-3 rounded-sm bg-[#ff8a1f]" /> Herupload
@@ -462,7 +462,7 @@ function isVisibleForMatchmakerOverview(row: MatchmakingRow, userId: string) {
   if (!isOwnMatchmaking(row, userId)) return false;
 
   // Als een matchmaking naar admin/NVB is gestuurd, verdwijnt hij uit dit overzicht
-  // tot admin hem retour zet. Zo kan de matchmaker hem niet meer aanpassen.
+  // tot de NVB hem retour zet. Zo kan de matchmaker hem niet meer aanpassen.
   if (isAangebodenAanNvb(row) && !isRetourVanNvb(row)) return false;
 
   return true;
@@ -920,7 +920,7 @@ function MatchmakingPageContent() {
       setShowUpload(false);
       resetUploadForm(profile);
       setSuccessMsg(
-        "✅ Upload is gelukt. Gebruik daarna Start controle om de matchmaking rechtstreeks tegen de FightPassport-database te controleren, of stuur hem naar admin.",
+        "✅ Upload is gelukt. Gebruik daarna Start controle om de matchmaking rechtstreeks tegen de FightPassport-database te controleren, of stuur hem naar de NVB.",
       );
       setViewTab("uploads");
       await load();
@@ -1142,7 +1142,7 @@ function MatchmakingPageContent() {
 
   async function stuurNaarAdmin(row: MatchmakingRow) {
     const ok = window.confirm(
-      "Weet je zeker dat je deze matchmaking naar admin wilt sturen?\n\nDaarna verdwijnt hij uit je upload-overzicht tot admin hem retour zet.",
+      "Weet je zeker dat je deze matchmaking naar de NVB wilt sturen?\n\nDaarna verdwijnt hij uit je upload-overzicht tot de NVB hem retour zet.",
     );
     if (!ok) return;
 
@@ -1160,16 +1160,16 @@ function MatchmakingPageContent() {
 
       if (!res.ok || payload?.ok === false) {
         console.error("send-to-admin failed:", res.status, payload);
-        alert(payload?.error || "Stuur naar admin mislukt.");
+        alert(payload?.error || "Stuur naar NVB mislukt.");
         return;
       }
 
-      setSuccessMsg("✅ Matchmaking is doorgestuurd naar admin.");
+      setSuccessMsg("✅ Matchmaking is doorgestuurd naar de NVB.");
       setViewTab("uploads");
       await load();
     } catch (e) {
       console.error(e);
-      alert("Onverwachte fout bij sturen naar admin.");
+      alert("Onverwachte fout bij sturen naar NVB.");
     } finally {
       setBusyId(null);
     }
@@ -1890,7 +1890,7 @@ function MatchmakingPageContent() {
                                             </ActionSquare>
 
                                             <ActionSquare
-                                              title="Stuur naar admin"
+                                              title="Stuur naar NVB"
                                               onClick={() => stuurNaarAdmin(r)}
                                               disabled={busyId === r.id}
                                               color={ACTION_COLORS.admin}
@@ -1927,7 +1927,7 @@ function MatchmakingPageContent() {
                                             </ActionSquare>
 
                                             <ActionSquare
-                                              title="Stuur naar admin"
+                                              title="Stuur naar NVB"
                                               onClick={() => stuurNaarAdmin(r)}
                                               disabled={busyId === r.id}
                                               color={ACTION_COLORS.admin}

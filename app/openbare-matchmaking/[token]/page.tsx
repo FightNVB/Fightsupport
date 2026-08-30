@@ -4,8 +4,8 @@ import { NO_INDEX } from "@/lib/seo";
 import "./public-matchmaking.css";
 
 export const metadata: Metadata = {
-  title: "Live matchmaking",
-  description: "Bekijk de actuele voorlopige matchmaking.",
+  title: "Live line-up",
+  description: "Bekijk de actuele line-up en partijgegevens.",
   robots: NO_INDEX,
 };
 

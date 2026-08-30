@@ -6,40 +6,47 @@ import {
 } from "../utils/fightPassportFighterNavigation.js";
 import { scrapeHistoricalStartverbodPage } from "./scrapeHistoricalStartverbodPage.js";
 
-async function createWorkerContext(browser) {
-  if (browser && typeof browser.createBrowserContext === "function") {
-    return await browser.createBrowserContext();
-  }
-  if (browser && typeof browser.createIncognitoBrowserContext === "function") {
-    return await browser.createIncognitoBrowserContext();
-  }
-  return null;
-}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function closeWorkerContext(ctx) {
-  if (!ctx) return;
-  try {
-    const pages = await ctx.pages().catch(() => []);
-    for (const workerPage of pages) {
-      await hardCloseFightPassportPage(workerPage).catch(() => {});
-    }
-  } catch {}
-  try {
-    await ctx.close().catch(() => {});
-  } catch {}
-}
+async function withTimeout(promiseFactory, ms, label, onTimeout) {
+  let timer;
+  const controller = new AbortController();
 
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(async () => {
+      controller.abort();
+      try {
+        if (typeof onTimeout === "function") {
+          await onTimeout(controller.signal);
+        }
+      } catch {}
+      reject(new Error(`HARD TIMEOUT ${ms}ms for ${label}`));
+    }, ms);
+  });
+
+  try {
+    const p = Promise.resolve().then(() => promiseFactory(controller.signal));
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Dossierhistorie-only: deze scraper mag nooit fightpassport_fighters,
 // heeft_startverbod, actuele blokkadestatus of gala-controledata schrijven.
 
-const startVa = Number(process.argv[2] || process.env.HISTORY_START_VA || 775);
-const endVa = Number(process.argv[3] || process.env.HISTORY_END_VA || startVa);
-const workers = Math.max(1, Math.min(10, Number(process.env.HISTORY_WORKERS || 2)));
-const staggerMs = Math.max(
-  0,
-  Number(process.env.HISTORY_STAGGER_MS || process.env.STAGGER_MS || 350)
-);
+const cliArgs = process.argv.slice(2);
+const cliCommand = cliArgs.find((v) => ["run", "run-all"].includes(String(v).toLowerCase()));
+const numericArgs = cliArgs.filter((v) => /^\d+$/.test(String(v)));
+const startVa = Number(numericArgs[0] || process.env.HISTORY_START_VA || 775);
+const endVa = Number(numericArgs[1] || process.env.HISTORY_END_VA || startVa);
+
+// EXACT dezelfde worker-defaults als actuele fp_total.
+const WORKERS_RAW = Number(process.env.HISTORY_WORKERS ?? process.env.WORKERS ?? "8");
+const workers = Number.isFinite(WORKERS_RAW) && WORKERS_RAW > 0
+  ? Math.min(20, Math.max(1, Math.floor(WORKERS_RAW)))
+  : 8;
+const staggerMs = Math.max(0, Number(process.env.HISTORY_STAGGER_MS ?? process.env.STAGGER_MS ?? "450"));
 const resumeRunId = String(process.env.HISTORY_RUN_ID || "").trim();
 let stopRequested = false;
 process.on("SIGTERM", () => { stopRequested = true; });
@@ -148,244 +155,460 @@ async function sendHistoricalVaToAiReview(runId, va, error) {
 export async function scraperHistoricalStartverbod() {
   const run = await createOrResumeRun();
   console.log(`[historie] 🏁 start VA ${startVa} t/m ${endVa} met ${workers} worker(s), stagger=${staggerMs}ms`);
+
   let browser;
   let masterPage;
+  let cookies = [];
+  let browserGeneration = 1;
+  let browserRestartPromise = null;
+  let masterRefreshPromise = null;
+
+  const timeoutMs = Math.max(30000, Number(process.env.HISTORY_TIMEOUT_MS ?? "120000"));
+  const maxLoginRetries = Math.max(1, Number(process.env.HISTORY_LOGIN_RETRIES ?? "1"));
+  const maxTransientRetries = Math.max(0, Number(process.env.HISTORY_TRANSIENT_RETRIES ?? "1"));
+  const workerDriftMaxMs = Math.max(0, Number(process.env.HISTORY_WORKER_DRIFT_MAX_MS ?? "250"));
+
   const stats = {
-    processed: Number(run.processed_count || 0), found: Number(run.found_count || 0),
-    inserted: Number(run.inserted_count || 0), updated: Number(run.updated_count || 0),
-    skipped: Number(run.skipped_count || 0), errors: Number(run.error_count || 0),
-    lastVa: Number(run.last_processed_va || startVa - 1), lastError: run.last_error || null,
+    processed: 0,
+    found: 0,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    errors: 0,
+    lastVa: Number(run.last_processed_va || startVa - 1),
+    lastError: null,
   };
 
+  async function persistRun(status = "running", finishedAt = null) {
+    const { error } = await supabase.from("fighter_startverbod_history_runs").update({
+      status,
+      processed_count: stats.processed,
+      found_count: stats.found,
+      inserted_count: stats.inserted,
+      updated_count: stats.updated,
+      skipped_count: stats.skipped,
+      error_count: stats.errors,
+      last_processed_va: stats.lastVa,
+      last_error: stats.lastError,
+      finished_at: finishedAt,
+      pid: status === "running" ? process.pid : null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", run.id);
+    if (error) throw error;
+  }
+
+  function isBrowserConnectionError(message) {
+    return /Connection closed|Target closed|Session closed|Protocol error|browser has disconnected|Not connected to DevTools/i.test(
+      String(message || "")
+    );
+  }
+
+  async function restartBrowserLocked(reason = "") {
+    if (browserRestartPromise) {
+      await browserRestartPromise;
+      return browserGeneration;
+    }
+
+    browserRestartPromise = (async () => {
+      console.log(`[historie] 🔄 volledige browser opnieuw starten ${reason ? `(${reason})` : ""}`);
+      try { await masterPage?.close(); } catch {}
+      try { await browser?.close(); } catch {}
+
+      const fresh = await loginFightPassport({ freshSession: true, saveCookiesToDisk: false });
+      browser = fresh.browser;
+      masterPage = fresh.page;
+      cookies = await masterPage.cookies().catch(() => []);
+      browserGeneration++;
+      console.log(`[historie] ✅ browser hersteld; generatie ${browserGeneration}`);
+      return browserGeneration;
+    })();
+
+    try { return await browserRestartPromise; }
+    finally { browserRestartPromise = null; }
+  }
+
+  async function refreshMasterSessionLocked(reason = "") {
+    if (masterRefreshPromise) {
+      try { await masterRefreshPromise; } catch {}
+      return cookies;
+    }
+
+    masterRefreshPromise = (async () => {
+      console.log(`[historie] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
+      await ensureLoggedIn(masterPage, {
+        force: true,
+        saveCookiesToDisk: false,
+        useStoredCookies: false,
+      });
+      cookies = await masterPage.cookies().catch(() => cookies);
+      console.log("[historie] ✅ master refreshed (cookies updated)");
+      return cookies;
+    })();
+
+    try { return await masterRefreshPromise; }
+    finally { masterRefreshPromise = null; }
+  }
+
   try {
-    // HISTORIE ALTIJD met een schone FightPassport-sessie starten.
-    // Alleen de permanente trusted-device cookie mag uit cookies.json mee; PHPSESSID niet.
     ({ browser, page: masterPage } = await loginFightPassport({
       freshSession: true,
       saveCookiesToDisk: false,
     }));
-    let cookies = await masterPage.cookies().catch(() => []);
-    console.log("[historie] ✅ Schone master-sessie gestart met trusted-device herkenning; alleen nieuwe sessiecookies worden intern gedeeld");
+    cookies = await masterPage.cookies().catch(() => []);
+    console.log("[historie] ✅ Schone master-sessie gestart; workers delen browser + actuele sessiecookies");
 
-    let masterRefreshPromise = null;
-    async function refreshMasterSessionLocked(reason = "") {
-      if (masterRefreshPromise) {
-        try { await masterRefreshPromise; } catch {}
-        return cookies;
-      }
-
-      masterRefreshPromise = (async () => {
-        console.log(`[historie] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
-        await ensureLoggedIn(masterPage, {
-          force: true,
-          saveCookiesToDisk: false,
-          useStoredCookies: false,
-        });
-        cookies = await masterPage.cookies().catch(() => cookies);
-        console.log("[historie] ✅ master refreshed (cookies updated)");
-        return cookies;
-      })();
-
-      try {
-        return await masterRefreshPromise;
-      } finally {
-        masterRefreshPromise = null;
-      }
-    }
     const confirmedDeleted = await loadConfirmedDeletedVaNumbers(startVa, endVa);
-    if (confirmedDeleted.size) {
-      console.log(`[historie] 🗑️ ${confirmedDeleted.size} bevestigd verwijderde VA-nummer(s) worden overgeslagen.`);
+
+    // Alle items paginagewijs ophalen; een volle range is groter dan Supabase's standaard response-limiet.
+    const existingItems = [];
+    const pageSize = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("fighter_startverbod_history_items")
+        .select("va_nummer,status,found_count,error_type")
+        .eq("run_id", run.id)
+        .order("va_nummer", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const rows = data ?? [];
+      existingItems.push(...rows);
+      if (rows.length < pageSize) break;
+      from += pageSize;
     }
 
-    // Hervatten gebeurt op ITEMSTATUS, niet op last_processed_va.
-    // Daardoor worden eerder mislukte VA's en VA's die tijdens een crash op
-    // "running" bleven staan opnieuw aangeboden, ook als ze lager zijn dan
-    // het hoogste reeds verwerkte VA-nummer. Completed/skipped blijven klaar.
-    const { data: existingItems, error: existingItemsError } = await supabase
-      .from("fighter_startverbod_history_items")
-      .select("va_nummer,status")
-      .eq("run_id", run.id);
-    if (existingItemsError) throw existingItemsError;
-
-    const terminalVas = new Set(
-      (existingItems ?? [])
-        .filter((item) => ["completed", "skipped"].includes(String(item.status || "")))
-        .map((item) => Number(item.va_nummer))
-        .filter(Number.isInteger)
+    const terminalStatuses = new Set(["completed", "skipped"]);
+    const terminalByVa = new Map(
+      existingItems.map((item) => [Number(item.va_nummer), String(item.status || "").toLowerCase()])
     );
 
-    const retryVas = new Set(
-      (existingItems ?? [])
-        .filter((item) => ["failed", "running"].includes(String(item.status || "")))
-        .map((item) => Number(item.va_nummer))
-        .filter(Number.isInteger)
-    );
+    // Stats opnieuw uit itemstatus opbouwen zodat resume nooit oude run-counters dubbel telt.
+    stats.processed = existingItems.filter((item) => terminalStatuses.has(String(item.status || "").toLowerCase())).length;
+    stats.found = existingItems
+      .filter((item) => String(item.status || "").toLowerCase() === "completed")
+      .reduce((sum, item) => sum + Number(item.found_count || 0), 0);
+    stats.skipped = existingItems.filter((item) => String(item.status || "").toLowerCase() === "skipped").length;
+    stats.errors = existingItems.filter((item) => String(item.error_type || "") === "pending_review").length;
 
-    const allVas = Array.from({ length: endVa - startVa + 1 }, (_, index) => startVa + index)
-      .filter((va) => !confirmedDeleted.has(va) && !terminalVas.has(va));
+    const vaList = [];
+    for (let va = startVa; va <= endVa; va++) {
+      if (terminalStatuses.has(terminalByVa.get(va))) continue;
 
-    if (existingItems?.length) {
-      console.log(
-        `[historie] ▶️ hervatten: ${terminalVas.size} al klaar, ` +
-        `${retryVas.size} failed/running opnieuw aangeboden, ${allVas.length} VA(s) in wachtrij`
-      );
+      if (confirmedDeleted.has(va)) {
+        const now = new Date().toISOString();
+        await saveItem(run.id, va, {
+          status: "skipped",
+          found_count: 0,
+          error_type: "confirmed_deleted",
+          error_step: "confirmed_deleted",
+          error_message: "Handmatig bevestigd als verwijderd; niet opnieuw bevraagd.",
+          started_at: now,
+          finished_at: now,
+        });
+        stats.processed++;
+        stats.skipped++;
+        stats.lastVa = Math.max(stats.lastVa, va);
+        continue;
+      }
+
+      vaList.push(va);
     }
+
+    console.log(`[historie] ▶️ ${stats.processed} al terminaal, ${vaList.length} VA(s) in wachtrij`);
+    await persistRun();
 
     let cursor = 0;
+    let activeAttempts = 0;
+    const loginRetryCounts = new Map();
+    const transientRetryCounts = new Map();
 
-    async function persistRun(status = "running", finishedAt = null) {
-      await supabase.from("fighter_startverbod_history_runs").update({
-        status, processed_count: stats.processed, found_count: stats.found,
-        inserted_count: stats.inserted, updated_count: stats.updated,
-        skipped_count: stats.skipped, error_count: stats.errors,
-        last_processed_va: stats.lastVa, last_error: stats.lastError,
-        finished_at: finishedAt, pid: status === "running" ? process.pid : null,
-        updated_at: new Date().toISOString(),
-      }).eq("id", run.id);
+    async function requeueTransientVa(va, label, reason) {
+      const key = String(va);
+      const retryNr = (transientRetryCounts.get(key) || 0) + 1;
+      if (retryNr > maxTransientRetries) return false;
+      transientRetryCounts.set(key, retryNr);
+
+      await saveItem(run.id, va, {
+        status: "pending",
+        found_count: 0,
+        error_type: "temporary_retry",
+        error_step: "temporary_retry",
+        error_message: `Tijdelijke fout; VA achteraan opnieuw ingepland (poging ${retryNr + 1}/${maxTransientRetries + 1}). Oorzaak: ${reason}`,
+        finished_at: null,
+      });
+      vaList.push(va);
+      console.log(`[historie] ♻️ ${label} VA ${va} achteraan opnieuw ingepland (verse poging ${retryNr + 1}/${maxTransientRetries + 1}): ${reason}`);
+      return true;
+    }
+
+    async function sendToReview(va, error, step = "ai_review") {
+      stats.processed++;
+      stats.skipped++;
+      stats.errors++;
+      stats.lastVa = Math.max(stats.lastVa, Number(va));
+      stats.lastError = error?.message ?? String(error);
+
+      await sendHistoricalVaToAiReview(run.id, va, error);
+      await saveItem(run.id, va, {
+        status: "skipped",
+        found_count: 0,
+        error_type: "pending_review",
+        error_step: step,
+        error_message: `${error?.message ?? String(error)} (na ${maxTransientRetries + 1} volledig verse poging(en); naar AI Controle)`,
+        retry_status: "pending_review",
+        finished_at: new Date().toISOString(),
+      });
+      console.log(`[historie] 🧠 VA ${va}: naar AI Controle; run gaat verder`);
+    }
+
+    async function confirmProfileMissing(va, label, vaPages) {
+      // Exact Total-model: na de eerste volledige mislukte open-cyclus nog twee
+      // onafhankelijke profielverificaties. Pas daarna behandelen als niet betrouwbaar geopend.
+      for (let retry = 1; retry <= 2; retry++) {
+        await sleep(1000 * retry);
+        const retryPage = await openFighterPageVerified(browser, null, cookies, va, {
+          maxAttempts: 2,
+          softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
+          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+          workerLabel: `[${label} ontbrekend-hercontrole ${retry}/2]`,
+        });
+        if (retryPage) {
+          vaPages.add(retryPage);
+          return retryPage;
+        }
+      }
+      return null;
     }
 
     async function worker(workerIndex) {
-      // Zelfde login/cookies als Total, maar iedere VA krijgt via openFighterPageVerified een schone geverifieerde tab.
-      // HISTORY_WORKERS is bewust standaard 4: SYS42-tabellen zijn zwaarder dan de profielsummary van Total.
-      await new Promise((resolve) => setTimeout(resolve, workerIndex * staggerMs));
+      const label = `worker${workerIndex + 1}/${workers}`;
+      const delay = workerIndex * staggerMs;
+      if (delay > 0) await sleep(delay);
 
-while (!stopRequested) {
-        const va = allVas[cursor++];
-        if (va == null) break;
-        const startedAt = new Date().toISOString();
-        await saveItem(run.id, va, { status: "running", started_at: startedAt, finished_at: null });
+      while (!stopRequested) {
+        if (cursor >= vaList.length) {
+          if (activeAttempts > 0) {
+            await sleep(100);
+            continue;
+          }
+          break;
+        }
+
+        const myIndex = cursor++;
+        if (myIndex >= vaList.length) continue;
+        const va = vaList[myIndex];
+        activeAttempts++;
+        const vaBrowserGeneration = browserGeneration;
         let page = null;
+        const vaPages = new Set();
+        let terminalThisAttempt = false;
+
+        console.log(`[historie] 🤖 ${label} → VA ${va}`);
+        await saveItem(run.id, va, {
+          status: "running",
+          started_at: new Date().toISOString(),
+          finished_at: null,
+        });
+
         try {
-          const loginRetries = Math.max(1, Number(process.env.HISTORY_LOGIN_RETRIES || 2));
-          const scrapeRetries = Math.max(1, Number(process.env.HISTORY_SCRAPE_RETRIES || 2));
-          let result = null;
-          let loginAttempts = 0;
-          let lastScrapeError = null;
+          page = await openFighterPageVerified(browser, null, cookies, va, {
+            maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
+            softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
+            betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
+            workerLabel: `[${label}]`,
+          });
 
-          // Niet alleen LOGIN_PAGE opnieuw proberen. Een incidenteel niet geopende
-          // STARTVERBODEN-modal/tabel krijgt dezelfde VA opnieuw op een volledig verse tab.
-          // Met de trusted-device login is een sessieverversing alleen nodig als we
-          // daadwerkelijk op de loginpagina terechtkomen.
-          for (let scrapeAttempt = 1; scrapeAttempt <= scrapeRetries; scrapeAttempt++) {
-            try {
-              page = await openFighterPageVerified(browser, null, cookies, va, {
-                maxAttempts: Number(process.env.TAB_ATTEMPTS || 5),
-                softWaitMs: Number(process.env.SOFT_WAIT_MS || 2500),
-                betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS || 1200),
-                workerLabel: `[historie ${workerIndex + 1}/${workers}]`,
-              });
+          if (page) vaPages.add(page);
 
-              if (!page) {
-                throw Object.assign(
-                  new Error("Vechterpagina niet geladen binnen de timeout."),
-                  { step: "navigation", type: "timeout" }
-                );
+          if (!page) {
+            page = await confirmProfileMissing(va, label, vaPages);
+          }
+
+          if (!page) {
+            const requeued = await requeueTransientVa(va, label, "fighter-url/profiel niet betrouwbaar geopend");
+            if (requeued) continue;
+            await sendToReview(va, new Error("Na volledig verse profielpogingen geen geldige fighter-header gevonden."), "navigation_pending_review");
+            terminalThisAttempt = true;
+            continue;
+          }
+
+          const result = await withTimeout(
+            (signal) => scrapeHistoricalStartverbodPage(page, va, signal),
+            timeoutMs,
+            `historical-startverbod ${va}`,
+            async () => {
+              for (const p of vaPages) {
+                await hardCloseFightPassportPage(p).catch(() => {});
               }
-
-              result = await scrapeHistoricalStartverbodPage(page, va);
-              break;
-            } catch (error) {
-              lastScrapeError = error;
-              const isLoginPage = error?.message === "LOGIN_PAGE";
-
-              await hardCloseFightPassportPage(page).catch(() => {});
               page = null;
-
-              if (isLoginPage) {
-                loginAttempts++;
-                if (loginAttempts >= loginRetries) throw error;
-
-                console.log(
-                  `[historie] 🔐 VA ${va}: worker ${workerIndex + 1} kwam op loginpagina ` +
-                  `(loginpoging ${loginAttempts}/${loginRetries}); master-sessie verversen en DEZELFDE VA opnieuw openen`
-                );
-
-                cookies = await refreshMasterSessionLocked(
-                  `worker ${workerIndex + 1} VA ${va} loginretry ${loginAttempts}`
-                );
-
-                await new Promise((resolve) =>
-                  setTimeout(resolve, Math.max(500, Number(process.env.HISTORY_LOGIN_RETRY_WAIT_MS || 750)))
-                );
-                continue;
-              }
-
-              if (scrapeAttempt >= scrapeRetries) throw error;
-
-              console.warn(
-                `[historie] ♻️ VA ${va}: poging ${scrapeAttempt}/${scrapeRetries} mislukt bij ` +
-                `${error?.step || "historical_startverbod"}/${error?.type || "scrape_error"}; ` +
-                `volledig verse VA-tab proberen`
-              );
-              await new Promise((resolve) =>
-                setTimeout(resolve, Math.max(250, Number(process.env.HISTORY_SCRAPE_RETRY_WAIT_MS || 500)))
-              );
             }
-          }
+          );
 
-          if (!result) {
-            throw Object.assign(
-              new Error(lastScrapeError?.message || "Geen scraperresultaat na worker-retries."),
-              {
-                step: lastScrapeError?.step || "navigation",
-                type: lastScrapeError?.type || "retry_exhausted",
-              }
-            );
-          }
+          loginRetryCounts.delete(String(va));
+          transientRetryCounts.delete(String(va));
 
           if (result.status === "skipped") {
+            stats.processed++;
             stats.skipped++;
+            stats.lastVa = Math.max(stats.lastVa, Number(va));
+            terminalThisAttempt = true;
             await saveItem(run.id, va, {
-              status: "skipped", naam_fp: result.naam_fp ?? null, found_count: 0,
-              error_type: result.reason, error_step: "startverboden_tile", finished_at: new Date().toISOString(),
+              status: "skipped",
+              naam_fp: result.naam_fp ?? null,
+              found_count: 0,
+              error_type: result.reason,
+              error_step: "startverboden_tile",
+              error_message: null,
+              retry_status: null,
+              finished_at: new Date().toISOString(),
             });
           } else {
             const saved = await saveRecords(result.records);
+            stats.processed++;
             stats.found += result.records.length;
             stats.inserted += saved.inserted;
             stats.updated += saved.updated;
+            stats.lastVa = Math.max(stats.lastVa, Number(va));
+            terminalThisAttempt = true;
             await saveItem(run.id, va, {
-              status: "completed", naam_fp: result.naam_fp, found_count: result.records.length,
-              error_type: null, error_step: null, error_message: null,
-              retry_status: null, finished_at: new Date().toISOString(),
+              status: "completed",
+              naam_fp: result.naam_fp ?? null,
+              found_count: result.records.length,
+              error_type: null,
+              error_step: null,
+              error_message: null,
+              retry_status: null,
+              finished_at: new Date().toISOString(),
             });
+            console.log(`[historie] ✅ ${label} VA ${va}: ${result.records.length} historische regel(s)`);
           }
         } catch (error) {
-          // Een VA-fout is geen runfout. Na maximaal 2 volledig verse pogingen
-          // gaat het VA-nummer naar AI Controle. Daar kiest admin: opnieuw proberen
-          // of bevestigd verwijderd. De historische run gaat direct verder.
-          stats.skipped++;
-          await sendHistoricalVaToAiReview(run.id, va, error);
-          await saveItem(run.id, va, {
-            status: "skipped",
-            error_type: "pending_review",
-            error_step: "ai_review",
-            error_message: `${error?.message ?? String(error)} (na 2 verse pogingen; naar AI Controle)`,
-            retry_status: "pending_review",
-            finished_at: new Date().toISOString(),
-          });
-          console.log(`[historie] 🧠 VA ${va}: na 2 pogingen naar AI Controle; run gaat verder`);
+          const message = error?.message ?? String(error);
+
+          for (const p of vaPages) {
+            await hardCloseFightPassportPage(p).catch(() => {});
+          }
+          page = null;
+
+          if (message === "LOGIN_PAGE") {
+            const key = String(va);
+            const retryNr = (loginRetryCounts.get(key) || 0) + 1;
+            loginRetryCounts.set(key, retryNr);
+            console.log(`[historie] 🔐 ${label} LOGIN_PAGE bij VA ${va}; master opnieuw inloggen (poging ${retryNr}/${maxLoginRetries})`);
+
+            await saveItem(run.id, va, {
+              status: "pending",
+              error_type: "login_recovery",
+              error_step: "login_recovery",
+              error_message: `Loginpagina geraakt; sessie wordt hersteld (poging ${retryNr}/${maxLoginRetries}).`,
+              finished_at: null,
+            });
+
+            try {
+              await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
+              if (retryNr <= maxLoginRetries) {
+                vaList.push(va);
+                console.log(`[historie] ♻️ ${label} VA ${va} opnieuw ingepland na verse login`);
+              } else {
+                throw new Error(`LOGIN_PAGE bleef terugkomen na ${maxLoginRetries} herstelpogingen`);
+              }
+            } catch (loginError) {
+              await sendToReview(va, loginError, "login_pending_review");
+              terminalThisAttempt = true;
+            }
+          } else if (isBrowserConnectionError(message)) {
+            console.log(`[historie] 🔌 ${label} browserverbinding weg bij VA ${va}: ${message}`);
+            try {
+              if (vaBrowserGeneration === browserGeneration) {
+                await restartBrowserLocked(`${label} VA ${va}`);
+              }
+              const requeued = await requeueTransientVa(va, label, `browserverbinding hersteld: ${message}`);
+              if (!requeued) throw new Error(`Browserverbinding bleef fout: ${message}`);
+            } catch (restartError) {
+              await sendToReview(va, restartError, "browser_pending_review");
+              terminalThisAttempt = true;
+            }
+          } else {
+            const requeued = await requeueTransientVa(va, label, message);
+            if (!requeued) {
+              await sendToReview(
+                va,
+                error,
+                String(message).startsWith("HARD TIMEOUT") ? "timeout_pending_review" : "scrape_pending_review"
+              );
+              terminalThisAttempt = true;
+            }
+          }
         } finally {
-          await hardCloseFightPassportPage(page).catch(() => {});
-          stats.processed++;
-          stats.lastVa = Math.max(stats.lastVa, va);
-          await persistRun();
+          for (const p of vaPages) {
+            await hardCloseFightPassportPage(p).catch(() => {});
+          }
+          activeAttempts = Math.max(0, activeAttempts - 1);
+
+          if (terminalThisAttempt || stats.processed % 10 === 0 || stopRequested) {
+            await persistRun().catch((error) =>
+              console.log("[historie] run progress update fout:", error?.message ?? String(error))
+            );
+          }
+
+          if (!stopRequested && workerDriftMaxMs > 0) {
+            const driftMs = ((workerIndex + 1) * 37 + (Number(va) % 97)) % (workerDriftMaxMs + 1);
+            if (driftMs > 0) await sleep(driftMs);
+          }
         }
       }
     }
 
     await Promise.all(Array.from({ length: workers }, (_, index) => worker(index)));
-    const { data: latestRun } = await supabase.from("fighter_startverbod_history_runs")
-      .select("status").eq("id", run.id).single();
-    const finalStatus = latestRun?.status === "failed"
-      ? "failed"
-      : stopRequested ? "paused" : stats.errors ? "completed_with_errors" : "completed";
+
+    // Eindcontrole zoals Total: nooit completed zolang er pending/running items bestaan.
+    const finalItems = [];
+    from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("fighter_startverbod_history_items")
+        .select("va_nummer,status,error_type")
+        .eq("run_id", run.id)
+        .order("va_nummer", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const rows = data ?? [];
+      finalItems.push(...rows);
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+
+    const pendingItems = finalItems.filter((item) =>
+      !terminalStatuses.has(String(item.status || "").toLowerCase())
+    );
+    const expectedCount = endVa - startVa + 1;
+    const terminalCount = finalItems.filter((item) =>
+      terminalStatuses.has(String(item.status || "").toLowerCase())
+    ).length;
+
+    if (!stopRequested && (pendingItems.length > 0 || terminalCount < expectedCount)) {
+      const message = `Eindcontrole mislukt: ${terminalCount}/${expectedCount} terminaal, ${pendingItems.length} pending/running.`;
+      stats.lastError = message;
+      await persistRun("failed", new Date().toISOString());
+      throw new Error(message);
+    }
+
+    const finalStatus = stopRequested
+      ? "paused"
+      : finalItems.some((item) => String(item.error_type || "") === "pending_review")
+        ? "completed_with_errors"
+        : "completed";
+
     await persistRun(finalStatus, stopRequested ? null : new Date().toISOString());
+    console.log(`[historie] 🏁 run ${run.id}: ${finalStatus} | verwerkt=${stats.processed} | historie=${stats.found} | fouten=${stats.errors}`);
     return { ok: true, run_id: run.id, status: finalStatus, ...stats };
   } catch (error) {
     await supabase.from("fighter_startverbod_history_runs").update({
-      status: "failed", last_error: error?.message ?? String(error), pid: null,
-      finished_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      status: "failed",
+      last_error: error?.message ?? String(error),
+      pid: null,
+      finished_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }).eq("id", run.id).catch(() => {});
     throw error;
   } finally {
@@ -393,7 +616,7 @@ while (!stopRequested) {
   }
 }
 
-if (["run", "run-all"].includes(process.argv[4] || process.argv[2])) {
+if (cliCommand) {
   scraperHistoricalStartverbod().then((result) => {
     console.log(JSON.stringify(result));
     process.exit(0);

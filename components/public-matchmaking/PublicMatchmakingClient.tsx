@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, MapPin, Search, Star, Swords, TimerReset } from "lucide-react";
-
-type BoutStatus = "concept" | "bevestigd" | "onder_voorbehoud";
+import { CalendarDays, Clock3, MapPin, Swords, TimerReset } from "lucide-react";
 
 type Bout = {
   id: string;
@@ -12,22 +10,9 @@ type Bout = {
   geslacht: string;
   discipline: string;
   maxGewicht: string;
-  status: BoutStatus;
-  red: { inschrijvingId?: string; naam: string; sportschool: string; record: string; starred?: boolean };
-  blue: { inschrijvingId?: string; naam: string; sportschool: string; record: string; starred?: boolean };
-};
-
-type SearchingFighter = {
-  id: string;
-  inschrijvingId?: string;
-  starred?: boolean;
-  naam: string;
-  sportschool: string;
-  record: string;
-  klasse: string;
-  geslacht: string;
-  leeftijd: number | null;
-  gewicht: string;
+  rondeTijden?: string;
+  red: { naam: string; sportschool: string };
+  blue: { naam: string; sportschool: string };
 };
 
 type Payload = {
@@ -39,20 +24,15 @@ type Payload = {
     disciplines: string;
     phase: string;
     updatedAt: string;
+    galaDuur?: string;
   };
-  counts: { total: number; confirmed: number; pending: number; searching: number };
+  counts: { total: number };
   bouts: Bout[];
-  searching: SearchingFighter[];
 };
 
-type FilterKey = "all" | "bevestigd" | "concept" | "tegenstander_gezocht";
-
-const labels: Record<FilterKey, string> = {
-  all: "Alle partijen",
-  bevestigd: "Bevestigd",
-  concept: "Concept",
-  tegenstander_gezocht: "Tegenstander gezocht",
-};
+function clean(value: unknown) {
+  return String(value ?? "").trim();
+}
 
 function dateLabel(value: string) {
   if (!value) return "Datum volgt";
@@ -78,147 +58,49 @@ function updateLabel(value: string) {
   }).format(d);
 }
 
-function statusLabel(status: BoutStatus) {
-  if (status === "bevestigd") return "Bevestigd";
-  if (status === "onder_voorbehoud") return "Onder voorbehoud";
-  return "Concept";
+function hasValue(value: unknown) {
+  const valueString = clean(value);
+  return Boolean(valueString && valueString !== "—" && valueString !== "-");
 }
 
 export default function PublicMatchmakingClient({ token }: { token: string }) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState<FilterKey>("all");
-  const [query, setQuery] = useState("");
-  const [savingStarId, setSavingStarId] = useState("");
-  const [starError, setStarError] = useState("");
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      try {
-        const response = await fetch(
-          `/api/public/matchmaking/${encodeURIComponent(token)}`,
-          { cache: "no-store" },
-        );
-        const json = await response.json();
-        if (!response.ok) throw new Error(json?.error || "Matchmaking laden mislukt");
-        if (active) {
-          setData(json);
-          setError("");
-        }
-      } catch (e: any) {
-        if (active) setError(e?.message || "Matchmaking laden mislukt");
-      }
-    }
-
-    load();
-    const timer = window.setInterval(load, 30_000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [token]);
-
-  async function toggleStar(inschrijvingId: string, nextActive: boolean) {
-    if (!inschrijvingId || data?.audience !== "promoter" || savingStarId) return;
-
-    setSavingStarId(inschrijvingId);
-    setStarError("");
-    setData((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        bouts: current.bouts,
-        searching: current.searching.map((fighter) =>
-          (fighter.inschrijvingId || fighter.id) === inschrijvingId
-            ? { ...fighter, starred: nextActive }
-            : fighter,
-        ),
-      };
-    });
-
+  async function load() {
     try {
       const response = await fetch(
         `/api/public/matchmaking/${encodeURIComponent(token)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inschrijving_id: inschrijvingId,
-            actief: nextActive,
-          }),
-        },
+        { cache: "no-store" },
       );
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json?.error || "Ster opslaan mislukt");
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error || "Line-up laden mislukt");
+      setData(json);
+      setError("");
     } catch (e: any) {
-      setData((current) => {
-        if (!current) return current;
-        return {
-          ...current,
-          bouts: current.bouts,
-          searching: current.searching.map((fighter) =>
-            (fighter.inschrijvingId || fighter.id) === inschrijvingId
-              ? { ...fighter, starred: !nextActive }
-              : fighter,
-          ),
-        };
-      });
-      setStarError(e?.message || "Ster opslaan mislukt");
+      setError(e?.message || "Line-up laden mislukt");
     } finally {
-      setSavingStarId("");
+      // Geen publieke handmatige refresh nodig; opnieuw laden gebeurt vanuit matchmaking.
     }
   }
 
-  const visibleBouts = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (data?.bouts ?? []).filter((bout) => {
-      if (filter !== "all" && filter !== "tegenstander_gezocht" && bout.status !== filter) {
-        return false;
-      }
-      if (!q) return true;
-      return [
-        bout.red.naam,
-        bout.red.sportschool,
-        bout.red.record,
-        bout.blue.naam,
-        bout.blue.sportschool,
-        bout.blue.record,
-        bout.klasse,
-        bout.geslacht,
-        bout.maxGewicht,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q);
-    });
-  }, [data, filter, query]);
+  useEffect(() => {
+    load();
+    // Bewust geen automatische interval: publicatie/verversing gebeurt vanuit matchmaking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
-  const visibleSearching = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (data?.searching ?? []).filter((fighter) => {
-      if (!q) return true;
-      return [
-        fighter.naam,
-        fighter.sportschool,
-        fighter.record,
-        fighter.klasse,
-        fighter.geslacht,
-        fighter.leeftijd,
-        fighter.gewicht,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q);
-    });
-  }, [data, query]);
+  const bouts = useMemo(() => data?.bouts ?? [], [data]);
+  const showMaxWeight = useMemo(
+    () => bouts.some((bout) => hasValue(bout.maxGewicht)),
+    [bouts],
+  );
 
   if (error) {
     return (
       <main className="pm-state">
         <div>
-          <b>Openbare matchmaking niet beschikbaar</b>
+          <b>Line-up niet beschikbaar</b>
           <span>{error}</span>
         </div>
       </main>
@@ -229,21 +111,12 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
     return (
       <main className="pm-state">
         <div>
-          <b>Matchmaking laden…</b>
+          <b>Line-up laden…</b>
           <span>De actuele partijen worden opgehaald.</span>
         </div>
       </main>
     );
   }
-
-  const counts: Record<FilterKey, number> = {
-    all: data.counts.total,
-    bevestigd: data.counts.confirmed,
-    concept: data.bouts.filter((bout) => bout.status === "concept").length,
-    tegenstander_gezocht: data.counts.searching,
-  };
-
-  const isSearching = filter === "tegenstander_gezocht";
 
   return (
     <main className="pm-page">
@@ -252,95 +125,54 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
         <div className="pm-brand">
           <img src="/branding/fightsupport/logo-header.png" alt="FightSupport" />
         </div>
+
         <div className="pm-heroContent">
           <div className="pm-kicker">
-            <Swords size={15} /> {data.event.phase}
+            <Swords size={15} /> Line-up
           </div>
           <h1>{data.event.title}</h1>
           <div className="pm-meta">
-            <span>
-              <CalendarDays size={16} /> {dateLabel(data.event.date)}
-            </span>
-            <span>
-              <MapPin size={16} /> {data.event.location || "Locatie volgt"}
-            </span>
+            <span><CalendarDays size={16} /> {dateLabel(data.event.date)}</span>
+            <span><MapPin size={16} /> {data.event.location || "Locatie volgt"}</span>
             {data.event.disciplines && (
-              <span>
-                <Swords size={16} /> {data.event.disciplines}
-              </span>
+              <span><Swords size={16} /> {data.event.disciplines}</span>
             )}
           </div>
           <div className="pm-update">
             <TimerReset size={15} /> Laatste update: {updateLabel(data.event.updatedAt)}
           </div>
         </div>
-        <div className="pm-stats">
-          <Stat label="Totaal partijen" value={data.counts.total} />
-          <Stat label="Bevestigd" value={data.counts.confirmed} kind="ok" />
-          <Stat label="Onder voorbehoud" value={data.counts.pending} kind="pending" />
-          <Stat label="Tegenstander gezocht" value={data.counts.searching} kind="searching" />
+
+        <div className="pm-lineupCount">
+          <strong>{bouts.length}</strong>
+          <span>{bouts.length === 1 ? "partij" : "partijen"}</span>
         </div>
       </section>
 
       <section className="pm-content">
-        <div className="pm-toolbar">
-          <div className="pm-tabs">
-            {(Object.keys(labels) as FilterKey[]).map((key) => (
-              <button
-                key={key}
-                className={filter === key ? "active" : ""}
-                onClick={() => setFilter(key)}
-              >
-                {labels[key]} <span>{counts[key]}</span>
-              </button>
-            ))}
+        <div className="pm-sectionHead">
+          <div>
+            <span className="pm-sectionEyebrow">Fightcard</span>
+            <h2>Line-up</h2>
           </div>
-          <label className="pm-search">
-            <Search size={17} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={
-                isSearching
-                  ? "Zoek naam, sportschool, klasse, gewicht…"
-                  : "Zoek naam, sportschool, record…"
-              }
-            />
-          </label>
+          <div className="pm-sectionActions">
+            <p>De gepubliceerde volgorde en partijgegevens.</p>
+            {data.event.galaDuur && (
+              <div className="pm-galaDuration" title="Geschatte gala-duur op basis van de gepubliceerde partijen">
+                <Clock3 size={16} />
+                <span>Gala duur</span>
+                <strong>{data.event.galaDuur}</strong>
+              </div>
+            )}
+          </div>
         </div>
 
-        {isSearching ? (
-          <SearchingTable
-            fighters={visibleSearching}
-            canStar={data.audience === "promoter"}
-            savingStarId={savingStarId}
-            onToggleStar={toggleStar}
-          />
-        ) : (
-          <BoutTable bouts={visibleBouts} />
-        )}
-
-        {starError && (
-          <div
-            role="alert"
-            style={{
-              marginTop: 12,
-              padding: "10px 12px",
-              border: "1px solid rgba(255,77,0,.45)",
-              borderRadius: 6,
-              background: "rgba(255,77,0,.1)",
-              color: "#ffd7c7",
-              fontSize: 13,
-            }}
-          >
-            Ster opslaan mislukt: {starError}
-          </div>
-        )}
+        <BoutTable bouts={bouts} showMaxWeight={showMaxWeight} />
 
         <div className="pm-disclaimer">
           {data.audience === "trainers"
-            ? "Dit is de laatst door de matchmaker gepubliceerde update. Latere wijzigingen zijn pas zichtbaar na een nieuwe publicatie."
-            : "Je kijkt live mee met de actuele werkversie van de matchmaker. Wijzigingen kunnen direct zichtbaar worden."}
+            ? "Dit is de laatst gepubliceerde line-up. Nieuwe wijzigingen verschijnen na een volgende publicatie."
+            : "Dit is de laatst gepubliceerde line-up."}
         </div>
       </section>
 
@@ -351,193 +183,57 @@ export default function PublicMatchmakingClient({ token }: { token: string }) {
   );
 }
 
-function BoutTable({ bouts }: { bouts: Bout[] }) {
+function BoutTable({ bouts, showMaxWeight }: { bouts: Bout[]; showMaxWeight: boolean }) {
+  const colSpan = showMaxWeight ? 8 : 7;
+
   return (
     <div className="pm-tableWrap">
       <table className="pm-boutTable">
         <thead>
           <tr>
-            <th className="col-nr">#</th>
-            <th className="col-class">K</th>
+            <th className="col-discipline">Discipline</th>
+            <th className="col-class">Klasse</th>
             <th className="col-gender">M/V</th>
-            <th>Rode hoek</th>
-            <th className="weight">Max gewicht</th>
-            <th>Blauwe hoek</th>
-            <th className="col-status">Status</th>
+            <th className="col-fighter">Naam <span>Sportschool</span></th>
+            <th className="col-vs">VS</th>
+            <th className="col-fighter">Naam <span>Sportschool</span></th>
+            {showMaxWeight && <th className="col-weight">Max gewicht</th>}
+            <th className="col-rounds">Rondetijden</th>
           </tr>
         </thead>
         <tbody>
           {bouts.map((bout) => (
             <tr key={bout.id || String(bout.partijNr)}>
-              <td className="nr">{bout.partijNr ?? "-"}</td>
-              <td
-                  className="compact"
-                  style={{ width: 44, minWidth: 44, maxWidth: 44, padding: "0 4px", textAlign: "center" }}
-                >{bout.klasse}</td>
-              <td className="compact">{bout.geslacht}</td>
-              <td>
-                <Fighter side="red" fighter={bout.red} />
+              <td className="disciplineCell">
+                <strong>{bout.discipline || "—"}</strong>
+                {bout.partijNr != null && <span className="boutNumber">Partij {bout.partijNr}</span>}
               </td>
-              <td className="maxWeight">
-                <strong>{bout.maxGewicht}</strong>
-                <span>MAX GEWICHT</span>
+              <td className="compact classCell">{bout.klasse || "—"}</td>
+              <td className="compact genderCell">{bout.geslacht || "—"}</td>
+              <td className="fighterCell fighterRed">
+                <strong>{bout.red?.naam || "—"}</strong>
+                <span>{bout.red?.sportschool || "—"}</span>
               </td>
-              <td>
-                <Fighter side="blue" fighter={bout.blue} />
+              <td className="vsCell"><span>VS</span></td>
+              <td className="fighterCell fighterBlue">
+                <strong>{bout.blue?.naam || "—"}</strong>
+                <span>{bout.blue?.sportschool || "—"}</span>
               </td>
-              <td className="statusCell">
-                <span className={`status ${bout.status}`}>{statusLabel(bout.status)}</span>
-              </td>
+              {showMaxWeight && (
+                <td className="weightCell">
+                  {hasValue(bout.maxGewicht) ? <strong>{bout.maxGewicht}</strong> : <span>—</span>}
+                </td>
+              )}
+              <td className="roundsCell"><strong>{bout.rondeTijden || "—"}</strong></td>
             </tr>
           ))}
           {!bouts.length && (
             <tr>
-              <td colSpan={7} className="empty">
-                Geen partijen binnen deze selectie.
-              </td>
+              <td colSpan={colSpan} className="empty">Nog geen partijen in deze line-up.</td>
             </tr>
           )}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function SearchingTable({
-  fighters,
-  canStar,
-  savingStarId,
-  onToggleStar,
-}: {
-  fighters: SearchingFighter[];
-  canStar: boolean;
-  savingStarId: string;
-  onToggleStar: (inschrijvingId: string, nextActive: boolean) => void;
-}) {
-  return (
-    <div className="pm-tableWrap pm-searchingWrap">
-      <table className="pm-searchingTable">
-        <thead>
-          <tr>
-            {canStar && (
-              <th
-                className="col-star"
-                aria-label="Prioriteit"
-                style={{ width: 44, minWidth: 44, maxWidth: 44, padding: 0 }}
-              >
-                ⭐
-              </th>
-            )}
-            <th>Naam</th>
-            <th>Sportschool</th>
-            <th>Record</th>
-            <th className="col-class">Klasse</th>
-            <th className="col-gender">M/V</th>
-            <th className="col-age">Leeftijd</th>
-            <th className="col-weight">Gewicht</th>
-          </tr>
-        </thead>
-        <tbody>
-          {fighters.map((fighter) => {
-            const inschrijvingId = fighter.inschrijvingId || fighter.id;
-            return (
-            <tr key={fighter.id}>
-              {canStar && (
-                <td className="compact">
-                  <StarButton
-                    active={fighter.starred === true}
-                    disabled={!inschrijvingId || savingStarId === inschrijvingId}
-                    label={`${fighter.naam} als prioriteit markeren`}
-                    onClick={() => onToggleStar(inschrijvingId, fighter.starred !== true)}
-                  />
-                </td>
-              )}
-              <td className="search-name">{fighter.naam}</td>
-              <td>{fighter.sportschool}</td>
-              <td className="search-record">{fighter.record}</td>
-              <td className="compact">{fighter.klasse}</td>
-              <td className="compact">{fighter.geslacht}</td>
-              <td className="compact">{fighter.leeftijd ?? "—"}</td>
-              <td className="compact search-weight">{fighter.gewicht}</td>
-            </tr>
-            );
-          })}
-          {!fighters.length && (
-            <tr>
-              <td colSpan={canStar ? 8 : 7} className="empty">
-                Geen vechters binnen deze selectie.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Fighter({
-  side,
-  fighter,
-}: {
-  side: "red" | "blue";
-  fighter: Bout["red"];
-}) {
-  return (
-    <div className={`fighter ${side}`}>
-      <div>
-        <strong>{fighter.naam}</strong>
-        <span>
-          {fighter.sportschool}
-          <i>•</i>
-          {fighter.record}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function StarButton({
-  active,
-  disabled,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  disabled: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={active}
-      title={active ? "Prioriteit verwijderen" : "Als prioriteit markeren"}
-      disabled={disabled}
-      onClick={onClick}
-      style={{
-        width: 28,
-        height: 28,
-        display: "inline-grid",
-        placeItems: "center",
-        border: "1px solid rgba(255,255,255,.18)",
-        borderRadius: 5,
-        background: active ? "rgba(255,184,0,.16)" : "rgba(255,255,255,.04)",
-        color: active ? "#ffb800" : "rgba(255,255,255,.45)",
-        cursor: disabled ? "wait" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-      }}
-    >
-      <Star size={18} fill={active ? "currentColor" : "none"} />
-    </button>
-  );
-}
-
-function Stat({ label, value, kind = "" }: { label: string; value: number; kind?: string }) {
-  return (
-    <div className={`pm-stat ${kind}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }

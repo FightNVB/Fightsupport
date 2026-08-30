@@ -693,10 +693,11 @@ async function fetchUitslagenByVa(opts: {
   for (let i = 0; i < vaList.length; i += chunkSize) {
     const chunk = vaList.slice(i, i + chunkSize);
 
+    // Centrale FightPassport-historie: niet aan één matchmaking-run gekoppeld.
+    // Deze tabel is de bron voor klasse/promotie/recordregels in de admin/official controle.
     const { data, error } = await supabaseAdmin
-      .from("uitslagen_raw")
+      .from("fightpassport_results")
       .select("va_nummer, discipline, klasse, uitslag")
-      .eq("matchmaking_id", matchmaking_id)
       .in("va_nummer", chunk);
 
     if (error) throw error;
@@ -3080,7 +3081,7 @@ export async function rulesEngine(opts: {
 
         const statsR = getRKlasseStats(rowsR);
 
-        // Belangrijk: R-klasse ervaring uit uitslagen_raw is toegestaan in de R-klasse.
+        // Belangrijk: R-klasse ervaring uit fightpassport_results is toegestaan in de R-klasse.
         // Een eerdere versie gebruikte statsR.hasAnyExperience / totaal_wedstrijden_scrape
         // als harde afkeur, waardoor één normale R-partij onterecht werd gezien als
         // "wedstrijdervaring niet toegestaan". Voor R gelden alleen deze harde grenzen:
