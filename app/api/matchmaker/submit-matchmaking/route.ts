@@ -806,7 +806,7 @@ export async function POST(req: Request) {
 
       mmId = s;
     } else {
-      const { data: mm, error: mmError } = await supabaseAdmin
+      const { data: insertedMatchmaking, error: mmError } = await supabaseAdmin
         .from("matchmakings")
         .insert({
           naam: evenement_naam,
@@ -842,7 +842,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: mmError.message }, { status: 500 });
       }
 
-      mmId = String((mm as any)?.id ?? "").trim();
+      mmId = String((insertedMatchmaking as any)?.id ?? "").trim();
       if (!mmId) {
         return NextResponse.json(
           { error: "Kon matchmaking id niet bepalen." },
