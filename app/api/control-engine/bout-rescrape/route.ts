@@ -5,9 +5,16 @@ import path from "path";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 
-import { buildControleBoutContext, buildToernooiContext } from "@/lib/control/buildControleBoutContext";
-import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
-import { rulesEngine } from "@/lib/rulesEngine";
+import {
+  buildControleBoutContext as buildControlBoutContext,
+  buildToernooiContext,
+} from "@/lib/control/buildControleBoutContext";
+import { enrichControleBoutContext as enrichControlBoutContext } from "@/lib/control/enrichControleBoutContext";
+import { rulesEngine as controlRulesEngine } from "@/lib/rulesEngine";
+
+import { buildControleBoutContext as buildMatchmakerBoutContext } from "@/lib/matchmaker/buildControleBoutContext";
+import { enrichControleBoutContext as enrichMatchmakerBoutContext } from "@/lib/matchmaker/enrichControleBoutContext";
+import { rulesEngine as matchmakerRulesEngine } from "@/lib/matchmaker/rulesEngine";
 import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
@@ -103,6 +110,30 @@ function runNodeScript(
       else reject(new Error(`Script failed: ${path.basename(scriptPath)} (exit code ${code})`));
     });
   });
+}
+
+async function runMatchmakerBundleForVaList(
+  matchmaking_id: string,
+  controle_run_id: string,
+  vaList: string[]
+) {
+  const uniqueVaList = [...new Set(vaList.map((v) => toVaStrict(v)).filter(Boolean) as string[])];
+  if (!uniqueVaList.length) return;
+
+  const bundlePath = resolveScriptPath("scrapers", "fp_bundle", "scraper_fp_bundle.js");
+
+  console.log(`[bout-rescrape] 🔄 Matchmaker fp_bundle voor VA: ${uniqueVaList.join(", ")}`);
+
+  await runNodeScript(
+    bundlePath,
+    [matchmaking_id, controle_run_id, ...uniqueVaList],
+    path.dirname(bundlePath),
+    {
+      FP_MATCHMAKER_ID: "",
+      FP_SESSION_MODE: "master",
+      WORKERS: String(Math.max(1, Math.min(uniqueVaList.length, 2))),
+    }
+  );
 }
 
 async function runTotalForVaList(vaList: string[]) {
@@ -322,6 +353,10 @@ export async function POST(req: Request) {
     const { userId, role } = await requireUserWithRole(req);
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
+    // Deze endpoint wordt door meerdere rollen gebruikt. Alleen een matchmaker-rescrape
+    // moet de matchmaker build/enrich/rules/save-stack gebruiken.
+    const isMatchmakerFlow = String(role ?? "").trim().toLowerCase() === "matchmaker";
+
     const controle_run_id_in = String(body?.controle_run_id ?? "").trim();
     const controle_run_id = controle_run_id_in || (await getLatestControleRunId(matchmaking_id));
 
@@ -343,7 +378,7 @@ export async function POST(req: Request) {
       // Alleen deze toernooi-vechter opnieuw verrijken.
       // Belangrijk: de rulesEngine moet daarna draaien op de actuele
       // controle_toernooi_context en niet op oude/raw toernooi-data.
-      await enrichControleBoutContext(matchmaking_id, controle_run_id, {
+      await enrichControlBoutContext(matchmaking_id, controle_run_id, {
         toernooi_code,
         fighter_id: fighter_id_in,
       } as any);
@@ -363,7 +398,7 @@ export async function POST(req: Request) {
       // rulesEngine haalt/maakt de toernooi-pair rows op basis van
       // controle_toernooi_context. Zo worden stale meldingen met oude
       // matchmaking_bouts_raw sportschool/klasse niet opnieuw gebruikt.
-      await rulesEngine({
+      await controlRulesEngine({
         matchmaking_id,
         controle_run_id,
         ctxRows: [],
@@ -435,10 +470,20 @@ export async function POST(req: Request) {
     const vaList = [vaRood, vaBlauw].filter(Boolean) as string[];
 
     if (vaList.length > 0) {
-      await runTotalForVaList(vaList);
+      if (isMatchmakerFlow) {
+        // Matchmaker: dezelfde gerichte fp_bundle als de matchmakercontrole,
+        // maar alleen voor rood/blauw van deze partij.
+        await runMatchmakerBundleForVaList(matchmaking_id, controle_run_id, vaList);
+      } else {
+        await runTotalForVaList(vaList);
+      }
     }
 
-    await buildControleBoutContext(matchmaking_id, controle_run_id, { partij_nr });
+    if (isMatchmakerFlow) {
+      await buildMatchmakerBoutContext(matchmaking_id, controle_run_id, { partij_nr });
+    } else {
+      await buildControlBoutContext(matchmaking_id, controle_run_id, { partij_nr });
+    }
 
     if (va_rood_in || va_blauw_in) {
       await persistVaChangeInBoutContext({
@@ -453,21 +498,36 @@ export async function POST(req: Request) {
     const ctxAfterBuild = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
     const scopedBoutId = unwrapUuid(ctxAfterBuild?.bout_id) ?? fallbackBoutId;
 
-    await enrichControleBoutContext(matchmaking_id, controle_run_id, {
-      partij_nr,
-      bout_id: scopedBoutId,
-    });
+    if (isMatchmakerFlow) {
+      await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id, {
+        partij_nr,
+        bout_id: scopedBoutId,
+      });
+    } else {
+      await enrichControlBoutContext(matchmaking_id, controle_run_id, {
+        partij_nr,
+        bout_id: scopedBoutId,
+      });
+    }
 
     const ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
     const ctxRows = ctxFinal ? [ctxFinal] : [];
 
-    await rulesEngine({
+    const rulesArgs = {
       matchmaking_id,
       controle_run_id,
       ctxRows,
       scoped_partij_nr: partij_nr,
       scoped_bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
-    });
+    };
+
+    if (isMatchmakerFlow) {
+      // lib/matchmaker/rulesEngine slaat via lib/matchmaker/saveControleResultaten
+      // alleen deze scoped partij opnieuw op.
+      await matchmakerRulesEngine(rulesArgs);
+    } else {
+      await controlRulesEngine(rulesArgs);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -476,7 +536,9 @@ export async function POST(req: Request) {
       partij_nr,
       bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
       vaList,
-      used_total: vaList.length > 0,
+      used_total: !isMatchmakerFlow && vaList.length > 0,
+      used_matchmaker_bundle: isMatchmakerFlow && vaList.length > 0,
+      flow: isMatchmakerFlow ? "matchmaker" : "control",
       ms: Date.now() - t0,
     });
   } catch (e: any) {
