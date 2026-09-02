@@ -606,6 +606,38 @@ export default function DashboardPage() {
           }}
         >
           © FIGHTSUPPORT
+          <span style={{ margin: "0 8px", opacity: 0.55 }}>·</span>
+          <button
+            type="button"
+            onClick={() => router.push("/privacy")}
+            style={{
+              border: 0,
+              padding: 0,
+              background: "transparent",
+              color: "inherit",
+              font: "inherit",
+              letterSpacing: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            PRIVACY
+          </button>
+          <span style={{ margin: "0 8px", opacity: 0.55 }}>·</span>
+          <button
+            type="button"
+            onClick={() => router.push("/cookies")}
+            style={{
+              border: 0,
+              padding: 0,
+              background: "transparent",
+              color: "inherit",
+              font: "inherit",
+              letterSpacing: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            COOKIES
+          </button>
         </div>
       </div>
     </main>

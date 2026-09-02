@@ -210,13 +210,13 @@ export default function MatchmakerDashboardPage() {
     {
       label: "Dispensatie aanvragen",
       subtitle: "Open het NVB dispensatieformulier",
-      external: "https://form.jotform.com/252374582262055",
+      external: "https://nvbformulieren.nl/dispensatie",
       icon: FileText as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
       label: "Licentie verlengen",
       subtitle: "Vraag verlenging Matchmaker licentie aan",
-      external: "https://form.jotform.com/253623147570355",
+      external: "https://nvbformulieren.nl/matchmaker-licentie",
       icon: Award as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
