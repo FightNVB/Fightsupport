@@ -800,11 +800,27 @@ function namesClearlyCompatibleForLive(mmGym: string, fpGym: string): boolean {
   if (!mm || !fp) return false;
 
   if (mm === fp) return true;
-  if (compactNorm(mm) === compactNorm(fp)) return true;
+
+  const mmCompact = compactNorm(mm);
+  const fpCompact = compactNorm(fp);
+
+  if (mmCompact === fpCompact) return true;
+
+  // FightPassport kan woorden anders schrijven dan de matchmaking, bijvoorbeeld:
+  // MM: "Team Nomercy" -> "nomercy"
+  // FP: "No Mercy Gym Never Give Up" -> "nomercynevergiveup"
+  // Als de betekenisvolle compacte naam duidelijk in de andere naam zit,
+  // beschouwen we dit als dezelfde sportschool. Daarna wordt voor het keurmerk
+  // juist de EXACTE FightPassport-naam in sportscholen opgezocht voor de einddatum.
+  if (
+    Math.min(mmCompact.length, fpCompact.length) >= 6 &&
+    (mmCompact.includes(fpCompact) || fpCompact.includes(mmCompact))
+  ) {
+    return true;
+  }
 
   // Voorbeeld: "No Mercy Gym" -> "no mercy" en
   // "No Mercy Gym Never Give Up" -> "no mercy never give up".
-  // Dit is dezelfde sportschool voor de snelle live-keurmerkcheck.
   if (isTokenSubset(mm, fp) || isTokenSubset(fp, mm)) return true;
 
   const inter = intersectionCount(mm, fp);
@@ -1082,9 +1098,9 @@ export async function enrichControleBoutContext(
 
   const aliasMaps: AliasMaps = { aliasNormToId, aliasCompactToId, aliasRows };
 
-  // Eerst de actuele FightPassport-sportschool gebruiken als snelle check.
-  // Alleen als de MM-naam en FP-naam echt niet bij elkaar passen, zoeken we
-  // als fallback in de sportscholen-database.
+  // Gebruik de actuele FightPassport-sportschool zodra die duidelijk bij de MM-sportschool hoort.
+  // Voor de keurmerkdatum wordt daarna de EXACTE FightPassport-sportschoolnaam in de DB opgezocht.
+  // Alleen als MM en FP echt niet bij dezelfde sportschool horen, vallen we terug op de MM-naam.
   const { data: liveRows, error: liveErr } = await supabaseAdmin
     .from("controle_fighter_actueel")
     .select("va_nummer,sportschool,land,keurmerk_schild_gevonden,error_message,checked_at")
@@ -1133,9 +1149,9 @@ export async function enrichControleBoutContext(
       const valueKey = side === "rood" ? "keurmerk_rood" : "keurmerk_blauw";
       const reasonKey = side === "rood" ? "keurmerk_reden_rood" : "keurmerk_reden_blauw";
 
-      // 1) SNELSTE + MEEST BETROUWBARE ROUTE:
-      // Matchmakingnaam en actuele FightPassport-sportschool horen duidelijk bij elkaar.
-      // Dan NIET verder zoeken in de database; gebruik direct het live schild.
+      // 1) MM en actuele FightPassport-sportschool horen duidelijk bij elkaar.
+      // Gebruik dan de FightPassport-sportschool als identiteit en zoek DIE exacte naam
+      // in sportscholen op om de keurmerk-einddatum tegen de eventdatum te controleren.
       if (liveSportschoolMatchesMatchmaking(mmGym, live, sportscholen, aliasMaps)) {
         Object.assign(
           patch,
