@@ -587,6 +587,125 @@ function chooseBestFromCandidates(
   return { row: null, reason: "Meerdere matches (ambigue) — maak alias aan." };
 }
 
+
+function looseGymNameCompatible(aRaw: string, bRaw: string) {
+  const a = compactNorm(norm(aRaw));
+  const b = compactNorm(norm(bRaw));
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const minLen = Math.min(a.length, b.length);
+  return minLen >= 5 && (a.includes(b) || b.includes(a));
+}
+
+type SchoolFighterLink = {
+  va_nummer: string;
+  sportschool_id: any;
+  actief: boolean | null;
+  last_seen_at?: string | null;
+};
+
+async function fetchSchoolFighterLinksByVa(vaNummers: string[]) {
+  const unique = Array.from(new Set((vaNummers ?? []).map((v) => String(v ?? "").trim()).filter(Boolean)));
+  const map = new Map<string, SchoolFighterLink[]>();
+  if (unique.length === 0) return map;
+
+  const { data, error } = await supabaseAdmin
+    .from("fightpassport_school_fighters")
+    .select("va_nummer,sportschool_id,actief,last_seen_at")
+    .in("va_nummer", unique)
+    .order("last_seen_at", { ascending: false });
+
+  if (error) throw error;
+
+  for (const row of (data ?? []) as SchoolFighterLink[]) {
+    const va = String(row?.va_nummer ?? "").trim();
+    if (!va || row?.sportschool_id == null) continue;
+    const arr = map.get(va) ?? [];
+    arr.push(row);
+    map.set(va, arr);
+  }
+
+  return map;
+}
+
+function findGymMatchFromVaLinksOnly(opts: {
+  sportscholen: any[];
+  gymNaam: string;
+  vaNummer: string;
+  schoolLinksByVa: Map<string, SchoolFighterLink[]>;
+  aliasMaps: AliasMaps;
+}): GymMatch {
+  const { sportscholen, gymNaam, vaNummer, schoolLinksByVa, aliasMaps } = opts;
+  const va = String(vaNummer ?? "").trim();
+  if (!va) return { row: null, reason: "Geen VA-nummer voor sportschoolkoppeling." };
+
+  const allLinks = schoolLinksByVa.get(va) ?? [];
+  const activeLinks = allLinks.filter((x) => x?.actief !== false);
+  const links = activeLinks.length > 0 ? activeLinks : allLinks;
+
+  const seen = new Set<string>();
+  const candidates: any[] = [];
+  for (const link of links) {
+    const sid = String(link?.sportschool_id ?? "").trim();
+    if (!sid || seen.has(sid)) continue;
+    seen.add(sid);
+    const school = findSportschoolBySportschoolId(sportscholen, sid);
+    if (school) candidates.push(school);
+  }
+
+  if (candidates.length === 0) {
+    return { row: null, reason: "Geen gekoppelde sportschool voor deze VA." };
+  }
+
+  // Eerst de MM-naam alleen binnen de sportscholen gebruiken waar deze VA
+  // volgens FightPassport daadwerkelijk aan gekoppeld staat.
+  const compatible = candidates.filter((x) => looseGymNameCompatible(gymNaam, String(x?.naam ?? "")));
+  if (compatible.length === 1) return { row: compatible[0], reason: null };
+
+  const restricted = findGymMatch(candidates, gymNaam, aliasMaps);
+  if (restricted.row) return restricted;
+
+  // Eén gekoppelde kandidaat is op zichzelf al sterke DB-informatie, ook wanneer
+  // de MM-naam afwijkt. Bij meerdere onduidelijke kandidaten gokken we niet.
+  if (candidates.length === 1) return { row: candidates[0], reason: null };
+
+  return { row: null, reason: restricted.reason ?? "Meerdere gekoppelde sportscholen voor deze VA." };
+}
+
+function teamConsensusKey(gymNaam: string) {
+  return compactNorm(norm(gymNaam));
+}
+
+function findGymMatchForFighter(opts: {
+  sportscholen: any[];
+  gymNaam: string;
+  vaNummer: string;
+  schoolLinksByVa: Map<string, SchoolFighterLink[]>;
+  aliasMaps: AliasMaps;
+  teamConsensusByGym?: Map<string, string>;
+}): GymMatch {
+  const { sportscholen, gymNaam, vaNummer, schoolLinksByVa, aliasMaps, teamConsensusByGym } = opts;
+
+  const linked = findGymMatchFromVaLinksOnly({ sportscholen, gymNaam, vaNummer, schoolLinksByVa, aliasMaps });
+  if (linked.row) return linked;
+
+  // Daarna de bestaande algemene MM/alias/fuzzy matching.
+  const general = findGymMatch(sportscholen, gymNaam, aliasMaps);
+  if (general.row) return general;
+
+  // Laatste fallback: uitsluitend binnen DEZE matchmaking kijken waar andere
+  // vechters met dezelfde MM-teamnaam via hun VA betrouwbaar aan gekoppeld zijn.
+  // Alleen gebruiken als alle betrouwbare teamgenoten op hetzelfde sportschool_id uitkomen.
+  const key = teamConsensusKey(gymNaam);
+  const consensusSid = key ? teamConsensusByGym?.get(key) : null;
+  if (consensusSid) {
+    const school = findSportschoolBySportschoolId(sportscholen, consensusSid);
+    if (school) return { row: school, reason: null };
+  }
+
+  return general;
+}
+
 function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMaps): GymMatch {
   const gRaw = String(gymNaam ?? "").trim();
   if (!gRaw) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
@@ -844,7 +963,7 @@ export async function enrichControleBoutContext(
 
   let ctxQ = supabaseAdmin
     .from("controle_bout_context")
-    .select("partij_nr, bout_id, rood_gym_mm, blauw_gym_mm, evenement_datum")
+    .select("partij_nr, bout_id, rood_va_mm, blauw_va_mm, rood_gym_mm, blauw_gym_mm, evenement_datum")
     .eq("matchmaking_id", matchmaking_id)
     .eq("controle_run_id", controle_run_id);
 
@@ -882,6 +1001,48 @@ export async function enrichControleBoutContext(
 
   const aliasMaps: AliasMaps = { aliasNormToId, aliasCompactToId, aliasRows };
 
+  const ctxVaNummers = (ctxRows ?? []).flatMap((row: any) => [
+    String(row?.rood_va_mm ?? "").trim(),
+    String(row?.blauw_va_mm ?? "").trim(),
+  ]).filter(Boolean);
+  const schoolLinksByVa = await fetchSchoolFighterLinksByVa(ctxVaNummers);
+
+  const teamConsensusVotes = new Map<string, Map<string, number>>();
+  for (const row of ctxRows ?? []) {
+    const sides = [
+      { gym: String((row as any)?.rood_gym_mm ?? "").trim(), va: String((row as any)?.rood_va_mm ?? "").trim() },
+      { gym: String((row as any)?.blauw_gym_mm ?? "").trim(), va: String((row as any)?.blauw_va_mm ?? "").trim() },
+    ];
+
+    for (const side of sides) {
+      if (!side.gym || !side.va) continue;
+      const reliable = findGymMatchFromVaLinksOnly({
+        sportscholen,
+        gymNaam: side.gym,
+        vaNummer: side.va,
+        schoolLinksByVa,
+        aliasMaps,
+      });
+      const sid = String(reliable.row?.sportschool_id ?? "").trim();
+      const key = teamConsensusKey(side.gym);
+      if (!sid || !key) continue;
+
+      const votes = teamConsensusVotes.get(key) ?? new Map<string, number>();
+      votes.set(sid, (votes.get(sid) ?? 0) + 1);
+      teamConsensusVotes.set(key, votes);
+    }
+  }
+
+  const teamConsensusByGym = new Map<string, string>();
+  for (const [key, votes] of teamConsensusVotes.entries()) {
+    // Geen conflict: één sportschool_id onder de betrouwbaar gekoppelde teamgenoten.
+    // Eén betrouwbare andere vechter is genoeg; bij verschillende IDs wordt niets gekozen.
+    if (votes.size === 1) {
+      const sid = Array.from(votes.keys())[0];
+      if (sid) teamConsensusByGym.set(key, sid);
+    }
+  }
+
   console.log("[enrichControleBoutContext] sportscholen loaded:", sportscholen.length);
   console.log("[enrichControleBoutContext] aliases loaded:", aliases.length);
   console.log("[enrichControleBoutContext] alias keys:", aliasNormToId.size);
@@ -900,8 +1061,15 @@ export async function enrichControleBoutContext(
     const roodGym = String((row as any).rood_gym_mm ?? "").trim();
     const blauwGym = String((row as any).blauw_gym_mm ?? "").trim();
 
-    const roodMatch = roodGym ? findGymMatch(sportscholen, roodGym, aliasMaps) : { row: null, reason: null };
-    const blauwMatch = blauwGym ? findGymMatch(sportscholen, blauwGym, aliasMaps) : { row: null, reason: null };
+    const roodVa = String((row as any).rood_va_mm ?? "").trim();
+    const blauwVa = String((row as any).blauw_va_mm ?? "").trim();
+
+    const roodMatch = roodGym
+      ? findGymMatchForFighter({ sportscholen, gymNaam: roodGym, vaNummer: roodVa, schoolLinksByVa, aliasMaps, teamConsensusByGym })
+      : { row: null, reason: null };
+    const blauwMatch = blauwGym
+      ? findGymMatchForFighter({ sportscholen, gymNaam: blauwGym, vaNummer: blauwVa, schoolLinksByVa, aliasMaps, teamConsensusByGym })
+      : { row: null, reason: null };
 
     const rood = roodMatch.row;
     const blauw = blauwMatch.row;
@@ -1018,19 +1186,61 @@ Geen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "
   const { data: tournamentRows, error: tErr } = await tCtxQ;
   if (tErr) throw tErr;
 
+  const tournamentVaNummers = (tournamentRows ?? []).map((row: any) =>
+    String(row?.va_nummer ?? row?.fighter_id ?? "").trim()
+  ).filter(Boolean);
+  const tournamentSchoolLinksByVa = await fetchSchoolFighterLinksByVa(tournamentVaNummers);
+
   for (const row of tournamentRows ?? []) {
     const rowId = unwrapUuid((row as any).id) ?? String((row as any).id ?? "").trim();
     if (!rowId) continue;
 
     const gym = String((row as any).sportschool_mm ?? (row as any).sportschool ?? "").trim();
-    const patch = buildKeurmerkPatchForGym({
-      gym,
-      evenement_datum: String((row as any).evenement_datum ?? "").trim() || null,
-      sportscholen,
-      aliasMaps,
-      valueKey: "heeft_keurmerk",
-      reasonKey: "keurmerk_reason",
-    });
+    const va = String((row as any).va_nummer ?? (row as any).fighter_id ?? "").trim();
+    const tournamentMatch = gym
+      ? findGymMatchForFighter({
+          sportscholen,
+          gymNaam: gym,
+          vaNummer: va,
+          schoolLinksByVa: tournamentSchoolLinksByVa,
+          aliasMaps,
+        })
+      : { row: null, reason: null };
+
+    let patch: any;
+    if (tournamentMatch.row) {
+      const found = tournamentMatch.row;
+      const hint = detectLandHintFromGymText(gym);
+      const landDb = found?.land ?? found?.country ?? null;
+      const land = landLabelForMatch(landDb, hint);
+      const eindeIso = toIsoDateOnly(found?.keurmerk_eind ?? found?.keurmerk_einde ?? found?.einde_keurmerk);
+      const matchInfo = `↳ [MM sportschool:] "${gym || "-"}"\n↳ gematcht met "${found.naam}" (${found.plaats ?? found.stad ?? "?"}, ${land ?? "?"})`;
+      const isForeign = landDb ? isForeignNonNL(landDb) : isForeignHint(hint);
+
+      if (isForeign) {
+        patch = {
+          heeft_keurmerk: true,
+          keurmerk_reason: buildForeignKeurmerkReason({ gym, land: land ?? "Buitenland", matchInfo }),
+        };
+      } else {
+        const geldig = !!eindeIso && eindeIso >= String((row as any).evenement_datum ?? "");
+        patch = {
+          heeft_keurmerk: geldig,
+          keurmerk_reason: geldig
+            ? `${matchInfo}\nKeurmerk geldig t/m ${eindeIso}.`
+            : `${matchInfo}\nGeen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "-"}.`,
+        };
+      }
+    } else {
+      patch = buildKeurmerkPatchForGym({
+        gym,
+        evenement_datum: String((row as any).evenement_datum ?? "").trim() || null,
+        sportscholen,
+        aliasMaps,
+        valueKey: "heeft_keurmerk",
+        reasonKey: "keurmerk_reason",
+      });
+    }
 
     const { error: tuErr } = await supabaseAdmin
       .from("controle_toernooi_context")
