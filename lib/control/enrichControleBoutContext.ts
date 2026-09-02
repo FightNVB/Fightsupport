@@ -299,6 +299,20 @@ async function fetchAllSportschoolAliases() {
   return all;
 }
 
+function aliasAcronym(raw: any): string | null {
+  const words = normStrictName(raw)
+    .split(/\s+/)
+    .map((w) => w.replace(/[^a-z0-9à-ÿ]/gi, ""))
+    .filter(Boolean);
+
+  if (words.length < 2) return null;
+
+  // Bewust ook korte verbindingswoorden meenemen:
+  // "House of Champions" => HOC.
+  const acronym = words.map((w) => w[0]).join("").toLowerCase();
+  return acronym.length >= 2 ? acronym : null;
+}
+
 type AliasMaps = {
   aliasNormToId: Map<string, string>;
   aliasCompactToId: Map<string, string>;
@@ -752,6 +766,25 @@ function dbMatchInfo(mmGym: string, found: any | null): string {
 }
 
 
+
+function keurmerkDbReason(opts: {
+  geldig: boolean;
+  aanmelding: string;
+  found: any | null;
+  eindeIso: string | null;
+}) {
+  const aanmelding = String(opts.aanmelding ?? "").trim() || "-";
+  const naam = String(opts.found?.naam ?? "").trim() || "GEEN";
+  const plaats = String(opts.found?.plaats ?? opts.found?.stad ?? "").trim();
+  const db = `"${naam}"${plaats ? ` (${plaats})` : ""}`;
+
+  if (opts.geldig) {
+    return `Keurmerk: JA · Aanmelding: "${aanmelding}" · DB-match: ${db} · geldig t/m ${opts.eindeIso ?? "-"}`;
+  }
+
+  return `Keurmerk: NEE · Aanmelding: "${aanmelding}" · DB-match: ${db} · einddatum: ${opts.eindeIso ?? "-"}`;
+}
+
 function fpMatchInfo(mmGym: string, live: any | null): string {
   const mm = String(mmGym ?? "").trim() || "-";
   if (!live) return `MM: "${mm}" · FightPassport-match: GEEN`;
@@ -778,16 +811,37 @@ function namesClearlyCompatibleForLive(mmGym: string, fpGym: string): boolean {
   return inter >= 2 && overlapScore(mm, fp) >= 0.66;
 }
 
-function liveSportschoolMatchesMatchmaking(mmGym: string, live: any | null): boolean {
+function liveSportschoolMatchesMatchmaking(
+  mmGym: string,
+  live: any | null,
+  sportscholen?: any[],
+  aliasMaps?: AliasMaps,
+): boolean {
   const mm = String(mmGym ?? "").trim();
   const fp = String(live?.sportschool ?? "").trim();
   if (!mm || !fp) return false;
 
-  if (!namesClearlyCompatibleForLive(mm, fp)) return false;
+  let sameSchool = namesClearlyCompatibleForLive(mm, fp);
+
+  // Als de zichtbare namen niet genoeg op elkaar lijken, gebruik dan de
+  // sportschool-aliases als identiteit. Bijvoorbeeld:
+  // MM "hoc" -> alias "House of Champions" -> sportschool_id 1898, terwijl
+  // FightPassport "Sportcentre Westervoort / House of Champions" teruggeeft.
+  if (!sameSchool && sportscholen && aliasMaps) {
+    const mmResolved = findGymMatch(sportscholen, mm, aliasMaps).row;
+    const fpResolved =
+      findExactSportschoolByName(sportscholen, fp) ??
+      findGymMatch(sportscholen, fp, aliasMaps).row;
+
+    const mmId = String(mmResolved?.sportschool_id ?? "").trim();
+    const fpId = String(fpResolved?.sportschool_id ?? "").trim();
+
+    if (mmId && fpId && mmId === fpId) sameSchool = true;
+  }
+
+  if (!sameSchool) return false;
 
   // Alleen een EXPLICIETE landhint in de matchmaking is hard leidend.
-  // Dus "No Mercy (DE)" moet Duits zijn. Zonder (DE)/(BE)/etc. gaan we
-  // niet alsnog via de database een buitenlandse naamvariant kiezen.
   const explicitMmLand = detectLandHintFromGymText(mm);
   if (explicitMmLand) {
     const fpLand = live?.land ?? null;
@@ -825,6 +879,71 @@ function liveKeurmerkValue(mmGym: string, live: any): boolean | null {
     : null;
 }
 
+
+function findExactSportschoolByName(sportscholen: any[], gymNaam: string) {
+  const raw = String(gymNaam ?? "").trim();
+  if (!raw) return null;
+  const strict = normStrictName(raw);
+  const compact = compactStrictName(raw);
+
+  return (
+    sportscholen.find((x) => normStrictName(x?.naam) === strict) ??
+    sportscholen.find((x) => compactStrictName(x?.naam) === compact) ??
+    null
+  );
+}
+
+function buildLiveEventDateKeurmerkPatch(opts: {
+  mmGym: string;
+  live: any;
+  evenement_datum?: string | null;
+  sportscholen: any[];
+  valueKey: string;
+  reasonKey: string;
+}) {
+  const { mmGym, live, evenement_datum, sportscholen, valueKey, reasonKey } = opts;
+  const patch: any = {};
+  const fpGym = String(live?.sportschool ?? "").trim();
+  const matchInfo = fpMatchInfo(mmGym, live);
+  const foreignLand = liveForeignLandLabel(mmGym, live);
+
+  if (foreignLand) {
+    patch[valueKey] = true;
+    patch[reasonKey] = `${buildForeignKeurmerkReason({ gym: mmGym, land: foreignLand })} · ${matchInfo}`;
+    return patch;
+  }
+
+  const exactDbSchool = findExactSportschoolByName(sportscholen, fpGym);
+  if (exactDbSchool) {
+    const eindeIso = toIsoDateOnly(
+      exactDbSchool?.keurmerk_eind ??
+      exactDbSchool?.keurmerk_einde ??
+      exactDbSchool?.einde_keurmerk
+    );
+    const eventIso = String(evenement_datum ?? "").trim();
+    const geldigOpEventdatum = !!eindeIso && !!eventIso && eindeIso >= eventIso;
+
+    patch[valueKey] = geldigOpEventdatum;
+    patch[reasonKey] = keurmerkDbReason({
+      geldig: geldigOpEventdatum,
+      aanmelding: mmGym,
+      found: exactDbSchool,
+      eindeIso,
+    });
+    return patch;
+  }
+
+  // Alleen als de exacte live FightPassport-naam niet in de DB staat,
+  // vallen we terug op de actuele schildstatus.
+  const value = liveKeurmerkValue(mmGym, live);
+  patch[valueKey] = value;
+  patch[reasonKey] = value === true
+    ? `Keurmerk live bevestigd via FightPassport-schild; exacte FP-sportschool niet in sportscholen-DB gevonden. · ${matchInfo}`
+    : value === false
+      ? `Geen FightPassport-keurmerkschild gevonden; exacte FP-sportschool niet in sportscholen-DB gevonden. · ${matchInfo}`
+      : `FightPassport-sportschool matcht, maar keurmerkstatus is niet leesbaar en exacte FP-sportschool staat niet in de DB. · ${matchInfo}`;
+  return patch;
+}
 function buildKeurmerkPatchForGym(opts: {
   gym: string;
   evenement_datum?: string | null;
@@ -886,9 +1005,12 @@ function buildKeurmerkPatchForGym(opts: {
 
   const geldig = !!eindeIso && eindeIso >= String(evenement_datum ?? "");
   patch[valueKey] = geldig;
-  patch[reasonKey] = geldig
-    ? `Keurmerk geldig t/m ${eindeIso}. · ${dbMatchInfo(gymValue, found)}`
-    : `Geen geldig keurmerk op eventdatum. Einddatum: ${eindeIso ?? "-"}. · ${dbMatchInfo(gymValue, found)}`;
+  patch[reasonKey] = keurmerkDbReason({
+    geldig,
+    aanmelding: gymValue,
+    found,
+    eindeIso,
+  });
 
   return patch;
 }
@@ -943,6 +1065,14 @@ export async function enrichControleBoutContext(
 
     if (!aliasNormToId.has(n)) aliasNormToId.set(n, String(sid));
     if (!aliasCompactToId.has(c)) aliasCompactToId.set(c, String(sid));
+
+    // Ook initialen van een bekende alias accepteren.
+    // Voorbeeld: alias "House of Champions" => "HOC".
+    const acronym = aliasAcronym(raw);
+    if (acronym) {
+      if (!aliasNormToId.has(acronym)) aliasNormToId.set(acronym, String(sid));
+      if (!aliasCompactToId.has(acronym)) aliasCompactToId.set(acronym, String(sid));
+    }
 
     aliasRows.push({
       alias_text: raw,
@@ -1006,24 +1136,18 @@ export async function enrichControleBoutContext(
       // 1) SNELSTE + MEEST BETROUWBARE ROUTE:
       // Matchmakingnaam en actuele FightPassport-sportschool horen duidelijk bij elkaar.
       // Dan NIET verder zoeken in de database; gebruik direct het live schild.
-      if (liveSportschoolMatchesMatchmaking(mmGym, live)) {
-        const value = liveKeurmerkValue(mmGym, live);
-        patch[valueKey] = value;
-
-        const matchInfo = fpMatchInfo(mmGym, live);
-        const foreignLand = liveForeignLandLabel(mmGym, live);
-        if (foreignLand) {
-          patch[reasonKey] = `${buildForeignKeurmerkReason({
-            gym: mmGym,
-            land: foreignLand,
-          })} · ${matchInfo}`;
-        } else if (value === true) {
-          patch[reasonKey] = `Keurmerk live bevestigd via FightPassport-schild. · ${matchInfo}`;
-        } else if (value === false) {
-          patch[reasonKey] = `Geen FightPassport-keurmerkschild gevonden. · ${matchInfo}`;
-        } else {
-          patch[reasonKey] = `FightPassport-sportschool matcht, maar keurmerkstatus is niet leesbaar. · ${matchInfo}`;
-        }
+      if (liveSportschoolMatchesMatchmaking(mmGym, live, sportscholen, aliasMaps)) {
+        Object.assign(
+          patch,
+          buildLiveEventDateKeurmerkPatch({
+            mmGym,
+            live,
+            evenement_datum: String((row as any)?.evenement_datum ?? "").trim() || null,
+            sportscholen,
+            valueKey,
+            reasonKey,
+          }),
+        );
         return;
       }
 
@@ -1039,9 +1163,7 @@ export async function enrichControleBoutContext(
 
       Object.assign(patch, fallback);
 
-      // Laat altijd zien waarom de fallback gebruikt is én waartegen de DB matchte.
-      const fpInfo = fpMatchInfo(mmGym, live);
-      patch[reasonKey] = `${String(patch[reasonKey] ?? "").trim()} · FP-naam onvoldoende overeenkomst; DB-fallback gebruikt. · ${fpInfo}`;
+      // Zichtbare keurmerkmelding blijft compact: aanmelding + DB-match + geldigheid.
     };
 
     applySide("rood", roodGym, liveRood);
@@ -1077,19 +1199,15 @@ export async function enrichControleBoutContext(
     const live = va ? liveByVa.get(va) : null;
 
     let patch: any;
-    if (liveSportschoolMatchesMatchmaking(gym, live)) {
-      const value = liveKeurmerkValue(gym, live);
-      const foreignLand = liveForeignLandLabel(gym, live);
-      patch = {
-        heeft_keurmerk: value,
-        keurmerk_reason: foreignLand
-          ? `${buildForeignKeurmerkReason({ gym, land: foreignLand })} · ${fpMatchInfo(gym, live)}`
-          : value === true
-            ? `Keurmerk live bevestigd via FightPassport-schild. · ${fpMatchInfo(gym, live)}`
-            : value === false
-              ? `Geen FightPassport-keurmerkschild gevonden. · ${fpMatchInfo(gym, live)}`
-              : `FightPassport-sportschool matcht, maar keurmerkstatus is niet leesbaar. · ${fpMatchInfo(gym, live)}`,
-      };
+    if (liveSportschoolMatchesMatchmaking(gym, live, sportscholen, aliasMaps)) {
+      patch = buildLiveEventDateKeurmerkPatch({
+        mmGym: gym,
+        live,
+        evenement_datum: String((row as any).evenement_datum ?? "").trim() || null,
+        sportscholen,
+        valueKey: "heeft_keurmerk",
+        reasonKey: "keurmerk_reason",
+      });
     } else {
       patch = buildKeurmerkPatchForGym({
         gym,
@@ -1099,7 +1217,7 @@ export async function enrichControleBoutContext(
         valueKey: "heeft_keurmerk",
         reasonKey: "keurmerk_reason",
       });
-      patch.keurmerk_reason = `${String(patch.keurmerk_reason ?? "").trim()} · FP-naam onvoldoende overeenkomst; DB-fallback gebruikt. · ${fpMatchInfo(gym, live)}`;
+      // Geen technische FP/MM-fallbacktekst in de zichtbare keurmerkmelding.
     }
 
     const { error: tuErr } = await supabaseAdmin

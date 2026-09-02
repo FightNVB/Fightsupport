@@ -1026,6 +1026,134 @@ function normResultaat(v: any): string {
   return s;
 }
 
+
+type DispDecisionStatus = "none" | "pending" | "approved" | "rejected";
+
+function firstFilled(...vals: any[]) {
+  for (const v of vals) {
+    if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  }
+  return null;
+}
+
+function normalizeDispVa(value: any): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function dispIdentityKey(args: {
+  matchmakingId: any;
+  boutId?: any;
+  vaRood: any;
+  vaBlauw: any;
+}): string | null {
+  const matchmaking = String(args.matchmakingId ?? "").trim();
+  if (!matchmaking) return null;
+
+  const pair = [normalizeDispVa(args.vaRood), normalizeDispVa(args.vaBlauw)]
+    .filter(Boolean)
+    .sort();
+
+  if (pair.length === 2) return `${matchmaking}|va:${pair[0]}|${pair[1]}`;
+
+  const boutId = String(args.boutId ?? "").trim();
+  return boutId ? `${matchmaking}|bout:${boutId}` : null;
+}
+
+function dispIdentityFromContext(matchmakingId: any, row: AnyRow | null | undefined): string | null {
+  if (!row) return null;
+  return dispIdentityKey({
+    matchmakingId,
+    boutId: row?.bout_id,
+    vaRood: firstFilled(
+      row?.rood_va_mm,
+      row?.rood_va_fp,
+      row?.rood_va,
+      row?.va_rood,
+      row?.rood_va_nummer,
+      row?.rood_fighter_id,
+    ),
+    vaBlauw: firstFilled(
+      row?.blauw_va_mm,
+      row?.blauw_va_fp,
+      row?.blauw_va,
+      row?.va_blauw,
+      row?.blauw_va_nummer,
+      row?.blauw_fighter_id,
+    ),
+  });
+}
+
+function dispIdentityFromRequest(request: AnyRow): string | null {
+  return dispIdentityKey({
+    matchmakingId: request?.matchmaking_id,
+    boutId: request?.bout_id,
+    vaRood: request?.va_rood,
+    vaBlauw: request?.va_blauw,
+  });
+}
+
+function normalizeDispDecision(row: AnyRow | null | undefined): DispDecisionStatus {
+  if (!row) return "none";
+  const raw = String(
+    row?.decision ??
+      row?.beslissing ??
+      row?.besluit ??
+      row?.final_decision ??
+      row?.status ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+
+  if (["approved", "approve", "goedgekeurd", "akkoord", "accepted", "geaccepteerd"].includes(raw)) {
+    return "approved";
+  }
+  if (["rejected", "reject", "afgewezen", "afgekeurd", "denied", "declined"].includes(raw)) {
+    return "rejected";
+  }
+  return raw ? "pending" : "pending";
+}
+
+function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
+  if (!rows?.length) return "none";
+  const states = rows.map(normalizeDispDecision);
+  if (states.some((state) => state === "rejected")) return "rejected";
+  if (states.some((state) => state === "pending")) return "pending";
+  return "approved";
+}
+
+function latestDispDecisionReason(rows: AnyRow[]): string | null {
+  const decided = [...(rows ?? [])]
+    .filter(
+      (r) =>
+        normalizeDispDecision(r) === "approved" ||
+        normalizeDispDecision(r) === "rejected",
+    )
+    .sort((a, b) => {
+      const ta = new Date(
+        String(a?.decided_at ?? a?.updated_at ?? a?.created_at ?? ""),
+      ).getTime();
+      const tb = new Date(
+        String(b?.decided_at ?? b?.updated_at ?? b?.created_at ?? ""),
+      ).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+
+  const row = decided[0];
+  if (!row) return null;
+
+  const value =
+    row?.decision_reason ??
+    row?.decided_reason ??
+    row?.decision_note ??
+    row?.reason ??
+    row?.reden ??
+    null;
+
+  const s = String(value ?? "").trim();
+  return s || null;
+}
+
 function asUuid(v: any): string | null {
   if (v == null) return null;
   const s = String(v).trim();
@@ -1329,6 +1457,8 @@ export default function PartijDetailPage() {
   const [showLoader, setShowLoader] = useState(false);
   const [sendingDisp, setSendingDisp] = useState(false);
   const [dispSent, setDispSent] = useState(false);
+  const [dispDecisionStatus, setDispDecisionStatus] = useState<DispDecisionStatus>("none");
+  const [dispDecisionReason, setDispDecisionReason] = useState<string | null>(null);
 
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const isSuperadmin = useMemo(
@@ -1942,21 +2072,21 @@ export default function PartijDetailPage() {
         const row = (ctxRows?.[0] ?? null) as AnyRow | null;
         setCtx(row);
 
-        const boutIdForDisp = String((row as any)?.bout_id ?? "").trim();
-        let dispReqQuery = supabase
+        const { data: dispReqRows, error: dispReqErr } = await supabase
           .from("dispensatie_requests")
-          .select("id")
-          .eq("matchmaking_id", matchmakingId)
-          .eq("partij_nr", partijNr)
-          .limit(1);
-
-        if (boutIdForDisp) {
-          dispReqQuery = dispReqQuery.eq("bout_id", boutIdForDisp);
-        }
-
-        const { data: dispReqRows, error: dispReqErr } = await dispReqQuery;
+          .select("*")
+          .eq("matchmaking_id", matchmakingId);
         if (dispReqErr) throw dispReqErr;
-        setDispSent((dispReqRows ?? []).length > 0);
+
+        const currentIdentity = dispIdentityFromContext(matchmakingId, row);
+        const dispRequests = ((dispReqRows ?? []) as AnyRow[]).filter(
+          (request) =>
+            !!currentIdentity && dispIdentityFromRequest(request) === currentIdentity,
+        );
+
+        setDispSent(dispRequests.length > 0);
+        setDispDecisionStatus(aggregateDispDecision(dispRequests));
+        setDispDecisionReason(latestDispDecisionReason(dispRequests));
 
         {
           const rows = await fetchRegelsVoorPartij({
@@ -3335,8 +3465,27 @@ export default function PartijDetailPage() {
               )}
 
               {dispSent ? (
-                <div className="mt-4 rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-950">
-                  Deze partij is al naar dispensatie gestuurd.
+                <div
+                  className={`mt-4 rounded-xl border px-4 py-3 text-sm font-extrabold ${
+                    dispDecisionStatus === "approved"
+                      ? "border-green-300 bg-green-50 text-green-900"
+                      : dispDecisionStatus === "rejected"
+                        ? "border-red-300 bg-red-50 text-red-900"
+                        : "border-orange-300 bg-orange-50 text-orange-950"
+                  }`}
+                >
+                  <div>
+                    {dispDecisionStatus === "approved"
+                      ? "✓ DISPENSATIE GOEDGEKEURD"
+                      : dispDecisionStatus === "rejected"
+                        ? "✕ DISPENSATIE AFGEWEZEN"
+                        : "DISPENSATIE IN BEHANDELING"}
+                  </div>
+                  {dispDecisionReason ? (
+                    <div className="mt-1 text-xs font-semibold opacity-85">
+                      Reden: {dispDecisionReason}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

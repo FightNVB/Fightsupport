@@ -1085,29 +1085,35 @@ function normalizeDispVa(value: any): string {
 
 function dispIdentityKey(args: {
   matchmakingId: any;
+  boutId?: any;
   vaRood: any;
   vaBlauw: any;
-  eventNaam: any;
-  eventDatum: any;
 }): string | null {
   const matchmaking = String(args.matchmakingId ?? "").trim();
+  if (!matchmaking) return null;
+
   const pair = [normalizeDispVa(args.vaRood), normalizeDispVa(args.vaBlauw)]
     .filter(Boolean)
     .sort();
-  const eventNaam = normalizeDispIdentityText(args.eventNaam);
-  const eventDatum = normalizeDispEventDate(args.eventDatum);
-  if (!matchmaking || pair.length !== 2 || !eventNaam || !eventDatum) return null;
-  return [matchmaking, pair[0], pair[1], eventNaam, eventDatum].join("|");
+
+  // Zelfde koppeling als op matchmaking-id:
+  // matchmaking + beide VA-nummers is leidend.
+  // Partij_nr, controle_run_id en ontbrekende eventvelden mogen de koppeling niet breken.
+  if (pair.length === 2) return `${matchmaking}|va:${pair[0]}|${pair[1]}`;
+
+  const boutId = String(args.boutId ?? "").trim();
+  return boutId ? `${matchmaking}|bout:${boutId}` : null;
 }
 
 function dispIdentityFromContext(
   matchmakingId: any,
   row: AnyRow,
-  fallbackEventNaam?: any,
-  fallbackEventDatum?: any,
+  _fallbackEventNaam?: any,
+  _fallbackEventDatum?: any,
 ): string | null {
   return dispIdentityKey({
     matchmakingId,
+    boutId: row?.bout_id,
     vaRood: firstFilled(
       row?.rood_va_mm,
       row?.rood_va_fp,
@@ -1124,18 +1130,15 @@ function dispIdentityFromContext(
       row?.blauw_va_nummer,
       row?.blauw_fighter_id,
     ),
-    eventNaam: firstFilled(row?.evenement_naam, row?.event_naam, fallbackEventNaam),
-    eventDatum: firstFilled(row?.evenement_datum, row?.event_datum, fallbackEventDatum),
   });
 }
 
 function dispIdentityFromRequest(request: AnyRow): string | null {
   return dispIdentityKey({
     matchmakingId: request?.matchmaking_id,
+    boutId: request?.bout_id,
     vaRood: request?.va_rood,
     vaBlauw: request?.va_blauw,
-    eventNaam: firstFilled(request?.evenement_naam, request?.event_naam),
-    eventDatum: firstFilled(request?.evenement_datum, request?.event_datum),
   });
 }
 
@@ -1161,6 +1164,38 @@ function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
   if (states.some((state) => state === "rejected")) return "rejected";
   if (states.some((state) => state === "pending")) return "pending";
   return "approved";
+}
+
+function latestDispDecisionReason(rows: AnyRow[]): string | null {
+  const decided = [...(rows ?? [])]
+    .filter(
+      (r) =>
+        normalizeDispDecision(r) === "approved" ||
+        normalizeDispDecision(r) === "rejected",
+    )
+    .sort((a, b) => {
+      const ta = new Date(
+        String(a?.decided_at ?? a?.updated_at ?? a?.created_at ?? ""),
+      ).getTime();
+      const tb = new Date(
+        String(b?.decided_at ?? b?.updated_at ?? b?.created_at ?? ""),
+      ).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+
+  const row = decided[0];
+  if (!row) return null;
+
+  const value =
+    row?.decision_reason ??
+    row?.decided_reason ??
+    row?.decision_note ??
+    row?.reason ??
+    row?.reden ??
+    null;
+
+  const s = String(value ?? "").trim();
+  return s || null;
 }
 
 function asUuid(v: any): string | null {
@@ -1470,6 +1505,7 @@ export default function PartijDetailPage() {
   const [sendingDisp, setSendingDisp] = useState(false);
   const [dispSent, setDispSent] = useState(false);
   const [dispDecisionStatus, setDispDecisionStatus] = useState<DispDecisionStatus>("none");
+  const [dispDecisionReason, setDispDecisionReason] = useState<string | null>(null);
 
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const isSuperadmin = useMemo(
@@ -2062,6 +2098,7 @@ export default function PartijDetailPage() {
           setUitslagenBlauw([]);
           setDispSent(false);
           setDispDecisionStatus("none");
+          setDispDecisionReason(null);
           return;
         }
 
@@ -2221,6 +2258,7 @@ export default function PartijDetailPage() {
         );
         setDispSent(dispRequests.length > 0);
         setDispDecisionStatus(aggregateDispDecision(dispRequests));
+        setDispDecisionReason(latestDispDecisionReason(dispRequests));
 
         {
           const rows = await fetchRegelsVoorPartij({
@@ -2820,6 +2858,7 @@ export default function PartijDetailPage() {
 
       setDispSent(true);
       setDispDecisionStatus("pending");
+      setDispDecisionReason(null);
       setMsg("✅ Naar dispensatie gestuurd.");
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -3619,11 +3658,18 @@ export default function PartijDetailPage() {
                         : "border-orange-300 bg-orange-50 text-orange-950"
                   }`}
                 >
-                  {dispDecisionStatus === "approved"
-                    ? "✓ DISPENSATIE GOEDGEKEURD"
-                    : dispDecisionStatus === "rejected"
-                      ? "✕ DISPENSATIE AFGEWEZEN"
-                      : "DISPENSATIE IN BEHANDELING"}
+                  <div>
+                    {dispDecisionStatus === "approved"
+                      ? "✓ DISPENSATIE GOEDGEKEURD"
+                      : dispDecisionStatus === "rejected"
+                        ? "✕ DISPENSATIE AFGEWEZEN"
+                        : "DISPENSATIE IN BEHANDELING"}
+                  </div>
+                  {dispDecisionReason ? (
+                    <div className="mt-1 text-xs font-semibold opacity-85">
+                      Reden: {dispDecisionReason}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

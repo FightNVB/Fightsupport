@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     // request ophalen (voor matchmaking_id / controle_run_id)
     const { data: reqRow, error: rErr } = await supabaseAdmin
       .from("dispensatie_requests")
-      .select("id, matchmaking_id, controle_run_id")
+      .select("id, matchmaking_id, controle_run_id, bout_id, partij_nr, rule_code")
       .eq("id", request_id)
       .single();
 
@@ -67,7 +67,85 @@ export async function POST(req: Request) {
 
     if (uErr) throw uErr;
 
-    return NextResponse.json({ ok: true, controle_run_id });
+    // Houd de oorspronkelijke controle-melding synchroon met het formele
+    // dispensatiebesluit. Zo blijft controle_resultaten zelfstandig leesbaar:
+    // original_resultaat blijft DISPENSATIE, resultaat wordt OK/AFGEKEURD en
+    // de opgegeven reden wordt als review_note + aantekeningen bewaard.
+    let resultQuery = supabaseAdmin
+      .from("controle_resultaten")
+      .select("id, resultaat, original_resultaat, created_at")
+      .eq("matchmaking_id", reqRow.matchmaking_id)
+      .eq("rule_code", reqRow.rule_code)
+      .order("created_at", { ascending: false });
+
+    if (reqRow.bout_id) {
+      resultQuery = resultQuery.eq("bout_id", reqRow.bout_id);
+    } else if (reqRow.partij_nr != null) {
+      resultQuery = resultQuery.eq("partij_nr", reqRow.partij_nr);
+    }
+
+    if (controle_run_id) {
+      resultQuery = resultQuery.eq("controle_run_id", controle_run_id);
+    }
+
+    const { data: resultRows, error: resultFindErr } = await resultQuery.limit(10);
+    if (resultFindErr) throw resultFindErr;
+
+    // Kies bij voorkeur de nog oorspronkelijke DISPENSATIE-regel.
+    // Als die al eerder is omgezet, herkennen we hem via original_resultaat.
+    const controleResultaat =
+      (resultRows ?? []).find(
+        (row: any) =>
+          String(row?.resultaat ?? "").trim().toUpperCase() === "DISPENSATIE",
+      ) ??
+      (resultRows ?? []).find(
+        (row: any) =>
+          String(row?.original_resultaat ?? "").trim().toUpperCase() ===
+          "DISPENSATIE",
+      ) ??
+      null;
+
+    if (controleResultaat?.id) {
+      const reviewedAt = new Date().toISOString();
+      const originalResultaat =
+        String(controleResultaat.original_resultaat ?? "").trim() ||
+        String(controleResultaat.resultaat ?? "").trim() ||
+        "DISPENSATIE";
+
+      const { error: resultUpdateErr } = await supabaseAdmin
+        .from("controle_resultaten")
+        .update({
+          resultaat: decision === "approved" ? "ok" : "afgekeurd",
+          review_status:
+            decision === "approved" ? "goedgekeurd" : "afgekeurd",
+          review_note: reason,
+          aantekeningen: reason,
+          reviewed_by: user.id,
+          reviewed_at: reviewedAt,
+          original_resultaat: originalResultaat,
+        })
+        .eq("id", controleResultaat.id);
+
+      if (resultUpdateErr) throw resultUpdateErr;
+    } else {
+      console.warn(
+        "[dispensatie/decide] Geen bijbehorende controle_resultaten DISPENSATIE-regel gevonden",
+        {
+          request_id,
+          matchmaking_id: reqRow.matchmaking_id,
+          controle_run_id,
+          bout_id: reqRow.bout_id,
+          partij_nr: reqRow.partij_nr,
+          rule_code: reqRow.rule_code,
+        },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      controle_run_id,
+      controle_resultaat_id: controleResultaat?.id ?? null,
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
   }

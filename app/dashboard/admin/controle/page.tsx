@@ -325,7 +325,6 @@ const ACTION_COLORS = {
   annuleren: "linear-gradient(180deg, #8b8b8b 0%, #4b4b4b 100%)",
   herupload: "linear-gradient(180deg, #ff8a1f 0%, #d94700 100%)",
   verwijderen: "linear-gradient(180deg, #c53636 0%, #7a1717 100%)",
-  resultaten: "linear-gradient(180deg, #fff36a 0%, #ffd400 55%, #c89b00 100%)",
 };
 
 export default function ControleOverzichtPage() {
@@ -1653,15 +1652,6 @@ export default function ControleOverzichtPage() {
 
 
 
-                                        {r.laatste_run?.id ? (
-                                          <ActionSquare
-                                            href={`/dashboard/admin/controle/run/${r.laatste_run.id}`}
-                                            title="Resultaten en fouten van laatste controlerun"
-                                            color={ACTION_COLORS.resultaten}
-                                          >
-                                            <span style={{ color: "#111" }}>!</span>
-                                          </ActionSquare>
-                                        ) : null}
 
                                         {rowMsg ? (
                                           <span

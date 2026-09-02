@@ -1068,6 +1068,39 @@ function aggregateDispDecision(rows: AnyRow[]): DispDecisionStatus {
   return "approved";
 }
 
+function latestDispDecisionReason(rows: AnyRow[]): string | null {
+  const decided = [...(rows ?? [])]
+    .filter(
+      (r) =>
+        normalizeDispDecision(r) === "approved" ||
+        normalizeDispDecision(r) === "rejected",
+    )
+    .sort((a, b) => {
+      const ta = new Date(
+        String(a?.decided_at ?? a?.updated_at ?? a?.created_at ?? ""),
+      ).getTime();
+      const tb = new Date(
+        String(b?.decided_at ?? b?.updated_at ?? b?.created_at ?? ""),
+      ).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+
+  const row = decided[0];
+  if (!row) return null;
+
+  const value =
+    row?.decision_reason ??
+    row?.decided_reason ??
+    row?.decision_note ??
+    row?.reason ??
+    row?.reden ??
+    null;
+
+  const s = String(value ?? "").trim();
+  return s || null;
+}
+
+
 function asUuid(v: any): string | null {
   if (v == null) return null;
   const s = String(v).trim();
@@ -1399,6 +1432,7 @@ export default function PartijDetailPage() {
   const [sendingDisp, setSendingDisp] = useState(false);
   const [dispSent, setDispSent] = useState(false);
   const [dispDecisionStatus, setDispDecisionStatus] = useState<DispDecisionStatus>("none");
+  const [dispDecisionReason, setDispDecisionReason] = useState<string | null>(null);
 
   const [roleNames, setRoleNames] = useState<string[]>([]);
   const isSuperadmin = useMemo(
@@ -1997,6 +2031,7 @@ export default function PartijDetailPage() {
         );
         setDispSent(dispRequests.length > 0);
         setDispDecisionStatus(aggregateDispDecision(dispRequests));
+        setDispDecisionReason(latestDispDecisionReason(dispRequests));
 
         {
           const rows = await fetchRegelsVoorPartij({
@@ -2550,6 +2585,7 @@ export default function PartijDetailPage() {
 
       setDispSent(true);
       setDispDecisionStatus("pending");
+      setDispDecisionReason(null);
       setMsg("✅ Naar dispensatie gestuurd.");
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -3385,11 +3421,18 @@ export default function PartijDetailPage() {
                         : "border-orange-300 bg-orange-50 text-orange-950"
                   }`}
                 >
-                  {dispDecisionStatus === "approved"
-                    ? "✓ DISPENSATIE GOEDGEKEURD"
-                    : dispDecisionStatus === "rejected"
-                      ? "✕ DISPENSATIE AFGEWEZEN"
-                      : "DISPENSATIE IN BEHANDELING"}
+                  <div>
+                    {dispDecisionStatus === "approved"
+                      ? "✓ DISPENSATIE GOEDGEKEURD"
+                      : dispDecisionStatus === "rejected"
+                        ? "✕ DISPENSATIE AFGEWEZEN"
+                        : "DISPENSATIE IN BEHANDELING"}
+                  </div>
+                  {dispDecisionReason ? (
+                    <div className="mt-1 text-xs font-semibold opacity-85">
+                      Reden: {dispDecisionReason}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
