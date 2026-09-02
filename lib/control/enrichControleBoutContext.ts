@@ -108,52 +108,66 @@ function normLand(v: any) {
 }
 
 function isNL(v: any) {
-  const s = normLand(v);
-  return s === "nl" || s === "nederland" || s === "the netherlands" || s === "netherlands";
+  return normalizeCountryCodeOrName(String(v ?? "")) === "NL";
 }
 
 function isBE(v: any) {
-  const s = normLand(v);
-  return s === "be" || s === "belgie" || s === "belgië" || s === "belgium";
+  return normalizeCountryCodeOrName(String(v ?? "")) === "BE";
 }
 
 function isDE(v: any) {
-  const s = normLand(v);
-  return s === "de" || s === "duitsland" || s === "germany" || s === "deutschland";
+  return normalizeCountryCodeOrName(String(v ?? "")) === "DE";
 }
 
-function isFR(v: any) {
-  const s = normLand(v);
-  return s === "fr" || s === "frankrijk" || s === "france";
-}
+type EuLandHint =
+  | "AT" | "BE" | "BG" | "HR" | "CY" | "CZ" | "DE" | "DK" | "EE"
+  | "ES" | "FI" | "FR" | "GR" | "HU" | "IE" | "IT" | "LT" | "LU"
+  | "LV" | "MT" | "NL" | "PL" | "PT" | "RO" | "SE" | "SI" | "SK";
 
-function isES(v: any) {
-  const s = normLand(v);
-  return s === "es" || s === "spanje" || s === "spain" || s === "españa" || s === "espana";
-}
+type LandHint = EuLandHint | "UK" | "TR" | "FOREIGN";
 
-function isUK(v: any) {
-  const s = normLand(v);
-  return (
-    s === "uk" ||
-    s === "gb" ||
-    s === "groot brittannie" ||
-    s === "groot-brittannie" ||
-    s === "groot brittannië" ||
-    s === "groot-brittannië" ||
-    s === "verenigd koninkrijk" ||
-    s === "united kingdom" ||
-    s === "engeland" ||
-    s === "england"
-  );
-}
+const COUNTRY_ALIASES: Record<string, LandHint> = {
+  at: "AT", oostenrijk: "AT", austria: "AT",
+  be: "BE", belgie: "BE", "belgië": "BE", belgium: "BE",
+  bg: "BG", bulgarije: "BG", bulgaria: "BG",
+  hr: "HR", kroatie: "HR", "kroatië": "HR", croatia: "HR",
+  cy: "CY", cyprus: "CY",
+  cz: "CZ", tsjechie: "CZ", "tsjechië": "CZ", czechia: "CZ", "czech republic": "CZ",
+  de: "DE", duitsland: "DE", deutschland: "DE", germany: "DE",
+  dk: "DK", denemarken: "DK", denmark: "DK",
+  ee: "EE", estland: "EE", estonia: "EE",
+  es: "ES", spanje: "ES", spain: "ES", "españa": "ES", espana: "ES",
+  fi: "FI", finland: "FI",
+  fr: "FR", frankrijk: "FR", france: "FR",
+  gr: "GR", el: "GR", griekenland: "GR", greece: "GR",
+  hu: "HU", hongarije: "HU", hungary: "HU",
+  ie: "IE", ierland: "IE", ireland: "IE",
+  it: "IT", italie: "IT", "italië": "IT", italy: "IT",
+  lt: "LT", litouwen: "LT", lithuania: "LT",
+  lu: "LU", luxemburg: "LU", luxembourg: "LU",
+  lv: "LV", letland: "LV", latvia: "LV",
+  mt: "MT", malta: "MT",
+  nl: "NL", nederland: "NL", netherlands: "NL", "the netherlands": "NL",
+  pl: "PL", polen: "PL", poland: "PL",
+  pt: "PT", portugal: "PT",
+  ro: "RO", roemenie: "RO", "roemenië": "RO", romania: "RO",
+  se: "SE", zweden: "SE", sweden: "SE",
+  si: "SI", slovenie: "SI", "slovenië": "SI", slovenia: "SI",
+  sk: "SK", slowakije: "SK", slovakia: "SK",
+  uk: "UK", gb: "UK", eng: "UK", engeland: "UK", england: "UK",
+  "groot brittannie": "UK", "groot-brittannie": "UK", "groot brittannië": "UK",
+  "groot-brittannië": "UK", "verenigd koninkrijk": "UK", "united kingdom": "UK",
+  tr: "TR", turkije: "TR", turkey: "TR", "türkiye": "TR", turkiye: "TR",
+};
 
-function isTR(v: any) {
-  const s = normLand(v);
-  return s === "tr" || s === "turkije" || s === "turkey" || s === "türkiye" || s === "turkiye";
-}
-
-type LandHint = "NL" | "BE" | "DE" | "FR" | "ES" | "UK" | "TR" | "FOREIGN";
+const COUNTRY_LABELS: Record<Exclude<LandHint, "FOREIGN">, string> = {
+  AT: "Oostenrijk", BE: "België", BG: "Bulgarije", HR: "Kroatië", CY: "Cyprus",
+  CZ: "Tsjechië", DE: "Duitsland", DK: "Denemarken", EE: "Estland", ES: "Spanje",
+  FI: "Finland", FR: "Frankrijk", GR: "Griekenland", HU: "Hongarije", IE: "Ierland",
+  IT: "Italië", LT: "Litouwen", LU: "Luxemburg", LV: "Letland", MT: "Malta",
+  NL: "Nederland", PL: "Polen", PT: "Portugal", RO: "Roemenië", SE: "Zweden",
+  SI: "Slovenië", SK: "Slowakije", UK: "United Kingdom", TR: "Turkije",
+};
 
 function normalizeCountryCodeOrName(raw: string): LandHint | null {
   const s = String(raw ?? "")
@@ -163,17 +177,11 @@ function normalizeCountryCodeOrName(raw: string): LandHint | null {
     .replace(/\s+/g, " ");
   if (!s) return null;
 
-  if (["nl", "nederland", "netherlands", "the netherlands"].includes(s)) return "NL";
-  if (["be", "belgie", "belgië", "belgium"].includes(s)) return "BE";
-  if (["de", "duitsland", "deutschland", "germany"].includes(s)) return "DE";
-  if (["fr", "frankrijk", "france"].includes(s)) return "FR";
-  if (["es", "spanje", "spain", "españa", "espana"].includes(s)) return "ES";
-  if (["uk", "gb", "groot brittannie", "groot-brittannie", "groot brittannië", "groot-brittannië", "verenigd koninkrijk", "united kingdom", "engeland", "england"].includes(s)) return "UK";
-  if (["tr", "turkije", "turkey", "türkiye", "turkiye"].includes(s)) return "TR";
+  const known = COUNTRY_ALIASES[s];
+  if (known) return known;
 
-  // Landcodes zet je tussen haakjes, bv. (BE). Alles anders dan NL is buitenland.
+  // Onbekende tweeletttercode tussen haakjes = buitenland. NL is hierboven expliciet.
   if (/^[a-z]{2}$/.test(s)) return "FOREIGN";
-
   return null;
 }
 
@@ -184,36 +192,28 @@ function detectLandHintFromGymText(rawGym: string): LandHint | null {
   const s = raw.replace(/ /g, " ").replace(/\s+/g, " ").trim();
   const lower = s.toLowerCase();
 
-  // Hoogste prioriteit: landcode/landnaam tussen haakjes, bv. Sportschool (BE).
-  const parenMatches = [...s.matchAll(/\(([^)]+)\)/g)];
-  for (const m of parenMatches) {
-    const inside = String(m[1] ?? "").trim();
-    const hint = normalizeCountryCodeOrName(inside);
+  // Hard leidend: landcode/landnaam tussen haakjes, bv. (DE), (UK), legacy (eng).
+  for (const m of [...s.matchAll(/\(([^)]+)\)/g)]) {
+    const hint = normalizeCountryCodeOrName(String(m[1] ?? "").trim());
     if (hint) return hint;
   }
 
-  // Fallback: expliciete landnamen achter/in de sportschoolnaam.
-  if (lower.includes("belgie") || lower.includes("belgië") || lower.includes("belgium")) return "BE";
-  if (lower.includes("duitsland") || lower.includes("deutschland") || lower.includes("germany")) return "DE";
-  if (lower.includes("nederland") || lower.includes("the netherlands") || lower.includes("netherlands")) return "NL";
-  if (lower.includes("frankrijk") || lower.includes("france")) return "FR";
-  if (lower.includes("spanje") || lower.includes("spain") || lower.includes("españa") || lower.includes("espana")) return "ES";
-  if (lower.includes("united kingdom") || lower.includes("verenigd koninkrijk") || lower.includes("engeland") || lower.includes("england")) return "UK";
-  if (lower.includes("turkije") || lower.includes("turkey") || lower.includes("türkiye") || lower.includes("turkiye")) return "TR";
-
+  // Fallback voor bestaande data met losse code/landnaam zonder haakjes.
+  for (const [alias, hint] of Object.entries(COUNTRY_ALIASES)) {
+    if (alias.length === 2 || alias === "eng") {
+      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`(^|\\s)${escaped}($|\\s)`, "i").test(s)) return hint;
+    } else if (lower.includes(alias)) {
+      return hint;
+    }
+  }
   return null;
 }
 
 function landHintToLabel(hint: LandHint | null): string | null {
-  if (hint === "NL") return "Nederland";
-  if (hint === "BE") return "België";
-  if (hint === "DE") return "Duitsland";
-  if (hint === "FR") return "Frankrijk";
-  if (hint === "ES") return "Spanje";
-  if (hint === "UK") return "United Kingdom";
-  if (hint === "TR") return "Turkije";
+  if (!hint) return null;
   if (hint === "FOREIGN") return "Buitenland";
-  return null;
+  return COUNTRY_LABELS[hint] ?? hint;
 }
 
 function isForeignHint(hint: LandHint | null) {
@@ -233,15 +233,10 @@ function landLabelForMatch(landDb: any, hint: LandHint | null) {
 
 function landMatchesHint(landValue: any, hint: LandHint | null) {
   if (!hint) return false;
-  if (hint === "NL") return isNL(landValue);
-  if (hint === "BE") return isBE(landValue);
-  if (hint === "DE") return isDE(landValue);
-  if (hint === "FR") return isFR(landValue);
-  if (hint === "ES") return isES(landValue);
-  if (hint === "UK") return isUK(landValue);
-  if (hint === "TR") return isTR(landValue);
   if (hint === "FOREIGN") return isForeignNonNL(landValue);
-  return false;
+
+  const normalizedLand = normalizeCountryCodeOrName(String(landValue ?? ""));
+  return normalizedLand === hint;
 }
 
 function buildForeignKeurmerkReason(opts: { gym: string; land: string | null; matchInfo?: string | null }) {
@@ -478,11 +473,23 @@ function tryAliasMatch(
   sportscholen: any[],
   gymNaam: string,
   aliasMaps: AliasMaps | undefined,
-  knownPlaces: string[]
+  knownPlaces: string[],
+  landHint: LandHint | null
 ): GymMatch | null {
   if (!aliasMaps) return null;
 
   const variants = buildAliasLookupVariants(gymNaam, knownPlaces);
+
+  const acceptAliasHit = (hit: any) => {
+    if (!hit) return null;
+    const hitLand = hit?.land ?? hit?.country ?? null;
+
+    // Landhint uit matchmaking is leidend.
+    // Dus "No Mercy NL" mag nooit via een alias op een Duitse/Belgische/etc. school landen.
+    if (landHint && !landMatchesHint(hitLand, landHint)) return null;
+
+    return { row: hit, reason: null } as GymMatch;
+  };
 
   for (const key of variants) {
     if (key.startsWith("__compact__:")) {
@@ -490,13 +497,15 @@ function tryAliasMatch(
       const sid = aliasMaps.aliasCompactToId.get(c);
       if (sid) {
         const hit = findSportschoolBySportschoolId(sportscholen, sid);
-        if (hit) return { row: hit, reason: null };
+        const accepted = acceptAliasHit(hit);
+        if (accepted) return accepted;
       }
     } else {
       const sid = aliasMaps.aliasNormToId.get(key);
       if (sid) {
         const hit = findSportschoolBySportschoolId(sportscholen, sid);
-        if (hit) return { row: hit, reason: null };
+        const accepted = acceptAliasHit(hit);
+        if (accepted) return accepted;
       }
     }
   }
@@ -597,7 +606,7 @@ function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMap
   }
 
   // 2) Alias lookup op hele string en basisvarianten
-  const aliasHit = tryAliasMatch(list, gRaw, aliasMaps, knownPlaces);
+  const aliasHit = tryAliasMatch(list, gRaw, aliasMaps, knownPlaces, landHint);
   if (aliasHit?.row) return aliasHit;
 
   // 3) Loose normalisatie pas daarna
@@ -710,81 +719,6 @@ function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMap
   return { row: null, reason: "Geen match gevonden." };
 }
 
-function namesCompatibleForFpHint(mmGym: string, fpGym: string) {
-  const mm = norm(mmGym);
-  const fp = norm(fpGym);
-  if (!mm || !fp) return false;
-
-  // Voorbeeld:
-  // MM "No Mercy Gym" -> "no mercy"
-  // FP "No Mercy Gym Never Give Up" -> "no mercy never give up"
-  // De korte MM-naam mag dan als basisnaam van de uitgebreidere FP-naam gelden.
-  if (isTokenSubset(mm, fp) || isTokenSubset(fp, mm)) return true;
-
-  const inter = intersectionCount(mm, fp);
-  return inter >= 2 && overlapScore(mm, fp) >= 0.66;
-}
-
-function findGymMatchWithFpHint(
-  sportscholen: any[],
-  mmGym: string,
-  aliasMaps: AliasMaps | undefined,
-  fpGym?: any,
-  fpLand?: any
-): GymMatch {
-  const base = findGymMatch(sportscholen, mmGym, aliasMaps);
-
-  const mmRaw = String(mmGym ?? "").trim();
-  const fpRaw = String(fpGym ?? "").trim();
-  if (!mmRaw || !fpRaw) return base;
-
-  // Een expliciete landhint van de matchmaker blijft leidend.
-  const mmExplicitLand = detectLandHintFromGymText(mmRaw);
-
-  // FP is alleen een hint als de namen inhoudelijk bij elkaar horen.
-  if (!namesCompatibleForFpHint(mmRaw, fpRaw)) return base;
-
-  const fpMatch = findGymMatch(sportscholen, fpRaw, aliasMaps);
-  const fpRow = fpMatch.row;
-  if (!fpRow) return base;
-
-  const fpRowLand = fpRow?.land ?? fpRow?.country ?? null;
-
-  // Als FightPassport zelf een land doorgeeft, moet de gevonden FP-sportschool
-  // ook bij dat land passen. Zo gebruiken we geen onbetrouwbare FP-naam-match.
-  const fpLandHint = normalizeCountryCodeOrName(String(fpLand ?? ""));
-  if (fpLandHint && !landMatchesHint(fpRowLand, fpLandHint)) {
-    return base;
-  }
-
-  // Staat in de matchmaking expliciet (DE)/(BE)/etc., dan mag FP dat niet overrulen.
-  if (mmExplicitLand && !landMatchesHint(fpRowLand, mmExplicitLand)) {
-    return base;
-  }
-
-  const baseId = canonicalSportschoolId(base.row);
-  const fpId = canonicalSportschoolId(fpRow);
-
-  // Zelfde record: niets te corrigeren.
-  if (baseId && fpId && baseId == fpId) return base;
-
-  // Zonder expliciete MM-landhint gebruiken we de actuele FP-sportschool
-  // als disambiguatie. Dit voorkomt dat een generieke naam als "No Mercy Gym"
-  // op een buitenlandse exact-name hit landt terwijl de vechter live aan de
-  // uitgebreidere Nederlandse sportschool gekoppeld staat.
-  if (!mmExplicitLand) {
-    return {
-      row: fpRow,
-      reason: base.row
-        ? `FightPassport-hint heeft "${base.row?.naam ?? mmRaw}" vervangen door actuele sportschool "${fpRow?.naam ?? fpRaw}".`
-        : `FightPassport-hint gebruikt: actuele sportschool "${fpRow?.naam ?? fpRaw}".`,
-      viaFpHint: true,
-    };
-  }
-
-  return base;
-}
-
 function unwrapUuid(v: any): string | null {
   if (v == null) return null;
   if (typeof v === "string") {
@@ -804,6 +738,92 @@ function unwrapUuid(v: any): string | null {
 }
 
 
+
+function dbMatchInfo(mmGym: string, found: any | null): string {
+  const mm = String(mmGym ?? "").trim() || "-";
+  if (!found) return `MM: "${mm}" · DB-match: GEEN`;
+
+  const naam = String(found?.naam ?? "-").trim() || "-";
+  const land = String(found?.land ?? found?.country ?? "").trim();
+  const plaats = String(found?.plaats ?? found?.stad ?? "").trim();
+  const extra = [plaats, land].filter(Boolean).join(", ");
+
+  return `MM: "${mm}" · DB-match: "${naam}"${extra ? ` (${extra})` : ""}`;
+}
+
+
+function fpMatchInfo(mmGym: string, live: any | null): string {
+  const mm = String(mmGym ?? "").trim() || "-";
+  if (!live) return `MM: "${mm}" · FightPassport-match: GEEN`;
+
+  const naam = String(live?.sportschool ?? "-").trim() || "-";
+  const land = String(live?.land ?? "").trim();
+  return `MM: "${mm}" · FightPassport-match: "${naam}"${land ? ` (${land})` : ""}`;
+}
+
+function namesClearlyCompatibleForLive(mmGym: string, fpGym: string): boolean {
+  const mm = norm(mmGym);
+  const fp = norm(fpGym);
+  if (!mm || !fp) return false;
+
+  if (mm === fp) return true;
+  if (compactNorm(mm) === compactNorm(fp)) return true;
+
+  // Voorbeeld: "No Mercy Gym" -> "no mercy" en
+  // "No Mercy Gym Never Give Up" -> "no mercy never give up".
+  // Dit is dezelfde sportschool voor de snelle live-keurmerkcheck.
+  if (isTokenSubset(mm, fp) || isTokenSubset(fp, mm)) return true;
+
+  const inter = intersectionCount(mm, fp);
+  return inter >= 2 && overlapScore(mm, fp) >= 0.66;
+}
+
+function liveSportschoolMatchesMatchmaking(mmGym: string, live: any | null): boolean {
+  const mm = String(mmGym ?? "").trim();
+  const fp = String(live?.sportschool ?? "").trim();
+  if (!mm || !fp) return false;
+
+  if (!namesClearlyCompatibleForLive(mm, fp)) return false;
+
+  // Alleen een EXPLICIETE landhint in de matchmaking is hard leidend.
+  // Dus "No Mercy (DE)" moet Duits zijn. Zonder (DE)/(BE)/etc. gaan we
+  // niet alsnog via de database een buitenlandse naamvariant kiezen.
+  const explicitMmLand = detectLandHintFromGymText(mm);
+  if (explicitMmLand) {
+    const fpLand = live?.land ?? null;
+    if (!landMatchesHint(fpLand, explicitMmLand)) return false;
+  }
+
+  return true;
+}
+
+function liveForeignLandLabel(mmGym: string, live: any): string | null {
+  const explicitMmLand = detectLandHintFromGymText(mmGym);
+
+  // Expliciete MM-landcode is leidend. (NL) blijft keurmerkplichtig.
+  if (isForeignHint(explicitMmLand)) {
+    return landHintToLabel(explicitMmLand) ?? "Buitenland";
+  }
+  if (explicitMmLand === "NL") return null;
+
+  // Als de live FightPassport-sportschool duidelijk dezelfde sportschool is,
+  // is ook het live FP-land voldoende om buitenland vast te stellen.
+  // Voorbeeld: London Shootfighters -> United Kingdom.
+  const fpLand = String(live?.land ?? "").trim();
+  if (fpLand && isForeignNonNL(fpLand)) return fpLand;
+
+  return null;
+}
+
+function liveKeurmerkValue(mmGym: string, live: any): boolean | null {
+  // Buitenlandse sportschool: geen NVB-keurmerk vereist.
+  if (liveForeignLandLabel(mmGym, live)) return true;
+
+  // NL / geen aantoonbaar buitenland: gebruik het live FightPassport-schild.
+  return typeof live?.keurmerk_schild_gevonden === "boolean"
+    ? live.keurmerk_schild_gevonden
+    : null;
+}
 
 function buildKeurmerkPatchForGym(opts: {
   gym: string;
@@ -829,14 +849,14 @@ function buildKeurmerkPatchForGym(opts: {
     if (isForeignHint(hint)) {
       const land = landHintToLabel(hint);
       patch[valueKey] = true;
-      patch[reasonKey] = buildForeignKeurmerkReason({ gym: gymValue, land });
+      patch[reasonKey] = `${buildForeignKeurmerkReason({ gym: gymValue, land })} · ${dbMatchInfo(gymValue, null)}`;
       return patch;
     }
 
     patch[valueKey] = null;
     patch[reasonKey] = gymValue
-      ? `Sportschool niet betrouwbaar herkend: "${gymValue}".`
-      : "Geen sportschool opgegeven.";
+      ? `Sportschool niet betrouwbaar herkend: "${gymValue}". · ${dbMatchInfo(gymValue, null)}`
+      : `Geen sportschool opgegeven. · ${dbMatchInfo(gymValue, null)}`;
     return patch;
   }
 
@@ -852,13 +872,13 @@ function buildKeurmerkPatchForGym(opts: {
 
     if (landDb ? isBE(landDb) : hint === "BE") {
       patch[reasonKey] =
-        buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "België", matchInfo });
+        `${buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "België", matchInfo })} · ${dbMatchInfo(gymValue, found)}`;
     } else if (landDb ? isDE(landDb) : hint === "DE") {
       patch[reasonKey] =
-        buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo });
+        `${buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo })} · ${dbMatchInfo(gymValue, found)}`;
     } else {
       patch[reasonKey] =
-        buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo });
+        `${buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo })} · ${dbMatchInfo(gymValue, found)}`;
     }
 
     return patch;
@@ -867,8 +887,8 @@ function buildKeurmerkPatchForGym(opts: {
   const geldig = !!eindeIso && eindeIso >= String(evenement_datum ?? "");
   patch[valueKey] = geldig;
   patch[reasonKey] = geldig
-    ? `Keurmerk geldig t/m ${eindeIso}.`
-    : `Geen geldig keurmerk op eventdatum. Einddatum: ${eindeIso ?? "-"}.`;
+    ? `Keurmerk geldig t/m ${eindeIso}. · ${dbMatchInfo(gymValue, found)}`
+    : `Geen geldig keurmerk op eventdatum. Einddatum: ${eindeIso ?? "-"}. · ${dbMatchInfo(gymValue, found)}`;
 
   return patch;
 }
@@ -876,67 +896,6 @@ function buildKeurmerkPatchForGym(opts: {
 function isForeignNonNL(landValue: any) {
   if (!landValue) return false;
   return !isNL(landValue);
-}
-
-const FP_SCHOOL_MISMATCH_MARKER = "[FP_SPORTSCHOOL_AFWIJKING]";
-
-function canonicalSportschoolId(row: any): string | null {
-  const id = String(row?.id ?? row?.sportschool_id ?? "").trim();
-  return id || null;
-}
-
-function schoolsEquivalent(
-  mmGym: string,
-  fpGym: string,
-  sportscholen: any[],
-  aliasMaps: AliasMaps
-): boolean | null {
-  const mm = String(mmGym ?? "").trim();
-  const fp = String(fpGym ?? "").trim();
-  if (!mm || !fp) return null;
-
-  if (compactStrictName(mm) === compactStrictName(fp)) return true;
-  if (norm(mm) && norm(mm) === norm(fp)) return true;
-
-  const mmMatch = findGymMatch(sportscholen, mm, aliasMaps)?.row ?? null;
-  const fpMatch = findGymMatch(sportscholen, fp, aliasMaps)?.row ?? null;
-
-  const mmId = canonicalSportschoolId(mmMatch);
-  const fpId = canonicalSportschoolId(fpMatch);
-
-  if (mmId && fpId) return mmId === fpId;
-
-  return false;
-}
-
-function appendFpSportschoolComparison(
-  baseReason: any,
-  opts: {
-    mmGym: string;
-    fpGym?: any;
-    fpLand?: any;
-    fpShield?: any;
-    sportscholen: any[];
-    aliasMaps: AliasMaps;
-  }
-): string {
-  const reason = String(baseReason ?? "").trim();
-  const mmGym = String(opts.mmGym ?? "").trim();
-  const fpGym = String(opts.fpGym ?? "").trim();
-  const fpLand = String(opts.fpLand ?? "").trim();
-
-  if (!mmGym || !fpGym) return reason;
-
-  const equal = schoolsEquivalent(mmGym, fpGym, opts.sportscholen, opts.aliasMaps);
-  if (equal !== false) return reason;
-
-  const extra =
-    `${FP_SCHOOL_MISMATCH_MARKER} ` +
-    `Sportschool wijkt af: MM "${mmGym}" · FightPassport "${fpGym}"` +
-    `${fpLand ? ` (${fpLand})` : ""}` +
-    `${opts.fpShield === false ? " · FP-schild ontbreekt" : ""}.`;
-
-  return reason ? `${reason}\n${extra}` : extra;
 }
 
 export async function enrichControleBoutContext(
@@ -993,13 +952,12 @@ export async function enrichControleBoutContext(
 
   const aliasMaps: AliasMaps = { aliasNormToId, aliasCompactToId, aliasRows };
 
-  // Eén actuele FightPassport-row per matchmaking + VA.
-  // Alleen voor sportschoolvergelijking; keurmerk blijft gebaseerd op MM sportschool.
+  // Eerst de actuele FightPassport-sportschool gebruiken als snelle check.
+  // Alleen als de MM-naam en FP-naam echt niet bij elkaar passen, zoeken we
+  // als fallback in de sportscholen-database.
   const { data: liveRows, error: liveErr } = await supabaseAdmin
     .from("controle_fighter_actueel")
-    .select(
-      "va_nummer,sportschool,land,keurmerk_schild_gevonden,error_message,checked_at"
-    )
+    .select("va_nummer,sportschool,land,keurmerk_schild_gevonden,error_message,checked_at")
     .eq("matchmaking_id", matchmaking_id)
     .order("checked_at", { ascending: false });
 
@@ -1030,137 +988,64 @@ export async function enrichControleBoutContext(
     const roodGym = String((row as any).rood_gym_mm ?? "").trim();
     const blauwGym = String((row as any).blauw_gym_mm ?? "").trim();
 
-    // De live FightPassport-sportschool is GEEN bron voor de MM-naam zelf,
-    // maar wel een sterke disambiguatiehint wanneer dezelfde/basisnaam in
-    // meerdere landen of varianten voorkomt.
     const roodVa = String((row as any)?.rood_va_mm ?? "").trim();
     const blauwVa = String((row as any)?.blauw_va_mm ?? "").trim();
     const liveRood = roodVa ? liveByVa.get(roodVa) : null;
     const liveBlauw = blauwVa ? liveByVa.get(blauwVa) : null;
 
-    const roodMatch = roodGym
-      ? findGymMatchWithFpHint(
-          sportscholen,
-          roodGym,
-          aliasMaps,
-          liveRood?.sportschool,
-          liveRood?.land
-        )
-      : { row: null, reason: null };
-
-    const blauwMatch = blauwGym
-      ? findGymMatchWithFpHint(
-          sportscholen,
-          blauwGym,
-          aliasMaps,
-          liveBlauw?.sportschool,
-          liveBlauw?.land
-        )
-      : { row: null, reason: null };
-
-    const rood = roodMatch.row;
-    const blauw = blauwMatch.row;
-
     const patch: any = {};
-    const mmLine = (gym: string) => (gym ? `↳ [MM sportschool:] "${gym}"` : `↳ [MM sportschool:] -`);
-    const roodHint = detectLandHintFromGymText(roodGym);
-    const blauwHint = detectLandHintFromGymText(blauwGym);
 
-    if (!rood) {
-      if (isForeignHint(roodHint)) {
-        patch.keurmerk_rood = true;
-        patch.keurmerk_reden_rood = buildForeignKeurmerkReason({ gym: roodGym, land: landHintToLabel(roodHint) });
-      } else {
-        patch.keurmerk_rood = null;
-        patch.keurmerk_reden_rood = roodGym
-          ? `Sportschool niet betrouwbaar herkend: "${roodGym}".`
-          : "Geen sportschool opgegeven.";
+    const applySide = (
+      side: "rood" | "blauw",
+      mmGym: string,
+      live: any | null,
+    ) => {
+      const valueKey = side === "rood" ? "keurmerk_rood" : "keurmerk_blauw";
+      const reasonKey = side === "rood" ? "keurmerk_reden_rood" : "keurmerk_reden_blauw";
+
+      // 1) SNELSTE + MEEST BETROUWBARE ROUTE:
+      // Matchmakingnaam en actuele FightPassport-sportschool horen duidelijk bij elkaar.
+      // Dan NIET verder zoeken in de database; gebruik direct het live schild.
+      if (liveSportschoolMatchesMatchmaking(mmGym, live)) {
+        const value = liveKeurmerkValue(mmGym, live);
+        patch[valueKey] = value;
+
+        const matchInfo = fpMatchInfo(mmGym, live);
+        const foreignLand = liveForeignLandLabel(mmGym, live);
+        if (foreignLand) {
+          patch[reasonKey] = `${buildForeignKeurmerkReason({
+            gym: mmGym,
+            land: foreignLand,
+          })} · ${matchInfo}`;
+        } else if (value === true) {
+          patch[reasonKey] = `Keurmerk live bevestigd via FightPassport-schild. · ${matchInfo}`;
+        } else if (value === false) {
+          patch[reasonKey] = `Geen FightPassport-keurmerkschild gevonden. · ${matchInfo}`;
+        } else {
+          patch[reasonKey] = `FightPassport-sportschool matcht, maar keurmerkstatus is niet leesbaar. · ${matchInfo}`;
+        }
+        return;
       }
-    } else {
-      const hint = roodHint;
-      const landDb = rood?.land ?? rood?.country ?? null;
-      const land = landLabelForMatch(landDb, hint);
-      const eindeIso = toIsoDateOnly(rood?.keurmerk_eind ?? rood?.keurmerk_einde ?? rood?.einde_keurmerk);
 
-      const matchInfo = `Sportschool: ${rood.naam}`;
-
-      const isForeign = landDb ? isForeignNonNL(landDb) : isForeignHint(hint);
-
-      if (isForeign) {
-        patch.keurmerk_rood = true;
-        patch.keurmerk_reden_rood = buildForeignKeurmerkReason({
-          gym: roodGym,
-          land: land ?? (landDb ? "Buitenland" : landHintToLabel(hint)),
-          matchInfo,
-        });
-      } else {
-        const geldig = !!eindeIso && eindeIso >= String((row as any)?.evenement_datum ?? "");
-        patch.keurmerk_rood = geldig;
-        patch.keurmerk_reden_rood = geldig
-          ? `Keurmerk geldig t/m ${eindeIso}.`
-          : `Geen geldig keurmerk op eventdatum. Einddatum: ${eindeIso ?? "-"}.`;
-      }
-    }
-
-    if (!blauw) {
-      if (isForeignHint(blauwHint)) {
-        patch.keurmerk_blauw = true;
-        patch.keurmerk_reden_blauw = buildForeignKeurmerkReason({ gym: blauwGym, land: landHintToLabel(blauwHint) });
-      } else {
-        patch.keurmerk_blauw = null;
-        patch.keurmerk_reden_blauw = blauwGym
-          ? `Sportschool niet betrouwbaar herkend: "${blauwGym}".`
-          : "Geen sportschool opgegeven.";
-      }
-    } else {
-      const hint = blauwHint;
-      const landDb = blauw?.land ?? blauw?.country ?? null;
-      const land = landLabelForMatch(landDb, hint);
-      const eindeIso = toIsoDateOnly(blauw?.keurmerk_eind ?? blauw?.keurmerk_einde ?? blauw?.einde_keurmerk);
-
-      const matchInfo = `Sportschool: ${blauw.naam}`;
-
-      const isForeign = landDb ? isForeignNonNL(landDb) : isForeignHint(hint);
-
-      if (isForeign) {
-        patch.keurmerk_blauw = true;
-        patch.keurmerk_reden_blauw = buildForeignKeurmerkReason({
-          gym: blauwGym,
-          land: land ?? (landDb ? "Buitenland" : landHintToLabel(hint)),
-          matchInfo,
-        });
-      } else {
-        const geldig = !!eindeIso && eindeIso >= String((row as any)?.evenement_datum ?? "");
-        patch.keurmerk_blauw = geldig;
-        patch.keurmerk_reden_blauw = geldig
-          ? `Keurmerk geldig t/m ${eindeIso}.`
-          : `Geen geldig keurmerk op eventdatum. Einddatum: ${eindeIso ?? "-"}.`;
-      }
-    }
-
-    patch.keurmerk_reden_rood = appendFpSportschoolComparison(
-      patch.keurmerk_reden_rood,
-      {
-        mmGym: roodGym,
-        fpGym: liveRood?.sportschool,
-        fpLand: liveRood?.land,
-        fpShield: liveRood?.keurmerk_schild_gevonden,
+      // 2) Alleen bij een ECHTE naamafwijking fallback naar sportscholen DB.
+      const fallback = buildKeurmerkPatchForGym({
+        gym: mmGym,
+        evenement_datum: String((row as any)?.evenement_datum ?? "").trim() || null,
         sportscholen,
         aliasMaps,
-      }
-    );
+        valueKey,
+        reasonKey,
+      });
 
-    patch.keurmerk_reden_blauw = appendFpSportschoolComparison(
-      patch.keurmerk_reden_blauw,
-      {
-        mmGym: blauwGym,
-        fpGym: liveBlauw?.sportschool,
-        fpLand: liveBlauw?.land,
-        fpShield: liveBlauw?.keurmerk_schild_gevonden,
-        sportscholen,
-        aliasMaps,
-      }
-    );
+      Object.assign(patch, fallback);
+
+      // Laat altijd zien waarom de fallback gebruikt is én waartegen de DB matchte.
+      const fpInfo = fpMatchInfo(mmGym, live);
+      patch[reasonKey] = `${String(patch[reasonKey] ?? "").trim()} · FP-naam onvoldoende overeenkomst; DB-fallback gebruikt. · ${fpInfo}`;
+    };
+
+    applySide("rood", roodGym, liveRood);
+    applySide("blauw", blauwGym, liveBlauw);
 
     const { error: uErr } = await supabaseAdmin
       .from("controle_bout_context")
@@ -1188,31 +1073,34 @@ export async function enrichControleBoutContext(
     if (!rowId) continue;
 
     const gym = String((row as any).sportschool_mm ?? (row as any).sportschool ?? "").trim();
-    const patch = buildKeurmerkPatchForGym({
-      gym,
-      evenement_datum: String((row as any).evenement_datum ?? "").trim() || null,
-      sportscholen,
-      aliasMaps,
-      valueKey: "heeft_keurmerk",
-      reasonKey: "keurmerk_reason",
-    });
-
-    const va = String(
-      (row as any)?.va_nummer ?? (row as any)?.fighter_id ?? ""
-    ).trim();
+    const va = String((row as any)?.va_nummer ?? (row as any)?.fighter_id ?? "").trim();
     const live = va ? liveByVa.get(va) : null;
 
-    patch.keurmerk_reason = appendFpSportschoolComparison(
-      patch.keurmerk_reason,
-      {
-        mmGym: gym,
-        fpGym: live?.sportschool,
-        fpLand: live?.land,
-        fpShield: live?.keurmerk_schild_gevonden,
+    let patch: any;
+    if (liveSportschoolMatchesMatchmaking(gym, live)) {
+      const value = liveKeurmerkValue(gym, live);
+      const foreignLand = liveForeignLandLabel(gym, live);
+      patch = {
+        heeft_keurmerk: value,
+        keurmerk_reason: foreignLand
+          ? `${buildForeignKeurmerkReason({ gym, land: foreignLand })} · ${fpMatchInfo(gym, live)}`
+          : value === true
+            ? `Keurmerk live bevestigd via FightPassport-schild. · ${fpMatchInfo(gym, live)}`
+            : value === false
+              ? `Geen FightPassport-keurmerkschild gevonden. · ${fpMatchInfo(gym, live)}`
+              : `FightPassport-sportschool matcht, maar keurmerkstatus is niet leesbaar. · ${fpMatchInfo(gym, live)}`,
+      };
+    } else {
+      patch = buildKeurmerkPatchForGym({
+        gym,
+        evenement_datum: String((row as any).evenement_datum ?? "").trim() || null,
         sportscholen,
         aliasMaps,
-      }
-    );
+        valueKey: "heeft_keurmerk",
+        reasonKey: "keurmerk_reason",
+      });
+      patch.keurmerk_reason = `${String(patch.keurmerk_reason ?? "").trim()} · FP-naam onvoldoende overeenkomst; DB-fallback gebruikt. · ${fpMatchInfo(gym, live)}`;
+    }
 
     const { error: tuErr } = await supabaseAdmin
       .from("controle_toernooi_context")

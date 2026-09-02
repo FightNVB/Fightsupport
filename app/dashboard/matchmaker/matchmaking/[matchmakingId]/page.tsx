@@ -2619,7 +2619,7 @@ export default function ControleMatchmakingPage() {
   async function waitForFinalControle(controleRunId: string) {
     for (let attempt = 0; attempt < 600; attempt += 1) {
       const res = await authedFetch(
-        `/api/officials/eindcontrole/start?controle_run_id=${encodeURIComponent(controleRunId)}&matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+        `/api/matchmaker/eindcontrole/start?controle_run_id=${encodeURIComponent(controleRunId)}&matchmaking_id=${encodeURIComponent(matchmakingId)}`,
         { method: "GET", cache: "no-store" },
       );
       const payload = await res.json().catch(() => ({}));
@@ -2639,7 +2639,7 @@ export default function ControleMatchmakingPage() {
   async function startFinalControle() {
     setMsg("Laatste FightPassport-eindcontrole gestart. Licentie, startverbod en keurmerk worden live gecontroleerd.");
 
-    const res = await authedFetch("/api/officials/eindcontrole/start", {
+    const res = await authedFetch("/api/matchmaker/eindcontrole/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ matchmaking_id: matchmakingId }),
@@ -3431,8 +3431,12 @@ export default function ControleMatchmakingPage() {
   }, [rows]);
 
   const eindrapportReady =
-    String(run?.run_type ?? "").toLowerCase() === "official_eindcontrole" &&
-    ["klaar", "done", "completed", "ok"].includes(String(run?.status ?? "").toLowerCase());
+    ["official_eindcontrole", "matchmaker_eindcontrole"].includes(
+      String(run?.run_type ?? "").toLowerCase(),
+    ) &&
+    ["klaar", "done", "completed", "ok"].includes(
+      String(run?.status ?? "").toLowerCase(),
+    );
 
   const galaDuurCalc = useMemo(() => {
     if (rows.length === 0) return null;

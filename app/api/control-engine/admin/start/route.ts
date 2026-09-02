@@ -38,8 +38,8 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 
-// Admin en officials gebruiken bewust exact dezelfde lichte live-scraper.
-// Total is de basis; live lezen we alleen licentie/startverbod/keurmerk.
+// Admin heeft bewust een eigen directe live-scraper (geen queue).
+// Daarna gebruikt admin dezelfde centrale build/enrich/rules/save-keten als MM en officials.
 const SCRAPER_FILE = "scraper_fp_admin.js";
 
 function toVaStrict(value: any): string | null {
@@ -610,9 +610,7 @@ export async function POST(req: Request) {
     // buildToernooiContext haalt licentie/startverbod nu uit controle_fighter_actueel.
     await buildToernooiContext(matchmaking_id, controle_run_id);
 
-    // Keurmerk blijft gebaseerd op de MATCHMAKER-sportschool.
-    // De actuele FP-sportschool wordt alleen vergeleken en levert bij verschil
-    // de aparte SPORTSCHOOL_AFWIJKING_FIGHTPASSPORT melding.
+    // Centrale enrich bepaalt keurmerk/sportschool op basis van de gedeelde eindcontrolelogica.
     await enrichControleBoutContext(matchmaking_id, controle_run_id);
 
     const { data: ctxRows, error: ctxError } = await supabase

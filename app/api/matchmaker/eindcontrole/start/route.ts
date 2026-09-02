@@ -1,4 +1,4 @@
-// app/api/officials/eindcontrole/start/route.ts
+// app/api/matchmaker/eindcontrole/start/route.ts
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import fs from "fs";
@@ -25,7 +25,7 @@ const supabase = createClient(
 );
 
 const QUEUE_TABLE = "controle_fighter_actueel_queue";
-const FINAL_RUN_TYPE = "official_eindcontrole";
+const FINAL_RUN_TYPE = "matchmaker_eindcontrole";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,7 +54,7 @@ function pickVA(row: any, side: "rood" | "blauw") {
 }
 
 function isRoleAllowed(role: string | null | undefined) {
-  return ["official", "hoofdofficial", "admin", "superadmin"].includes(
+  return ["matchmaker", "admin", "superadmin"].includes(
     String(role ?? "").toLowerCase(),
   );
 }
@@ -62,16 +62,16 @@ function isRoleAllowed(role: string | null | undefined) {
 function resolveQueueWorkerPath() {
   const root = process.cwd();
   const candidates = [
-    path.join(root, "ControlEngine", "scrapers", "fp_bundle_officials", "scraper_fp_officials_queue.js"),
-    path.join(root, "ControlEngine", "ControlEngine", "scrapers", "fp_bundle_officials", "scraper_fp_officials_queue.js"),
-    path.join(root, "control-engine", "scrapers", "fp_bundle_officials", "scraper_fp_officials_queue.js"),
-    path.join(root, "control-engine", "control-engine", "scrapers", "fp_bundle_officials", "scraper_fp_officials_queue.js"),
-    path.join(root, "scrapers", "fp_bundle_officials", "scraper_fp_officials_queue.js"),
+    path.join(root, "ControlEngine", "scrapers", "fp_mm", "scraper_fp_mm_queue.js"),
+    path.join(root, "ControlEngine", "ControlEngine", "scrapers", "fp_mm", "scraper_fp_mm_queue.js"),
+    path.join(root, "control-engine", "scrapers", "fp_mm", "scraper_fp_mm_queue.js"),
+    path.join(root, "control-engine", "control-engine", "scrapers", "fp_mm", "scraper_fp_mm_queue.js"),
+    path.join(root, "scrapers", "fp_mm", "scraper_fp_mm_queue.js"),
   ];
 
   const found = candidates.find((candidate) => fs.existsSync(candidate));
   if (!found) {
-    throw new Error(`fp_officials queue-worker niet gevonden:\n- ${candidates.join("\n- ")}`);
+    throw new Error(`fp_mm queue-worker niet gevonden:\n- ${candidates.join("\n- ")}`);
   }
   return found;
 }
@@ -85,7 +85,7 @@ async function updateRun(
     .update(patch)
     .eq("id", controleRunId);
 
-  if (error) console.warn("[official-eindcontrole] run update mislukt", error);
+  if (error) console.warn("[matchmaker-eindcontrole] run update mislukt", error);
 }
 
 async function abortOlderFinalRuns(matchmakingId: string) {
@@ -211,8 +211,8 @@ function launchQueueWorker() {
       ...process.env,
       FP_SESSION_MODE: "master",
       FP_MATCHMAKER_ID: "",
-      FP_OFFICIALS_WORKERS: process.env.FP_OFFICIALS_WORKERS ?? process.env.WORKERS ?? "8",
-      WORKERS: process.env.FP_OFFICIALS_WORKERS ?? process.env.WORKERS ?? "8",
+      FP_MM_WORKERS: process.env.FP_MM_WORKERS ?? process.env.WORKERS ?? "8",
+      WORKERS: process.env.FP_MM_WORKERS ?? process.env.WORKERS ?? "8",
     },
   });
   child.unref();
@@ -223,7 +223,7 @@ async function waitForOwnQueue(args: {
   controleRunId: string;
   total: number;
 }) {
-  const timeoutMs = Math.max(120000, Number(process.env.FP_OFFICIALS_FINAL_TIMEOUT_MS ?? 20 * 60 * 1000));
+  const timeoutMs = Math.max(120000, Number(process.env.FP_MM_FINAL_TIMEOUT_MS ?? 20 * 60 * 1000));
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -337,7 +337,7 @@ async function finalizeInBackground(args: {
 
     await updateRun(controleRunId, {
       progress: 84,
-      current_step: "Official RulesEngine draait...",
+      current_step: "Matchmaker RulesEngine draait...",
     });
 
     const hits = await rulesEngine({
@@ -361,7 +361,7 @@ async function finalizeInBackground(args: {
       foutmelding: warningText,
     });
 
-    console.log("[official-eindcontrole] klaar", {
+    console.log("[matchmaker-eindcontrole] klaar", {
       matchmakingId,
       controleRunId,
       vaCount: args.vaCount,
@@ -371,7 +371,7 @@ async function finalizeInBackground(args: {
       hits: Array.isArray(hits) ? hits.length : 0,
     });
   } catch (error: any) {
-    console.error("[official-eindcontrole] mislukt", error);
+    console.error("[matchmaker-eindcontrole] mislukt", error);
     await updateRun(controleRunId, {
       status: "failed",
       afgerond_op: new Date().toISOString(),
@@ -392,7 +392,7 @@ export async function POST(req: Request) {
 
     const { userId, role } = await requireUserWithRole(req);
     if (!isRoleAllowed(role)) {
-      return NextResponse.json({ error: "Geen toegang tot laatste eindcontrole" }, { status: 403 });
+      return NextResponse.json({ error: "Geen toegang tot matchmaker eindcontrole" }, { status: 403 });
     }
     await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId, role });
 
@@ -442,7 +442,7 @@ export async function POST(req: Request) {
       { status: 202 },
     );
   } catch (error: any) {
-    console.error("[official-eindcontrole/start] fout", error);
+    console.error("[matchmaker-eindcontrole/start] fout", error);
     return NextResponse.json(
       { error: error?.message ?? "Laatste eindcontrole starten mislukt." },
       { status: 500 },

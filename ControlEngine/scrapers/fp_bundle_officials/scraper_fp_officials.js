@@ -266,29 +266,52 @@ async function readCurrentSportschool(page, va, signal = null) {
     };
 
     const tables = [...document.querySelectorAll("table")].filter(visible);
+
+    // De SPORTSCHOLEN-tegel opent een modal/overzicht waarin soms ook andere
+    // zichtbare tabellen aanwezig zijn. Daarom niet de eerste willekeurige
+    // tabel gebruiken, maar alle geldige sportschoolrijen verzamelen en
+    // uiteindelijk de onderste/laatste echte rij nemen.
+    const candidates = [];
+
     for (const table of tables) {
       const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
         .filter((row) => !row.classList.contains("filler"));
-      if (!rows.length) continue;
 
-      const candidates = rows.map((row) => ({
-        row,
-        cells: [...row.querySelectorAll("td")],
-      })).filter((entry) => entry.cells.length >= 4);
-      if (!candidates.length) continue;
+      for (const row of rows) {
+        const cells = [...row.querySelectorAll("td")];
+        if (cells.length < 4) continue;
 
-      const { row, cells } = candidates[candidates.length - 1];
-      const sportschool = clean(cells[1]?.textContent);
-      const plaats = clean(cells[2]?.textContent);
-      const land = clean(cells[cells.length - 2]?.textContent);
-      if (!sportschool || !land) continue;
+        const sportschool = clean(cells[1]?.textContent);
+        const plaats = clean(cells[2]?.textContent);
+        const land = clean(cells[cells.length - 2]?.textContent);
+
+        // Header/placeholderrijen zoals "Organisatie naam" / "Land" zijn
+        // geen echte sportschoolregistraties en mogen nooit als actuele
+        // sportschool worden opgeslagen.
+        if (!sportschool || !land) continue;
+        if (/^organisatie\s*naam$/i.test(sportschool)) continue;
+        if (/^land$/i.test(land)) continue;
+
+        candidates.push({
+          row,
+          sportschool,
+          plaats,
+          land,
+        });
+      }
+    }
+
+    if (candidates.length) {
+      const current = candidates[candidates.length - 1];
 
       return {
         ok: true,
-        sportschool,
-        plaats: plaats || null,
-        land,
-        keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || "")),
+        sportschool: current.sportschool,
+        plaats: current.plaats || null,
+        land: current.land,
+        keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(
+          String(current.row.innerHTML || ""),
+        ),
       };
     }
 

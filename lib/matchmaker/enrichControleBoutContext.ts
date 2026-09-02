@@ -153,7 +153,11 @@ function isTR(v: any) {
   return s === "tr" || s === "turkije" || s === "turkey" || s === "türkiye" || s === "turkiye";
 }
 
-type LandHint = "NL" | "BE" | "DE" | "FR" | "ES" | "UK" | "TR" | "FOREIGN";
+type LandHint =
+  | "NL" | "AT" | "BE" | "BG" | "HR" | "CY" | "CZ" | "DK" | "EE" | "FI"
+  | "FR" | "DE" | "GR" | "HU" | "IE" | "IT" | "LV" | "LT" | "LU" | "MT"
+  | "PL" | "PT" | "RO" | "SK" | "SI" | "ES" | "SE"
+  | "UK" | "TR" | "FOREIGN";
 
 function normalizeCountryCodeOrName(raw: string): LandHint | null {
   const s = String(raw ?? "")
@@ -163,15 +167,23 @@ function normalizeCountryCodeOrName(raw: string): LandHint | null {
     .replace(/\s+/g, " ");
   if (!s) return null;
 
-  if (["nl", "nederland", "netherlands", "the netherlands"].includes(s)) return "NL";
-  if (["be", "belgie", "belgië", "belgium"].includes(s)) return "BE";
-  if (["de", "duitsland", "deutschland", "germany"].includes(s)) return "DE";
-  if (["fr", "frankrijk", "france"].includes(s)) return "FR";
-  if (["es", "spanje", "spain", "españa", "espana"].includes(s)) return "ES";
-  if (["uk", "gb", "groot brittannie", "groot-brittannie", "groot brittannië", "groot-brittannië", "verenigd koninkrijk", "united kingdom", "engeland", "england"].includes(s)) return "UK";
+  const euCodes: Record<string, LandHint> = {
+    nl: "NL", at: "AT", be: "BE", bg: "BG", hr: "HR", cy: "CY", cz: "CZ",
+    dk: "DK", ee: "EE", fi: "FI", fr: "FR", de: "DE", gr: "GR", hu: "HU",
+    ie: "IE", it: "IT", lv: "LV", lt: "LT", lu: "LU", mt: "MT", pl: "PL",
+    pt: "PT", ro: "RO", sk: "SK", si: "SI", es: "ES", se: "SE",
+  };
+  if (euCodes[s]) return euCodes[s];
+
+  if (["nederland", "netherlands", "the netherlands"].includes(s)) return "NL";
+  if (["belgie", "belgië", "belgium"].includes(s)) return "BE";
+  if (["duitsland", "deutschland", "germany"].includes(s)) return "DE";
+  if (["frankrijk", "france"].includes(s)) return "FR";
+  if (["spanje", "spain", "españa", "espana"].includes(s)) return "ES";
+  if (["uk", "gb", "eng", "groot brittannie", "groot-brittannie", "groot brittannië", "groot-brittannië", "verenigd koninkrijk", "united kingdom", "engeland", "england"].includes(s)) return "UK";
   if (["tr", "turkije", "turkey", "türkiye", "turkiye"].includes(s)) return "TR";
 
-  // Landcodes zet je tussen haakjes, bv. (BE). Alles anders dan NL is buitenland.
+  // Overige 2-lettercodes worden als buitenland behandeld.
   if (/^[a-z]{2}$/.test(s)) return "FOREIGN";
 
   return null;
@@ -205,15 +217,15 @@ function detectLandHintFromGymText(rawGym: string): LandHint | null {
 }
 
 function landHintToLabel(hint: LandHint | null): string | null {
-  if (hint === "NL") return "Nederland";
-  if (hint === "BE") return "België";
-  if (hint === "DE") return "Duitsland";
-  if (hint === "FR") return "Frankrijk";
-  if (hint === "ES") return "Spanje";
-  if (hint === "UK") return "United Kingdom";
-  if (hint === "TR") return "Turkije";
-  if (hint === "FOREIGN") return "Buitenland";
-  return null;
+  const labels: Partial<Record<LandHint, string>> = {
+    NL: "Nederland", AT: "Oostenrijk", BE: "België", BG: "Bulgarije", HR: "Kroatië",
+    CY: "Cyprus", CZ: "Tsjechië", DK: "Denemarken", EE: "Estland", FI: "Finland",
+    FR: "Frankrijk", DE: "Duitsland", GR: "Griekenland", HU: "Hongarije", IE: "Ierland",
+    IT: "Italië", LV: "Letland", LT: "Litouwen", LU: "Luxemburg", MT: "Malta",
+    PL: "Polen", PT: "Portugal", RO: "Roemenië", SK: "Slowakije", SI: "Slovenië",
+    ES: "Spanje", SE: "Zweden", UK: "United Kingdom", TR: "Turkije", FOREIGN: "Buitenland",
+  };
+  return hint ? labels[hint] ?? null : null;
 }
 
 function isForeignHint(hint: LandHint | null) {
@@ -241,7 +253,11 @@ function landMatchesHint(landValue: any, hint: LandHint | null) {
   if (hint === "UK") return isUK(landValue);
   if (hint === "TR") return isTR(landValue);
   if (hint === "FOREIGN") return isForeignNonNL(landValue);
-  return false;
+
+  // Overige EU-codes: accepteer de ISO alpha-2 code rechtstreeks uit de DB.
+  // Bij een expliciete niet-NL EU-code blijft het in elk geval buitenland.
+  const dbLand = normLand(landValue);
+  return dbLand === hint.toLowerCase();
 }
 
 function buildForeignKeurmerkReason(opts: { gym: string; land: string | null; matchInfo?: string | null }) {
@@ -398,12 +414,12 @@ function stripCountryHintsFromRaw(raw: string) {
   let s = String(raw ?? "").trim();
   if (!s) return s;
 
-  s = s.replace(/\(([A-Z]{2})\)/g, " ");
+  s = s.replace(/\(([A-Z]{2}|ENG)\)/gi, " ");
   s = s.replace(
     /\((Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\)/gi,
     " "
   );
-  s = s.replace(/\b(NL|BE|DE|FR|ES|UK|GB|TR)\b/g, " ");
+  s = s.replace(/\b(NL|AT|BE|BG|HR|CY|CZ|DK|EE|FI|FR|DE|GR|HU|IE|IT|LV|LT|LU|MT|PL|PT|RO|SK|SI|ES|SE|UK|GB|ENG|TR)\b/gi, " ");
   s = s.replace(
     /\b(Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\b/gi,
     " "
