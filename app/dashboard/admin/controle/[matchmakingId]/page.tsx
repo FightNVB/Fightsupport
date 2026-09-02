@@ -1227,16 +1227,16 @@ function getGalaDuurMarge(eventDateRaw: string | null): 15 | 30 {
 
 function buildGalaDuurFromMins(
   totalMins: number,
-  aantalUren: 6 | 7 | 8 | null,
+  aantalUren: 7 | 8 | 9 | null,
   eventDate: string | null,
 ) {
   const basisMin = aantalUren != null ? aantalUren * 60 : null;
   const margeMinuten = getGalaDuurMarge(eventDate);
   const toegestaneMinuten = basisMin != null ? basisMin + margeMinuten : null;
 
-  // 8,5 uur is de absolute eventgrens. Ook zonder ingestelde 6/7/8 uur
+  // 9,5 uur is de absolute eventgrens. Ook zonder ingestelde 7/8/9 uur
   // moet een gala boven deze grens expliciet worden goedgekeurd.
-  const maxGalaMinuten = 8.5 * 60; // 510 minuten
+  const maxGalaMinuten = 9.5 * 60; // 570 minuten
   const overMax = totalMins > maxGalaMinuten;
   const bovenIngesteldeMarge =
     toegestaneMinuten != null && totalMins > toegestaneMinuten;
@@ -1248,10 +1248,10 @@ function buildGalaDuurFromMins(
   let extra = "";
   if (overMax && aantalUren == null) {
     extra =
-      "⚠️ Langer dan 8,5 uur en geen galaduur ingesteld — goedkeuring door hoofdofficial/superadmin vereist.";
+      "⚠️ Langer dan 9,5 uur en geen galaduur ingesteld — goedkeuring door hoofdofficial/superadmin vereist.";
   } else if (overMax) {
     extra =
-      "⚠️ Langer dan de maximale galaduur van 8,5 uur — goedkeuring door hoofdofficial/superadmin vereist.";
+      "⚠️ Langer dan de maximale galaduur van 9,5 uur — goedkeuring door hoofdofficial/superadmin vereist.";
   } else if (aantalUren == null) {
     extra = "⚠️ Geen geldig aantal uren ingesteld.";
   } else if (bovenIngesteldeMarge) {
@@ -1288,8 +1288,8 @@ function buildCompactRunMeldingen(
 
   if (mins === null && galaRows.length === 0) return runMeldingen ?? [];
 
-  const approvalMin = 390;
-  const maxMin = 510;
+  const approvalMin = 450;
+  const maxMin = 570;
   const needsApproval = mins != null ? mins > approvalMin : true;
   const overMax = mins != null ? mins > maxMin : false;
   const resultaat = needsApproval ? "actie" : "ok";
@@ -1300,10 +1300,10 @@ function buildCompactRunMeldingen(
           Math.round(mins * 10) / 10,
         ).replace(".", ",")} min). ${
           overMax
-            ? "Langer dan 8,5 uur — goedkeuring door hoofdofficial/superadmin vereist."
+            ? "Langer dan 9,5 uur — goedkeuring door hoofdofficial/superadmin vereist."
             : needsApproval
-              ? "Boven 6.5 uur — Hoofdofficial nodig / actie."
-              : "Binnen 6.5 uur (geen goedkeuring nodig)."
+              ? "Boven 7.5 uur — Hoofdofficial nodig / actie."
+              : "Binnen 7.5 uur (geen goedkeuring nodig)."
         }`
       : (galaRows.find((r) => r?.boodschap)?.boodschap ??
         "Gala-duur kon niet worden berekend.");
@@ -2496,7 +2496,7 @@ export default function ControleMatchmakingPage() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
   const [showGalaBreakdown, setShowGalaBreakdown] = useState(false);
-  const [aantalUren, setAantalUren] = useState<6 | 7 | 8 | null>(null);
+  const [aantalUren, setAantalUren] = useState<7 | 8 | 9 | null>(null);
   const [duurGoedkeuring, setDuurGoedkeuring] = useState<any | null>(null);
   const [duurGoedkeuringLoading, setDuurGoedkeuringLoading] = useState(false);
   const [duurGoedkeuringBusy, setDuurGoedkeuringBusy] = useState(false);
@@ -3114,7 +3114,9 @@ export default function ControleMatchmakingPage() {
         let datum = String((mm as any)?.datum ?? "").trim() || null;
         const eventId = String((mm as any)?.event_id ?? "").trim() || null;
         const urenRaw = Number((mm as any)?.aantal_uren);
-        setAantalUren(urenRaw === 6 || urenRaw === 7 || urenRaw === 8 ? urenRaw : null);
+        setAantalUren(
+          urenRaw === 7 || urenRaw === 8 || urenRaw === 9 ? urenRaw : null,
+        );
 
         if (eventId && (!naam || !datum)) {
           const { data: ev, error: evErr } = await supabase
@@ -3561,8 +3563,8 @@ export default function ControleMatchmakingPage() {
       return;
     }
 
-    // Ook zonder ingestelde 6/7/8 uur moet de API worden geraadpleegd.
-    // Boven 8,5 uur is immers altijd expliciete goedkeuring vereist.
+    // Ook zonder ingestelde 7/8/9 uur moet de API worden geraadpleegd.
+    // Boven 9,5 uur is immers altijd expliciete goedkeuring vereist.
     loadDuurGoedkeuring(galaDuurCalc.totalMins);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [galaDuurCalc?.totalMins, aantalUren, evenementDatum, matchmakingId]);

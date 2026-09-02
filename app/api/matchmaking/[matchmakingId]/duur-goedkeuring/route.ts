@@ -35,9 +35,9 @@ function asMinutes(v: unknown): number | null {
   return Math.round(n * 10) / 10;
 }
 
-function asAllowedHours(v: unknown): 6 | 7 | 8 | null {
+function asAllowedHours(v: unknown): 7 | 8 | 9 | null {
   const n = Number(v);
-  return n === 6 || n === 7 || n === 8 ? n : null;
+  return n === 7 || n === 8 || n === 9 ? n : null;
 }
 
 function amsterdamTodayYmd(): string {
@@ -190,7 +190,7 @@ export async function GET(
         : null;
 
     const overAbsoluteMax =
-      huidigeBerekendeMinuten != null && huidigeBerekendeMinuten > 510;
+      huidigeBerekendeMinuten != null && huidigeBerekendeMinuten > 570;
 
     const goedkeuringNodig =
       huidigeBerekendeMinuten != null &&
@@ -320,7 +320,7 @@ export async function POST(
         );
       }
 
-      const overAbsoluteMax = berekendeMinuten > 510;
+      const overAbsoluteMax = berekendeMinuten > 570;
       const overIngesteldeMarge =
         toegestaneMinuten != null && berekendeMinuten > toegestaneMinuten;
       const goedkeuringNodig = overAbsoluteMax || overIngesteldeMarge;
@@ -331,7 +331,7 @@ export async function POST(
             ok: false,
             error:
               aantalUren == null
-                ? "Deze galaduur is niet langer dan 8,5 uur en hoeft daarom niet te worden goedgekeurd."
+                ? "Deze galaduur is niet langer dan 9,5 uur en hoeft daarom niet te worden goedgekeurd."
                 : "Deze galaduur valt binnen de toegestane marge en hoeft niet te worden goedgekeurd.",
             aantal_uren: aantalUren,
             marge_minuten: margeMinuten,

@@ -684,7 +684,7 @@ async function fetchUitslagenByVa(opts: {
   controle_run_id: string;
   vaList: string[];
 }): Promise<Map<string, UitslagRow[]>> {
-  const { matchmaking_id, controle_run_id, vaList } = opts;
+  const { vaList } = opts;
   const map = new Map<string, UitslagRow[]>();
   if (!vaList.length) return map;
 
@@ -692,25 +692,162 @@ async function fetchUitslagenByVa(opts: {
 
   for (let i = 0; i < vaList.length; i += chunkSize) {
     const chunk = vaList.slice(i, i + chunkSize);
+    const numericChunk = chunk
+      .map((va) => Number(va))
+      .filter((va) => Number.isFinite(va));
 
-    // Centrale FightPassport-historie: niet aan één matchmaking-run gekoppeld.
-    // Deze tabel is de bron voor klasse/promotie/recordregels in de admin/official controle.
     const { data, error } = await supabaseAdmin
       .from("fightpassport_results")
-      .select("va_nummer, discipline, klasse, uitslag")
-      .in("va_nummer", chunk);
+      .select("va_nummer, discipline, klasse, uitslag, datum, evenement, tegenstander")
+      .in("va_nummer", numericChunk.length > 0 ? numericChunk : chunk)
+      .order("datum", { ascending: false });
 
     if (error) throw error;
 
+    const seen = new Set<string>();
+
     for (const r of (data ?? []) as any[]) {
-      const va = String(r?.va_nummer ?? "").trim();
+      const va = String(r?.va_nummer ?? "").trim().replace(/^0+/, "");
       if (!va) continue;
+
+      // Centrale resultaten kunnen door imports een dubbel snapshot bevatten.
+      // Eén echte partij mag de klasse/promotietelling maar één keer beïnvloeden.
+      const dedupeKey = [
+        va,
+        String(r?.datum ?? "").trim(),
+        String(r?.evenement ?? "").trim().toLowerCase(),
+        String(r?.tegenstander ?? "").trim().toLowerCase(),
+        String(r?.discipline ?? "").trim().toLowerCase(),
+        String(r?.klasse ?? "").trim().toUpperCase(),
+        String(r?.uitslag ?? "").trim().toLowerCase(),
+      ].join("||");
+
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
       if (!map.has(va)) map.set(va, []);
-      map.get(va)!.push(r as UitslagRow);
+      map.get(va)!.push({
+        va_nummer: r?.va_nummer ?? null,
+        discipline: r?.discipline ?? null,
+        klasse: r?.klasse ?? null,
+        uitslag: r?.uitslag ?? null,
+      });
     }
   }
 
   return map;
+}
+
+function getCtxVa(ctx: any, hoek: "rood" | "blauw"): string {
+  const candidates =
+    hoek === "rood"
+      ? [ctx?.rood_va_mm, ctx?.rood_va_fp, ctx?.rood_va_scrape, ctx?.va_rood, ctx?.va_rood_mm]
+      : [ctx?.blauw_va_mm, ctx?.blauw_va_fp, ctx?.blauw_va_scrape, ctx?.va_blauw, ctx?.va_blauw_mm];
+
+  for (const value of candidates) {
+    const va = String(value ?? "").trim().replace(/\D+/g, "").replace(/^0+/, "");
+    if (va) return va;
+  }
+
+  return "";
+}
+
+async function fetchFightPassportFightersByVa(vaList: string[]): Promise<Map<string, any>> {
+  const map = new Map<string, any>();
+  if (!vaList.length) return map;
+
+  const chunkSize = 500;
+
+  for (let i = 0; i < vaList.length; i += chunkSize) {
+    const chunk = vaList.slice(i, i + chunkSize);
+    const numericChunk = chunk
+      .map((va) => Number(va))
+      .filter((va) => Number.isFinite(va));
+
+    const { data, error } = await supabaseAdmin
+      .from("fightpassport_fighters")
+      .select("*")
+      .in("va_nummer", numericChunk.length > 0 ? numericChunk : chunk)
+      .order("updated_at", { ascending: false });
+
+    if (error) throw error;
+
+    for (const fighter of (data ?? []) as any[]) {
+      const va = String(fighter?.va_nummer ?? "").trim().replace(/^0+/, "");
+      if (!va || map.has(va)) continue;
+      map.set(va, fighter);
+    }
+  }
+
+  return map;
+}
+
+function firstDefined(...values: any[]): any {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return null;
+}
+
+function applyCentralFighterToCorner(ctx: any, hoek: "rood" | "blauw", fighter: any): any {
+  if (!fighter) return ctx;
+
+  const prefix = hoek === "rood" ? "rood" : "blauw";
+  const va = String(fighter?.va_nummer ?? getCtxVa(ctx, hoek)).trim().replace(/^0+/, "");
+  const totaal = firstDefined(
+    fighter?.totaal_wedstrijden,
+    fighter?.totaal,
+    fighter?.totaal_wedstrijden_scrape,
+    fighter?.nulmeting_totaal
+  );
+  const licentie = firstDefined(
+    fighter?.licentie,
+    fighter?.licentie_actief,
+    fighter?.licentie_geldig,
+    fighter?.licentie_status
+  );
+  const startverbod = firstDefined(fighter?.heeft_startverbod, fighter?.startverbod_actief);
+  const nulmetingKlasse = firstDefined(fighter?.nulmeting_klasse, fighter?.berekende_klasse, fighter?.klasse);
+
+  return {
+    ...ctx,
+    [`${prefix}_va_fp`]: va || null,
+    [`${prefix}_va_scrape`]: va || null,
+    [`${prefix}_naam_fp`]: firstDefined(fighter?.naam, ctx?.[`${prefix}_naam_fp`]),
+    [`${prefix}_naam_scrape`]: firstDefined(fighter?.naam, ctx?.[`${prefix}_naam_scrape`]),
+    [`${prefix}_geboortedatum_fp`]: firstDefined(fighter?.geboortedatum, ctx?.[`${prefix}_geboortedatum_fp`]),
+    [`${prefix}_geslacht`]: firstDefined(fighter?.geslacht, ctx?.[`${prefix}_geslacht`]),
+    [`${prefix}_licentie`]: licentie,
+    [`${prefix}_licentie_fp`]: licentie,
+    [`${prefix}_heeft_startverbod`]: startverbod,
+    [`${prefix}_totaal_wedstrijden_scrape`]: totaal,
+    [`${prefix}_gewonnen_scrape`]: firstDefined(fighter?.gewonnen, fighter?.wins),
+    [`${prefix}_nulmeting_totaal`]: firstDefined(fighter?.nulmeting_totaal, totaal),
+    [`${prefix}_nulmeting_opmerking`]: firstDefined(
+      fighter?.nulmeting_opmerking,
+      ctx?.[`${prefix}_nulmeting_opmerking`]
+    ),
+    [`${prefix}_nulmeting_klasse`]: firstDefined(
+      nulmetingKlasse,
+      ctx?.[`${prefix}_nulmeting_klasse`]
+    ),
+    [`${prefix}_klasse_nulmeting`]: firstDefined(
+      nulmetingKlasse,
+      ctx?.[`${prefix}_klasse_nulmeting`]
+    ),
+    [`${prefix}_fp_klasse`]: firstDefined(nulmetingKlasse, ctx?.[`${prefix}_fp_klasse`]),
+    [`${prefix}_current_klasse`]: firstDefined(nulmetingKlasse, ctx?.[`${prefix}_current_klasse`]),
+  };
+}
+
+function applyCentralFightersToCtx(ctx: any, fighterByVa: Map<string, any>): any {
+  const roodVa = getCtxVa(ctx, "rood");
+  const blauwVa = getCtxVa(ctx, "blauw");
+
+  let next = ctx;
+  if (roodVa) next = applyCentralFighterToCorner(next, "rood", fighterByVa.get(roodVa));
+  if (blauwVa) next = applyCentralFighterToCorner(next, "blauw", fighterByVa.get(blauwVa));
+  return next;
 }
 
 function getMandatoryPromotionInfo(
@@ -2144,7 +2281,22 @@ export async function rulesEngine(opts: {
       ? Number(opts.scoped_partij_nr)
       : null;
 
-  const rowsRaw = Array.isArray(ctxRows) ? ctxRows : ctxRows ? [ctxRows] : [];
+  const rowsInput = Array.isArray(ctxRows) ? ctxRows : ctxRows ? [ctxRows] : [];
+
+  // Safety-net voor admin/official: laad de centrale FightPassport-persoonsdata opnieuw
+  // op basis van de VA-nummers uit de context. Hierdoor blijven leeftijd, klasse,
+  // record/nulmeting en daarmee DISPENSATIE-regels beschikbaar, ook wanneer de
+  // live dagcontrole alleen licentie/keurmerk/startverbod heeft ververst.
+  const vaSet = new Set<string>();
+  for (const ctx of rowsInput) {
+    const roodVa = getCtxVa(ctx, "rood");
+    const blauwVa = getCtxVa(ctx, "blauw");
+    if (roodVa) vaSet.add(roodVa);
+    if (blauwVa) vaSet.add(blauwVa);
+  }
+
+  const centralFighterByVa = await fetchFightPassportFightersByVa([...vaSet]);
+  const rowsRaw = rowsInput.map((ctx) => applyCentralFightersToCtx(ctx, centralFighterByVa));
 
   const rows = rowsRaw.filter((ctx) => {
     const ctxBoutId = unwrapUuid(ctx?.bout_id);
@@ -2229,14 +2381,14 @@ export async function rulesEngine(opts: {
     }
   }
 
-  const vaSet = new Set<string>();
+  const uitslagenVaSet = new Set<string>();
   for (const ctx of rows) {
-    const vr = String(ctx?.rood_va_mm ?? "").trim();
-    const vb = String(ctx?.blauw_va_mm ?? "").trim();
-    if (vr) vaSet.add(vr);
-    if (vb) vaSet.add(vb);
+    const roodVa = getCtxVa(ctx, "rood");
+    const blauwVa = getCtxVa(ctx, "blauw");
+    if (roodVa) uitslagenVaSet.add(roodVa);
+    if (blauwVa) uitslagenVaSet.add(blauwVa);
   }
-  const vaList = [...vaSet];
+  const vaList = [...uitslagenVaSet];
 
   const uitslagenByVa = await fetchUitslagenByVa({
     matchmaking_id,

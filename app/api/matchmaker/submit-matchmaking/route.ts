@@ -483,7 +483,7 @@ export async function POST(req: Request) {
     let bondteam: string | null = null;
     let hoofdofficial: string | null = null;
     let promotor: string | null = null;
-    let aantal_uren = 6;
+    let aantal_uren = 7;
 
     let uploaded_by = "";
 
@@ -523,7 +523,7 @@ export async function POST(req: Request) {
         ? String(body.hoofdofficial).trim()
         : null;
       promotor = body.promotor ? String(body.promotor).trim() : null;
-      aantal_uren = Number(body.aantal_uren ?? 6);
+      aantal_uren = Number(body.aantal_uren ?? 7);
 
       matchmaking_id = body.matchmaking_id
         ? String(body.matchmaking_id).trim()
@@ -566,7 +566,7 @@ export async function POST(req: Request) {
 
       hoofdofficial = String(form.get("hoofdofficial") ?? "").trim() || null;
       promotor = String(form.get("promotor") ?? "").trim() || null;
-      aantal_uren = Number(form.get("aantal_uren") ?? 6);
+      aantal_uren = Number(form.get("aantal_uren") ?? 7);
 
       matchmaking_id = String(form.get("matchmaking_id") ?? "").trim() || null;
       force_new = String(form.get("force_new") ?? "false") === "true";
@@ -657,8 +657,8 @@ export async function POST(req: Request) {
     if (!normalizedBondteam) {
       return bad("Bondteam is verplicht.");
     }
-    if (![6, 7, 8].includes(aantal_uren)) {
-      return bad("aantal_uren moet 6, 7 of 8 zijn.");
+    if (![7, 8, 9].includes(aantal_uren)) {
+      return bad("aantal_uren moet 7, 8 of 9 zijn.");
     }
     if (!ALLOWED_BONDTEAMS.has(normalizedBondteam)) {
       return bad(`Onbekend bondteam: ${normalizedBondteam}.`);

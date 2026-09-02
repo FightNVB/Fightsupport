@@ -548,11 +548,22 @@ if (scopedPartijNr != null) {
   // Total is de centrale FightPassport-bron. Geen per-matchmaking fighters_raw snapshot meer.
   const fighterByVa = new Map<string, any>();
   if (vaList.length > 0) {
-    const { data: fighters, error: fErr } = await supabaseAdmin
+    const vaListAsNumbers = vaList
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n));
+
+    let fightersQ = supabaseAdmin
       .from("fightpassport_fighters")
       .select("*")
-      .in("va_nummer", vaList)
       .order("updated_at", { ascending: false });
+
+    // va_nummer staat in de centrale tabellen numeriek opgeslagen in een deel van de data.
+    // Zoek daarom numeriek waar mogelijk, met de originele lijst als veilige fallback.
+    fightersQ = vaListAsNumbers.length > 0
+      ? fightersQ.in("va_nummer", vaListAsNumbers)
+      : fightersQ.in("va_nummer", vaList);
+
+    const { data: fighters, error: fErr } = await fightersQ;
 
     if (fErr) throw fErr;
 
@@ -602,10 +613,14 @@ if (scopedPartijNr != null) {
   // Uitslagenhistorie komt rechtstreeks uit de centrale Total-snapshot.
   const uitslagenByVa = new Map<string, any[]>();
   if (vaList.length > 0) {
+    const numericVaList = vaList
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n));
+
     const { data: uitslagen, error: uErr } = await supabaseAdmin
       .from("fightpassport_results")
       .select("*")
-      .in("va_nummer", vaList)
+      .in("va_nummer", numericVaList.length > 0 ? numericVaList : vaList)
       .order("datum", { ascending: false });
 
     if (uErr) throw uErr;
@@ -1401,11 +1416,20 @@ export async function buildToernooiContext(
   const fighterByVa = new Map<string, any>();
 
   if (vaList.length > 0) {
-    const { data: fighters, error: fightersErr } = await supabaseAdmin
+    const vaListAsNumbers = vaList
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n));
+
+    let fighterQuery = supabaseAdmin
       .from("fightpassport_fighters")
       .select("*")
-      .in("va_nummer", vaList)
       .order("updated_at", { ascending: false });
+
+    fighterQuery = vaListAsNumbers.length > 0
+      ? fighterQuery.in("va_nummer", vaListAsNumbers)
+      : fighterQuery.in("va_nummer", vaList);
+
+    const { data: fighters, error: fightersErr } = await fighterQuery;
 
     if (fightersErr) throw fightersErr;
 
@@ -1458,7 +1482,9 @@ export async function buildToernooiContext(
     const { data: uitslagen, error: uitslagenErr } = await supabaseAdmin
       .from("fightpassport_results")
       .select("*")
-      .in("va_nummer", vaList)
+      .in("va_nummer", vaList.map((v) => Number(v)).filter((n) => Number.isFinite(n)).length > 0
+        ? vaList.map((v) => Number(v)).filter((n) => Number.isFinite(n))
+        : vaList)
       .order("datum", { ascending: false });
 
     if (uitslagenErr) throw uitslagenErr;

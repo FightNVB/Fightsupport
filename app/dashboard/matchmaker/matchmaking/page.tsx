@@ -631,7 +631,7 @@ function MatchmakingPageContent() {
   const [uploadLocatie, setUploadLocatie] = useState("");
   const [uploadPromotor, setUploadPromotor] = useState("");
   const [uploadBondteam, setUploadBondteam] = useState("");
-  const [uploadAantalUren, setUploadAantalUren] = useState("6");
+  const [uploadAantalUren, setUploadAantalUren] = useState("7");
 
   const [viewTab, setViewTab] = useState<ViewTab>("zelf");
   const [filterMonth, setFilterMonth] = useState("");
@@ -676,7 +676,7 @@ function MatchmakingPageContent() {
     setUploadLocatie("");
     setUploadPromotor("");
     setUploadBondteam(normalizeBondteam(profileData?.bondteam ?? ""));
-    setUploadAantalUren("6");
+    setUploadAantalUren("7");
     setUploadFile(null);
     setUploadMsg("");
   }
@@ -805,7 +805,7 @@ function MatchmakingPageContent() {
       if (!naam.trim()) return setCreateMsg("⚠️ Naam is verplicht.");
       if (!datum.trim()) return setCreateMsg("⚠️ Datum is verplicht.");
       if (!bondteam.trim()) return setCreateMsg("⚠️ Bondteam is verplicht.");
-      if (!["6", "7", "8"].includes(aantalUren)) return setCreateMsg("⚠️ Kies het aantal uren: 6, 7 of 8 uur.");
+      if (!["7", "8", "9"].includes(aantalUren)) return setCreateMsg("⚠️ Kies het aantal uren: 7, 8 of 9 uur.");
 
       setCreating(true);
 
@@ -866,8 +866,8 @@ function MatchmakingPageContent() {
       if (!uploadDatum.trim()) return setUploadMsg("⚠️ Datum is verplicht.");
       if (!uploadBondteam.trim())
         return setUploadMsg("⚠️ Bondteam is verplicht.");
-      if (!["6", "7", "8"].includes(uploadAantalUren))
-        return setUploadMsg("⚠️ Kies het aantal uren: 6, 7 of 8 uur.");
+      if (!["7", "8", "9"].includes(uploadAantalUren))
+        return setUploadMsg("⚠️ Kies het aantal uren: 7, 8 of 9 uur.");
       if (!uploadFile) return setUploadMsg("⚠️ Kies eerst een Excel-bestand.");
 
       setUploading(true);
@@ -1539,9 +1539,9 @@ function MatchmakingPageContent() {
                             className="orange-input h-10 w-full"
                           >
                             <option value="">Kies aantal uren *</option>
-                            <option value="6">6 uur</option>
                             <option value="7">7 uur</option>
                             <option value="8">8 uur</option>
+                            <option value="9">9 uur</option>
                           </select>
                         </div>
 
@@ -1624,9 +1624,9 @@ function MatchmakingPageContent() {
                             onChange={(e) => setUploadAantalUren(e.target.value)}
                             className="orange-input h-10 w-full"
                           >
-                            <option value="6">6 uur</option>
                             <option value="7">7 uur</option>
                             <option value="8">8 uur</option>
+                            <option value="9">9 uur</option>
                           </select>
                         </div>
 

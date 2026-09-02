@@ -1217,7 +1217,7 @@ function getGalaDuurPolicy(
   evenementDatum: string | null,
 ) {
   const doelMinuten =
-    aantalUren != null && [6, 7, 8].includes(aantalUren)
+    aantalUren != null && [7, 8, 9].includes(aantalUren)
       ? aantalUren * 60
       : null;
 
@@ -1245,9 +1245,9 @@ function getGalaDuurPolicy(
   const overschrijding =
     doelMinuten == null ? null : Math.max(0, totalMins - doelMinuten);
 
-  // Absolute eventgrens: boven 8,5 uur is altijd expliciete goedkeuring nodig,
-  // ook wanneer bij de matchmaking geen 6/7/8 uur is ingesteld.
-  const maxGalaMinuten = 8.5 * 60; // 510 minuten
+  // Absolute eventgrens: boven 9,5 uur is altijd expliciete goedkeuring nodig,
+  // ook wanneer bij de matchmaking geen 7/8/9 uur is ingesteld.
+  const maxGalaMinuten = 9.5 * 60; // 570 minuten
   const overMax = totalMins > maxGalaMinuten;
   const bovenIngesteldeMarge =
     toegestaanTot != null && totalMins > toegestaanTot;
@@ -1256,13 +1256,13 @@ function getGalaDuurPolicy(
   let statusText = "";
   if (overMax && doelMinuten == null) {
     statusText =
-      "⚠️ Langer dan 8,5 uur en geen galaduur ingesteld. Goedkeuring door hoofdofficial of superadmin vereist.";
+      "⚠️ Langer dan 9,5 uur en geen galaduur ingesteld. Goedkeuring door hoofdofficial of superadmin vereist.";
   } else if (overMax) {
     statusText =
-      "⚠️ Langer dan de maximale galaduur van 8,5 uur. Goedkeuring door hoofdofficial of superadmin vereist.";
+      "⚠️ Langer dan de maximale galaduur van 9,5 uur. Goedkeuring door hoofdofficial of superadmin vereist.";
   } else if (doelMinuten == null) {
     statusText =
-      "Ingestelde galaduur ontbreekt. Kies bij de matchmaking 6, 7 of 8 uur.";
+      "Ingestelde galaduur ontbreekt. Kies bij de matchmaking 7, 8 of 9 uur.";
   } else if (bovenIngesteldeMarge) {
     statusText = `⚠️ ${formatDurationExact(
       totalMins,
@@ -2458,6 +2458,8 @@ export default function ControleMatchmakingPage() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
   const [showGalaBreakdown, setShowGalaBreakdown] = useState(false);
+  const [duurGoedkeuring, setDuurGoedkeuring] = useState<any | null>(null);
+  const [duurGoedkeuringLoading, setDuurGoedkeuringLoading] = useState(false);
   const [openToernooien, setOpenToernooien] = useState<Record<string, boolean>>(
     {},
   );
@@ -3115,7 +3117,7 @@ export default function ControleMatchmakingPage() {
         let datum = String((mm as any)?.datum ?? "").trim() || null;
         const eventId = String((mm as any)?.event_id ?? "").trim() || null;
         const urenRaw = Number((mm as any)?.aantal_uren);
-        setAantalUren([6, 7, 8].includes(urenRaw) ? urenRaw : null);
+        setAantalUren([7, 8, 9].includes(urenRaw) ? urenRaw : null);
 
         if (eventId && (!naam || !datum)) {
           const { data: ev, error: evErr } = await supabase
@@ -3438,6 +3440,32 @@ export default function ControleMatchmakingPage() {
       String(run?.status ?? "").toLowerCase(),
     );
 
+  async function loadDuurGoedkeuring(berekendeMinuten?: number | null) {
+    if (!matchmakingId) return;
+    setDuurGoedkeuringLoading(true);
+    try {
+      const query =
+        berekendeMinuten != null
+          ? `?berekende_minuten=${encodeURIComponent(
+              String(Math.round(berekendeMinuten * 10) / 10),
+            )}`
+          : "";
+      const resp = await authedFetch(
+        `/api/matchmaking/${encodeURIComponent(matchmakingId)}/duur-goedkeuring${query}`,
+      );
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(json?.error ?? "Duurgoedkeuring ophalen mislukt.");
+      }
+      setDuurGoedkeuring(json);
+    } catch (e) {
+      console.warn("[matchmaker page] duurgoedkeuring ophalen mislukt:", e);
+      setDuurGoedkeuring(null);
+    } finally {
+      setDuurGoedkeuringLoading(false);
+    }
+  }
+
   const galaDuurCalc = useMemo(() => {
     if (rows.length === 0) return null;
     const result = calcGalaDuurFromRows(rows);
@@ -3453,6 +3481,16 @@ export default function ControleMatchmakingPage() {
       );
     return null;
   }, [galaDuurCalc, aantalUren, evenementDatum]);
+
+  useEffect(() => {
+    if (!galaDuurCalc) {
+      setDuurGoedkeuring(null);
+      return;
+    }
+
+    void loadDuurGoedkeuring(galaDuurCalc.totalMins);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [galaDuurCalc?.totalMins, aantalUren, evenementDatum, matchmakingId]);
 
   const missingLicentieByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
@@ -4297,7 +4335,7 @@ export default function ControleMatchmakingPage() {
                 {galaDuur?.text ? (
                   <div
                     className={`rounded-xl border overflow-hidden ${
-                      galaDuur.needsApproval
+                      galaDuur.needsApproval && !duurGoedkeuring?.goedkeuring_geldig
                         ? "border-amber-500 bg-amber-50"
                         : "border-emerald-300 bg-white/80"
                     }`}
@@ -4319,14 +4357,18 @@ export default function ControleMatchmakingPage() {
                       <div className="shrink-0 flex items-center gap-2">
                         <span
                           className={`px-2 py-1 rounded text-[11px] font-black ${
-                            galaDuur.needsApproval
-                              ? "bg-amber-300 text-amber-950"
-                              : "bg-emerald-500 text-emerald-950"
+                            duurGoedkeuring?.goedkeuring_geldig
+                              ? "bg-teal-600 text-white"
+                              : galaDuur.needsApproval
+                                ? "bg-amber-300 text-amber-950"
+                                : "bg-emerald-500 text-emerald-950"
                           }`}
                         >
-                          {galaDuur.needsApproval
-                            ? "GOEDKEURING NODIG"
-                            : "DUUR OK"}
+                          {duurGoedkeuring?.goedkeuring_geldig
+                            ? "GOEDGEKEURD"
+                            : galaDuur.needsApproval
+                              ? "GOEDKEURING NODIG"
+                              : "DUUR OK"}
                         </span>
                         <span className="text-xs text-zinc-600 font-semibold">
                           {showGalaBreakdown ? "Inklappen" : "Uitklappen"}
@@ -4342,6 +4384,22 @@ export default function ControleMatchmakingPage() {
                     {showGalaBreakdown ? (
                       <div className="border-t border-zinc-300 px-3 py-3 text-sm text-zinc-800">
                         <div>{galaDuur.text}</div>
+                        {duurGoedkeuring?.goedkeuring_geldig ? (
+                          <div className="mb-2 rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-xs font-bold text-teal-900">
+                            ✅ Deze galaduur is goedgekeurd
+                            {duurGoedkeuring?.latest_approval?.approved_at
+                              ? ` op ${new Date(
+                                  duurGoedkeuring.latest_approval.approved_at,
+                                ).toLocaleString("nl-NL")}`
+                              : ""}
+                            .
+                          </div>
+                        ) : galaDuur.needsApproval && !duurGoedkeuringLoading ? (
+                          <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+                            ⚠️ Voor deze galaduur is nog geen geldige goedkeuring gevonden.
+                          </div>
+                        ) : null}
+
                         <div className="mt-2 text-xs font-semibold text-zinc-700">
                           Ingesteld: {galaDuur.aantalUren ?? "-"} uur
                           {galaDuur.toegestaanTot != null
