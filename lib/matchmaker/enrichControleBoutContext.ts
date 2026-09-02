@@ -665,11 +665,14 @@ function findGymMatchFromVaLinksOnly(opts: {
   const restricted = findGymMatch(candidates, gymNaam, aliasMaps);
   if (restricted.row) return restricted;
 
-  // Eén gekoppelde kandidaat is op zichzelf al sterke DB-informatie, ook wanneer
-  // de MM-naam afwijkt. Bij meerdere onduidelijke kandidaten gokken we niet.
-  if (candidates.length === 1) return { row: candidates[0], reason: null };
-
-  return { row: null, reason: restricted.reason ?? "Meerdere gekoppelde sportscholen voor deze VA." };
+  // Een enkele VA-koppeling is NIET genoeg: vechters kunnen van sportschool
+  // wisselen. Alleen naamcompatibele koppelingen mogen worden gebruikt.
+  return {
+    row: null,
+    reason:
+      restricted.reason ??
+      "De gekoppelde sportschool van deze VA komt niet overeen met de sportschool uit de matchmaking.",
+  };
 }
 
 function teamConsensusKey(gymNaam: string) {
@@ -686,21 +689,42 @@ function findGymMatchForFighter(opts: {
 }): GymMatch {
   const { sportscholen, gymNaam, vaNummer, schoolLinksByVa, aliasMaps, teamConsensusByGym } = opts;
 
-  const linked = findGymMatchFromVaLinksOnly({ sportscholen, gymNaam, vaNummer, schoolLinksByVa, aliasMaps });
-  if (linked.row) return linked;
-
-  // Daarna de bestaande algemene MM/alias/fuzzy matching.
+  // Voor de keurmerkcontrole is de sportschool uit de matchmaking leidend.
+  // Een vechter kan inmiddels van sportschool zijn gewisseld; een oude
+  // fightpassport_school_fighters-koppeling mag de MM-sportschool daarom
+  // nooit overrulen.
   const general = findGymMatch(sportscholen, gymNaam, aliasMaps);
   if (general.row) return general;
 
-  // Laatste fallback: uitsluitend binnen DEZE matchmaking kijken waar andere
-  // vechters met dezelfde MM-teamnaam via hun VA betrouwbaar aan gekoppeld zijn.
-  // Alleen gebruiken als alle betrouwbare teamgenoten op hetzelfde sportschool_id uitkomen.
+  // VA-koppelingen mogen alleen helpen wanneer de gekoppelde sportschoolnaam
+  // ook werkelijk overeenkomt met de MM-sportschoolnaam. Dus NOOIT meer:
+  // "één gekoppelde sportschool = automatisch kiezen".
+  const linked = findGymMatchFromVaLinksOnly({
+    sportscholen,
+    gymNaam,
+    vaNummer,
+    schoolLinksByVa,
+    aliasMaps,
+  });
+  if (
+    linked.row &&
+    looseGymNameCompatible(gymNaam, String(linked.row?.naam ?? ""))
+  ) {
+    return linked;
+  }
+
+  // Laatste fallback: alleen binnen DEZE matchmaking en alleen wanneer de
+  // consensus-school óók naamtechnisch bij de MM-sportschool past.
   const key = teamConsensusKey(gymNaam);
   const consensusSid = key ? teamConsensusByGym?.get(key) : null;
   if (consensusSid) {
     const school = findSportschoolBySportschoolId(sportscholen, consensusSid);
-    if (school) return { row: school, reason: null };
+    if (
+      school &&
+      looseGymNameCompatible(gymNaam, String(school?.naam ?? ""))
+    ) {
+      return { row: school, reason: null };
+    }
   }
 
   return general;
@@ -1023,7 +1047,11 @@ export async function enrichControleBoutContext(
         schoolLinksByVa,
         aliasMaps,
       });
-      const sid = String(reliable.row?.sportschool_id ?? "").trim();
+      const reliableName = String(reliable.row?.naam ?? "");
+      const sid =
+        reliable.row && looseGymNameCompatible(side.gym, reliableName)
+          ? String(reliable.row?.sportschool_id ?? "").trim()
+          : "";
       const key = teamConsensusKey(side.gym);
       if (!sid || !key) continue;
 

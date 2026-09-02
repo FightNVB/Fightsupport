@@ -409,7 +409,7 @@ export default function OfficialRapportPage() {
     const expectedVas = Array.from(vaContext.keys());
     const actualByVa = new Map<string, AnyRow>(actueel.map((r): [string, AnyRow] => [normalizeVa(r?.va_nummer), r]));
     let licenseBad = 0, startBad = 0, keurmerkBad = 0, missingLive = 0;
-    const blockers: Blocker[] = []; // alleen openstaande dispensaties
+    const blockers: Blocker[] = []; // alle vereiste dispensaties die niet zijn goedgekeurd blokkeren eventstatus
     const attention: Attention[] = [];
     const keurmerkIssues: KeurmerkIssue[] = [];
     const licentieIssues: FighterIssue[] = [];
@@ -746,7 +746,7 @@ export default function OfficialRapportPage() {
           {summary.blockers.length > 0 ? (
             <div className="report-section mt-2 overflow-hidden rounded-lg border border-[#ff4d00] bg-gradient-to-b from-zinc-100 to-zinc-300 text-zinc-950 print:mt-1.5">
               <div className="flex items-center justify-between bg-[#ff4d00] px-3 py-2 text-[12px] font-black uppercase tracking-[0.06em] text-white print:px-2.5 print:py-1.5 print:text-[9px]">
-                <span>Openstaande dispensaties</span>
+                <span>Blokkerende dispensaties</span>
                 <span>{summary.blockers.length}</span>
               </div>
               <div className="grid md:grid-cols-2 print:grid-cols-2">

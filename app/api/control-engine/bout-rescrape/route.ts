@@ -470,13 +470,10 @@ export async function POST(req: Request) {
     const vaList = [vaRood, vaBlauw].filter(Boolean) as string[];
 
     if (vaList.length > 0) {
-      if (isMatchmakerFlow) {
-        // Matchmaker: dezelfde gerichte fp_bundle als de matchmakercontrole,
-        // maar alleen voor rood/blauw van deze partij.
-        await runMatchmakerBundleForVaList(matchmaking_id, controle_run_id, vaList);
-      } else {
-        await runTotalForVaList(vaList);
-      }
+      // "Controleer Fightpaspoort" haalt voor deze partij altijd eerst de
+      // actuele vechterdata op via FP Total. Daarna bepaalt de rol alleen
+      // welke build/enrich/rules/save-stack wordt gebruikt.
+      await runTotalForVaList(vaList);
     }
 
     if (isMatchmakerFlow) {
@@ -536,8 +533,8 @@ export async function POST(req: Request) {
       partij_nr,
       bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
       vaList,
-      used_total: !isMatchmakerFlow && vaList.length > 0,
-      used_matchmaker_bundle: isMatchmakerFlow && vaList.length > 0,
+      used_total: vaList.length > 0,
+      used_matchmaker_bundle: false,
       flow: isMatchmakerFlow ? "matchmaker" : "control",
       ms: Date.now() - t0,
     });

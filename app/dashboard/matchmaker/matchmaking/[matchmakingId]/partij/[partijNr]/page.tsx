@@ -2873,7 +2873,7 @@ export default function PartijDetailPage() {
       setRescraping(true);
       setShowLoader(true);
 
-      const r = await authedFetch("/api/matchmaker/rebuild-bout", {
+      const r = await authedFetch("/api/control-engine/bout-rescrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2884,7 +2884,7 @@ export default function PartijDetailPage() {
       });
 
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error ?? "Partij opnieuw opbouwen mislukt");
+      if (!r.ok) throw new Error(j?.error ?? "Fightpaspoort-controle van partij mislukt");
 
       window.location.reload();
     } catch (e: any) {
