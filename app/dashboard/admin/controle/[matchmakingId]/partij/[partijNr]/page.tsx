@@ -2752,106 +2752,6 @@ export default function PartijDetailPage() {
     }
   }
 
-  async function saveAndRescrapeFromModal() {
-    if (!editOpen) return;
-    if (!matchmakingId || !partijNr) return;
-
-    setEditSaving(true);
-    setError(null);
-    setMsg("");
-
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess?.session?.access_token ?? null;
-      if (!token) throw new Error("Niet ingelogd.");
-
-      const payload: any = {
-        matchmaking_id: String(matchmakingId),
-        partij_nr: partijNr,
-        controle_run_id: run?.id ?? null,
-        va_gewijzigd: false,
-      };
-
-      const d = String(
-        editDraftRef.current.discipline ?? editBoutDiscipline ?? "",
-      ).trim();
-      const k = String(
-        editDraftRef.current.klasse ?? editBoutKlasse ?? "",
-      ).trim();
-      const va = String(editDraftRef.current.va ?? editVa ?? "");
-      const naam = String(editDraftRef.current.naam ?? editNaam ?? "");
-      const gym = String(editDraftRef.current.gym ?? editGym ?? "");
-      const gewicht = String(editDraftRef.current.gewicht ?? editGewicht ?? "");
-      const geslacht = String(
-        editDraftRef.current.geslacht ?? editGeslacht ?? "",
-      );
-      const maxGewicht = String(
-        editDraftRef.current.max_gewicht ?? editMaxGewicht ?? "",
-      );
-
-      if (d) payload.new_discipline = d;
-      if (k) payload.new_klasse_mm = k;
-      payload.new_geslacht = geslacht;
-      payload.new_max_gewicht = maxGewicht;
-
-      if (editOpen === "rood") {
-        payload.new_va_rood = va;
-        payload.new_rood_naam = naam;
-        payload.new_rood_gym = gym;
-        payload.new_rood_gewicht = gewicht;
-      } else {
-        payload.new_va_blauw = va;
-        payload.new_blauw_naam = naam;
-        payload.new_blauw_gym = gym;
-        payload.new_blauw_gewicht = gewicht;
-      }
-
-      const r1 = await authedFetch("/api/control-engine/correct-bout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const j1 = await r1.json().catch(() => ({}));
-      if (!r1.ok)
-        throw new Error(j1?.error ?? "Opslaan mislukt (admin-correct-bout)");
-
-      const va_rood =
-        editOpen === "rood"
-          ? String(va ?? "").trim()
-          : String(ctx?.rood_va_mm ?? "").trim();
-      const va_blauw =
-        editOpen === "blauw"
-          ? String(va ?? "").trim()
-          : String(ctx?.blauw_va_mm ?? "").trim();
-
-      const r2 = await authedFetch("/api/control-engine/bout-rescrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchmaking_id: String(matchmakingId),
-          partij_nr: partijNr,
-          controle_run_id: run?.id ?? null,
-          va_rood: va_rood || null,
-          va_blauw: va_blauw || null,
-        }),
-      });
-
-      const j2 = await r2.json().catch(() => ({}));
-      if (!r2.ok) throw new Error(j2?.error ?? "Automatische check mislukt");
-
-      setMsg("✅ Opgeslagen + Automatische check gestart.");
-      closeEdit();
-      window.location.reload();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setEditSaving(false);
-    }
-  }
 
   const Shell = ({ children }: { children: any }) => (
     <div
@@ -3666,21 +3566,6 @@ export default function PartijDetailPage() {
                   >
                     {editSaving ? "Opslaan…" : "Opslaan"}
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={saveAndRescrapeFromModal}
-                    disabled={editSaving}
-                    className="px-4 py-2 rounded bg-[#2a2a2e] text-white font-semibold hover:opacity-90 disabled:opacity-50"
-                    title="Opslaan en autocheck"
-                  >
-                    {editSaving ? "Bezig…" : "Opslaan + Autocheck"}
-                  </button>
-                </div>
-
-                <div className="text-xs text-zinc-600">
-                  Tip: “Opslaan” wijzigt alleen Matchmaking-data. “Opslaan +
-                  Autocheck” haalt daarna data Fightpaspoort opnieuw op.
                 </div>
               </div>
             </div>
