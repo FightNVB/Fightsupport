@@ -23,11 +23,14 @@ type Attention = {
 
 type KeurmerkIssue = {
   key: string;
-  partij: string;
-  va: string;
-  naam: string;
   sportschool: string;
   land: string;
+  partijen: string[];
+  vechters: Array<{
+    partij: string;
+    va: string;
+    naam: string;
+  }>;
 };
 
 type FighterIssue = {
@@ -408,10 +411,10 @@ export default function OfficialRapportPage() {
 
     const expectedVas = Array.from(vaContext.keys());
     const actualByVa = new Map<string, AnyRow>(actueel.map((r): [string, AnyRow] => [normalizeVa(r?.va_nummer), r]));
-    let licenseBad = 0, startBad = 0, keurmerkBad = 0, missingLive = 0;
+    let licenseBad = 0, startBad = 0, missingLive = 0;
     const blockers: Blocker[] = []; // alle vereiste dispensaties die niet zijn goedgekeurd blokkeren eventstatus
     const attention: Attention[] = [];
-    const keurmerkIssues: KeurmerkIssue[] = [];
+    const keurmerkIssueMap = new Map<string, KeurmerkIssue>();
     const licentieIssues: FighterIssue[] = [];
     const startverbodIssues: FighterIssue[] = [];
     const liveIssues: FighterIssue[] = [];
@@ -438,19 +441,44 @@ export default function OfficialRapportPage() {
         startverbodIssues.push({ key: `sv-${va}`, partij, va, naam: context?.naam ?? `VA ${va}` });
       }
       if (r.keurmerk_ok !== true) {
-        keurmerkBad++;
         const sportschool = safe(r?.sportschool, "Sportschool onbekend");
         const land = safe(r?.land, "-");
-        keurmerkIssues.push({
-          key: `keur-${va}`,
-          partij,
-          va,
-          naam: context?.naam ?? `VA ${va}`,
-          sportschool,
-          land,
-        });
+        const schoolKey = `${norm(sportschool)}|${norm(land)}`;
+        const existing = keurmerkIssueMap.get(schoolKey);
+
+        if (existing) {
+          if (!existing.partijen.includes(partij)) existing.partijen.push(partij);
+          existing.vechters.push({
+            partij,
+            va,
+            naam: context?.naam ?? `VA ${va}`,
+          });
+        } else {
+          keurmerkIssueMap.set(schoolKey, {
+            key: `keur-${schoolKey || va}`,
+            sportschool,
+            land,
+            partijen: [partij],
+            vechters: [{
+              partij,
+              va,
+              naam: context?.naam ?? `VA ${va}`,
+            }],
+          });
+        }
       }
     }
+
+    const keurmerkIssues = Array.from(keurmerkIssueMap.values()).map((issue) => ({
+      ...issue,
+      partijen: [...issue.partijen].sort((a, b) => {
+        const an = Number(a);
+        const bn = Number(b);
+        if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+        return String(a).localeCompare(String(b), "nl");
+      }),
+    }));
+    const keurmerkBad = keurmerkIssues.length;
 
     const activeVerboden = results.filter((r) => !isApprovedReview(r?.review_status) && norm(r?.resultaat) !== "ok" && isVerbodResult(r));
     const verbodIssues: Blocker[] = activeVerboden.map((r) => {
@@ -642,7 +670,15 @@ export default function OfficialRapportPage() {
           <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 print:grid-cols-3 print:gap-1.5 items-stretch">
             <StatusCard
               label="Licentie"
-              value={summary.licenseBad === 0 && summary.missingLive === 0 ? `${summary.expectedVas.length}/${summary.expectedVas.length} akkoord` : `${summary.licenseBad + summary.missingLive} probleem`}
+              value={
+                summary.licenseBad === 0 && summary.missingLive === 0
+                  ? "Alle licenties geldig"
+                  : summary.licenseBad === 1
+                    ? "1 ongeldige licentie"
+                    : summary.licenseBad > 1
+                      ? `${summary.licenseBad} ongeldige licenties`
+                      : `${summary.missingLive} controle(s) onvolledig`
+              }
               detail={summary.missingLive > 0 ? `${summary.missingLive} controle(s) onvolledig` : undefined}
               ok={summary.licenseBad === 0 && summary.missingLive === 0}
             />
@@ -712,13 +748,26 @@ export default function OfficialRapportPage() {
 
             {summary.keurmerkIssues.length > 0 ? (
               <IssuePanel title="Sportscholen zonder geldig keurmerk" count={summary.keurmerkIssues.length} variant="orangeDark">
-                {summary.keurmerkIssues.map((x) => (
-                  <div key={x.key} className="grid grid-cols-[64px_minmax(0,1.25fr)_minmax(0,1fr)] gap-2 border-b border-zinc-700 px-3 py-2 text-[12px] last:border-0 print:grid-cols-[52px_minmax(0,1.25fr)_minmax(0,1fr)] print:px-2 print:py-1 print:text-[9px]">
-                    <b className="text-[#ff7a42]">{x.partij.startsWith("T") ? x.partij : `P${x.partij}`}</b>
-                    <div className="min-w-0"><b className="block truncate text-white">{x.sportschool}</b><span className="text-zinc-400">{x.land}</span></div>
-                    <div className="min-w-0"><b className="block truncate text-zinc-100">{x.naam}</b><span className="text-zinc-400">VA {x.va}</span></div>
-                  </div>
-                ))}
+                {summary.keurmerkIssues.map((x) => {
+                  const partijLabels = x.partijen.map((p) => (p.startsWith("T") ? p : `P${p}`));
+                  return (
+                    <div key={x.key} className="grid grid-cols-[145px_minmax(0,1fr)_minmax(0,1.35fr)] gap-2 border-b border-zinc-700 px-3 py-2 text-[12px] last:border-0 print:grid-cols-[105px_minmax(0,1fr)_minmax(0,1.35fr)] print:px-2 print:py-1 print:text-[9px]">
+                      <b className="text-[#ff7a42]">{partijLabels.join(", ")}</b>
+                      <div className="min-w-0">
+                        <b className="block truncate text-white">{x.sportschool}</b>
+                        <span className="text-zinc-400">{x.land}</span>
+                      </div>
+                      <div className="min-w-0 text-zinc-200">
+                        <b className="block text-zinc-100">
+                          {x.vechters.length} {x.vechters.length === 1 ? "vechter" : "vechters"}
+                        </b>
+                        <span className="text-zinc-400">
+                          {x.vechters.map((v) => v.naam).join(" · ")}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </IssuePanel>
             ) : null}
 
