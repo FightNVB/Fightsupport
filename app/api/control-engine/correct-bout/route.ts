@@ -2,11 +2,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  buildControleBoutContext,
+  buildControleBoutContext as buildControlBoutContext,
   buildToernooiContext,
 } from "@/lib/control/buildControleBoutContext";
-import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
-import { rulesEngine } from "@/lib/rulesEngine";
+import { enrichControleBoutContext as enrichControlBoutContext } from "@/lib/control/enrichControleBoutContext";
+import { rulesEngine as controlRulesEngine } from "@/lib/rulesEngine";
+
+import { buildControleBoutContext as buildMatchmakerBoutContext } from "@/lib/matchmaker/buildControleBoutContext";
+import { enrichControleBoutContext as enrichMatchmakerBoutContext } from "@/lib/matchmaker/enrichControleBoutContext";
+import { rulesEngine as matchmakerRulesEngine } from "@/lib/matchmaker/rulesEngine";
 import { assertHasMatchmakingEditLock } from "@/lib/matchmakingEditLock";
 import {
   assertCanAccessMatchmaking,
@@ -507,7 +511,7 @@ async function correctToernooiFighter(opts: {
   // 4) Regels opnieuw draaien voor deze toernooi-vechter.
   //    rulesEngine gebruikt ctxRows uit controle_bout_context voor normale partijen;
   //    voor toernooi draait hij meestal op DB-context. Daarom geven we lege ctxRows mee.
-  await rulesEngine({
+  await controlRulesEngine({
     matchmaking_id,
     controle_run_id,
     ctxRows: [],
@@ -549,6 +553,9 @@ export async function POST(req: Request) {
 
     await assertCanCorrectBout({ matchmaking_id, userId, role });
     await assertHasMatchmakingEditLock(matchmaking_id, userId);
+
+    const isMatchmakerFlow =
+      String(role ?? "").trim().toLowerCase() === "matchmaker";
 
     // Toernooi-flow: geen partij_nr, maar wel toernooi_code + VA.
     if (toernooi_code && !Number.isFinite(partij_nr)) {
@@ -723,7 +730,14 @@ export async function POST(req: Request) {
       });
     }
 
-    await buildControleBoutContext(matchmaking_id, controle_run_id, { partij_nr });
+    // matchmaking_bouts_raw is hierboven de bron die is aangepast.
+    // Voor een matchmaker opnieuw opbouwen met de nieuwe matchmaker-stack;
+    // die gebruikt de VA-nummers uit de raw bout voor de centrale vechterdata.
+    if (isMatchmakerFlow) {
+      await buildMatchmakerBoutContext(matchmaking_id, controle_run_id, { partij_nr });
+    } else {
+      await buildControlBoutContext(matchmaking_id, controle_run_id, { partij_nr });
+    }
 
     const ctxAfterBuild = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
     const scopedBoutId =
@@ -732,10 +746,17 @@ export async function POST(req: Request) {
       unwrapUuid(existingBout?.bout_id) ??
       null;
 
-    await enrichControleBoutContext(matchmaking_id, controle_run_id, {
-      partij_nr,
-      bout_id: scopedBoutId,
-    });
+    if (isMatchmakerFlow) {
+      await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id, {
+        partij_nr,
+        bout_id: scopedBoutId,
+      });
+    } else {
+      await enrichControlBoutContext(matchmaking_id, controle_run_id, {
+        partij_nr,
+        bout_id: scopedBoutId,
+      });
+    }
 
     let ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
 
@@ -822,13 +843,20 @@ export async function POST(req: Request) {
       });
     }
 
-    await rulesEngine({
+    const scopedRulesArgs = {
       matchmaking_id,
       controle_run_id,
       ctxRows,
       scoped_partij_nr: partij_nr,
       scoped_bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
-    });
+    };
+
+    if (isMatchmakerFlow) {
+      // De matchmaker rulesEngine gebruikt de matchmaker saveControleResultaten-flow.
+      await matchmakerRulesEngine(scopedRulesArgs);
+    } else {
+      await controlRulesEngine(scopedRulesArgs);
+    }
 
     return NextResponse.json({
       ok: true,
