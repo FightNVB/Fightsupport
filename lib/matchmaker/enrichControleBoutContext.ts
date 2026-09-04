@@ -629,6 +629,32 @@ async function fetchLatestResultGymsByVa(vaNummers: string[]) {
   return map;
 }
 
+
+function mmNameMatchesSchoolOrAlias(
+  gymNaam: string,
+  school: any,
+  aliasMaps: AliasMaps
+) {
+  const mm = String(gymNaam ?? "").trim();
+  if (!mm || !school) return false;
+
+  const canonical = String(school?.naam ?? "").trim();
+  if (looseGymNameCompatible(mm, canonical)) return true;
+
+  const sid = String(school?.sportschool_id ?? "").trim();
+  if (!sid) return false;
+
+  const mmNorm = norm(mm);
+  const mmCompact = compactNorm(mmNorm);
+
+  return (aliasMaps.aliasRows ?? []).some((a) => {
+    if (String(a?.sportschool_id ?? "").trim() !== sid) return false;
+    const aliasNorm = norm(a?.alias_text ?? "");
+    if (!aliasNorm) return false;
+    return aliasNorm === mmNorm || compactNorm(aliasNorm) === mmCompact;
+  });
+}
+
 function findGymMatchFromLatestResult(opts: {
   sportscholen: any[];
   gymNaam: string;
@@ -644,14 +670,20 @@ function findGymMatchFromLatestResult(opts: {
   const resultGym = String(latest?.sportschool ?? "").trim();
   if (!resultGym) return { row: null, reason: "Geen sportschool in laatste FightPassport-uitslag." };
 
-  // De historische sportschool moet inhoudelijk passen bij de sportschool uit de matchmaking.
-  // Voorbeeld: MM "No Mercy Gym" ↔ laatste uitslag "No Mercy Gym Never Give Up".
-  if (!looseGymNameCompatible(gymNaam, resultGym)) {
-    return { row: null, reason: `Laatste FightPassport-uitslag noemt "${resultGym}", maar die past niet bij de MM-sportschool.` };
-  }
-
+  // Resolve eerst de sportschool uit de laatste FightPassport-uitslag. Daarna controleren
+  // we of de MM-naam de canonieke naam OF een alias van precies DIE sportschool is.
+  // Dit voorkomt dat bijvoorbeeld "Fightteam TMS" naar een andere sportschool "TMS" valt,
+  // terwijl de uitslag van deze vechter naar "Theo Meijer Sport Leusden" wijst en
+  // "Fightteam TMS" daar als alias geregistreerd staat.
   const match = findGymMatch(sportscholen, resultGym, aliasMaps);
   if (!match.row) return match;
+
+  if (!mmNameMatchesSchoolOrAlias(gymNaam, match.row, aliasMaps)) {
+    return {
+      row: null,
+      reason: `Laatste FightPassport-uitslag noemt "${resultGym}", maar de MM-naam "${gymNaam}" is geen naam/alias van die sportschool.`,
+    };
+  }
 
   // Zonder expliciete buitenlandse landhint in de matchmaking mag een historische naam
   // niet alsnog een buitenlandse sportschool afdwingen.
@@ -726,7 +758,7 @@ function findGymMatchFromVaLinksOnly(opts: {
 
   // Eerst de MM-naam alleen binnen de sportscholen gebruiken waar deze VA
   // volgens FightPassport daadwerkelijk aan gekoppeld staat.
-  const compatible = candidates.filter((x) => looseGymNameCompatible(gymNaam, String(x?.naam ?? "")));
+  const compatible = candidates.filter((x) => mmNameMatchesSchoolOrAlias(gymNaam, x, aliasMaps));
   if (compatible.length === 1) return { row: compatible[0], reason: null };
 
   const restricted = findGymMatch(candidates, gymNaam, aliasMaps);
@@ -788,7 +820,7 @@ function findGymMatchForFighter(opts: {
   });
   if (
     linked.row &&
-    looseGymNameCompatible(gymNaam, String(linked.row?.naam ?? ""))
+    mmNameMatchesSchoolOrAlias(gymNaam, linked.row, aliasMaps)
   ) {
     return linked;
   }
@@ -801,7 +833,7 @@ function findGymMatchForFighter(opts: {
     const school = findSportschoolBySportschoolId(sportscholen, consensusSid);
     if (
       school &&
-      looseGymNameCompatible(gymNaam, String(school?.naam ?? ""))
+      mmNameMatchesSchoolOrAlias(gymNaam, school, aliasMaps)
     ) {
       return { row: school, reason: null };
     }
