@@ -1,11 +1,7 @@
 // app/api/control-engine/correct-bout/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import {
-  buildControleBoutContext as buildControlBoutContext,
-  buildToernooiContext,
-} from "@/lib/control/buildControleBoutContext";
-import { enrichControleBoutContext as enrichControlBoutContext } from "@/lib/control/enrichControleBoutContext";
+import { buildToernooiContext } from "@/lib/control/buildControleBoutContext";
 import { rulesEngine as controlRulesEngine } from "@/lib/rulesEngine";
 
 import { buildControleBoutContext as buildMatchmakerBoutContext } from "@/lib/matchmaker/buildControleBoutContext";
@@ -554,10 +550,6 @@ export async function POST(req: Request) {
     await assertCanCorrectBout({ matchmaking_id, userId, role });
     await assertHasMatchmakingEditLock(matchmaking_id, userId);
 
-    // Bewerken/Opslaan van een matchmaking-partij gebruikt altijd de matchmaker-stack.
-    // De rol bepaalt alleen de toegang, niet de build/enrich/rules/save-logica.
-    const isMatchmakerFlow = true;
-
     // Toernooi-flow: geen partij_nr, maar wel toernooi_code + VA.
     if (toernooi_code && !Number.isFinite(partij_nr)) {
       return await correctToernooiFighter({
@@ -734,11 +726,8 @@ export async function POST(req: Request) {
     // matchmaking_bouts_raw is hierboven de bron die is aangepast.
     // Voor een matchmaker opnieuw opbouwen met de nieuwe matchmaker-stack;
     // die gebruikt de VA-nummers uit de raw bout voor de centrale vechterdata.
-    if (isMatchmakerFlow) {
-      await buildMatchmakerBoutContext(matchmaking_id, controle_run_id, { partij_nr });
-    } else {
-      await buildControlBoutContext(matchmaking_id, controle_run_id, { partij_nr });
-    }
+    // Normale partij: altijd de matchmaker-build. Geen control fallback.
+    await buildMatchmakerBoutContext(matchmaking_id, controle_run_id, { partij_nr });
 
     const ctxAfterBuild = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
     const scopedBoutId =
@@ -859,12 +848,8 @@ export async function POST(req: Request) {
       scoped_bout_id: unwrapUuid(ctxFinal?.bout_id) ?? scopedBoutId ?? null,
     };
 
-    if (isMatchmakerFlow) {
-      // De matchmaker rulesEngine gebruikt de matchmaker saveControleResultaten-flow.
-      await matchmakerRulesEngine(scopedRulesArgs);
-    } else {
-      await controlRulesEngine(scopedRulesArgs);
-    }
+    // Normale partij: altijd matchmaker rules/save. Geen control fallback.
+    await matchmakerRulesEngine(scopedRulesArgs);
 
     return NextResponse.json({
       ok: true,
