@@ -830,6 +830,32 @@ export async function POST(req: Request) {
       }
     }
 
+    // BELANGRIJK:
+    // De final override hierboven zet de bewerkvelden (o.a. *_gym_mm) na enrich terug.
+    // Daardoor kan een eerder correct opgeloste sportschool/alias-match weer stale worden
+    // vóór de rulesEngine/save draait. Verrijk daarom na de override nog één keer op basis
+    // van de definitieve MM-context.
+    if (ctxFinal) {
+      const finalBoutId =
+        unwrapUuid(ctxFinal?.bout_id) ??
+        scopedBoutId ??
+        null;
+
+      if (isMatchmakerFlow) {
+        await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id, {
+          partij_nr,
+          bout_id: finalBoutId,
+        });
+      } else {
+        await enrichControlBoutContext(matchmaking_id, controle_run_id, {
+          partij_nr,
+          bout_id: finalBoutId,
+        });
+      }
+
+      ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+    }
+
     const ctxRows = ctxFinal ? [ctxFinal] : [];
 
     if (ctxRows.length === 0) {
