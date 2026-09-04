@@ -554,8 +554,9 @@ export async function POST(req: Request) {
     await assertCanCorrectBout({ matchmaking_id, userId, role });
     await assertHasMatchmakingEditLock(matchmaking_id, userId);
 
-    const isMatchmakerFlow =
-      String(role ?? "").trim().toLowerCase() === "matchmaker";
+    // Bewerken/Opslaan van een matchmaking-partij gebruikt altijd de matchmaker-stack.
+    // De rol bepaalt alleen de toegang, niet de build/enrich/rules/save-logica.
+    const isMatchmakerFlow = true;
 
     // Toernooi-flow: geen partij_nr, maar wel toernooi_code + VA.
     if (toernooi_code && !Number.isFinite(partij_nr)) {
@@ -746,21 +747,11 @@ export async function POST(req: Request) {
       unwrapUuid(existingBout?.bout_id) ??
       null;
 
-    if (isMatchmakerFlow) {
-      await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id, {
-        partij_nr,
-        bout_id: scopedBoutId,
-      });
-    } else {
-      await enrichControlBoutContext(matchmaking_id, controle_run_id, {
-        partij_nr,
-        bout_id: scopedBoutId,
-      });
-    }
-
+    // Nog NIET enrichen. Eerst alle definitieve MM-bewerkvelden vastzetten.
+    // Rescrape doet hetzelfde principe: build/context eerst definitief, daarna enrich.
     let ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
 
-    // Final override na build + enrich:
+    // Final override na build en vóór enrich:
     // buildControleBoutContext/enrich kunnen context opnieuw vullen vanuit raw/scrape.
     // De bewerkvelden uit deze request moeten leidend blijven.
     // Let op: controle_bout_context gebruikt *_mm kolommen voor namen/gym/gewicht.
@@ -830,28 +821,19 @@ export async function POST(req: Request) {
       }
     }
 
-    // BELANGRIJK:
-    // De final override hierboven zet de bewerkvelden (o.a. *_gym_mm) na enrich terug.
-    // Daardoor kan een eerder correct opgeloste sportschool/alias-match weer stale worden
-    // vóór de rulesEngine/save draait. Verrijk daarom na de override nog één keer op basis
-    // van de definitieve MM-context.
+    // Nu pas de definitieve matchmaker-enrich uitvoeren op exact de context
+    // die daarna naar rules/save gaat. Na deze enrich worden geen MM-bronvelden
+    // meer teruggezet of overschreven.
     if (ctxFinal) {
       const finalBoutId =
         unwrapUuid(ctxFinal?.bout_id) ??
         scopedBoutId ??
         null;
 
-      if (isMatchmakerFlow) {
-        await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id, {
-          partij_nr,
-          bout_id: finalBoutId,
-        });
-      } else {
-        await enrichControlBoutContext(matchmaking_id, controle_run_id, {
-          partij_nr,
-          bout_id: finalBoutId,
-        });
-      }
+      await enrichMatchmakerBoutContext(matchmaking_id, controle_run_id, {
+        partij_nr,
+        bout_id: finalBoutId,
+      });
 
       ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
     }

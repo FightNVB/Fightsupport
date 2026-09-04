@@ -353,9 +353,10 @@ export async function POST(req: Request) {
     const { userId, role } = await requireUserWithRole(req);
     await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
 
-    // Deze endpoint wordt door meerdere rollen gebruikt. Alleen een matchmaker-rescrape
-    // moet de matchmaker build/enrich/rules/save-stack gebruiken.
-    const isMatchmakerFlow = String(role ?? "").trim().toLowerCase() === "matchmaker";
+    // Deze endpoint hoort voor normale partijen altijd dezelfde Matchmaker-controle
+    // te draaien, ongeacht welke bevoegde rol de herscrape start.
+    // De rol bepaalt alleen de toegang, niet de build/enrich/rules/save-stack.
+    const isMatchmakerFlow = true;
 
     const controle_run_id_in = String(body?.controle_run_id ?? "").trim();
     const controle_run_id = controle_run_id_in || (await getLatestControleRunId(matchmaking_id));
