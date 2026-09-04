@@ -597,6 +597,73 @@ function looseGymNameCompatible(aRaw: string, bRaw: string) {
   return minLen >= 5 && (a.includes(b) || b.includes(a));
 }
 
+type FightPassportResultGym = {
+  id?: number | null;
+  va_nummer: string;
+  datum?: string | null;
+  sportschool: string | null;
+  last_seen_at?: string | null;
+};
+
+async function fetchLatestResultGymsByVa(vaNummers: string[]) {
+  const unique = Array.from(new Set((vaNummers ?? []).map((v) => String(v ?? "").trim()).filter(Boolean)));
+  const map = new Map<string, FightPassportResultGym>();
+  if (unique.length === 0) return map;
+
+  const { data, error } = await supabaseAdmin
+    .from("fightpassport_results")
+    .select("id,va_nummer,datum,sportschool,last_seen_at")
+    .in("va_nummer", unique)
+    .order("datum", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false });
+
+  if (error) throw error;
+
+  for (const row of (data ?? []) as FightPassportResultGym[]) {
+    const va = String(row?.va_nummer ?? "").trim();
+    const gym = String(row?.sportschool ?? "").trim();
+    if (!va || !gym || map.has(va)) continue;
+    map.set(va, row);
+  }
+
+  return map;
+}
+
+function findGymMatchFromLatestResult(opts: {
+  sportscholen: any[];
+  gymNaam: string;
+  vaNummer: string;
+  latestResultGymByVa: Map<string, FightPassportResultGym>;
+  aliasMaps: AliasMaps;
+}): GymMatch {
+  const { sportscholen, gymNaam, vaNummer, latestResultGymByVa, aliasMaps } = opts;
+  const va = String(vaNummer ?? "").trim();
+  if (!va) return { row: null, reason: "Geen VA-nummer voor laatste FightPassport-uitslag." };
+
+  const latest = latestResultGymByVa.get(va);
+  const resultGym = String(latest?.sportschool ?? "").trim();
+  if (!resultGym) return { row: null, reason: "Geen sportschool in laatste FightPassport-uitslag." };
+
+  // De historische sportschool moet inhoudelijk passen bij de sportschool uit de matchmaking.
+  // Voorbeeld: MM "No Mercy Gym" ↔ laatste uitslag "No Mercy Gym Never Give Up".
+  if (!looseGymNameCompatible(gymNaam, resultGym)) {
+    return { row: null, reason: `Laatste FightPassport-uitslag noemt "${resultGym}", maar die past niet bij de MM-sportschool.` };
+  }
+
+  const match = findGymMatch(sportscholen, resultGym, aliasMaps);
+  if (!match.row) return match;
+
+  // Zonder expliciete buitenlandse landhint in de matchmaking mag een historische naam
+  // niet alsnog een buitenlandse sportschool afdwingen.
+  const mmHint = detectLandHintFromGymText(gymNaam);
+  const landDb = match.row?.land ?? match.row?.country ?? null;
+  if (!isForeignHint(mmHint) && isForeignNonNL(landDb)) {
+    return { row: null, reason: "Laatste FightPassport-uitslag leidde alleen naar een buitenlandse sportschool zonder buitenlandse MM-landhint." };
+  }
+
+  return match;
+}
+
 type SchoolFighterLink = {
   va_nummer: string;
   sportschool_id: any;
@@ -684,21 +751,34 @@ function findGymMatchForFighter(opts: {
   gymNaam: string;
   vaNummer: string;
   schoolLinksByVa: Map<string, SchoolFighterLink[]>;
+  latestResultGymByVa: Map<string, FightPassportResultGym>;
   aliasMaps: AliasMaps;
   teamConsensusByGym?: Map<string, string>;
 }): GymMatch {
-  const { sportscholen, gymNaam, vaNummer, schoolLinksByVa, aliasMaps, teamConsensusByGym } = opts;
+  const { sportscholen, gymNaam, vaNummer, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym } = opts;
 
-  // Voor de keurmerkcontrole is de sportschool uit de matchmaking leidend.
-  // Een vechter kan inmiddels van sportschool zijn gewisseld; een oude
-  // fightpassport_school_fighters-koppeling mag de MM-sportschool daarom
-  // nooit overrulen.
-  const general = findGymMatch(sportscholen, gymNaam, aliasMaps);
-  if (general.row) return general;
+  const explicitLandHint = detectLandHintFromGymText(gymNaam);
 
-  // VA-koppelingen mogen alleen helpen wanneer de gekoppelde sportschoolnaam
-  // ook werkelijk overeenkomt met de MM-sportschoolnaam. Dus NOOIT meer:
-  // "één gekoppelde sportschool = automatisch kiezen".
+  // 1) Staat er in de matchmaking expliciet een landcode/landnaam, dan is die leidend.
+  //    Voorbeeld: "No Mercy Gym (DE)" mag rechtstreeks naar Duitsland zoeken.
+  if (explicitLandHint) {
+    const explicit = findGymMatch(sportscholen, gymNaam, aliasMaps);
+    if (explicit.row) return explicit;
+  }
+
+  // 2) Zonder expliciete buitenlandse hint: kijk eerst naar de LAATSTE uitslag van deze VA
+  //    in fightpassport_results. Dit is de sterkste historische aanwijzing voor de gym.
+  const latestResult = findGymMatchFromLatestResult({
+    sportscholen,
+    gymNaam,
+    vaNummer,
+    latestResultGymByVa,
+    aliasMaps,
+  });
+  if (latestResult.row) return latestResult;
+
+  // 3) Daarna de huidige/actieve koppeling in fightpassport_school_fighters, maar alleen
+  //    wanneer de gekoppelde sportschoolnaam ook inhoudelijk bij de MM-sportschool past.
   const linked = findGymMatchFromVaLinksOnly({
     sportscholen,
     gymNaam,
@@ -713,7 +793,7 @@ function findGymMatchForFighter(opts: {
     return linked;
   }
 
-  // Laatste fallback: alleen binnen DEZE matchmaking en alleen wanneer de
+  // 4) Teamfallback: alleen binnen DEZE matchmaking en alleen wanneer de
   // consensus-school óók naamtechnisch bij de MM-sportschool past.
   const key = teamConsensusKey(gymNaam);
   const consensusSid = key ? teamConsensusByGym?.get(key) : null;
@@ -724,6 +804,21 @@ function findGymMatchForFighter(opts: {
       looseGymNameCompatible(gymNaam, String(school?.naam ?? ""))
     ) {
       return { row: school, reason: null };
+    }
+  }
+
+  // 5) Pas als laatste de algemene naam/alias/fuzzy matching gebruiken.
+  // Zonder expliciete buitenlandse landhint accepteren we hier GEEN buitenlandse match.
+  const general = findGymMatch(sportscholen, gymNaam, aliasMaps);
+  if (general.row) {
+    const landDb = general.row?.land ?? general.row?.country ?? null;
+    if (!explicitLandHint && isForeignNonNL(landDb)) {
+      return {
+        row: null,
+        reason:
+          `Naam-match kwam uit op buitenlandse sportschool "${general.row?.naam ?? "?"}" (${general.row?.plaats ?? general.row?.stad ?? "?"}), ` +
+          "maar de matchmaking bevat geen buitenlandse landcode/landnaam.",
+      };
     }
   }
 
@@ -1030,6 +1125,7 @@ export async function enrichControleBoutContext(
     String(row?.blauw_va_mm ?? "").trim(),
   ]).filter(Boolean);
   const schoolLinksByVa = await fetchSchoolFighterLinksByVa(ctxVaNummers);
+  const latestResultGymByVa = await fetchLatestResultGymsByVa(ctxVaNummers);
 
   const teamConsensusVotes = new Map<string, Map<string, number>>();
   for (const row of ctxRows ?? []) {
@@ -1093,10 +1189,10 @@ export async function enrichControleBoutContext(
     const blauwVa = String((row as any).blauw_va_mm ?? "").trim();
 
     const roodMatch = roodGym
-      ? findGymMatchForFighter({ sportscholen, gymNaam: roodGym, vaNummer: roodVa, schoolLinksByVa, aliasMaps, teamConsensusByGym })
+      ? findGymMatchForFighter({ sportscholen, gymNaam: roodGym, vaNummer: roodVa, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym })
       : { row: null, reason: null };
     const blauwMatch = blauwGym
-      ? findGymMatchForFighter({ sportscholen, gymNaam: blauwGym, vaNummer: blauwVa, schoolLinksByVa, aliasMaps, teamConsensusByGym })
+      ? findGymMatchForFighter({ sportscholen, gymNaam: blauwGym, vaNummer: blauwVa, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym })
       : { row: null, reason: null };
 
     const rood = roodMatch.row;
@@ -1218,6 +1314,7 @@ Geen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "
     String(row?.va_nummer ?? row?.fighter_id ?? "").trim()
   ).filter(Boolean);
   const tournamentSchoolLinksByVa = await fetchSchoolFighterLinksByVa(tournamentVaNummers);
+  const tournamentLatestResultGymByVa = await fetchLatestResultGymsByVa(tournamentVaNummers);
 
   for (const row of tournamentRows ?? []) {
     const rowId = unwrapUuid((row as any).id) ?? String((row as any).id ?? "").trim();
@@ -1231,6 +1328,7 @@ Geen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "
           gymNaam: gym,
           vaNummer: va,
           schoolLinksByVa: tournamentSchoolLinksByVa,
+          latestResultGymByVa: tournamentLatestResultGymByVa,
           aliasMaps,
         })
       : { row: null, reason: null };
