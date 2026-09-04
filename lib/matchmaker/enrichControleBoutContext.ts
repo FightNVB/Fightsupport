@@ -500,6 +500,20 @@ function tryAliasMatch(
 ): GymMatch | null {
   if (!aliasMaps) return null;
 
+  // Eerst een exacte vergelijking waarbij alleen spaties/punctuatie verschillen.
+  // Zo matcht "Fightteam TMS" ook met alias "Fight Team TMS" voordat een
+  // algemene naam/fuzzy-match de losse sportschool "TMS" kan kiezen.
+  const inputStrictCompact = compactStrictName(gymNaam);
+  if (inputStrictCompact) {
+    for (const a of aliasMaps.aliasRows ?? []) {
+      const aliasRaw = String(a?.alias_text ?? "").trim();
+      if (!aliasRaw || compactStrictName(aliasRaw) !== inputStrictCompact) continue;
+
+      const hit = findSportschoolBySportschoolId(sportscholen, a?.sportschool_id);
+      if (hit) return { row: hit, reason: null };
+    }
+  }
+
   const variants = buildAliasLookupVariants(gymNaam, knownPlaces);
 
   for (const key of variants) {
@@ -646,12 +660,22 @@ function mmNameMatchesSchoolOrAlias(
 
   const mmNorm = norm(mm);
   const mmCompact = compactNorm(mmNorm);
+  const mmStrictCompact = compactStrictName(mm);
 
   return (aliasMaps.aliasRows ?? []).some((a) => {
     if (String(a?.sportschool_id ?? "").trim() !== sid) return false;
-    const aliasNorm = norm(a?.alias_text ?? "");
-    if (!aliasNorm) return false;
-    return aliasNorm === mmNorm || compactNorm(aliasNorm) === mmCompact;
+
+    const aliasRaw = String(a?.alias_text ?? "").trim();
+    const aliasNorm = norm(aliasRaw);
+    if (!aliasRaw) return false;
+
+    // Belangrijk voor aliases als "Fight Team TMS" versus MM "Fightteam TMS".
+    // norm() verwijdert losse woorden "fight" en "team", maar niet het
+    // aaneengeschreven woord "fightteam". De strict-compact vergelijking
+    // maakt beide vormen gelijk zonder meteen fuzzy te gaan matchen.
+    if (compactStrictName(aliasRaw) === mmStrictCompact) return true;
+
+    return !!aliasNorm && (aliasNorm === mmNorm || compactNorm(aliasNorm) === mmCompact);
   });
 }
 
