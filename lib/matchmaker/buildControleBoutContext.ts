@@ -40,6 +40,25 @@ function toNullableRealStr(v: any): string | null {
   return s;
 }
 
+function isOpenOpponentPlaceholder(v: any): boolean {
+  const s = String(v ?? "")
+    .toLowerCase()
+    .replace(/[._-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return new Set([
+    "tba",
+    "t b a",
+    "gezocht",
+    "tegenstander gezocht",
+    "opponent gezocht",
+    "nog gezocht",
+    "to be announced",
+  ]).has(s);
+}
+
+
 function toernooiParticipantHasRealData(row: any): boolean {
   return !!(
     firstValidVa(row?.fighter_id, row?.va_nummer, row?.va_nummer_fp, row?.va_nummer_mm) ||
@@ -783,8 +802,10 @@ if (scopedPartijNr != null) {
     if (!duplicatePartijNrs.has(partijNr)) duplicatePartijNrs.set(partijNr, []);
     duplicatePartijNrs.get(partijNr)!.push(String(bout_id));
 
-    const vaR = pickVA(partij, "rood");
-    const vaB = pickVA(partij, "blauw");
+    const roodOpen = isOpenOpponentPlaceholder(partij?.rood_naam);
+    const blauwOpen = isOpenOpponentPlaceholder(partij?.blauw_naam);
+    const vaR = roodOpen ? null : pickVA(partij, "rood");
+    const vaB = blauwOpen ? null : pickVA(partij, "blauw");
 
     const vaRPrev = firstValidVa(
       partij?.rood_va_mm_prev,
@@ -937,26 +958,30 @@ if (scopedPartijNr != null) {
       max_gewicht_notatie,
       max_gewicht_type,
 
-      rood_naam_mm:
-        toNullableStr(partij?.rood_naam) ??
-        toNullableStr(mr?.naam_input) ??
-        toNullableStr(mr?.voornaam && mr?.achternaam ? `${mr.voornaam} ${mr.achternaam}` : null),
-      rood_gym_mm:
-        toNullableStr(partij?.rood_gym) ??
-        toNullableStr(mr?.gym_input),
+      rood_naam_mm: roodOpen
+        ? "TBA"
+        : toNullableStr(partij?.rood_naam) ??
+          toNullableStr(mr?.naam_input) ??
+          toNullableStr(mr?.voornaam && mr?.achternaam ? `${mr.voornaam} ${mr.achternaam}` : null),
+      rood_gym_mm: roodOpen
+        ? null
+        : toNullableStr(partij?.rood_gym) ??
+          toNullableStr(mr?.gym_input),
       rood_gewicht_mm:
         toNullableNumber(partij?.rood_gewicht) ??
         toNullableNumber(mr?.gewicht),
       rood_va_mm: vaR,
       rood_va_mm_prev: vaRPrev,
 
-      blauw_naam_mm:
-        toNullableStr(partij?.blauw_naam) ??
-        toNullableStr(mb?.naam_input) ??
-        toNullableStr(mb?.voornaam && mb?.achternaam ? `${mb.voornaam} ${mb.achternaam}` : null),
-      blauw_gym_mm:
-        toNullableStr(partij?.blauw_gym) ??
-        toNullableStr(mb?.gym_input),
+      blauw_naam_mm: blauwOpen
+        ? "TBA"
+        : toNullableStr(partij?.blauw_naam) ??
+          toNullableStr(mb?.naam_input) ??
+          toNullableStr(mb?.voornaam && mb?.achternaam ? `${mb.voornaam} ${mb.achternaam}` : null),
+      blauw_gym_mm: blauwOpen
+        ? null
+        : toNullableStr(partij?.blauw_gym) ??
+          toNullableStr(mb?.gym_input),
       blauw_gewicht_mm:
         toNullableNumber(partij?.blauw_gewicht) ??
         toNullableNumber(mb?.gewicht),

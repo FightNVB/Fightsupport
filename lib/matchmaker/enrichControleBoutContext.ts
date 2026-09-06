@@ -85,6 +85,25 @@ function compactStrictName(s: any) {
   return normStrictName(s).replace(/\s+/g, "");
 }
 
+function isOpenOpponentPlaceholder(v: any): boolean {
+  const s = String(v ?? "")
+    .toLowerCase()
+    .replace(/[._-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return new Set([
+    "tba",
+    "t b a",
+    "gezocht",
+    "tegenstander gezocht",
+    "opponent gezocht",
+    "nog gezocht",
+    "to be announced",
+  ]).has(s);
+}
+
+
 function normPlaats(s: any) {
   return String(s ?? "")
     .toLowerCase()
@@ -1238,11 +1257,15 @@ export async function enrichControleBoutContext(
     const bout_id = unwrapUuid((row as any).bout_id);
     if (!bout_id) continue;
 
-    const roodGym = String((row as any).rood_gym_mm ?? "").trim();
-    const blauwGym = String((row as any).blauw_gym_mm ?? "").trim();
+    const roodNaam = String((row as any).rood_naam_mm ?? "").trim();
+    const blauwNaam = String((row as any).blauw_naam_mm ?? "").trim();
+    const roodOpen = isOpenOpponentPlaceholder(roodNaam);
+    const blauwOpen = isOpenOpponentPlaceholder(blauwNaam);
+    const roodGym = roodOpen ? "" : String((row as any).rood_gym_mm ?? "").trim();
+    const blauwGym = blauwOpen ? "" : String((row as any).blauw_gym_mm ?? "").trim();
 
-    const roodVa = String((row as any).rood_va_mm ?? "").trim();
-    const blauwVa = String((row as any).blauw_va_mm ?? "").trim();
+    const roodVa = roodOpen ? "" : String((row as any).rood_va_mm ?? "").trim();
+    const blauwVa = blauwOpen ? "" : String((row as any).blauw_va_mm ?? "").trim();
 
     const roodMatch = roodGym
       ? findGymMatchForFighter({ sportscholen, gymNaam: roodGym, vaNummer: roodVa, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym })
@@ -1259,7 +1282,10 @@ export async function enrichControleBoutContext(
     const roodHint = detectLandHintFromGymText(roodGym);
     const blauwHint = detectLandHintFromGymText(blauwGym);
 
-    if (!rood) {
+    if (roodOpen) {
+      patch.keurmerk_rood = null;
+      patch.keurmerk_reden_rood = null;
+    } else if (!rood) {
       if (isForeignHint(roodHint)) {
         patch.keurmerk_rood = true;
         patch.keurmerk_reden_rood = buildForeignKeurmerkReason({ gym: roodGym, land: landHintToLabel(roodHint) });
@@ -1302,7 +1328,10 @@ Geen geldig keurmerk op eventdatum. Keurmerk eindigt/eindigde op ${eindeIso ?? "
       }
     }
 
-    if (!blauw) {
+    if (blauwOpen) {
+      patch.keurmerk_blauw = null;
+      patch.keurmerk_reden_blauw = null;
+    } else if (!blauw) {
       if (isForeignHint(blauwHint)) {
         patch.keurmerk_blauw = true;
         patch.keurmerk_reden_blauw = buildForeignKeurmerkReason({ gym: blauwGym, land: landHintToLabel(blauwHint) });

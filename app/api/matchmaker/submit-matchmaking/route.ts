@@ -79,7 +79,26 @@ function toBoolLoose(v: any): boolean | null {
   return null;
 }
 
+function isOpenOpponentName(v: any): boolean {
+  const s = String(v ?? "")
+    .toLowerCase()
+    .replace(/[._-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return [
+    "tba",
+    "t b a",
+    "gezocht",
+    "tegenstander gezocht",
+    "opponent gezocht",
+    "nog gezocht",
+    "to be announced",
+  ].includes(s);
+}
+
 function normalizeMaxGewicht(v: any): number | null {
+
+
   if (v == null) return null;
 
   const raw = String(v).trim();
@@ -936,12 +955,14 @@ export async function POST(req: Request) {
     const rows: any[] = [];
 
     for (const b of bouts ?? []) {
-      const vaR = toVaStrict(
+      const roodOpen = isOpenOpponentName((b as any)?.rood_naam);
+      const blauwOpen = isOpenOpponentName((b as any)?.blauw_naam);
+      const vaR = roodOpen ? null : toVaStrict(
         (b as any)?.va_rood ??
           (b as any)?.rood_va ??
           (b as any)?.rood_va_mm
       );
-      const vaB = toVaStrict(
+      const vaB = blauwOpen ? null : toVaStrict(
         (b as any)?.va_blauw ??
           (b as any)?.blauw_va ??
           (b as any)?.blauw_va_mm
@@ -991,17 +1012,17 @@ export async function POST(req: Request) {
 
         partij_nr: (b as any)?.partij_nr ?? null,
 
-        rood_naam: (b as any)?.rood_naam ?? null,
-        rood_gym: (b as any)?.rood_gym ?? null,
+        rood_naam: roodOpen ? "TBA" : (b as any)?.rood_naam ?? null,
+        rood_gym: roodOpen ? null : (b as any)?.rood_gym ?? null,
         va_rood: vaR,
-        rood_geboortedatum: (b as any)?.rood_geboortedatum ?? null,
-        rood_gewicht: (b as any)?.rood_gewicht ?? null,
+        rood_geboortedatum: roodOpen ? null : (b as any)?.rood_geboortedatum ?? null,
+        rood_gewicht: roodOpen ? null : (b as any)?.rood_gewicht ?? null,
 
-        blauw_naam: (b as any)?.blauw_naam ?? null,
-        blauw_gym: (b as any)?.blauw_gym ?? null,
+        blauw_naam: blauwOpen ? "TBA" : (b as any)?.blauw_naam ?? null,
+        blauw_gym: blauwOpen ? null : (b as any)?.blauw_gym ?? null,
         va_blauw: vaB,
-        blauw_geboortedatum: (b as any)?.blauw_geboortedatum ?? null,
-        blauw_gewicht: (b as any)?.blauw_gewicht ?? null,
+        blauw_geboortedatum: blauwOpen ? null : (b as any)?.blauw_geboortedatum ?? null,
+        blauw_gewicht: blauwOpen ? null : (b as any)?.blauw_gewicht ?? null,
 
         discipline: discipline || null,
         klasse: klasse || null,
@@ -1024,6 +1045,8 @@ export async function POST(req: Request) {
           ...((b as any)?.extra ?? {}),
           toernooi_code:
             toernooi_code ?? (b as any)?.extra?.toernooi_code ?? null,
+          rood_open_opponent: roodOpen || undefined,
+          blauw_open_opponent: blauwOpen || undefined,
         },
 
         created_at: now,

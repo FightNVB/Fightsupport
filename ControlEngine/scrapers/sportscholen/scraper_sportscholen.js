@@ -1125,6 +1125,52 @@ async function downloadVechtersExcel(page, browser, sportschoolKey) {
   }
 }
 
+function findHeaderIndex(headers, names) {
+  const low = headers.map((h) => String(h || "").trim().toLowerCase());
+
+  for (const name of names) {
+    const idx = low.indexOf(String(name).toLowerCase());
+    if (idx !== -1) return idx;
+  }
+
+  for (const name of names) {
+    const needle = String(name).toLowerCase();
+    const idx = low.findIndex((h) => h.includes(needle));
+    if (idx !== -1) return idx;
+  }
+
+  return -1;
+}
+
+function findHeaderRowIndex(rows) {
+  const max = Math.min(rows?.length ?? 0, 25);
+
+  for (let i = 0; i < max; i++) {
+    const cells = rows[i] || [];
+    const normalized = cells.map((x) => String(x ?? "").trim().toLowerCase());
+
+    const hasVa = normalized.some((cell) =>
+      cell === "va" ||
+      cell.includes("va-nummer") ||
+      cell.includes("va nummer") ||
+      cell.includes("vanummer") ||
+      cell.includes("va nr") ||
+      cell.includes("relatienummer")
+    );
+
+    const hasNaam = normalized.some((cell) =>
+      cell.includes("naam vechter") ||
+      cell === "naam" ||
+      cell === "vechter" ||
+      cell.includes("volledige naam")
+    );
+
+    if (hasVa && hasNaam) return i;
+  }
+
+  return -1;
+}
+
 async function parseVechtersExcel(filePath, sportschool) {
   console.log("📊 Excel verwerken:", filePath);
 
@@ -1213,8 +1259,6 @@ async function parseVechtersExcel(filePath, sportschool) {
     seen.add(va);
 
     const naam = idxNaam !== -1 ? normalizeText(row[idxNaam]) || null : null;
-    const naamParts = splitNaam(naam);
-
     out.push({
       sportschool_id: Number(sportschool.sportschool_id),
       va_nummer: va,
@@ -1450,10 +1494,13 @@ async function readKeurmerkPeriods(page, key) {
         if (!el) return false;
         const r = el.getBoundingClientRect();
         const st = getComputedStyle(el);
-        return r.width > 0 && r.height > 0 &&
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
           st.display !== "none" &&
           st.visibility !== "hidden" &&
-          st.opacity !== "0";
+          st.opacity !== "0"
+        );
       };
 
       const clean = (v) =>
@@ -1462,34 +1509,87 @@ async function readKeurmerkPeriods(page, key) {
           .replace(/\s+/g, " ")
           .trim();
 
-      const bodies = [...document.querySelectorAll("#overview_table_body")].filter(visible);
-      let rows = [];
-      for (const body of bodies) {
-        const candidateRows = [...body.querySelectorAll("tr.flexlist_row")]
-          .filter((row) => !row.classList.contains("filler") && visible(row));
-        if (candidateRows.length > rows.length) rows = candidateRows;
-      }
+      const norm = (v) => clean(v).toLowerCase();
+      const requiredHeaders = ["toegevoegd door", "toegevoegd op", "start", "einde"];
 
-      if (!rows.length) {
-        // fallback: elke zichtbare tabel binnen de open DETAILS-overlay
-        const tables = [...document.querySelectorAll("table")].filter(visible);
-        for (const table of tables) {
-          const candidateRows = [...table.querySelectorAll("tr.flexlist_row")]
-            .filter((row) => !row.classList.contains("filler") && visible(row));
-          if (candidateRows.length > rows.length) rows = candidateRows;
+      // FightPassport gebruikt op deze pagina meerdere tabellen met soms hetzelfde
+      // #overview_table_body. Kies daarom niet de tabel met de meeste rijen, maar
+      // exact de tabel waarvan de kolomkoppen de keurmerkvelden bevatten.
+      const tables = [...document.querySelectorAll("table")].filter(visible);
+      let chosenTable = null;
+      let chosenHeaders = [];
+
+      for (const table of tables) {
+        const headerCandidates = [
+          ...table.querySelectorAll("thead th, thead td, th, tr.flexlist_header td, tr.flexlist_header th")
+        ]
+          .map((el) => norm(el.textContent))
+          .filter(Boolean);
+
+        const joined = headerCandidates.join(" | ");
+        const matchesAll = requiredHeaders.every((header) => joined.includes(header));
+
+        if (matchesAll) {
+          chosenTable = table;
+          chosenHeaders = headerCandidates;
+          break;
         }
       }
 
-      const parsed = rows.map((row) => {
-        const cells = [...row.querySelectorAll("td")]
-          .map((td) => clean(td.textContent));
-        return cells;
-      }).filter((cells) => cells.length >= 4);
+      // Extra fallback voor FightPassport-varianten waarbij de kopregel geen <th>
+      // gebruikt: zoek het zichtbare #overview_table_body waarvan de bovenliggende
+      // tabeltekst alle vier de keurmerkkoppen bevat.
+      if (!chosenTable) {
+        const bodies = [...document.querySelectorAll("#overview_table_body")].filter(visible);
+        for (const body of bodies) {
+          const table = body.closest("table");
+          if (!table || !visible(table)) continue;
+
+          const tableText = norm(table.innerText || table.textContent);
+          if (requiredHeaders.every((header) => tableText.includes(header))) {
+            chosenTable = table;
+            chosenHeaders = requiredHeaders;
+            break;
+          }
+        }
+      }
+
+      if (!chosenTable) {
+        return {
+          ready: false,
+          foundTable: false,
+          headers: [],
+          rows: [],
+          body: clean(document.body?.innerText).slice(0, 1400),
+        };
+      }
+
+      const candidateRows = [
+        ...chosenTable.querySelectorAll("tbody tr.flexlist_row, tbody tr, tr.flexlist_row")
+      ].filter((row) => {
+        if (!visible(row) || row.classList.contains("filler")) return false;
+        // Headerregels niet als data meenemen.
+        if (row.closest("thead")) return false;
+        return true;
+      });
+
+      const parsed = candidateRows
+        .map((row) =>
+          [...row.querySelectorAll("td")].map((td) => clean(td.textContent))
+        )
+        .filter((cells) => cells.length >= 4)
+        .filter((cells) => {
+          const joined = cells.map(norm).join(" | ");
+          return !requiredHeaders.every((header) => joined.includes(header));
+        });
 
       return {
-        ready: parsed.length > 0,
+        // Een gevonden keurmerktabel zonder regels is ook een geldige uitkomst.
+        ready: true,
+        foundTable: true,
+        headers: chosenHeaders,
         rows: parsed,
-        body: clean(document.body?.innerText).slice(0, 1000),
+        body: clean(document.body?.innerText).slice(0, 1400),
       };
     }).catch(() => null);
 
@@ -1497,7 +1597,8 @@ async function readKeurmerkPeriods(page, key) {
 
     if (state?.ready) {
       const periods = [];
-      for (const cells of state.rows) {
+
+      for (const cells of state.rows ?? []) {
         const toegevoegdDoor = String(cells?.[0] ?? "").trim() || null;
         const toegevoegdOp = parseNlDateStrict(cells?.[1]);
         const start = parseNlDateStrict(cells?.[2]);
@@ -1512,6 +1613,13 @@ async function readKeurmerkPeriods(page, key) {
           einde,
         });
       }
+
+      console.log(`[sportscholen] 📜 ${cleanKey} keurmerkregels gelezen`, {
+        aantal: periods.length,
+        bovenste_regel: periods[0] ?? null,
+        headers: state.headers ?? [],
+      });
+
       return periods;
     }
 
@@ -1526,10 +1634,48 @@ async function readKeurmerkPeriods(page, key) {
 
 async function closeDetailsExact(page, key) {
   const cleanKey = normalizeSportschoolKey(key);
+  const startedAt = Date.now();
 
-  const clicked = await page.evaluate(() => {
-    const buttons = [...document.querySelectorAll("button#sluit_inr_detail")];
-    const button = buttons.find((el) => {
+  // Eerst een paar seconden wachten op de exacte FightPassport-knop.
+  while (Date.now() - startedAt < 3500) {
+    const result = await page.evaluate(() => {
+      const visible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const st = getComputedStyle(el);
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          st.display !== "none" &&
+          st.visibility !== "hidden" &&
+          st.opacity !== "0"
+        );
+      };
+
+      const exact = [...document.querySelectorAll("button#sluit_inr_detail")]
+        .find(visible);
+
+      if (!exact) return { clicked: false, exactVisible: false };
+
+      exact.scrollIntoView?.({ block: "center" });
+      exact.click();
+      return { clicked: true, exactVisible: true };
+    }).catch(() => ({ clicked: false, exactVisible: false }));
+
+    if (result?.clicked) {
+      console.log(`[sportscholen] ↩️ ${cleanKey} DETAILS sluiten aangeklikt`);
+      break;
+    }
+
+    await sleep(120);
+  }
+
+  // Zelfde robuuste fallbackgedachte als startverbod/fp_total: FightPassport kan
+  // de exacte knop tijdens een rerender al hebben vervangen. Probeer dan andere
+  // bekende sluitknoppen en uiteindelijk Escape, zonder de hele school te laten falen.
+  let exactStillVisible = await page.evaluate(() => {
+    const visible = (el) => {
+      if (!el) return false;
       const r = el.getBoundingClientRect();
       const st = getComputedStyle(el);
       return (
@@ -1539,29 +1685,54 @@ async function closeDetailsExact(page, key) {
         st.visibility !== "hidden" &&
         st.opacity !== "0"
       );
-    });
+    };
 
-    if (!button) return false;
-    button.scrollIntoView?.({ block: "center" });
-    button.click();
-    return true;
+    return [...document.querySelectorAll("button#sluit_inr_detail")].some(visible);
   }).catch(() => false);
 
-  if (!clicked) {
-    throw new Error(
-      `DETAILS sluitknop #sluit_inr_detail niet gevonden voor sportschool ${cleanKey}`
-    );
+  if (exactStillVisible) {
+    const selectors = [
+      "button#sluit_inr_detail",
+      "button.sluit_scherm.detail_modal",
+      "button.sluit_scherm.overview",
+      "button.sluit_scherm",
+      "img.sluit_modal",
+      "button.ui-dialog-titlebar-close",
+    ];
+
+    for (const selector of selectors) {
+      try {
+        const handles = await page.$$(selector);
+        for (const handle of handles) {
+          const isVisible = await page.evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            const st = getComputedStyle(el);
+            return (
+              r.width > 0 &&
+              r.height > 0 &&
+              st.display !== "none" &&
+              st.visibility !== "hidden" &&
+              st.opacity !== "0"
+            );
+          }, handle).catch(() => false);
+
+          if (!isVisible) continue;
+          await handle.click().catch(() => {});
+          await sleep(120);
+          break;
+        }
+      } catch {}
+    }
   }
 
-  console.log(`[sportscholen] ↩️ ${cleanKey} DETAILS sluiten aangeklikt`);
+  try {
+    await page.keyboard.press("Escape");
+    await sleep(80);
+  } catch {}
 
-  // Alleen controleren of de DETAILS-popup verdwijnt.
-  // NIET wachten op VECHTERS of eisen dat de organisation-page al volledig
-  // opnieuw is vrijgegeven: FightPassport rendert die tegels asynchroon en
-  // daardoor ontstonden onterechte retries terwijl DETAILS al was opgeslagen.
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 3000) {
-    const detailsStillVisible = await page.evaluate(() => {
+  const waitClosedAt = Date.now();
+  while (Date.now() - waitClosedAt < 3000) {
+    exactStillVisible = await page.evaluate(() => {
       const visible = (el) => {
         if (!el) return false;
         const r = el.getBoundingClientRect();
@@ -1578,18 +1749,16 @@ async function closeDetailsExact(page, key) {
       return [...document.querySelectorAll("button#sluit_inr_detail")].some(visible);
     }).catch(() => false);
 
-    if (!detailsStillVisible) {
-      await sleep(250);
+    if (!exactStillVisible) {
+      await sleep(200);
       return true;
     }
 
     await sleep(100);
   }
 
-  // Geen scraperfout van maken. openVechtersTile()/waitForOrganisationPage()
-  // controleert hierna zelf of de juiste organisation-page bruikbaar is.
   console.log(
-    `[sportscholen] ⚠️ ${cleanKey} DETAILS-sluitknop bleef langer zichtbaar; doorgaan naar VECHTERS-controle`
+    `[sportscholen] ⚠️ ${cleanKey} DETAILS lijkt nog open; VECHTERS-controle bepaalt of de pagina bruikbaar is`
   );
   return true;
 }

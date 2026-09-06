@@ -62,6 +62,39 @@ function normLower(v: any): string {
   return String(v ?? "").toLowerCase().trim();
 }
 
+function isOpenOpponentPlaceholder(v: any): boolean {
+  const s = String(v ?? "")
+    .toLowerCase()
+    .replace(/[._-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return new Set([
+    "tba",
+    "t b a",
+    "gezocht",
+    "tegenstander gezocht",
+    "opponent gezocht",
+    "nog gezocht",
+    "to be announced",
+  ]).has(s);
+}
+
+function hasMeaningfulCorner(ctx: any, hoek: "rood" | "blauw"): boolean {
+  const va = String(hoek === "rood"
+    ? ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.va_rood_mm
+    : ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.va_blauw_mm ?? "").trim();
+  if (va) return true;
+
+  const names = hoek === "rood"
+    ? [ctx?.rood_naam_mm, ctx?.rood_naam_fp, ctx?.rood_naam_scrape, ctx?.rood_naam]
+    : [ctx?.blauw_naam_mm, ctx?.blauw_naam_fp, ctx?.blauw_naam_scrape, ctx?.blauw_naam];
+  return names.some((name) => {
+    const s = String(name ?? "").trim();
+    return !!s && !isOpenOpponentPlaceholder(s);
+  });
+}
+
 function normalizeKlasseText(v: any): string {
   return String(v ?? "")
     .toUpperCase()
@@ -662,21 +695,25 @@ function fallbackAdultKbMtKlasseFromNulmeting(ctx: any, hoek: "rood" | "blauw"):
 }
 
 function getAdultKbMtBaseKlasse(ctx: any, hoek: "rood" | "blauw", rows: UitslagRow[]): Klasse {
-  // Uitslagen zijn leidend. Nulmeting is alleen fallback als er geen
-  // bruikbare volwassen KICKBOKSEN/MUAY THAI uitslagen zijn.
+  // 1. Echte volwassen KICKBOKSEN/MUAY THAI-uitslagen zijn leidend.
   const historyKlasse = hoogsteKlasseUitUitslagen(rows);
   if (historyKlasse) return historyKlasse;
 
-  const jeugdStats = getJeugdExperienceStats(rows);
+  // 2. Geen bruikbare volwassen historie:
+  // gebruik de volwassen klasse uit nulmeting/FightPassport als fallback.
+  // Pure jeugdwaarden (J/J+/Jeugd/Youth) leveren hier null op.
+  // Samengestelde waarden zoals "Jeugd/Youth • Nieuweling/Newcomer"
+  // kunnen wel als volwassen N worden herkend.
+  const nulmetingKlasse = fallbackAdultKbMtKlasseFromNulmeting(ctx, hoek);
+  if (nulmetingKlasse) return nulmetingKlasse;
 
-  // Zelfde uitgangspunt als matchEngine en fighterRules:
-  // alleen jeugdpartijen geven bij de overgang naar senioren niet automatisch
-  // een volwassen C/B/A-klasse. Zonder aantoonbare hoofdcontact-doorstroom
-  // start de reguliere volwassen controle daarom in N.
+  // 3. Alleen jeugdverleden zonder bruikbare volwassen fallback
+  // promoveert niet automatisch naar een hogere volwassen klasse.
+  const jeugdStats = getJeugdExperienceStats(rows);
   if (jeugdStats.total > 0) return "N";
 
-  const nulmetingKlasse = fallbackAdultKbMtKlasseFromNulmeting(ctx, hoek);
-  return nulmetingKlasse ?? "N";
+  // 4. Geen historie en geen bruikbare nulmeting: start volwassen controle in N.
+  return "N";
 }
 
 async function fetchUitslagenByVa(opts: {
@@ -2402,11 +2439,12 @@ export async function rulesEngine(opts: {
 
     const vaRood = String(ctx?.rood_va_mm ?? ctx?.va_rood ?? ctx?.va_rood_mm ?? "").trim();
     const vaBlauw = String(ctx?.blauw_va_mm ?? ctx?.va_blauw ?? ctx?.va_blauw_mm ?? "").trim();
-    const hasRood = true;
-    const hasBlauw = true;
+    const hasRood = hasMeaningfulCorner(ctx, "rood");
+    const hasBlauw = hasMeaningfulCorner(ctx, "blauw");
+    if (!hasRood && !hasBlauw) continue;
     const skipLicentieEnKeurmerk = isPureBoksenZonderLicentieKeurmerk(ctx);
 
-    if (!skipLicentieEnKeurmerk && !vaRood) {
+    if (!skipLicentieEnKeurmerk && hasRood && !vaRood) {
       const naam = getFighterDisplayName(ctx, "rood");
 
       pushTournamentPersonHit(
@@ -2498,6 +2536,7 @@ export async function rulesEngine(opts: {
 
       if (boutIsJPlus) {
         for (const hoek of ["rood", "blauw"] as const) {
+          if ((hoek === "rood" && !hasRood) || (hoek === "blauw" && !hasBlauw)) continue;
           const heeftTalentstatus = hoek === "rood" ? talentInfo.roodHeeft : talentInfo.blauwHeeft;
           const naam = getFighterDisplayName(ctx, hoek);
           const va = getTournamentVaNummerFromCtx(ctx, hoek) ??
@@ -2532,6 +2571,7 @@ export async function rulesEngine(opts: {
 
       if (dopingCertificaatVerplicht) {
         for (const hoek of ["rood", "blauw"] as const) {
+          if ((hoek === "rood" && !hasRood) || (hoek === "blauw" && !hasBlauw)) continue;
           const heeftCertificaat = hoek === "rood" ? dopingInfo.roodHeeft : dopingInfo.blauwHeeft;
           const naam = getFighterDisplayName(ctx, hoek);
           const va = getTournamentVaNummerFromCtx(ctx, hoek) ??
@@ -2564,7 +2604,7 @@ export async function rulesEngine(opts: {
       const ageR = ageOnEventFromCtx(ctx, "rood");
       const ageB = ageOnEventFromCtx(ctx, "blauw");
 
-      if (typeof ageR === "number" && ageR >= 40) {
+      if (hasRood && typeof ageR === "number" && ageR >= 40) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2581,7 +2621,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (typeof ageB === "number" && ageB >= 40) {
+      if (hasBlauw && typeof ageB === "number" && ageB >= 40) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2626,7 +2666,7 @@ export async function rulesEngine(opts: {
       const blauwNaamMM = ctx?.blauw_naam_mm;
       const blauwNaamFP = ctx?.blauw_naam_fp ?? ctx?.blauw_naam_scrape;
 
-      if (roodHeeftFightPassportInfo && !nameSimilar(roodNaamMM, roodNaamFP)) {
+      if (hasRood && roodHeeftFightPassportInfo && !nameSimilar(roodNaamMM, roodNaamFP)) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2643,7 +2683,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (blauwHeeftFightPassportInfo && !nameSimilar(blauwNaamMM, blauwNaamFP)) {
+      if (hasBlauw && blauwHeeftFightPassportInfo && !nameSimilar(blauwNaamMM, blauwNaamFP)) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2753,7 +2793,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!skipLicentieEnKeurmerk && roodHeeftFightPassportInfo && kR == null) {
+      if (!skipLicentieEnKeurmerk && hasRood && roodHeeftFightPassportInfo && kR == null) {
         const naam = getFighterDisplayName(ctx, "rood");
         const gym = getFighterGymName(ctx, "rood");
 
@@ -2797,7 +2837,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!skipLicentieEnKeurmerk && blauwHeeftFightPassportInfo && kB == null) {
+      if (!skipLicentieEnKeurmerk && hasBlauw && blauwHeeftFightPassportInfo && kB == null) {
         const naam = getFighterDisplayName(ctx, "blauw");
         const gym = getFighterGymName(ctx, "blauw");
 
@@ -2846,7 +2886,7 @@ export async function rulesEngine(opts: {
       const gR = parseGender(ctx?.rood_geslacht);
       const gB = parseGender(ctx?.blauw_geslacht);
 
-      if (gR && gB && gR !== gB) {
+      if (hasRood && hasBlauw && gR && gB && gR !== gB) {
         pushHit({
           matchmaking_id,
           partij_nr,
@@ -2868,7 +2908,7 @@ export async function rulesEngine(opts: {
       const sbR_has = sbR === "ja" || sbR === "true" || sbR === "1";
       const sbB_has = sbB === "ja" || sbB === "true" || sbB === "1";
 
-      if (roodHeeftFightPassportInfo && sbR_has) {
+      if (hasRood && roodHeeftFightPassportInfo && sbR_has) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2885,7 +2925,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (blauwHeeftFightPassportInfo && sbB_has) {
+      if (hasBlauw && blauwHeeftFightPassportInfo && sbB_has) {
         pushHitTournamentAware(
           {
             matchmaking_id,
@@ -2920,7 +2960,7 @@ export async function rulesEngine(opts: {
         licB === "1" ||
         licB === "geldig";
 
-      if (!skipLicentieEnKeurmerk && roodHeeftFightPassportInfo && !licR_ok) {
+      if (!skipLicentieEnKeurmerk && hasRood && roodHeeftFightPassportInfo && !licR_ok) {
         const naam = getFighterDisplayName(ctx, "rood");
         const licWaarde = String(ctx?.rood_licentie ?? "").trim() || "leeg";
 
@@ -2942,7 +2982,7 @@ export async function rulesEngine(opts: {
         );
       }
 
-      if (!skipLicentieEnKeurmerk && blauwHeeftFightPassportInfo && !licB_ok) {
+      if (!skipLicentieEnKeurmerk && hasBlauw && blauwHeeftFightPassportInfo && !licB_ok) {
         const naam = getFighterDisplayName(ctx, "blauw");
         const licWaarde = String(ctx?.blauw_licentie ?? "").trim() || "leeg";
 

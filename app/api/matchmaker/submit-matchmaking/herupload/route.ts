@@ -227,6 +227,60 @@ async function fetchExistingBoutIndex(matchmaking_id: string) {
   return { index, all };
 }
 
+function stablePartijNr(v: any): number | null {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function sameOptionalText(a: any, b: any): boolean {
+  const aa = normUpper(a);
+  const bb = normUpper(b);
+  return !aa || !bb || aa === bb;
+}
+
+function existingVaSet(row: ExistingBoutIndexRow): Set<string> {
+  return new Set(
+    [toVaStrict((row as any)?.va_rood), toVaStrict((row as any)?.va_blauw)].filter(Boolean) as string[]
+  );
+}
+
+function findStableExistingBout(opts: {
+  existingBouts: ExistingBoutIndexRow[];
+  touchedExistingIds: Set<string>;
+  partijNr: any;
+  vaR: string | null;
+  vaB: string | null;
+  discipline: any;
+  klasse: any;
+  is_toernooi: any;
+  toernooi_code: any;
+}): ExistingBoutIndexRow | null {
+  if (toBoolLoose(opts.is_toernooi) === true || normalizeToernooiCode(opts.toernooi_code)) return null;
+
+  const incomingPartijNr = stablePartijNr(opts.partijNr);
+  const incomingVas = [opts.vaR, opts.vaB].filter(Boolean) as string[];
+  if (!incomingVas.length) return null;
+
+  const active = opts.existingBouts.filter((row) => {
+    if ((row as any)?.verwijderd === true) return false;
+    if (opts.touchedExistingIds.has(String((row as any)?.id))) return false;
+    if ((row as any)?.is_toernooi === true || normalizeToernooiCode((row as any)?.toernooi_code)) return false;
+    if (!sameOptionalText((row as any)?.discipline, opts.discipline)) return false;
+    if (!sameOptionalText((row as any)?.klasse, opts.klasse)) return false;
+    const vas = existingVaSet(row);
+    return incomingVas.some((va) => vas.has(va));
+  });
+
+  if (incomingPartijNr != null) {
+    const sameNr = active.filter((row) => stablePartijNr((row as any)?.partij_nr) === incomingPartijNr);
+    if (sameNr.length === 1) return sameNr[0];
+  }
+
+  // Fallback voor hernummerde matchmakings: alleen gebruiken als de aanwezige VA
+  // binnen discipline/klasse exact één actieve kandidaat oplevert.
+  return active.length === 1 ? active[0] : null;
+}
+
 const ALLOWED_BONDTEAMS = new Set([
   "IRO",
   "NKF",
@@ -840,8 +894,40 @@ const existingStage =
         laatste_bewerking_op: now,
       };
 
+      const stableExisting = findStableExistingBout({
+        existingBouts,
+        touchedExistingIds,
+        partijNr: (b as any)?.partij_nr,
+        vaR,
+        vaB,
+        discipline,
+        klasse,
+        is_toernooi,
+        toernooi_code,
+      });
+
+      if (stableExisting) {
+        const existingId = (stableExisting as any).id;
+        const existingBoutUid = String((stableExisting as any).bout_uid ?? "").trim();
+
+        touchedExistingIds.add(String(existingId));
+        reused++;
+        updated++;
+
+        updates.push({
+          id: existingId,
+          values: {
+            ...baseValues,
+            bout_uid: existingBoutUid || insertBoutUid,
+          },
+        });
+        continue;
+      }
+
       if (fp) {
-        const list = existingIndex.get(fp) ?? [];
+        const list = (existingIndex.get(fp) ?? []).filter(
+          (row) => !touchedExistingIds.has(String((row as any)?.id))
+        );
         if (list.length === 1) {
           const existing = list[0];
           const existingId = (existing as any).id;

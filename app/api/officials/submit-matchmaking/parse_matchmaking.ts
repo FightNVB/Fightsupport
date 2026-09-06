@@ -398,6 +398,50 @@ function looksLikeGym(v: string) {
   return /(gym|team|boxing|kickbox|muay|thai|academy|club|fight|mma)/i.test(v);
 }
 
+function normalizeOpenOpponentCorner(bout: any) {
+  const normalizeName = (value: any) => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return null;
+    const norm = raw.toLowerCase().replace(/[._-]/g, " " ).replace(/\s+/g, " " ).trim();
+    return [
+      "tba",
+      "t b a",
+      "gezocht",
+      "tegenstander gezocht",
+      "opponent gezocht",
+      "nog gezocht",
+      "to be announced",
+    ].includes(norm) ? "TBA" : raw;
+  };
+
+  const clear = (side: "rood" | "blauw") => {
+    const nameKey = side === "rood" ? "rood_naam" : "blauw_naam";
+    const gymKey = side === "rood" ? "rood_gym" : "blauw_gym";
+    const vaKey = side === "rood" ? "va_rood" : "va_blauw";
+    const dobKey = side === "rood" ? "rood_geboortedatum" : "blauw_geboortedatum";
+    const weightKey = side === "rood" ? "rood_gewicht" : "blauw_gewicht";
+    const weightNotationKey = side === "rood" ? "rood_gewicht_notatie" : "blauw_gewicht_notatie";
+    const recPrefix = side === "rood" ? "record_rood_" : "record_blauw_";
+    if (normalizeName(bout?.[nameKey]) !== "TBA") {
+      bout[nameKey] = normalizeName(bout?.[nameKey]);
+      return;
+    }
+    bout[nameKey] = "TBA";
+    bout[gymKey] = null;
+    bout[vaKey] = null;
+    bout[dobKey] = null;
+    bout[weightKey] = null;
+    bout[weightNotationKey] = null;
+    bout[`${recPrefix}w`] = 0;
+    bout[`${recPrefix}l`] = 0;
+    bout[`${recPrefix}d`] = 0;
+    bout.extra = { ...(bout.extra ?? {}), [`${side}_open_opponent`]: true };
+  };
+
+  clear("rood");
+  clear("blauw");
+}
+
 function makeEmptyBout(): ParsedBout {
   return {
     bout_uid: randomUUID(),
@@ -903,6 +947,7 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
         min_gewicht_type: bout.extra.min_gewicht_type ?? minKgMeta?.type ?? null,
       };
 
+      normalizeOpenOpponentCorner(bout);
       bouts.push(bout);
       continue;
     }
@@ -995,6 +1040,7 @@ async function tryParseAdminTemplate(fileBuffer: Buffer): Promise<any[] | null> 
           min_gewicht_type: bout.extra.min_gewicht_type ?? nk?.type ?? null,
         };
 
+        normalizeOpenOpponentCorner(bout);
         bouts.push(bout);
       }
     }
@@ -2285,6 +2331,7 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
 
     if (!hasAny) continue;
 
+    normalizeOpenOpponentCorner(bout);
     bouts.push(bout);
   }
 

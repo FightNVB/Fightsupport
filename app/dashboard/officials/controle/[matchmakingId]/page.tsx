@@ -84,7 +84,8 @@ type FilterKey =
   | "actie"
   | "ok"
   | "geen_info"
-  | "geen_licentie";
+  | "geen_licentie"
+  | "tba";
 
 type ToernooiDeelnemer = {
   key: string;
@@ -881,15 +882,34 @@ function isVerbodRow(r: ResRow) {
   return false;
 }
 
+function isOpenOpponentPlaceholder(v: any): boolean {
+  const s = String(v ?? "")
+    .toLowerCase()
+    .replace(/[._-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return new Set([
+    "tba",
+    "t b a",
+    "gezocht",
+    "tegenstander gezocht",
+    "opponent gezocht",
+    "nog gezocht",
+    "to be announced",
+  ]).has(s);
+}
+
 function isGeenTegenstander(ctx: AnyRow): boolean {
   const blauwVa = String(ctx?.blauw_va_mm ?? "").trim();
   const blauwNaam = String(
-    ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? "",
+    ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? ctx?.blauw_naam ?? "",
   ).trim();
   const roodVa = String(ctx?.rood_va_mm ?? "").trim();
-  const roodNaam = String(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? "").trim();
-  const heeftRood = !!(roodVa || roodNaam);
-  const heeftBlauw = !!(blauwVa || blauwNaam);
+  const roodNaam = String(
+    ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? ctx?.rood_naam ?? "",
+  ).trim();
+  const heeftRood = !!roodVa || (!!roodNaam && !isOpenOpponentPlaceholder(roodNaam));
+  const heeftBlauw = !!blauwVa || (!!blauwNaam && !isOpenOpponentPlaceholder(blauwNaam));
   return (heeftRood && !heeftBlauw) || (!heeftRood && heeftBlauw);
 }
 
@@ -1133,7 +1153,12 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
     minsByKlasse[label] = mins;
   };
 
-  const gewoneRows = rows.filter((r) => !isToernooiRow(r));
+  const gewoneRows = rows.filter(
+    (r) =>
+      !isToernooiRow(r) &&
+      !isOpenOpponentPlaceholder(r?.rood_naam_mm ?? r?.rood_naam) &&
+      !isOpenOpponentPlaceholder(r?.blauw_naam_mm ?? r?.blauw_naam),
+  );
   for (const r of gewoneRows) {
     const klasse = String(r.klasse_mm ?? r.klasse ?? "").trim();
     const discipline = String(r.discipline ?? "").trim();
@@ -1147,6 +1172,12 @@ function calcGalaDuurFromRows(rows: AnyRow[]): {
   const toernooiGroups = new Map<string, AnyRow[]>();
   for (const r of rows) {
     if (!isToernooiRow(r)) continue;
+    if (
+      isOpenOpponentPlaceholder(r?.rood_naam_mm ?? r?.rood_naam) ||
+      isOpenOpponentPlaceholder(r?.blauw_naam_mm ?? r?.blauw_naam)
+    ) {
+      continue;
+    }
     const key = getToernooiKey(r) ?? "TOERNOOI";
     if (!toernooiGroups.has(key)) toernooiGroups.set(key, []);
     toernooiGroups.get(key)!.push(r);
@@ -3690,7 +3721,8 @@ export default function ControleMatchmakingPage() {
       disp = 0,
       geen = 0,
       verbod = 0,
-      geen_licentie = 0;
+      geen_licentie = 0,
+      tba = 0;
 
     for (const r of gewoneRows) {
       const pn = Number(r.partij_nr);
@@ -3706,6 +3738,7 @@ export default function ControleMatchmakingPage() {
       if (hasActieByPartij[pn]) actie++;
       if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
+      if (isGeenTegenstander(r)) tba++;
 
       const cnt = countByPartij[pn] ?? 0;
       meldingen_totaal += cnt;
@@ -3723,6 +3756,7 @@ export default function ControleMatchmakingPage() {
       ok,
       geen,
       geen_licentie: geen_licentie + toernooiGeenLicentieTotaal,
+      tba,
     };
   }, [
     gewoneRows,
@@ -3744,7 +3778,8 @@ export default function ControleMatchmakingPage() {
       disp = 0,
       geen = 0,
       verbod = 0,
-      geen_licentie = 0;
+      geen_licentie = 0,
+      tba = 0;
 
     for (const r of gewoneRows) {
       const pn = Number(r.partij_nr);
@@ -3760,6 +3795,7 @@ export default function ControleMatchmakingPage() {
       if (hasActieByPartij[pn]) actie++;
       if (hasDispByPartij[pn] || dispRequestByPartij[pn]) disp++;
       if (missingLicentieByPartij[pn]) geen_licentie++;
+      if (isGeenTegenstander(r)) tba++;
     }
 
     return {
@@ -3771,6 +3807,7 @@ export default function ControleMatchmakingPage() {
       ok,
       geen_info: geen,
       geen_licentie,
+      tba,
     };
   }, [
     gewoneRows,
@@ -3796,6 +3833,7 @@ export default function ControleMatchmakingPage() {
           statusByPartij[pn] === "dispensatie"
         );
       if (filter === "verbod") return !!verbodByPartij[pn];
+      if (filter === "tba") return isGeenTegenstander(r);
       if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
       if (filter === "afgekeurd") return !!hasAfkeurByPartij[pn];
       if (filter === "actie") return !!hasActieByPartij[pn];
@@ -4419,33 +4457,6 @@ export default function ControleMatchmakingPage() {
                     value={totals.partijen_met_melding}
                     tone="white"
                   />
-                  <HeaderBadge
-                    label="Verbod"
-                    value={totals.verbod}
-                    tone="purple"
-                  />
-                  <HeaderBadge
-                    label="Geen licentie"
-                    value={totals.geen_licentie}
-                    tone="blue"
-                  />
-                  <HeaderBadge label="Afkeur" value={totals.afk} tone="red" />
-                  <HeaderBadge
-                    label="Dispensatie"
-                    value={totals.dispensatie}
-                    tone="orange"
-                  />
-                  <HeaderBadge
-                    label="Actie"
-                    value={totals.actie}
-                    tone="yellow"
-                  />
-                  <HeaderBadge label="OK" value={totals.ok} tone="green" />
-                  <HeaderBadge
-                    label="Geen info"
-                    value={totals.geen}
-                    tone="white"
-                  />
                 </div>
 
                 {galaDuur?.text ? (
@@ -4913,12 +4924,13 @@ export default function ControleMatchmakingPage() {
                   <div className="text-sm text-zinc-700">{msg}</div>
                 ) : null}
 
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-300 bg-white/5 p-3">
-                  <div className="text-sm font-semibold text-zinc-800 mr-2">
-                    Filter:
-                  </div>
+                <div className="flex flex-col gap-2 rounded-xl border border-zinc-300 bg-white/5 p-3">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-zinc-800 mr-2 shrink-0">
+                      Filter:
+                    </div>
 
-                  <div className="flex-1 min-w-[220px]">
+                    <div className="flex-1 min-w-[220px]">
                     <input
                       data-readonly-allowed="true"
                 value={search}
@@ -4935,14 +4947,24 @@ export default function ControleMatchmakingPage() {
                           "inset 0 1px 0 rgba(255,255,255,0.90), 0 8px 18px rgba(0,0,0,0.10)",
                       }}
                     />
+                    </div>
                   </div>
 
+                  <div className="flex items-center gap-2 flex-nowrap overflow-x-auto pb-1">
                   <FilterButton
                     label="Alle"
                     count={filterCounts.all}
                     tone="neutral"
                     active={filter === "all"}
                     onClick={() => setFilter("all")}
+                    disabled={lineupMode}
+                  />
+                  <FilterButton
+                    label="TBA"
+                    count={filterCounts.tba}
+                    tone="gray"
+                    active={filter === "tba"}
+                    onClick={() => setFilter("tba")}
                     disabled={lineupMode}
                   />
                   <FilterButton
@@ -5007,6 +5029,7 @@ export default function ControleMatchmakingPage() {
                     <span className="font-semibold text-zinc-900">
                       {filteredRows.length}
                     </span>
+                  </div>
                   </div>
                 </div>
 
