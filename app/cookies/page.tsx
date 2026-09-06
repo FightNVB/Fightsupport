@@ -92,12 +92,15 @@ export default function CookiesPage() {
             </p>
 
             <h2 style={{ color: "#fff", marginTop: 28 }}>
-              Functionele cookies
+              Noodzakelijke opslag
             </h2>
             <p>
-              Functionele cookies kunnen worden gebruikt om onder andere
-              inlogsessies, beveiliging en technische instellingen van het
-              platform te ondersteunen.
+              FightSupport gebruikt noodzakelijke cookies en vergelijkbare
+              browseropslag om je ingelogd te houden, je sessie veilig te
+              beheren en essentiële onderdelen van het platform te laten
+              functioneren. Deze opslag is noodzakelijk voor de werking van
+              FightSupport en wordt niet gebruikt voor advertenties of het
+              volgen van gebruikers voor marketingdoeleinden.
             </p>
 
             <h2 style={{ color: "#fff", marginTop: 28 }}>
@@ -106,6 +109,15 @@ export default function CookiesPage() {
             <p>
               FightSupport gebruikt geen cookies om gebruikers voor
               advertentiedoeleinden te volgen.
+            </p>
+
+            <h2 style={{ color: "#fff", marginTop: 28 }}>Toestemming</h2>
+            <p>
+              Omdat FightSupport alleen noodzakelijke cookies en vergelijkbare
+              technieken gebruikt, wordt hiervoor geen afzonderlijke
+              toestemming gevraagd. Als FightSupport in de toekomst
+              niet-noodzakelijke cookies gaat gebruiken, wordt deze pagina
+              aangepast en wordt waar nodig vooraf toestemming gevraagd.
             </p>
 
             <h2 style={{ color: "#fff", marginTop: 28 }}>
