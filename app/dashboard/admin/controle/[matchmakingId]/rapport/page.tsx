@@ -25,7 +25,7 @@ type EventMeta = {
   matchmaker?: string | null;
   promotor?: string | null;
   locatie?: string | null;
-  source?: "matchmaking_uploads" | "events" | null;
+  source?: "matchmakings" | "matchmaking_uploads" | "events" | null;
 };
 
 type ResultRow = {
@@ -589,8 +589,8 @@ function Badge({ status }: { status: PartijStatus }) {
   const base = "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide";
   if (status === "VERBOD") return <span className={`${base} bg-purple-700 text-white`}>VERBOD</span>;
   if (status === "AFKEUR") return <span className={`${base} bg-red-600 text-white`}>AFKEUR</span>;
-  if (status === "DISPENSATIE") return <span className={`${base} bg-orange-500 text-black`}>DISPENSATIE</span>;
-  if (status === "ACTIE") return <span className={`${base} bg-yellow-400 text-black`}>ACTIE</span>;
+  if (status === "DISPENSATIE") return <span className={`${base} bg-yellow-400 text-black`}>DISPENSATIE</span>;
+  if (status === "ACTIE") return <span className={`${base} bg-orange-500 text-black`}>ACTIE</span>;
   return <span className={`${base} bg-green-600 text-white`}>OK</span>;
 }
 
@@ -653,6 +653,46 @@ function keurmerkTekst(row: ResultRow) {
   return `${row.rule_code ?? ""} ${row.rule ?? ""} ${row.boodschap ?? ""} ${row.aantekeningen ?? ""}`.toLowerCase();
 }
 
+function compactKeurmerkDetail(v: any) {
+  const raw = String(v ?? "").trim().replace(/\s+/g, " ");
+  if (!raw) return "Geen geldig keurmerk";
+
+  const endMatch =
+    raw.match(/Keurmerk eindigt\/eindigde op\s+(\d{4}-\d{2}-\d{2})/i) ??
+    raw.match(/Keurmerk geldig t\/m\s+(\d{4}-\d{2}-\d{2})/i);
+
+  const dateNl = endMatch?.[1]
+    ? `${endMatch[1].slice(8, 10)}-${endMatch[1].slice(5, 7)}-${endMatch[1].slice(0, 4)}`
+    : null;
+
+  if (/geen geldig keurmerk op eventdatum/i.test(raw)) {
+    return dateNl
+      ? `Geen geldig keurmerk op eventdatum · laatste einddatum ${dateNl}`
+      : "Geen geldig keurmerk op eventdatum";
+  }
+
+  if (/geen keurmerk|zonder keurmerk|ongeldig keurmerk/i.test(raw)) {
+    return dateNl ? `Geen geldig keurmerk · einddatum ${dateNl}` : "Geen geldig keurmerk";
+  }
+
+  if (/keurmerk datum ontbreekt|geen keurmerkdatum|datum ontbreekt/i.test(raw)) {
+    return "Keurmerkdatum ontbreekt";
+  }
+
+  if (/sportschool niet gevonden|geen sportschool match|geen match in sportscholen|geen match gevonden/i.test(raw)) {
+    return "Sportschool niet betrouwbaar herkend";
+  }
+
+  if (/meerdere matches|ambigue/i.test(raw)) {
+    return "Meerdere mogelijke sportschoolmatches";
+  }
+
+  // Technische match-/scrapertekst niet onnodig in het rapport tonen.
+  return raw
+    .replace(/^.*?\bGeen geldig keurmerk op eventdatum\./i, "Geen geldig keurmerk op eventdatum.")
+    .trim();
+}
+
 function isKeurmerkOpenIssue(row: ResultRow) {
   if (!isKeurmerkRow(row) && !isSportschoolMatchRow(row)) return false;
   if (isBelgischeManualCheckRow(row)) return false;
@@ -692,6 +732,64 @@ function isKeurmerkOpenIssue(row: ResultRow) {
 }
 
 async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
+  // De matchmakings-tabel is de primaire bron voor de rapportheader.
+  // Alleen voor oudere matchmakings zonder rij in deze tabel vallen we terug
+  // op matchmaking_uploads en eventueel events.
+  try {
+    const { data: matchmaking, error: matchmakingErr } = await supabase
+      .from("matchmakings")
+      .select("id, naam, datum, locatie, promotor, bondteam, matchmaker_naam, matchmaker_id, maker_user_id, uploaded_by")
+      .eq("id", matchmaking_id)
+      .maybeSingle();
+
+    if (!matchmakingErr && matchmaking) {
+      let matchmakerNaam =
+        safeRaw((matchmaking as any).matchmaker_naam) ||
+        safeRaw((matchmaking as any).matchmaker);
+
+      // Oudere matchmakings hebben vaak nog geen matchmaker_naam opgeslagen.
+      // Haal de naam dan op uit user_profiles via de gebruiker die de matchmaking bezit/uploadde.
+      if (!matchmakerNaam) {
+        const profielId =
+          safeRaw((matchmaking as any).matchmaker_id) ||
+          safeRaw((matchmaking as any).maker_user_id) ||
+          safeRaw((matchmaking as any).uploaded_by);
+
+        if (profielId) {
+          const { data: profiel, error: profielErr } = await supabase
+            .from("user_profiles")
+            .select("full_name")
+            .eq("id", profielId)
+            .maybeSingle();
+
+          if (!profielErr) {
+            matchmakerNaam = safeRaw((profiel as any)?.full_name);
+          } else {
+            console.warn("matchmakernaam uit user_profiles laden mislukt:", profielErr.message);
+          }
+        }
+      }
+
+      return {
+        id: String((matchmaking as any).id ?? matchmaking_id),
+        event_id: null,
+        naam: (matchmaking as any).naam ?? null,
+        datum: (matchmaking as any).datum ?? null,
+        bondteam: (matchmaking as any).bondteam ?? null,
+        matchmaker: matchmakerNaam || null,
+        promotor: (matchmaking as any).promotor ?? null,
+        locatie: (matchmaking as any).locatie ?? null,
+        source: "matchmakings",
+      };
+    }
+
+    if (matchmakingErr) {
+      console.warn("matchmakings header load failed:", matchmakingErr.message);
+    }
+  } catch (error) {
+    console.warn("matchmakings header load failed:", error);
+  }
+
   try {
     const { data: up, error: upErr } = await supabase
       .from("matchmaking_uploads")
@@ -727,29 +825,33 @@ async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
       }
     }
 
-    return {
-      id: String((up as any)?.matchmaking_id ?? matchmaking_id),
-      event_id: uploadEventId,
-      naam: (up as any)?.evenement_naam ?? null,
-      datum: (up as any)?.evenement_datum ?? null,
-      bondteam: (up as any)?.bondteam ?? null,
-      matchmaker: (up as any)?.matchmaker ?? null,
-      promotor: (up as any)?.promotor ?? null,
-      locatie: (up as any)?.locatie ?? null,
-      source: "matchmaking_uploads",
-    };
-  } catch {
-    return {
-      id: null,
-      naam: null,
-      datum: null,
-      bondteam: null,
-      matchmaker: null,
-      promotor: null,
-      locatie: null,
-      source: null,
-    };
+    if (up) {
+      return {
+        id: String((up as any)?.matchmaking_id ?? matchmaking_id),
+        event_id: uploadEventId,
+        naam: (up as any)?.evenement_naam ?? null,
+        datum: (up as any)?.evenement_datum ?? null,
+        bondteam: (up as any)?.bondteam ?? null,
+        matchmaker: (up as any)?.matchmaker ?? null,
+        promotor: (up as any)?.promotor ?? null,
+        locatie: (up as any)?.locatie ?? null,
+        source: "matchmaking_uploads",
+      };
+    }
+  } catch (error) {
+    console.warn("oude eventheader fallback load failed:", error);
   }
+
+  return {
+    id: matchmaking_id || null,
+    naam: null,
+    datum: null,
+    bondteam: null,
+    matchmaker: null,
+    promotor: null,
+    locatie: null,
+    source: null,
+  };
 }
 
 export default function RapportPage() {
@@ -763,6 +865,8 @@ export default function RapportPage() {
   const [ctxRows, setCtxRows] = useState<any[]>([]);
   const [toernooiCtxRows, setToernooiCtxRows] = useState<any[]>([]);
   const [resultaten, setResultaten] = useState<ResultRow[]>([]);
+  const [matchmakerResultaten, setMatchmakerResultaten] = useState<any[]>([]);
+  const [matchmakerCtxRows, setMatchmakerCtxRows] = useState<any[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
 
   useEffect(() => {
@@ -817,6 +921,37 @@ export default function RapportPage() {
 
         const em = await getEventMeta(matchmakingId);
         setEventMeta(em);
+
+        // Aanmeldingsresultaten horen ook in dit matchmakerrapport.
+        // Ondersteun beide matchmaking-id kolomnamen omdat oudere runs beide varianten kunnen bevatten.
+        let mmResults: any[] = [];
+        for (const column of ["matchmaking_id", "matchmaker_matchmaking_id"]) {
+          const q = await supabase
+            .from("matchmaker_fighter_resultaten")
+            .select("*")
+            .eq(column, matchmakingId)
+            .order("created_at", { ascending: true });
+
+          if (!q.error) {
+            mmResults = q.data ?? [];
+            if (mmResults.length) break;
+          } else if (!String(q.error.message ?? "").toLowerCase().includes("column")) {
+            console.warn("matchmaker_fighter_resultaten load failed:", q.error.message);
+          }
+        }
+        setMatchmakerResultaten(mmResults);
+
+        let mmCtx: any[] = [];
+        for (const column of ["matchmaking_id", "matchmaker_matchmaking_id"]) {
+          const q = await supabase.from("matchmaker_fighter_context").select("*").eq(column, matchmakingId);
+          if (!q.error) {
+            mmCtx = q.data ?? [];
+            if (mmCtx.length) break;
+          } else if (!String(q.error.message ?? "").toLowerCase().includes("column")) {
+            console.warn("matchmaker_fighter_context load failed:", q.error.message);
+          }
+        }
+        setMatchmakerCtxRows(mmCtx);
 
         if (!latestControleRunId) {
           setCtxRows([]);
@@ -1258,78 +1393,20 @@ export default function RapportPage() {
     const items: IssueSummaryItem[] = [];
     const seen = new Set<string>();
 
-    const codeFromAny = (row: any) =>
-      String(row?.toernooi_code ?? row?.toernooiCode ?? "").trim().toUpperCase();
-
-    const fighterIdFromAny = (row: any) =>
-      normalizeVa(row?.fighter_id ?? row?.toernooi_va_nummer ?? row?.va_nummer ?? row?.fighterId);
-
-    const ctxByToernooiFighter = new Map<string, any>();
-    for (const row of toernooiRows ?? []) {
-      const code = codeFromAny(row) || getToernooiCodeSafe(row);
-      const fighterId = fighterIdFromAny(row);
-      if (!code || !fighterId) continue;
-      ctxByToernooiFighter.set(`${code}__${fighterId}`, row);
-    }
-
     const missingRows = dedupeRows(
       (resultaten ?? []).filter((r) => {
+        const pn = Number(r.partij_nr);
+        if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) return false;
         if (!isMissingVARow(r)) return false;
         if (isApprovedOrClosed(r.review_status)) return false;
-        const res = normResultaatLower(r.resultaat);
-        if (res === "" || res === "ok") return false;
-
-        const pn = Number(r.partij_nr);
-        const code = codeFromAny(r);
-        const isToernooiResultaat = (Number.isFinite(pn) && pn === 0) || !!code;
-        const isGewonePartij = Number.isFinite(pn) && gewonePartijNrs.has(pn);
-
-        // Geen VA moet uit alle open controle_resultaten komen:
-        // gewone partijen én toernooi-deelnemers.
-        return isGewonePartij || isToernooiResultaat;
+        return true;
       })
     );
 
     for (const r of missingRows) {
       const pn = Number(r.partij_nr);
-      const code = codeFromAny(r);
-      const fighterId = fighterIdFromAny(r);
-      const isToernooiResultaat = (Number.isFinite(pn) && pn === 0) || !!code;
-
-      if (isToernooiResultaat) {
-        const toernooiCode = code || "TOERNOOI";
-        const ctx = fighterId ? ctxByToernooiFighter.get(`${toernooiCode}__${fighterId}`) : null;
-
-        const naam =
-          safeRaw(ctx?.naam ?? ctx?.naam_fp ?? ctx?.naam_mm ?? r.naam) ||
-          (fighterId ? `VA ${fighterId}` : "Toernooi deelnemer");
-
-        const gym = safeRaw(ctx?.sportschool ?? ctx?.sportschool_mm ?? r.sportschool);
-        const naamKey = normDedupeText(naam);
-        const gymKey = normGymKey(gym);
-        const key = `${toernooiCode}__${fighterId || `${naamKey}__${gymKey}`}__va-ontbreekt`;
-
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        items.push({
-          partij_nr: Number.isFinite(pn) ? pn : 0,
-          partij: toernooiCode,
-          hoek: inferHoek(r) ?? "rood",
-          naam: safe(naam, "Toernooi deelnemer"),
-          gym: safe(gym),
-          label: "VA ontbreekt",
-          detail: safe(r.boodschap ?? r.rule ?? "Fightpaspoortnummer ontbreekt"),
-          sortNaam: naamKey,
-        });
-
-        continue;
-      }
-
-      if (!Number.isFinite(pn) || !gewonePartijNrs.has(pn)) continue;
-
       const hoek = inferHoek(r);
-      if (!hoek) continue;
+      if (!Number.isFinite(pn) || !hoek) continue;
 
       const ctx = ctxByPartij.get(pn);
       if (!ctx) continue;
@@ -1340,7 +1417,7 @@ export default function RapportPage() {
           ? safe(ctx?.rood_naam_fp ?? ctx?.rood_naam_mm ?? ctx?.rood_naam)
           : safe(ctx?.blauw_naam_fp ?? ctx?.blauw_naam_mm ?? ctx?.blauw_naam);
 
-      const key = `${pn}__${hoek}__va-ontbreekt`;
+      const key = `${naam.toLowerCase()}__va-ontbreekt`;
       if (seen.has(key)) continue;
       seen.add(key);
 
@@ -1362,7 +1439,7 @@ export default function RapportPage() {
     return items.sort((a, b) =>
       (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl")
     );
-  }, [resultaten, ctxByPartij, gewonePartijNrs, toernooiRows]);
+  }, [resultaten, ctxByPartij, gewonePartijNrs]);
 
   const openKeurmerkRows = useMemo(() => {
     return (resultaten ?? []).filter((r) => {
@@ -1392,7 +1469,7 @@ export default function RapportPage() {
           ? safe(ctx?.rood_gym_fp ?? ctx?.rood_gym_mm ?? ctx?.rood_gym)
           : safe(ctx?.blauw_gym_fp ?? ctx?.blauw_gym_mm ?? ctx?.blauw_gym);
 
-      const detail = safe(r.boodschap ?? r.rule ?? "geen geldig of geen herkend keurmerk");
+      const detail = compactKeurmerkDetail(r.boodschap ?? r.rule ?? "geen geldig of geen herkend keurmerk");
       const key = `${pn}-${hoek}-${detail}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1974,6 +2051,63 @@ export default function RapportPage() {
     return [...verbodStartverbodIssues, ...toernooiVerbodStartverbodIssues];
   }, [verbodStartverbodIssues, toernooiVerbodStartverbodIssues]);
 
+  const matchmakerCtxByFighter = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const row of matchmakerCtxRows ?? []) {
+      const ids = [
+        row?.fighter_id,
+        row?.va_nummer,
+        row?.inschrijving_id,
+        row?.aanmelding_id,
+        row?.id,
+      ];
+      for (const raw of ids) {
+        const key = normalizeVa(raw);
+        if (key && !map.has(key)) map.set(key, row);
+      }
+    }
+    return map;
+  }, [matchmakerCtxRows]);
+
+  const matchmakerIssueItems = useMemo(() => {
+    const licentie: IssueSummaryItem[] = [];
+    const keurmerk: IssueSummaryItem[] = [];
+
+    for (const r of matchmakerResultaten ?? []) {
+      if (isApprovedOrClosed(r?.review_status)) continue;
+      const res = normResultaatLower(r?.resultaat ?? r?.severity);
+      if (res === "ok") continue;
+
+      const hay = `${r?.regel_type ?? ""} ${r?.rule_code ?? ""} ${r?.rule ?? ""} ${r?.boodschap ?? ""}`.toLowerCase();
+      const isLic = hay.includes("licentie") || hay.includes("license");
+      const isKeur = hay.includes("keurmerk") || hay.includes("sportschool_niet_gevonden") || hay.includes("sportschool niet gevonden");
+      if (!isLic && !isKeur) continue;
+
+      const fighterId = normalizeVa(r?.va_nummer ?? r?.fighter_id ?? r?.inschrijving_id ?? r?.aanmelding_id);
+      const ctx = fighterId ? matchmakerCtxByFighter.get(fighterId) : null;
+      const naam = safe(
+        ctx?.fp_naam ?? ctx?.naam_fp ?? ctx?.naam_match ?? ctx?.naam_input ?? ctx?.naam ??
+        [ctx?.voornaam, ctx?.achternaam].filter(Boolean).join(" ") ?? r?.naam
+      );
+      const gym = safe(ctx?.fp_gym ?? ctx?.gym_input ?? ctx?.sportschool ?? ctx?.gym ?? r?.sportschool);
+      const detail = safe(r?.boodschap ?? r?.rule ?? r?.rule_code ?? r?.regel_type);
+      const base: IssueSummaryItem = {
+        partij_nr: -1,
+        partij: "Aanmelding",
+        hoek: "rood",
+        naam,
+        gym,
+        label: isLic ? "Geen licentie" : "Keurmerk",
+        detail,
+        sortNaam: naam.toLowerCase(),
+      };
+      if (isLic) licentie.push(base);
+      if (isKeur) keurmerk.push(base);
+    }
+
+    return { licentie, keurmerk };
+  }, [matchmakerResultaten, matchmakerCtxByFighter]);
+
   const toernooiLicentieIssues = useMemo(() => {
     const items: IssueSummaryItem[] = [];
     const seen = new Set<string>();
@@ -2001,42 +2135,38 @@ export default function RapportPage() {
   const allLicentieIssues = useMemo(() => {
     const map = new Map<string, IssueSummaryItem>();
 
-    for (const item of [...licentieIssues, ...toernooiLicentieIssues]) {
-      const key = `${normDedupeText(item.partij)}__${normDedupeText(item.naam)}__${normGymKey(item.gym)}__licentie`;
+    for (const item of [...licentieIssues, ...toernooiLicentieIssues, ...matchmakerIssueItems.licentie]) {
+      const vaMatch = item.detail.match(/(?:VA|fightpaspoort(?:nummer)?)\s*[:#-]?\s*([A-Z0-9-]+)/i);
+      const identity = vaMatch?.[1]
+        ? `va:${normalizeVa(vaMatch[1])}`
+        : `persoon:${normDedupeText(item.naam)}__${normGymKey(item.gym)}`;
+      const key = `${identity}__licentie`;
       const prev = map.get(key);
       if (!prev) {
         map.set(key, item);
         continue;
       }
 
-      // Bewaar de meest herkenbare partijlabel/detail, maar toon dezelfde vechter maar één keer.
+      const details = Array.from(new Set([prev.detail, item.detail].filter(Boolean)));
+      const bronnen = Array.from(new Set([prev.partij, item.partij].filter(Boolean)));
       map.set(key, {
         ...prev,
-        partij: prev.partij !== "TOERNOOI" ? prev.partij : item.partij,
-        detail: prev.detail.length >= item.detail.length ? prev.detail : item.detail,
+        partij: bronnen.join(" / "),
+        detail: details.join(" • "),
       });
     }
 
     return Array.from(map.values()).sort((a, b) =>
       (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl")
     );
-  }, [licentieIssues, toernooiLicentieIssues]);
+  }, [licentieIssues, toernooiLicentieIssues, matchmakerIssueItems]);
 
   const toernooiMissingVaIssues = useMemo(() => {
     const items: IssueSummaryItem[] = [];
     const seen = new Set<string>();
 
     for (const item of toernooiMeldingen) {
-      if (
-        !item.labels.some((x) => {
-          const lx = x.toLowerCase();
-          return lx.includes("geen va") || lx.includes("va ontbreekt") || lx.includes("fightpaspoort");
-        }) &&
-        !item.details.some((x) => {
-          const dx = x.toLowerCase();
-          return dx.includes("geen va") || dx.includes("va ontbreekt") || dx.includes("fightpaspoort");
-        })
-      ) continue;
+      if (!item.labels.some((x) => x.toLowerCase().includes("geen va"))) continue;
       const key = `${item.toernooiCode}-${item.fighterKey}-va`.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -2056,25 +2186,7 @@ export default function RapportPage() {
   }, [toernooiMeldingen]);
 
   const allMissingVaIssues = useMemo(() => {
-    const map = new Map<string, IssueSummaryItem>();
-
-    for (const item of [...missingVaIssues, ...toernooiMissingVaIssues]) {
-      const key = `${normDedupeText(item.partij)}__${normDedupeText(item.naam)}__${normGymKey(item.gym)}__va-ontbreekt`;
-      const prev = map.get(key);
-      if (!prev) {
-        map.set(key, item);
-        continue;
-      }
-
-      map.set(key, {
-        ...prev,
-        detail: prev.detail.length >= item.detail.length ? prev.detail : item.detail,
-      });
-    }
-
-    return Array.from(map.values()).sort((a, b) =>
-      (a.sortNaam ?? a.naam).localeCompare(b.sortNaam ?? b.naam, "nl")
-    );
+    return [...missingVaIssues, ...toernooiMissingVaIssues];
   }, [missingVaIssues, toernooiMissingVaIssues]);
 
   const toernooiKeurmerkIssues = useMemo(() => {
@@ -2093,7 +2205,7 @@ export default function RapportPage() {
         naam: item.naam,
         gym: item.gym,
         label: "Keurmerk",
-        detail: item.details.join(" • ") || "Geen geldig keurmerk",
+        detail: compactKeurmerkDetail(item.details.join(" • ") || "Geen geldig keurmerk"),
         sortNaam: item.naam.toLowerCase(),
       });
     }
@@ -2102,8 +2214,55 @@ export default function RapportPage() {
   }, [toernooiMeldingen]);
 
   const allKeurmerkIssues = useMemo(() => {
-    return [...keurmerkIssues, ...toernooiKeurmerkIssues];
-  }, [keurmerkIssues, toernooiKeurmerkIssues]);
+    const map = new Map<string, IssueSummaryItem>();
+
+    for (const item of [...keurmerkIssues, ...toernooiKeurmerkIssues, ...matchmakerIssueItems.keurmerk]) {
+      // Keurmerk is een eigenschap van de sportschool, niet van de vechter.
+      // Daarom altijd exact één regel per genormaliseerde sportschool tonen,
+      // ongeacht hoeveel aanmeldingen, wedstrijden of toernooien de melding veroorzaken.
+      const gymKey = normGymKey(item.gym);
+      if (!gymKey || gymKey === "-") continue;
+
+      const prev = map.get(gymKey);
+      if (!prev) {
+        map.set(gymKey, {
+          ...item,
+          naam: "-",
+          sortNaam: gymKey,
+        });
+        continue;
+      }
+
+      const bronnen = Array.from(
+        new Set(
+          [prev.partij, item.partij]
+            .flatMap((value) => String(value ?? "").split(" / "))
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      );
+
+      const opmerkingen = Array.from(
+        new Set(
+          [prev.detail, item.detail]
+            .flatMap((value) => String(value ?? "").split(" • "))
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      );
+
+      map.set(gymKey, {
+        ...prev,
+        partij: bronnen.join(" / "),
+        detail: opmerkingen.join(" • "),
+        naam: "-",
+      });
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.gym.localeCompare(b.gym, "nl"),
+    );
+  }, [keurmerkIssues, toernooiKeurmerkIssues, matchmakerIssueItems]);
 
   const toernooiFightpaspoortGewijzigd = useMemo(() => {
     const items: IssueSummaryItem[] = [];
@@ -2148,7 +2307,7 @@ export default function RapportPage() {
       return Array.from(map.values()).sort((a, b) => a.localeCompare(b, "nl"));
     };
 
-    const toernooiGeenKeurmerk = toernooiKeurmerkIssues.map((x) => x.gym).filter((x) => x && x !== "-");
+    const gecombineerdeKeurmerkGyms = allKeurmerkIssues.map((x) => x.gym).filter((x) => x && x !== "-");
 
     return {
       belgischeCheck: uniqueGyms(sportschoolIssues.belgischeCheck),
@@ -2156,9 +2315,9 @@ export default function RapportPage() {
       geenData: uniqueGyms(sportschoolIssues.geenData),
       datumOntbreekt: uniqueGyms(sportschoolIssues.datumOntbreekt),
       verlopen: uniqueGyms(sportschoolIssues.verlopen),
-      geenKeurmerk: uniqueGyms([...sportschoolIssues.geenKeurmerk, ...toernooiGeenKeurmerk]),
+      geenKeurmerk: uniqueGyms([...sportschoolIssues.geenKeurmerk, ...gecombineerdeKeurmerkGyms]),
     };
-  }, [sportschoolIssues, toernooiKeurmerkIssues]);
+  }, [sportschoolIssues, allKeurmerkIssues]);
 
   const allSportschoolIssueCount = useMemo(() => {
     return (
@@ -2227,7 +2386,7 @@ export default function RapportPage() {
       <div className="print-max mx-auto max-w-6xl px-4 py-5">
         <div className="no-print mb-4 flex items-center justify-between gap-3">
           <Link
-            href={`/dashboard/admin/controle/${matchmakingId}`}
+            href={`/dashboard/matchmaker/matchmaking/${matchmakingId}`}
             className="inline-flex items-center rounded-lg bg-black px-4 py-2 text-sm font-bold text-white hover:opacity-90"
           >
             ← Terug
@@ -2370,7 +2529,7 @@ export default function RapportPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={4} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                        <td colSpan={3} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
                           Geen open licentieproblemen.
                         </td>
                       </tr>
@@ -2451,71 +2610,29 @@ export default function RapportPage() {
             </div>
 
             <div className="overflow-hidden rounded-[18px] border border-black/10">
-              <SectionTitle right={allSportschoolIssueCount}>SPORTSCHOLEN ZONDER KEURMERK / GEEN KEURMERK INFO</SectionTitle>
+              <SectionTitle right={allKeurmerkIssues.length}>GEEN KEURMERK / GEEN KEURMERK INFO</SectionTitle>
               <div className="overflow-x-auto px-3 pb-3">
                 <table className="w-full border-separate border-spacing-y-[2px] text-xs">
                   <thead>
                     <tr>
-                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Soort</th>
+                      <th className="rounded-l-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Bron</th>
                       <th className="bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Sportschool</th>
-                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Detail</th>
+                      <th className="rounded-r-md bg-[#3a3f46] px-2 py-1 text-left font-black text-white">Opmerking</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {allSportschoolIssueCount ? (
-                      <>
-                        {allSportschoolIssues.nietGevonden.map((gym, idx) => (
-                          <tr key={`sportschool-niet-gevonden-${gym}-${idx}`}>
-                            <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>Niet gevonden</td>
-                            <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{gym}</td>
-                            <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>Geen match in sportscholen. Maak alias aan of koppel juiste sportschool.</td>
-                          </tr>
-                        ))}
-                        {allSportschoolIssues.geenData.map((gym, idx) => {
-                          const rowIndex = allSportschoolIssues.nietGevonden.length + idx;
-                          return (
-                            <tr key={`sportschool-geen-data-${gym}-${idx}`}>
-                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Geen keurmerk info</td>
-                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
-                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Geen bruikbare keurmerkdata gevonden of meerdere matches.</td>
-                            </tr>
-                          );
-                        })}
-                        {allSportschoolIssues.datumOntbreekt.map((gym, idx) => {
-                          const rowIndex = allSportschoolIssues.nietGevonden.length + allSportschoolIssues.geenData.length + idx;
-                          return (
-                            <tr key={`sportschool-datum-ontbreekt-${gym}-${idx}`}>
-                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Datum ontbreekt</td>
-                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
-                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Keurmerkinfo gevonden maar datum/vervaldatum ontbreekt.</td>
-                            </tr>
-                          );
-                        })}
-                        {allSportschoolIssues.verlopen.map((gym, idx) => {
-                          const rowIndex = allSportschoolIssues.nietGevonden.length + allSportschoolIssues.geenData.length + allSportschoolIssues.datumOntbreekt.length + idx;
-                          return (
-                            <tr key={`sportschool-verlopen-${gym}-${idx}`}>
-                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Keurmerk verlopen</td>
-                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
-                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Keurmerk gevonden maar niet meer geldig op eventdatum.</td>
-                            </tr>
-                          );
-                        })}
-                        {allSportschoolIssues.geenKeurmerk.map((gym, idx) => {
-                          const rowIndex = allSportschoolIssues.nietGevonden.length + allSportschoolIssues.geenData.length + allSportschoolIssues.datumOntbreekt.length + allSportschoolIssues.verlopen.length + idx;
-                          return (
-                            <tr key={`sportschool-geen-keurmerk-${gym}-${idx}`}>
-                              <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(rowIndex)}`}>Geen keurmerk</td>
-                              <td className={`px-2 py-1.5 font-semibold ${rowBg(rowIndex)}`}>{gym}</td>
-                              <td className={`rounded-r-md px-2 py-1.5 ${rowBg(rowIndex)}`}>Sportschool heeft geen geldig keurmerk op datum evenement.</td>
-                            </tr>
-                          );
-                        })}
-                      </>
+                    {allKeurmerkIssues.length ? (
+                      allKeurmerkIssues.map((item, idx) => (
+                        <tr key={`${normGymKey(item.gym)}-${idx}`}>
+                          <td className={`rounded-l-md px-2 py-1.5 font-bold ${rowBg(idx)}`}>{item.partij}</td>
+                          <td className={`px-2 py-1.5 font-semibold ${rowBg(idx)}`}>{item.gym}</td>
+                          <td className={`rounded-r-md px-2 py-1.5 ${rowBg(idx)}`}>{item.detail}</td>
+                        </tr>
+                      ))
                     ) : (
                       <tr>
-                        <td colSpan={3} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
-                          Geen open sportschool- of keurmerkmeldingen.
+                        <td colSpan={4} className="rounded-md bg-white px-3 py-3 text-sm text-black/70">
+                          Geen open keurmerkproblemen.
                         </td>
                       </tr>
                     )}

@@ -26,63 +26,6 @@ function resolveScriptPath(...parts: string[]) {
   throw new Error(`scraper niet gevonden:\n- ${candidates.join("\n- ")}`);
 }
 
-function resolveScraperLockPath() {
-  const root = process.cwd();
-  const candidates = [
-    path.join(root, "ControlEngine", "scrapers"),
-    path.join(root, "ControlEngine", "ControlEngine", "scrapers"),
-    path.join(root, "scrapers"),
-  ];
-  const dir = candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
-  fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, ".fightpassport-scraper.lock");
-}
-
-async function withScraperLock<T>(fn: () => Promise<T>): Promise<T> {
-  const lockPath = resolveScraperLockPath();
-  const started = Date.now();
-  let lastLog = 0;
-
-  while (true) {
-    try {
-      const fd = fs.openSync(lockPath, "wx");
-      fs.writeFileSync(fd, JSON.stringify({
-        pid: process.pid,
-        started_at: new Date().toISOString(),
-        route: "sportscholen-3x10",
-      }, null, 2));
-      fs.closeSync(fd);
-      break;
-    } catch {
-      try {
-        const stat = fs.statSync(lockPath);
-        const ageMs = Date.now() - stat.mtimeMs;
-        if (ageMs > 1000 * 60 * 90) {
-          fs.unlinkSync(lockPath);
-          continue;
-        }
-        if (Date.now() - lastLog > 10000) {
-          lastLog = Date.now();
-          console.log("🏫 sportscholen: wacht op scraper-lock", {
-            age_sec: Math.round(ageMs / 1000),
-          });
-        }
-      } catch {}
-
-      if (Date.now() - started > 1000 * 60 * 120) {
-        throw new Error("FightPassport scraper-lock timeout.");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-  }
-
-  try {
-    return await fn();
-  } finally {
-    try { fs.unlinkSync(lockPath); } catch {}
-  }
-}
-
 function runNodeScript(
   scriptPath: string,
   args: string[],
@@ -177,29 +120,28 @@ function splitRoundRobin<T>(items: T[], parts: number): T[][] {
 
 export async function POST() {
   try {
-    return await withScraperLock(async () => {
-      const preparePath = resolveScriptPath(
-        "scrapers", "sportscholen", "scraper_sportscholen_prepare.js"
+    const preparePath = resolveScriptPath(
+      "scrapers", "sportscholen", "scraper_sportscholen_prepare.js"
       );
-      const workerPath = resolveScriptPath(
-        "scrapers", "sportscholen", "scraper_sportscholen.js"
+    const workerPath = resolveScriptPath(
+      "scrapers", "sportscholen", "scraper_sportscholen.js"
       );
 
-      console.log("🏫 fase 1/2: volledige sportscholenlijst downloaden");
-      await runNodeScript(preparePath, ["run"], {}, "sportscholen-prepare");
+    console.log("🏫 fase 1/2: volledige sportscholenlijst downloaden");
+    await runNodeScript(preparePath, ["run"], {}, "sportscholen-prepare");
 
-      const keys = await loadAllSportschoolKeys();
-      if (!keys.length) throw new Error("Geen sportschool-keys gevonden.");
+    const keys = await loadAllSportschoolKeys();
+    if (!keys.length) throw new Error("Geen sportschool-keys gevonden.");
 
-      const chunks = splitRoundRobin(keys, 3).filter((chunk) => chunk.length > 0);
+    const chunks = splitRoundRobin(keys, 3).filter((chunk) => chunk.length > 0);
 
-      console.log("🏫 fase 2/2: 3x10 DETAILS + VECHTERS", {
-        sportscholen: keys.length,
-        processen: chunks.length,
-        workers_per_proces: 10,
-      });
+    console.log("🏫 fase 2/2: 3x10 DETAILS + VECHTERS", {
+      sportscholen: keys.length,
+      processen: chunks.length,
+      workers_per_proces: 10,
+    });
 
-      const results = await Promise.all(
+    const results = await Promise.all(
         chunks.map((chunk, index) =>
           runNodeScript(
             workerPath,
@@ -230,13 +172,12 @@ export async function POST() {
         )
       );
 
-      return NextResponse.json({
-        ok: true,
-        sportscholen: keys.length,
-        processen: chunks.length,
-        workers_per_proces: 10,
-        ms: results.reduce((max, r) => Math.max(max, r.ms), 0),
-      });
+    return NextResponse.json({
+      ok: true,
+      sportscholen: keys.length,
+      processen: chunks.length,
+      workers_per_proces: 10,
+      ms: results.reduce((max, r) => Math.max(max, r.ms), 0),
     });
   } catch (err: any) {
     console.error("❌ sportscholen API fout:", err);

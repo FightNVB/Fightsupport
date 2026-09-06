@@ -1008,6 +1008,25 @@ function toNumKg(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+
+function fitTextareaToContentAndCell(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+
+  const resize = () => {
+    el.style.height = "auto";
+
+    const parentHeight = el.parentElement?.clientHeight ?? 0;
+    const availableHeight = Math.max(54, parentHeight - 16);
+    const contentHeight = el.scrollHeight;
+
+    el.style.height = `${Math.max(availableHeight, contentHeight)}px`;
+  };
+
+  // Eerst op inhoud, daarna nogmaals zodra de tabelrij zijn definitieve hoogte heeft.
+  resize();
+  requestAnimationFrame(resize);
+}
+
 function firstFilled(...values: any[]): any {
   for (const value of values) {
     if (value == null) continue;
@@ -2873,7 +2892,7 @@ export default function PartijDetailPage() {
       setRescraping(true);
       setShowLoader(true);
 
-      const r = await authedFetch("/api/control-engine/bout-rescrape", {
+      const r = await authedFetch("/api/matchmaker/bout-rescrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3518,11 +3537,15 @@ export default function PartijDetailPage() {
 
                             <td className="px-3 py-2 align-top">
                               <textarea
+                                ref={fitTextareaToContentAndCell}
                                 defaultValue={
                                   (noteDraftRef.current[r.id] ??
                                     r.aantekeningen ??
                                     "") as any
                                 }
+                                onInput={(e) => {
+                                  fitTextareaToContentAndCell(e.currentTarget);
+                                }}
                                 onChange={(e) => {
                                   noteDraftRef.current[r.id] = e.target.value;
                                 }}
@@ -3533,7 +3556,7 @@ export default function PartijDetailPage() {
                                 }}
                                 placeholder="Noteer reden van goedkeuren / besluit…"
                                 spellCheck={false}
-                                className="w-full min-h-[54px] px-2 py-2 rounded border border-zinc-400 bg-zinc-50 text-zinc-900 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                                className="w-full min-h-[54px] resize-none overflow-hidden px-2 py-2 rounded border border-zinc-400 bg-zinc-50 text-zinc-900 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                               />
                             </td>
 
@@ -3854,7 +3877,9 @@ export default function PartijDetailPage() {
                     onChange={(e) => {
                       customDraftRef.current.boodschap = e.target.value;
                     }}
-                    className="w-full min-h-[110px] px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    ref={fitTextareaToContentAndCell}
+                    onInput={(e) => fitTextareaToContentAndCell(e.currentTarget)}
+                    className="w-full min-h-[110px] resize-none overflow-hidden px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                     placeholder="Typ hier je eigen melding die mee moet in rapport en export..."
                   />
                 </div>
@@ -3868,7 +3893,9 @@ export default function PartijDetailPage() {
                     onChange={(e) => {
                       customDraftRef.current.aantekeningen = e.target.value;
                     }}
-                    className="w-full min-h-[80px] px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                    ref={fitTextareaToContentAndCell}
+                    onInput={(e) => fitTextareaToContentAndCell(e.currentTarget)}
+                    className="w-full min-h-[80px] resize-none overflow-hidden px-3 py-2 rounded bg-zinc-50 border border-zinc-400 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                     placeholder="Optioneel..."
                   />
                 </div>

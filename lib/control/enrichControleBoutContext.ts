@@ -85,24 +85,6 @@ function compactStrictName(s: any) {
   return normStrictName(s).replace(/\s+/g, "");
 }
 
-function isOpenOpponentPlaceholder(v: any): boolean {
-  const s = String(v ?? "")
-    .toLowerCase()
-    .replace(/[._-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return new Set([
-    "tba",
-    "t b a",
-    "gezocht",
-    "tegenstander gezocht",
-    "opponent gezocht",
-    "nog gezocht",
-    "to be announced",
-  ]).has(s);
-}
-
 function normPlaats(s: any) {
   return String(s ?? "")
     .toLowerCase()
@@ -271,6 +253,66 @@ function toIsoDateOnly(d: any): string | null {
   if (!d) return null;
   const x = dayjs(d);
   return x.isValid() ? x.format("YYYY-MM-DD") : null;
+}
+
+
+function getKeurmerkEventStatus(school: any, eventDate: any) {
+  const eventIso = toIsoDateOnly(eventDate);
+
+  let rawPeriods: any = school?.keurmerk_periodes ?? [];
+  if (typeof rawPeriods === "string") {
+    try { rawPeriods = JSON.parse(rawPeriods); } catch { rawPeriods = []; }
+  }
+  if (!Array.isArray(rawPeriods)) rawPeriods = [];
+
+  const periods: { start: string | null; einde: string | null }[] = [];
+  const pushPeriod = (startValue: any, endValue: any) => {
+    const start = toIsoDateOnly(startValue);
+    const einde = toIsoDateOnly(endValue);
+    if (!start && !einde) return;
+    if (periods.some((p) => p.start === start && p.einde === einde)) return;
+    periods.push({ start, einde });
+  };
+
+  // Volledige scraperhistorie is leidend.
+  for (const p of rawPeriods) {
+    pushPeriod(
+      p?.start ?? p?.keurmerk_start ?? p?.startdatum ?? p?.start_date,
+      p?.einde ?? p?.keurmerk_einde ?? p?.einddatum ?? p?.end_date,
+    );
+  }
+
+  // Samenvattingskolommen van de sportscholen-scraper als extra/fallback.
+  pushPeriod(school?.keurmerk_start, school?.keurmerk_einde);
+  pushPeriod(school?.keurmerk_volgende_start, school?.keurmerk_volgende_einde);
+
+  // Legacy data: alleen een einddatum.
+  if (periods.length === 0) {
+    pushPeriod(
+      null,
+      school?.keurmerk_eind ?? school?.keurmerk_einde ?? school?.einde_keurmerk ?? school?.keurmerk_laatste_einde,
+    );
+  }
+
+  const covering = eventIso
+    ? periods.find((p) => (!p.start || p.start <= eventIso) && (!p.einde || p.einde >= eventIso)) ?? null
+    : null;
+
+  const latestEnd = [
+    ...periods.map((p) => p.einde),
+    toIsoDateOnly(school?.keurmerk_laatste_einde),
+    toIsoDateOnly(school?.keurmerk_volgende_einde),
+    toIsoDateOnly(school?.keurmerk_einde),
+    toIsoDateOnly(school?.keurmerk_eind),
+    toIsoDateOnly(school?.einde_keurmerk),
+  ].filter(Boolean).sort().at(-1) ?? null;
+
+  return {
+    geldig: !!covering,
+    start: covering?.start ?? null,
+    einde: covering?.einde ?? null,
+    latestEnd,
+  };
 }
 
 async function fetchAllSportscholen() {
@@ -451,7 +493,14 @@ function findGymMatchFromStoredFighterData(opts: {
       findGymMatch(sportscholen, resultGym, aliasMaps).row;
 
     if (resultMatch && mmNameMatchesSchoolOrAlias(gymNaam, resultMatch, aliasMaps)) {
-      return { row: resultMatch, reason: null };
+      const explicitLandHint = detectLandHintFromGymText(gymNaam);
+      const landDb = resultMatch?.land ?? resultMatch?.country ?? null;
+
+      if (explicitLandHint || isNL(landDb)) {
+        return { row: resultMatch, reason: null };
+      }
+      // Zonder landhint bewaren we buitenland voor de allerlaatste
+      // exacte DB-naam/alias-fallback, gelijk aan Matchmaker.
     }
   }
 
@@ -465,7 +514,13 @@ function findGymMatchFromStoredFighterData(opts: {
   for (const link of ordered) {
     const school = findSportschoolBySportschoolId(sportscholen, link?.sportschool_id);
     if (school && mmNameMatchesSchoolOrAlias(gymNaam, school, aliasMaps)) {
-      return { row: school, reason: null };
+      const explicitLandHint = detectLandHintFromGymText(gymNaam);
+      const landDb = school?.land ?? school?.country ?? null;
+
+      if (explicitLandHint || isNL(landDb)) {
+        return { row: school, reason: null };
+      }
+      // Buitenlandse VA-koppeling zonder landhint niet vroeg accepteren.
     }
   }
 
@@ -484,11 +539,7 @@ function buildKeurmerkPatchForResolvedSchool(opts: {
   const hint = detectLandHintFromGymText(mmGym);
   const landDb = found?.land ?? found?.country ?? null;
   const land = landLabelForMatch(landDb, hint);
-  const eindeIso = toIsoDateOnly(
-    found?.keurmerk_eind ??
-    found?.keurmerk_einde ??
-    found?.einde_keurmerk
-  );
+  const keurmerkStatus = getKeurmerkEventStatus(found, evenement_datum);
 
   if (landDb ? isForeignNonNL(landDb) : isForeignHint(hint)) {
     patch[valueKey] = true;
@@ -497,13 +548,12 @@ function buildKeurmerkPatchForResolvedSchool(opts: {
     return patch;
   }
 
-  const geldig = !!eindeIso && eindeIso >= String(evenement_datum ?? "");
-  patch[valueKey] = geldig;
+  patch[valueKey] = keurmerkStatus.geldig;
   patch[reasonKey] = keurmerkDbReason({
-    geldig,
+    geldig: keurmerkStatus.geldig,
     aanmelding: mmGym,
     found,
-    eindeIso,
+    eindeIso: keurmerkStatus.geldig ? keurmerkStatus.einde : keurmerkStatus.latestEnd,
   });
   return patch;
 }
@@ -586,7 +636,91 @@ type GymMatch = {
 function findSportschoolBySportschoolId(list: any[], sid: any) {
   const s = String(sid ?? "").trim();
   if (!s) return null;
-  return list.find((x) => String(x?.sportschool_id) === s) ?? null;
+
+  return (
+    list.find((x) => String(x?.sportschool_id ?? "").trim() === s) ??
+    list.find((x) => String(x?.id ?? "").trim() === s) ??
+    null
+  );
+}
+
+
+function findExactNameOrAliasFallback(
+  sportscholen: any[],
+  gymNaam: string,
+  aliasMaps?: AliasMaps
+): GymMatch {
+  const raw = String(gymNaam ?? "").trim();
+  if (!raw) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
+
+  const strict = normStrictName(raw);
+  const strictCompact = compactStrictName(raw);
+  const loose = norm(raw);
+  const looseCompact = compactNorm(loose);
+
+  const candidates: any[] = [];
+  const seen = new Set<string>();
+
+  const add = (row: any) => {
+    if (!row) return;
+    const id = String(row?.sportschool_id ?? "").trim() ||
+      `${normStrictName(row?.naam)}|${String(row?.plaats ?? row?.stad ?? "").trim()}|${String(row?.land ?? row?.country ?? "").trim()}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    candidates.push(row);
+  };
+
+  // Alleen exacte naam-identiteit; geen subset/fuzzy.
+  for (const row of sportscholen ?? []) {
+    const naam = String(row?.naam ?? "").trim();
+    if (!naam) continue;
+
+    if (
+      normStrictName(naam) === strict ||
+      compactStrictName(naam) === strictCompact ||
+      norm(naam) === loose ||
+      compactNorm(norm(naam)) === looseCompact
+    ) {
+      add(row);
+    }
+  }
+
+  // Exacte alias-identiteit van de volledige MM-naam.
+  for (const alias of aliasMaps?.aliasRows ?? []) {
+    const aliasRaw = String(alias?.alias_text ?? "").trim();
+    if (!aliasRaw) continue;
+
+    if (
+      normStrictName(aliasRaw) === strict ||
+      compactStrictName(aliasRaw) === strictCompact ||
+      norm(aliasRaw) === loose ||
+      compactNorm(norm(aliasRaw)) === looseCompact
+    ) {
+      add(findSportschoolBySportschoolId(sportscholen, alias?.sportschool_id));
+    }
+  }
+
+  // Zonder landcode eerst Nederland prefereren.
+  const nl = candidates.filter((row) => isNL(row?.land ?? row?.country));
+  if (nl.length === 1) return { row: nl[0], reason: null };
+  if (nl.length > 1) {
+    return {
+      row: null,
+      reason: "Meerdere exacte Nederlandse sportschoolmatches — maak alias specifieker.",
+    };
+  }
+
+  // Pas als allerlaatste mag een exact buitenlandse naam/alias gebruikt worden.
+  const foreign = candidates.filter((row) => isForeignNonNL(row?.land ?? row?.country));
+  if (foreign.length === 1) return { row: foreign[0], reason: null };
+  if (foreign.length > 1) {
+    return {
+      row: null,
+      reason: "Meerdere exacte buitenlandse sportschoolmatches — voeg landcode of plaats toe.",
+    };
+  }
+
+  return { row: null, reason: "Geen exacte naam- of aliasmatch gevonden." };
 }
 
 function hasPlaatsHint(gRaw: string, plaatsValue: any) {
@@ -1068,10 +1202,17 @@ function liveSportschoolMatchesMatchmaking(
 
   // Alleen een EXPLICIETE landhint in de matchmaking is hard leidend.
   const explicitMmLand = detectLandHintFromGymText(mm);
+  const fpLand = live?.land ?? null;
+
   if (explicitMmLand) {
-    const fpLand = live?.land ?? null;
     if (!landMatchesHint(fpLand, explicitMmLand)) return false;
+    return true;
   }
+
+  // Zonder landhint mag een buitenlandse live FP-koppeling niet eerder winnen
+  // dan de Nederlandse zoekstappen. Laat die doorvallen naar dezelfde
+  // exacte DB-naam/alias-fallback als Matchmaker.
+  if (fpLand && isForeignNonNL(fpLand)) return false;
 
   return true;
 }
@@ -1140,20 +1281,14 @@ function buildLiveEventDateKeurmerkPatch(opts: {
 
   const exactDbSchool = findExactSportschoolByName(sportscholen, fpGym);
   if (exactDbSchool) {
-    const eindeIso = toIsoDateOnly(
-      exactDbSchool?.keurmerk_eind ??
-      exactDbSchool?.keurmerk_einde ??
-      exactDbSchool?.einde_keurmerk
-    );
-    const eventIso = String(evenement_datum ?? "").trim();
-    const geldigOpEventdatum = !!eindeIso && !!eventIso && eindeIso >= eventIso;
+    const keurmerkStatus = getKeurmerkEventStatus(exactDbSchool, evenement_datum);
 
-    patch[valueKey] = geldigOpEventdatum;
+    patch[valueKey] = keurmerkStatus.geldig;
     patch[reasonKey] = keurmerkDbReason({
-      geldig: geldigOpEventdatum,
+      geldig: keurmerkStatus.geldig,
       aanmelding: mmGym,
       found: exactDbSchool,
-      eindeIso,
+      eindeIso: keurmerkStatus.geldig ? keurmerkStatus.einde : keurmerkStatus.latestEnd,
     });
     return patch;
   }
@@ -1184,9 +1319,29 @@ function buildKeurmerkPatchForGym(opts: {
     value ? `↳ [MM sportschool:] "${value}"` : `↳ [MM sportschool:] -`;
   const hint = detectLandHintFromGymText(gymValue);
 
-  const match = gymValue
+  let match = gymValue
     ? findGymMatch(sportscholen, gymValue, aliasMaps)
     : { row: null, reason: null };
+
+  // Zonder landcode eerst Nederland. Alleen als dat niets betrouwbaars oplevert,
+  // mag als allerlaatste een exacte buitenlandse DB-naam of exacte alias winnen.
+  // Fuzzy/subset buitenland blijft zonder landhint afgewezen.
+  if (
+    gymValue &&
+    !hint &&
+    (!match.row || isForeignNonNL(match.row?.land ?? match.row?.country))
+  ) {
+    const exactFallback = findExactNameOrAliasFallback(sportscholen, gymValue, aliasMaps);
+
+    if (match.row && isNL(match.row?.land ?? match.row?.country)) {
+      // Nederlandse match blijft leidend.
+    } else if (exactFallback.row) {
+      match = exactFallback;
+    } else if (match.row && isForeignNonNL(match.row?.land ?? match.row?.country)) {
+      match = exactFallback;
+    }
+  }
+
   const found = match.row;
 
   if (!found) {
@@ -1206,7 +1361,7 @@ function buildKeurmerkPatchForGym(opts: {
 
   const landDb = found?.land ?? found?.country ?? null;
   const land = landLabelForMatch(landDb, hint);
-  const eindeIso = toIsoDateOnly(found?.keurmerk_eind ?? found?.keurmerk_einde ?? found?.einde_keurmerk);
+  const keurmerkStatus = getKeurmerkEventStatus(found, evenement_datum);
   const matchInfo = `Sportschool: ${found.naam}`;
 
   const isForeign = landDb ? isForeignNonNL(landDb) : hint !== null && hint !== "NL";
@@ -1228,13 +1383,12 @@ function buildKeurmerkPatchForGym(opts: {
     return patch;
   }
 
-  const geldig = !!eindeIso && eindeIso >= String(evenement_datum ?? "");
-  patch[valueKey] = geldig;
+  patch[valueKey] = keurmerkStatus.geldig;
   patch[reasonKey] = keurmerkDbReason({
-    geldig,
+    geldig: keurmerkStatus.geldig,
     aanmelding: gymValue,
     found,
-    eindeIso,
+    eindeIso: keurmerkStatus.geldig ? keurmerkStatus.einde : keurmerkStatus.latestEnd,
   });
 
   return patch;
@@ -1353,15 +1507,11 @@ export async function enrichControleBoutContext(
     const bout_id = unwrapUuid((row as any).bout_id);
     if (!bout_id) continue;
 
-    const roodNaam = String((row as any).rood_naam_mm ?? "").trim();
-    const blauwNaam = String((row as any).blauw_naam_mm ?? "").trim();
-    const roodOpen = isOpenOpponentPlaceholder(roodNaam);
-    const blauwOpen = isOpenOpponentPlaceholder(blauwNaam);
-    const roodGym = roodOpen ? "" : String((row as any).rood_gym_mm ?? "").trim();
-    const blauwGym = blauwOpen ? "" : String((row as any).blauw_gym_mm ?? "").trim();
+    const roodGym = String((row as any).rood_gym_mm ?? "").trim();
+    const blauwGym = String((row as any).blauw_gym_mm ?? "").trim();
 
-    const roodVa = roodOpen ? "" : String((row as any)?.rood_va_mm ?? "").trim();
-    const blauwVa = blauwOpen ? "" : String((row as any)?.blauw_va_mm ?? "").trim();
+    const roodVa = String((row as any)?.rood_va_mm ?? "").trim();
+    const blauwVa = String((row as any)?.blauw_va_mm ?? "").trim();
     const liveRood = roodVa ? liveByVa.get(roodVa) : null;
     const liveBlauw = blauwVa ? liveByVa.get(blauwVa) : null;
 
@@ -1435,19 +1585,8 @@ export async function enrichControleBoutContext(
       // Zichtbare keurmerkmelding blijft compact: aanmelding + DB-match + geldigheid.
     };
 
-    if (roodOpen) {
-      patch.keurmerk_rood = null;
-      patch.keurmerk_reden_rood = null;
-    } else {
-      applySide("rood", roodGym, liveRood);
-    }
-
-    if (blauwOpen) {
-      patch.keurmerk_blauw = null;
-      patch.keurmerk_reden_blauw = null;
-    } else {
-      applySide("blauw", blauwGym, liveBlauw);
-    }
+    applySide("rood", roodGym, liveRood);
+    applySide("blauw", blauwGym, liveBlauw);
 
     const { error: uErr } = await supabaseAdmin
       .from("controle_bout_context")

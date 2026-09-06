@@ -1512,33 +1512,31 @@ async function readKeurmerkPeriods(page, key) {
       const norm = (v) => clean(v).toLowerCase();
       const requiredHeaders = ["toegevoegd door", "toegevoegd op", "start", "einde"];
 
-      // FightPassport gebruikt op deze pagina meerdere tabellen met soms hetzelfde
-      // #overview_table_body. Kies daarom niet de tabel met de meeste rijen, maar
-      // exact de tabel waarvan de kolomkoppen de keurmerkvelden bevatten.
+      const bodyText = clean(document.body?.innerText);
+
+      // 1) Eerst de normale tabelstructuur proberen.
       const tables = [...document.querySelectorAll("table")].filter(visible);
       let chosenTable = null;
       let chosenHeaders = [];
 
       for (const table of tables) {
         const headerCandidates = [
-          ...table.querySelectorAll("thead th, thead td, th, tr.flexlist_header td, tr.flexlist_header th")
+          ...table.querySelectorAll(
+            "thead th, thead td, th, tr.flexlist_header td, tr.flexlist_header th"
+          ),
         ]
           .map((el) => norm(el.textContent))
           .filter(Boolean);
 
         const joined = headerCandidates.join(" | ");
-        const matchesAll = requiredHeaders.every((header) => joined.includes(header));
-
-        if (matchesAll) {
+        if (requiredHeaders.every((header) => joined.includes(header))) {
           chosenTable = table;
           chosenHeaders = headerCandidates;
           break;
         }
       }
 
-      // Extra fallback voor FightPassport-varianten waarbij de kopregel geen <th>
-      // gebruikt: zoek het zichtbare #overview_table_body waarvan de bovenliggende
-      // tabeltekst alle vier de keurmerkkoppen bevat.
+      // 2) FightPassport gebruikt soms #overview_table_body zonder bruikbare <th>.
       if (!chosenTable) {
         const bodies = [...document.querySelectorAll("#overview_table_body")].filter(visible);
         for (const body of bodies) {
@@ -1554,42 +1552,84 @@ async function readKeurmerkPeriods(page, key) {
         }
       }
 
-      if (!chosenTable) {
+      if (chosenTable) {
+        const candidateRows = [
+          ...chosenTable.querySelectorAll("tbody tr.flexlist_row, tbody tr, tr.flexlist_row"),
+        ].filter((row) => {
+          if (!visible(row) || row.classList.contains("filler")) return false;
+          if (row.closest("thead")) return false;
+          return true;
+        });
+
+        const parsed = candidateRows
+          .map((row) => [...row.querySelectorAll("td")].map((td) => clean(td.textContent)))
+          .filter((cells) => cells.length >= 4)
+          .filter((cells) => {
+            const joined = cells.map(norm).join(" | ");
+            return !requiredHeaders.every((header) => joined.includes(header));
+          });
+
         return {
-          ready: false,
-          foundTable: false,
-          headers: [],
-          rows: [],
-          body: clean(document.body?.innerText).slice(0, 1400),
+          ready: true,
+          foundTable: true,
+          source: "table",
+          headers: chosenHeaders,
+          rows: parsed,
+          body: bodyText.slice(0, 1400),
         };
       }
 
-      const candidateRows = [
-        ...chosenTable.querySelectorAll("tbody tr.flexlist_row, tbody tr, tr.flexlist_row")
-      ].filter((row) => {
-        if (!visible(row) || row.classList.contains("filler")) return false;
-        // Headerregels niet als data meenemen.
-        if (row.closest("thead")) return false;
-        return true;
-      });
+      // 3) Laatste fallback: lees de zichtbare DETAILS-tekst zelf.
+      // In FightPassport staat de keurmerksectie soms wel volledig zichtbaar in de DOM,
+      // maar niet als een herkenbare HTML-table. De sectie ziet er dan bijvoorbeeld uit als:
+      // "Keurmerk Toegevoegd door Toegevoegd op Start Einde Naam 01-01-2026 01-01-2026 31-12-2027 ... Vervallen kaarten zichtbaar"
+      const startMarker = "Keurmerk Toegevoegd door Toegevoegd op Start Einde";
+      const endMarker = "Vervallen kaarten zichtbaar";
+      const markerIndex = bodyText.indexOf(startMarker);
 
-      const parsed = candidateRows
-        .map((row) =>
-          [...row.querySelectorAll("td")].map((td) => clean(td.textContent))
-        )
-        .filter((cells) => cells.length >= 4)
-        .filter((cells) => {
-          const joined = cells.map(norm).join(" | ");
-          return !requiredHeaders.every((header) => joined.includes(header));
-        });
+      if (markerIndex >= 0) {
+        const afterHeader = bodyText.slice(markerIndex + startMarker.length).trim();
+        const endIndex = afterHeader.indexOf(endMarker);
+        const section = clean(endIndex >= 0 ? afterHeader.slice(0, endIndex) : afterHeader);
 
+        // Iedere keurmerkregel eindigt met exact drie NL-datums:
+        // toegevoegd_op, start, einde. Alles vóór die drie datums is 'toegevoegd door'.
+        // Door non-greedy te matchen blijven regels in de zichtbare volgorde staan,
+        // dus periods[0] blijft de bovenste FightPassport-regel.
+        const date = "\\d{2}-\\d{2}-\\d{4}";
+        const rowRegex = new RegExp(`(.+?)\\s+(${date})\\s+(${date})\\s+(${date})(?=\\s|$)`, "g");
+        const rows = [];
+        let match;
+
+        while ((match = rowRegex.exec(section)) !== null) {
+          const toegevoegdDoor = clean(match[1]);
+          const toegevoegdOp = clean(match[2]);
+          const start = clean(match[3]);
+          const einde = clean(match[4]);
+
+          if (!toegevoegdDoor) continue;
+          rows.push([toegevoegdDoor, toegevoegdOp, start, einde]);
+        }
+
+        return {
+          ready: true,
+          foundTable: true,
+          source: "details_text",
+          headers: requiredHeaders,
+          rows,
+          body: bodyText.slice(0, 1400),
+        };
+      }
+
+      // Loginpagina of echt nog niet geladen: niet als lege keurmerktabel accepteren,
+      // zodat het bestaande retry/login-herstel in werking blijft.
       return {
-        // Een gevonden keurmerktabel zonder regels is ook een geldige uitkomst.
-        ready: true,
-        foundTable: true,
-        headers: chosenHeaders,
-        rows: parsed,
-        body: clean(document.body?.innerText).slice(0, 1400),
+        ready: false,
+        foundTable: false,
+        source: "none",
+        headers: [],
+        rows: [],
+        body: bodyText.slice(0, 1400),
       };
     }).catch(() => null);
 
@@ -1615,6 +1655,7 @@ async function readKeurmerkPeriods(page, key) {
       }
 
       console.log(`[sportscholen] 📜 ${cleanKey} keurmerkregels gelezen`, {
+        bron: state.source ?? null,
         aantal: periods.length,
         bovenste_regel: periods[0] ?? null,
         headers: state.headers ?? [],
@@ -1628,7 +1669,7 @@ async function readKeurmerkPeriods(page, key) {
 
   throw new Error(
     `DETAILS keurmerktabel niet tijdig leesbaar voor sportschool ${cleanKey}. ` +
-    `Laatste state=${JSON.stringify(lastState)}`
+      `Laatste state=${JSON.stringify(lastState)}`
   );
 }
 

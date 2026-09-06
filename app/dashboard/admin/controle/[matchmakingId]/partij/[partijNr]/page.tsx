@@ -1408,6 +1408,22 @@ function UitslagenTable({
   );
 }
 
+
+function fitTextareaToContentAndCell(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+
+  const resize = () => {
+    el.style.height = "auto";
+    const parentHeight = el.parentElement?.clientHeight ?? 0;
+    const availableHeight = Math.max(54, parentHeight - 16);
+    const contentHeight = el.scrollHeight;
+    el.style.height = `${Math.max(availableHeight, contentHeight)}px`;
+  };
+
+  resize();
+  requestAnimationFrame(resize);
+}
+
 export default function PartijDetailPage() {
   const [allPartijNrs, setAllPartijNrs] = useState<number[]>([]);
   const noteDraftRef = useRef<Record<string, string>>({});
@@ -3312,11 +3328,13 @@ export default function PartijDetailPage() {
 
                             <td className="px-3 py-2 align-top">
                               <textarea
+                                ref={fitTextareaToContentAndCell}
                                 defaultValue={
                                   (noteDraftRef.current[r.id] ??
                                     r.aantekeningen ??
                                     "") as any
                                 }
+                                onInput={(e) => fitTextareaToContentAndCell(e.currentTarget)}
                                 onChange={(e) => {
                                   noteDraftRef.current[r.id] = e.target.value;
                                 }}
@@ -3327,7 +3345,7 @@ export default function PartijDetailPage() {
                                 }}
                                 placeholder="Noteer reden van goedkeuren / besluit…"
                                 spellCheck={false}
-                                className="w-full min-h-[54px] px-2 py-2 rounded border border-zinc-400 bg-zinc-50 text-zinc-900 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
+                                className="w-full min-h-[54px] resize-none overflow-hidden px-2 py-2 rounded border border-zinc-400 bg-zinc-50 text-zinc-900 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400/40"
                               />
                             </td>
 
