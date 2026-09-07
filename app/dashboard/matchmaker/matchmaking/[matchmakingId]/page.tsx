@@ -498,6 +498,14 @@ function isActiveMeldingRow(r: ResRow): boolean {
   return res !== "" && res !== "ok";
 }
 
+function isFightPassportOntbreektRow(
+  r: Partial<ResRow> | null | undefined,
+): boolean {
+  return String((r as any)?.rule_code ?? "")
+    .trim()
+    .toUpperCase() === "FIGHTPASPOORT_ONTBREEKT";
+}
+
 function statusFromResultaten(resultaten: ResRow[]): PartijStatus {
   const active = resultaten.filter(isActiveMeldingRow);
   if (active.some(isVerbodRow)) return "verbod";
@@ -513,6 +521,7 @@ function statusFromResultatenOrOk(
   resultaten: ResRow[] | undefined,
   ctxRow: AnyRow,
 ): PartijStatus {
+  if ((resultaten ?? []).some(isFightPassportOntbreektRow)) return "geen_info";
   if (!isContextCompleet(ctxRow)) return "geen_info";
   if (!resultaten || resultaten.length === 0) return "ok";
   return statusFromResultaten(resultaten);
@@ -3553,7 +3562,9 @@ export default function ControleMatchmakingPage() {
       if (
         rr.some(
           (r) =>
-            !isBelgischeGymInfoRow(r) && normResultaatRow(r) === "afgekeurd",
+            !isBelgischeGymInfoRow(r) &&
+            !isFightPassportOntbreektRow(r) &&
+            normResultaatRow(r) === "afgekeurd",
         )
       ) {
         m[pn] = true;
