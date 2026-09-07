@@ -32,6 +32,8 @@ type UploadRow = {
   promotor?: string | null;
   matchmaker?: string | null;
   hoofdofficial?: string | null;
+  bondteam?: string | null;
+  locatie?: string | null;
 };
 
 type VoteRow = {
@@ -277,39 +279,51 @@ export default function DispensatieDetailPage() {
 
       // De dispensatie blijft gekoppeld aan dezelfde bout via bout_id.
       // partij_nr kan veranderen wanneer de matchmaker de lineup opnieuw ordent.
-      let resolvedPartijNr =
-        Number.isFinite(reqPartijNr) && reqPartijNr > 0 ? reqPartijNr : null;
+      // Als er een bout_id is, gebruiken we het oude partij_nr NOOIT als fallback:
+      // dat nummer kan inmiddels bij een andere partij horen.
+      let resolvedPartijNr = reqBoutId
+        ? null
+        : Number.isFinite(reqPartijNr) && reqPartijNr > 0
+          ? reqPartijNr
+          : null;
 
       if (reqMatchmakingId && reqBoutId) {
-        const { data: currentCtx, error: currentCtxErr } = await supabase
-          .from("controle_bout_context")
-          .select("partij_nr,bout_id,updated_at")
+        // Raw is leidend voor de actuele lineup. Een verwijderde raw-bout mag
+        // niet via zijn oude partij_nr naar een andere partij doorlinken.
+        const { data: currentRaw, error: currentRawErr } = await supabase
+          .from("matchmaking_bouts_raw")
+          .select("partij_nr,bout_uid,laatste_bewerking_op,verwijderd")
           .eq("matchmaking_id", reqMatchmakingId)
-          .eq("bout_id", reqBoutId)
-          .order("updated_at", { ascending: false })
+          .eq("bout_uid", reqBoutId)
+          .order("laatste_bewerking_op", { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        if (currentCtxErr) throw currentCtxErr;
+        if (currentRawErr) throw currentRawErr;
 
-        const ctxPartijNr = Number(currentCtx?.partij_nr);
-        if (Number.isFinite(ctxPartijNr) && ctxPartijNr > 0) {
-          resolvedPartijNr = ctxPartijNr;
+        if (currentRaw) {
+          if (currentRaw.verwijderd !== true) {
+            const rawPartijNr = Number(currentRaw.partij_nr);
+            if (Number.isFinite(rawPartijNr) && rawPartijNr > 0) {
+              resolvedPartijNr = rawPartijNr;
+            }
+          }
         } else {
-          // Fallback naar de actuele raw-bout wanneer de context niet bestaat.
-          const { data: currentRaw, error: currentRawErr } = await supabase
-            .from("matchmaking_bouts_raw")
-            .select("partij_nr,bout_uid,laatste_bewerking_op")
+          // Alleen voor oudere data zonder raw-record: probeer de actuele context.
+          const { data: currentCtx, error: currentCtxErr } = await supabase
+            .from("controle_bout_context")
+            .select("partij_nr,bout_id,updated_at")
             .eq("matchmaking_id", reqMatchmakingId)
-            .eq("bout_uid", reqBoutId)
-            .order("laatste_bewerking_op", { ascending: false })
+            .eq("bout_id", reqBoutId)
+            .order("updated_at", { ascending: false })
             .limit(1)
             .maybeSingle();
 
-          if (currentRawErr) throw currentRawErr;
-          const rawPartijNr = Number(currentRaw?.partij_nr);
-          if (Number.isFinite(rawPartijNr) && rawPartijNr > 0) {
-            resolvedPartijNr = rawPartijNr;
+          if (currentCtxErr) throw currentCtxErr;
+
+          const ctxPartijNr = Number(currentCtx?.partij_nr);
+          if (Number.isFinite(ctxPartijNr) && ctxPartijNr > 0) {
+            resolvedPartijNr = ctxPartijNr;
           }
         }
       }
@@ -347,21 +361,15 @@ export default function DispensatieDetailPage() {
         ? String((r as any).matchmaking_id)
         : null;
       if (mmId) {
-        const { data: mm } = await supabase
+        const { data: mm, error: mmErr } = await supabase
           .from("matchmakings")
-          .select("id,naam,datum,event_id")
+          .select(
+            "id,naam,datum,locatie,event_id,promotor,matchmaker_naam,bondteam,hoofdofficial",
+          )
           .eq("id", mmId)
           .maybeSingle();
-        let mmNaam = mm?.naam ?? null;
-        let mmDatum = mm?.datum ?? null;
-        if (mm?.event_id && (!mmNaam || !mmDatum)) {
-          const { data: ev } = await supabase.from("events").select("naam,datum").eq("id", mm.event_id).maybeSingle();
-          if (!mmNaam) mmNaam = ev?.naam ?? null;
-          if (!mmDatum) mmDatum = ev?.datum ?? null;
-        }
-        if (mmNaam || mmDatum) {
-          setUploadRow({ matchmaking_id: mmId, evenement_naam: mmNaam, evenement_datum: mmDatum, uploaded_by: null, uploaded_at: null } as any);
-        } else {
+        if (mmErr) throw mmErr;
+
         const { data: ups, error: uErr } = await supabase
           .from("matchmaking_uploads")
           .select(
@@ -371,8 +379,34 @@ export default function DispensatieDetailPage() {
           .order("uploaded_at", { ascending: false })
           .limit(1);
         if (uErr) throw uErr;
-        setUploadRow((ups?.[0] ?? null) as any);
+
+        const latestUpload = (ups?.[0] ?? null) as any;
+        let mmNaam = mm?.naam ?? latestUpload?.evenement_naam ?? null;
+        let mmDatum = mm?.datum ?? latestUpload?.evenement_datum ?? null;
+
+        if (mm?.event_id && (!mmNaam || !mmDatum)) {
+          const { data: ev, error: evErr } = await supabase
+            .from("events")
+            .select("naam,datum")
+            .eq("id", mm.event_id)
+            .maybeSingle();
+          if (evErr) throw evErr;
+          if (!mmNaam) mmNaam = ev?.naam ?? null;
+          if (!mmDatum) mmDatum = ev?.datum ?? null;
         }
+
+        setUploadRow({
+          matchmaking_id: mmId,
+          evenement_naam: mmNaam,
+          evenement_datum: mmDatum,
+          locatie: mm?.locatie ?? null,
+          promotor: mm?.promotor ?? latestUpload?.promotor ?? null,
+          matchmaker: mm?.matchmaker_naam ?? latestUpload?.matchmaker ?? null,
+          bondteam: mm?.bondteam ?? null,
+          hoofdofficial: mm?.hoofdofficial ?? latestUpload?.hoofdofficial ?? null,
+          uploaded_by: latestUpload?.uploaded_by ?? null,
+          uploaded_at: latestUpload?.uploaded_at ?? null,
+        });
       } else {
         setUploadRow(null);
       }
@@ -550,9 +584,15 @@ export default function DispensatieDetailPage() {
   }, [requestId]);
 
   const mmId = reqRow?.matchmaking_id ?? null;
-  const partijNr = currentPartijNr ?? reqRow?.partij_nr ?? null;
+  const hasBoutId = Boolean(String(reqRow?.bout_id ?? "").trim());
+  const partijNr = hasBoutId
+    ? currentPartijNr
+    : currentPartijNr ?? reqRow?.partij_nr ?? null;
+  const partijIsVerwijderd = Boolean(
+    reqRow && hasBoutId && !loading && currentPartijNr == null,
+  );
   const partijDetailHref =
-    reqRow?.matchmaking_id && partijNr != null
+    reqRow?.matchmaking_id && partijNr != null && !partijIsVerwijderd
       ? `/dashboard/dispensatie/${requestId}/partij/${encodeURIComponent(String(reqRow.matchmaking_id))}/${encodeURIComponent(String(partijNr))}`
       : "#";
   const controleHref = mmId ? `/dashboard/admin/controle/${mmId}` : "#";
@@ -582,7 +622,7 @@ export default function DispensatieDetailPage() {
               >
                 ← Overzicht
               </SilverButton>
-              {reqRow && partijNr != null ? (
+              {reqRow && partijNr != null && !partijIsVerwijderd ? (
                 <LinkButton href={partijDetailHref}>Partij detail</LinkButton>
               ) : null}
               {mmId ? (
@@ -594,6 +634,13 @@ export default function DispensatieDetailPage() {
             </div>
           </div>
         </header>
+
+        {partijIsVerwijderd ? (
+          <div className="border-b border-red-800 bg-red-950/60 px-4 py-3 text-sm text-red-100">
+            <strong>Partij is verwijderd uit de matchmaking.</strong>{" "}
+            Deze dispensatie blijft als historisch dossier zichtbaar, maar er is geen actieve partijdetailpagina meer.
+          </div>
+        ) : null}
 
         <div className="grid gap-3 border-b border-zinc-700 p-4 md:grid-cols-5">
           <Stat
@@ -646,11 +693,13 @@ export default function DispensatieDetailPage() {
                 label="Datum"
                 value={fmtDateNL(uploadRow?.evenement_datum)}
               />
+              <InfoRow label="Locatie" value={uploadRow?.locatie ?? "-"} />
               <InfoRow
                 label="Matchmaker"
                 value={uploadRow?.matchmaker ?? "-"}
               />
               <InfoRow label="Promotor" value={uploadRow?.promotor ?? "-"} />
+              <InfoRow label="Bondteam" value={uploadRow?.bondteam ?? "-"} />
               <InfoRow
                 label="Hoofdofficial"
                 value={uploadRow?.hoofdofficial ?? "-"}
