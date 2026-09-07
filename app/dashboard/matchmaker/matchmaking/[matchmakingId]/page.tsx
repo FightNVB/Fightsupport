@@ -2768,7 +2768,14 @@ export default function ControleMatchmakingPage() {
     }
   }
 
-  async function handleBuildWeegstation() {
+  function handleBuildWeegstation() {
+    if (lineupMode || headerBusy) return;
+    setError(null);
+    setMsg("");
+    setShowWeegstationModal(true);
+  }
+
+  async function confirmBuildWeegstation() {
     await withHeaderBusy("weegstation", async () => {
       const token = await getAccessToken();
       if (!token) throw new Error("Niet ingelogd.");
@@ -2789,12 +2796,8 @@ export default function ControleMatchmakingPage() {
         throw new Error(json?.error ?? "Klaarzetten voor weegstation mislukt.");
       }
 
-      setMsg(
-        json?.message ??
-          "✅ Matchmaking is gebouwd en klaargezet voor het weegstation.",
-      );
-      setReloadTick((x) => x + 1);
-      setShowWeegstationModal(true);
+      setShowWeegstationModal(false);
+      router.replace("/dashboard/matchmaker/matchmaking");
     });
   }
 
@@ -5374,17 +5377,16 @@ export default function ControleMatchmakingPage() {
             <div className="fixed inset-0 z-[998] flex items-center justify-center px-4">
               <button
                 type="button"
-                aria-label="Sluit bevestiging"
+                aria-label="Annuleer overdracht naar weegstation"
                 className="absolute inset-0"
                 style={{ background: "rgba(0,0,0,0.62)" }}
                 onClick={() => {
-                  setShowWeegstationModal(false);
-                  router.replace("/dashboard/matchmaker/matchmaking");
+                  if (!headerBusy) setShowWeegstationModal(false);
                 }}
               />
 
               <div
-                className="relative w-full max-w-[620px] overflow-hidden rounded-[26px]"
+                className="relative w-full max-w-[660px] overflow-hidden rounded-[26px]"
                 style={{
                   ...metalFrameStyle("orange"),
                   borderRadius: 26,
@@ -5429,16 +5431,21 @@ export default function ControleMatchmakingPage() {
                             textTransform: "uppercase",
                           }}
                         >
-                          Weegstation bevestiging
+                          Overdracht naar de bond
                         </div>
                         <h2 className="mt-2 text-2xl font-black text-white md:text-[30px]">
-                          Weegstation is klaargezet
+                          Weet je zeker dat je naar het weegstation wilt?
                         </h2>
                         <p className="mt-3 text-sm leading-6 text-white/80 md:text-[15px]">
-                          De matchmaking is gebouwd en klaargezet voor het
-                          weegstation. Wil je direct verdergaan naar het
-                          weegstation? Bij nee ga je terug naar het
-                          controle-overzicht.
+                          Met <strong>Akkoord</strong> draag je deze matchmaking over
+                          aan de bond voor het weegstation. Alleen de bond mag de
+                          officiële weging uitvoeren. De matchmaking verdwijnt daarna
+                          uit jouw actieve matchmaker-overzicht.
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-white/80 md:text-[15px]">
+                          Vlak vóór de overdracht wordt automatisch een snapshot van
+                          jouw matchmaking opgeslagen. Die kun je later terugvinden
+                          onder <strong>Snapshots</strong> in het matchmaker-menu.
                         </p>
                       </div>
                     </div>
@@ -5447,11 +5454,9 @@ export default function ControleMatchmakingPage() {
                   <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowWeegstationModal(false);
-                        router.replace("/dashboard/matchmaker/matchmaking");
-                      }}
-                      className="rounded-xl px-4 py-3 text-sm font-extrabold transition hover:-translate-y-0.5"
+                      disabled={!!headerBusy}
+                      onClick={() => setShowWeegstationModal(false)}
+                      className="rounded-xl px-4 py-3 text-sm font-extrabold transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
                       style={{
                         background:
                           "linear-gradient(180deg, #f5f5f5 0%, #d7d7d7 100%)",
@@ -5460,18 +5465,14 @@ export default function ControleMatchmakingPage() {
                         boxShadow: "0 10px 22px rgba(0,0,0,0.10)",
                       }}
                     >
-                      Nee, terug naar controle
+                      Annuleren
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowWeegstationModal(false);
-                        router.push(
-                          `/dashboard/officials/weegstation/${matchmakingId}`,
-                        );
-                      }}
-                      className="rounded-xl px-4 py-3 text-sm font-extrabold transition hover:-translate-y-0.5"
+                      disabled={!!headerBusy}
+                      onClick={confirmBuildWeegstation}
+                      className="rounded-xl px-4 py-3 text-sm font-extrabold transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
                       style={{
                         background:
                           "linear-gradient(180deg, #ff6a1a 0%, #ff4d00 100%)",
@@ -5480,7 +5481,7 @@ export default function ControleMatchmakingPage() {
                         boxShadow: "0 12px 24px rgba(255,77,0,0.28)",
                       }}
                     >
-                      Open weegstation
+                      {headerBusy === "weegstation" ? "Overdragen..." : "Akkoord"}
                     </button>
                   </div>
                 </div>
