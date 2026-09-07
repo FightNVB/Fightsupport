@@ -221,6 +221,7 @@ export default function DispensatieDetailPage() {
   const [messages, setMessages] = useState<MsgRow[]>([]);
   const [attachments, setAttachments] = useState<AttachmentRow[]>([]);
   const [controleResultaten, setControleResultaten] = useState<ControleResultaatRow[]>([]);
+  const [currentPartijNr, setCurrentPartijNr] = useState<number | null>(null);
   const [myRole, setMyRole] = useState<string | null>(null);
   const [msgText, setMsgText] = useState("");
   const [voteNote, setVoteNote] = useState("");
@@ -271,15 +272,69 @@ export default function DispensatieDetailPage() {
       const req = r as any;
       const reqPartijNr = Number(req?.partij_nr);
       const reqRunId = String(req?.controle_run_id ?? "").trim();
-      if (Number.isFinite(reqPartijNr) && reqPartijNr > 0) {
+      const reqBoutId = String(req?.bout_id ?? "").trim();
+      const reqMatchmakingId = String(req?.matchmaking_id ?? "").trim();
+
+      // De dispensatie blijft gekoppeld aan dezelfde bout via bout_id.
+      // partij_nr kan veranderen wanneer de matchmaker de lineup opnieuw ordent.
+      let resolvedPartijNr =
+        Number.isFinite(reqPartijNr) && reqPartijNr > 0 ? reqPartijNr : null;
+
+      if (reqMatchmakingId && reqBoutId) {
+        const { data: currentCtx, error: currentCtxErr } = await supabase
+          .from("controle_bout_context")
+          .select("partij_nr,bout_id,updated_at")
+          .eq("matchmaking_id", reqMatchmakingId)
+          .eq("bout_id", reqBoutId)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (currentCtxErr) throw currentCtxErr;
+
+        const ctxPartijNr = Number(currentCtx?.partij_nr);
+        if (Number.isFinite(ctxPartijNr) && ctxPartijNr > 0) {
+          resolvedPartijNr = ctxPartijNr;
+        } else {
+          // Fallback naar de actuele raw-bout wanneer de context niet bestaat.
+          const { data: currentRaw, error: currentRawErr } = await supabase
+            .from("matchmaking_bouts_raw")
+            .select("partij_nr,bout_uid,laatste_bewerking_op")
+            .eq("matchmaking_id", reqMatchmakingId)
+            .eq("bout_uid", reqBoutId)
+            .order("laatste_bewerking_op", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (currentRawErr) throw currentRawErr;
+          const rawPartijNr = Number(currentRaw?.partij_nr);
+          if (Number.isFinite(rawPartijNr) && rawPartijNr > 0) {
+            resolvedPartijNr = rawPartijNr;
+          }
+        }
+      }
+
+      setCurrentPartijNr(resolvedPartijNr);
+
+      // Controle-resultaten primair aan bout_id koppelen, niet aan het oude partij_nr.
+      if (reqBoutId || (Number.isFinite(reqPartijNr) && reqPartijNr > 0)) {
         let resultQuery = supabase
           .from("controle_resultaten")
           .select(
             "partij_nr,bout_id,hoek,resultaat,rule,rule_code,boodschap,review_status,original_resultaat",
-          )
-          .eq("partij_nr", reqPartijNr);
+          );
 
-        if (reqRunId) resultQuery = resultQuery.eq("controle_run_id", reqRunId);
+        if (reqMatchmakingId) {
+          resultQuery = resultQuery.eq("matchmaking_id", reqMatchmakingId);
+        }
+        if (reqBoutId) {
+          resultQuery = resultQuery.eq("bout_id", reqBoutId);
+        } else {
+          resultQuery = resultQuery.eq("partij_nr", reqPartijNr);
+        }
+        if (reqRunId) {
+          resultQuery = resultQuery.eq("controle_run_id", reqRunId);
+        }
 
         const { data: resultRows, error: resultErr } = await resultQuery;
         if (resultErr) throw resultErr;
@@ -355,6 +410,7 @@ export default function DispensatieDetailPage() {
       setMessages([]);
       setAttachments([]);
       setControleResultaten([]);
+      setCurrentPartijNr(null);
     } finally {
       setLoading(false);
     }
@@ -494,10 +550,10 @@ export default function DispensatieDetailPage() {
   }, [requestId]);
 
   const mmId = reqRow?.matchmaking_id ?? null;
-  const partijNr = reqRow?.partij_nr ?? null;
+  const partijNr = currentPartijNr ?? reqRow?.partij_nr ?? null;
   const partijDetailHref =
-    reqRow?.matchmaking_id && reqRow?.partij_nr != null
-      ? `/dashboard/dispensatie/${requestId}/partij/${encodeURIComponent(String(reqRow.matchmaking_id))}/${encodeURIComponent(String(reqRow.partij_nr))}`
+    reqRow?.matchmaking_id && partijNr != null
+      ? `/dashboard/dispensatie/${requestId}/partij/${encodeURIComponent(String(reqRow.matchmaking_id))}/${encodeURIComponent(String(partijNr))}`
       : "#";
   const controleHref = mmId ? `/dashboard/admin/controle/${mmId}` : "#";
   const currentStatus = normStatus(reqRow?.status);
@@ -564,7 +620,7 @@ export default function DispensatieDetailPage() {
           <DarkPanel className="xl:col-span-4">
             <PanelTitle title="Aanvraag" />
             <div className="mt-3 space-y-2 text-sm text-zinc-100">
-              <InfoRow label="Partijnr" value={reqRow?.partij_nr ?? "-"} />
+              <InfoRow label="Partijnr" value={partijNr ?? "-"} />
               <InfoRow label="Rule" value={reqRow?.rule_code ?? "-"} />
               <InfoRow label="Bout ID" value={reqRow?.bout_id ?? "-"} mono />
               <InfoRow
