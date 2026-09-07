@@ -548,7 +548,16 @@ export async function POST(req: Request) {
     }
 
     await assertCanCorrectBout({ matchmaking_id, userId, role });
-    await assertHasMatchmakingEditLock(matchmaking_id, userId);
+
+    // Admin/superadmin werkt in de NVB-controlefase. Zodra de matchmaking
+    // aan NVB is overgedragen, hoeft de partij-detailpagina geen aparte
+    // bewerk-lock te hebben om een correctie te mogen opslaan. Dit sluit
+    // aan op de review-route: toegang + rol bepalen of de actie is toegestaan.
+    // Voor matchmakers blijft de bestaande bewerk-lock wel verplicht.
+    const editRole = String(role ?? "").trim().toLowerCase();
+    if (editRole !== "admin" && editRole !== "superadmin") {
+      await assertHasMatchmakingEditLock(matchmaking_id, userId);
+    }
 
     // Toernooi-flow: geen partij_nr, maar wel toernooi_code + VA.
     if (toernooi_code && !Number.isFinite(partij_nr)) {

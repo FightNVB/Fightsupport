@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { assertHasMatchmakingEditLock } from "@/lib/matchmakingEditLock";
 
 export const runtime = "nodejs";
 
@@ -77,14 +76,19 @@ async function getRolesForUser(userId: string): Promise<string[]> {
 }
 
 async function canAccessMatchmaking(matchmakingId: string, userId: string, roles: string[]) {
+  // Beheerrollen mogen deze route gebruiken op basis van hun rol.
   if (
     roles.includes("superadmin") ||
     roles.includes("admin") ||
-    roles.includes("hoofdofficial") ||
-    roles.includes("matchmaker")
+    roles.includes("hoofdofficial")
   ) {
     return true;
   }
+
+  // Een matchmaker mag NOOIT alleen op basis van de rol toegang krijgen.
+  // Voor matchmakers moet hieronder eerst blijken dat deze matchmaking
+  // daadwerkelijk aan deze gebruiker toebehoort.
+  const isMatchmaker = roles.includes("matchmaker");
 
   const { data: uploadRow, error: uploadErr } = await supabaseAdmin
     .from("matchmaking_uploads")
@@ -115,7 +119,7 @@ async function canAccessMatchmaking(matchmakingId: string, userId: string, roles
     .map((v) => String(v ?? "").trim())
     .filter(Boolean);
 
-  if (ownerCandidates.includes(userId)) return true;
+  if (isMatchmaker && ownerCandidates.includes(userId)) return true;
 
   return false;
 }
@@ -642,8 +646,6 @@ export async function POST(req: NextRequest) {
     if (!allowed) {
       return jsonError("Je hebt geen toegang tot deze matchmaking.", 403);
     }
-
-    await assertHasMatchmakingEditLock(matchmakingId, user.id);
 
     const latestControleRunId = await getLatestControleRunId(matchmakingId);
     if (!latestControleRunId) {

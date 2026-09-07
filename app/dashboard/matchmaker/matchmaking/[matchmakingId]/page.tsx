@@ -2843,7 +2843,13 @@ export default function ControleMatchmakingPage() {
 
       setMsg("✅ Lineup opgeslagen.");
       setLineupMode(false);
-      setReloadTick((x) => x + 1);
+
+      // Na een reorder zijn partij_nrs en eventuele hoekwissels server-side gewijzigd.
+      // Een gewone reloadTick laat deze grote pagina opnieuw alle state opbouwen en kan
+      // daardoor visueel blijven hangen. Na succesvolle opslag daarom de pagina hard
+      // verversen zodat alle context/resultaten direct met de nieuwe partijvolgorde
+      // opnieuw worden ingelezen.
+      window.location.reload();
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
