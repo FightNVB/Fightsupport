@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, ArrowLeft, CalendarDays, MapPin, RefreshCcw } from "lucide-react";
+import {
+  Archive,
+  ArrowLeft,
+  CalendarDays,
+  MapPin,
+  RefreshCcw,
+  Trash2,
+} from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
 
@@ -41,6 +48,7 @@ export default function MatchmakerSnapshotsPage() {
   const [rows, setRows] = useState<SnapshotRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const allowed = useMemo(
     () => (roles ?? []).some((r) => ["matchmaker", "admin", "superadmin"].includes(r)),
@@ -59,6 +67,30 @@ export default function MatchmakerSnapshotsPage() {
       setError(e?.message || "Snapshots laden mislukt.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function removeSnapshot(row: SnapshotRow) {
+    const naam = row.evenement_naam || "deze snapshot";
+    if (!window.confirm(`Snapshot van "${naam}" definitief verwijderen?`)) return;
+
+    setDeletingId(row.id);
+    setError("");
+
+    try {
+      const res = await authedFetch("/api/matchmaker/snapshots", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Snapshot verwijderen mislukt.");
+
+      setRows((prev) => prev.filter((item) => item.id !== row.id));
+    } catch (e: any) {
+      setError(e?.message || "Snapshot verwijderen mislukt.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -145,13 +177,25 @@ export default function MatchmakerSnapshotsPage() {
                     <td className="px-4 py-3">{row.bondteam || "-"}</td>
                     <td className="px-4 py-3">{fmtDateTime(row.created_at)}</td>
                     <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/dashboard/matchmaker/snapshots/${row.id}`)}
-                        className="h-8 border border-white/15 bg-white/5 px-3 text-xs font-bold hover:border-[#ff4d00]"
-                      >
-                        Bekijken
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/dashboard/matchmaker/snapshots/${row.id}`)}
+                          className="h-8 border border-white/15 bg-white/5 px-3 text-xs font-bold hover:border-[#ff4d00]"
+                        >
+                          Bekijken
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === row.id}
+                          onClick={() => void removeSnapshot(row)}
+                          className="inline-flex h-8 items-center gap-1.5 border border-red-500/50 bg-red-950/30 px-3 text-xs font-bold text-red-200 hover:border-red-400 disabled:opacity-50"
+                          title="Snapshot verwijderen"
+                        >
+                          <Trash2 size={13} />
+                          {deletingId === row.id ? "Verwijderen..." : "Verwijderen"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

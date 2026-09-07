@@ -745,15 +745,14 @@ export async function POST(req: Request) {
       unwrapUuid(existingBout?.bout_id) ??
       null;
 
-    // Nog NIET enrichen. Eerst alle definitieve MM-bewerkvelden vastzetten.
-    // Rescrape doet hetzelfde principe: build/context eerst definitief, daarna enrich.
     let ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
 
-    // Final override na build en vóór enrich:
-    // buildControleBoutContext/enrich kunnen context opnieuw vullen vanuit raw/scrape.
-    // De bewerkvelden uit deze request moeten leidend blijven.
-    // Let op: controle_bout_context gebruikt *_mm kolommen voor namen/gym/gewicht.
-    if (ctxFinal) {
+    // Bouw één definitieve contextpatch op uit exact de velden die in deze request
+    // zijn gewijzigd. Admin, superadmin en matchmaker mogen deze velden wijzigen
+    // binnen een matchmaking waartoe zij volgens de bestaande toegangscontrole
+    // toegang hebben. De raw-bout blijft de bron; deze patch zorgt ervoor dat een
+    // rebuild/enrich de handmatige wijziging niet weer ongedaan maakt.
+    const buildFinalCtxPatch = (): Record<string, any> => {
       const finalCtxPatch: Record<string, any> = {
         updated_at: new Date().toISOString(),
       };
@@ -789,7 +788,6 @@ export async function POST(req: Request) {
       }
 
       if (hasNewKlasse || hasNewKlasseMm || hasKlasse) {
-        // controle_bout_context heeft geen kolom "klasse"; alleen "klasse_mm".
         finalCtxPatch.klasse_mm = patch.klasse ?? null;
       }
 
@@ -807,21 +805,25 @@ export async function POST(req: Request) {
         finalCtxPatch.blauw_gewicht_mm = patch.blauw_gewicht ?? null;
       }
 
-      if (Object.keys(finalCtxPatch).length > 1) {
-        const { error: finalCtxErr } = await supabase
+      return finalCtxPatch;
+    };
+
+    // Eerst de context na build gelijkzetten met de handmatige wijziging.
+    if (ctxFinal) {
+      const preEnrichPatch = buildFinalCtxPatch();
+      if (Object.keys(preEnrichPatch).length > 1) {
+        const { error: preEnrichErr } = await supabase
           .from("controle_bout_context")
-          .update(finalCtxPatch)
+          .update(preEnrichPatch)
           .eq("id", ctxFinal.id);
 
-        if (finalCtxErr) throw finalCtxErr;
-
+        if (preEnrichErr) throw preEnrichErr;
         ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
       }
     }
 
-    // Nu pas de definitieve matchmaker-enrich uitvoeren op exact de context
-    // die daarna naar rules/save gaat. Na deze enrich worden geen MM-bronvelden
-    // meer teruggezet of overschreven.
+    // Enrich mag aanvullende FightPassport-data ophalen, maar mag een handmatige
+    // correctie van admin/superadmin/matchmaker niet definitief overschrijven.
     if (ctxFinal) {
       const finalBoutId =
         unwrapUuid(ctxFinal?.bout_id) ??
@@ -834,6 +836,44 @@ export async function POST(req: Request) {
       });
 
       ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+    }
+
+    // Cruciaal: NA enrich dezelfde handmatige waarden nogmaals definitief vastzetten.
+    // Dit is het punt dat ontbrak bij o.a. het toevoegen van een VA waar eerst NULL stond.
+    if (ctxFinal) {
+      const postEnrichPatch = buildFinalCtxPatch();
+      if (Object.keys(postEnrichPatch).length > 1) {
+        const { error: postEnrichErr } = await supabase
+          .from("controle_bout_context")
+          .update(postEnrichPatch)
+          .eq("id", ctxFinal.id);
+
+        if (postEnrichErr) throw postEnrichErr;
+        ctxFinal = await getBoutContextRow(matchmaking_id, controle_run_id, partij_nr);
+      }
+    }
+
+    // Niet stil 'ok' teruggeven als de database de gevraagde wijziging niet bevat.
+    const { data: rawVerify, error: rawVerifyErr } = await supabase
+      .from("matchmaking_bouts_raw")
+      .select("id, va_rood, va_blauw, rood_naam, blauw_naam, rood_gym, blauw_gym, rood_gewicht, blauw_gewicht, discipline, klasse, max_gewicht")
+      .eq("id", existingBout.id)
+      .maybeSingle();
+
+    if (rawVerifyErr) throw rawVerifyErr;
+    if (!rawVerify) throw new Error("Controle na opslaan mislukt: raw bout niet gevonden.");
+
+    if (hasNewVaRood && normalizeVa(rawVerify.va_rood) !== normalizeVa(newVaRood)) {
+      throw new Error("VA rood is niet correct opgeslagen in matchmaking_bouts_raw.");
+    }
+    if (hasNewVaBlauw && normalizeVa(rawVerify.va_blauw) !== normalizeVa(newVaBlauw)) {
+      throw new Error("VA blauw is niet correct opgeslagen in matchmaking_bouts_raw.");
+    }
+    if (ctxFinal && hasNewVaRood && normalizeVa(ctxFinal.rood_va_mm) !== normalizeVa(newVaRood)) {
+      throw new Error("VA rood is niet correct doorgezet naar controle_bout_context.");
+    }
+    if (ctxFinal && hasNewVaBlauw && normalizeVa(ctxFinal.blauw_va_mm) !== normalizeVa(newVaBlauw)) {
+      throw new Error("VA blauw is niet correct doorgezet naar controle_bout_context.");
     }
 
     const ctxRows = ctxFinal ? [ctxFinal] : [];
