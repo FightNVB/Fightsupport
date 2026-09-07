@@ -169,10 +169,13 @@ export default function MatchmakerSnapshotsPage() {
                 ) : rows.length === 0 ? (
                   <tr><td className="px-4 py-8 text-center text-white/55" colSpan={7}>Nog geen snapshots. De eerste wordt gemaakt zodra een matchmaking naar het weegstation wordt gestuurd.</td></tr>
                 ) : rows.map((row, index) => (
-                  <tr key={row.id} className={index % 2 ? "bg-white/[0.035]" : "bg-black/20"}>
+                  <tr
+                    key={row.id}
+                    className={index % 2 === 0 ? "bg-white text-[#111]" : "bg-[#111318] text-white"}
+                  >
                     <td className="px-4 py-3 font-bold">{row.evenement_naam || "-"}</td>
                     <td className="px-4 py-3"><span className="inline-flex items-center gap-2"><CalendarDays size={14} className="text-[#ff4d00]" />{fmtDate(row.evenement_datum)}</span></td>
-                    <td className="px-4 py-3"><span className="inline-flex items-center gap-2"><MapPin size={14} className="text-white/45" />{row.locatie || "-"}</span></td>
+                    <td className="px-4 py-3"><span className="inline-flex items-center gap-2"><MapPin size={14} className={index % 2 === 0 ? "text-black/45" : "text-white/45"} />{row.locatie || "-"}</span></td>
                     <td className="px-4 py-3">{row.totaal_partijen ?? 0}</td>
                     <td className="px-4 py-3">{row.bondteam || "-"}</td>
                     <td className="px-4 py-3">{fmtDateTime(row.created_at)}</td>
@@ -181,7 +184,7 @@ export default function MatchmakerSnapshotsPage() {
                         <button
                           type="button"
                           onClick={() => router.push(`/dashboard/matchmaker/snapshots/${row.id}`)}
-                          className="h-8 border border-white/15 bg-white/5 px-3 text-xs font-bold hover:border-[#ff4d00]"
+                          className="h-8 border border-black/25 bg-[#15171b] px-3 text-xs font-bold text-white hover:border-[#ff4d00]"
                         >
                           Bekijken
                         </button>

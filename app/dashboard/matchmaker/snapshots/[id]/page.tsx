@@ -84,7 +84,10 @@ export default function MatchmakerSnapshotDetailPage() {
                     {bouts.map((b: any, i: number) => {
                       const disp = dispensaties.filter((d: any) => Number(d.partij_nr) === Number(b.partij_nr));
                       return (
-                        <tr key={b.id ?? `${b.partij_nr}-${i}`} className={i % 2 ? "bg-white/[0.035]" : "bg-black/20"}>
+                        <tr
+                          key={b.id ?? `${b.partij_nr}-${i}`}
+                          className={i % 2 === 0 ? "bg-white text-[#111]" : "bg-[#111318] text-white"}
+                        >
                           <td className="px-3 py-2 font-bold text-[#ff4d00]">{b.partij_nr ?? "-"}</td>
                           <td className="px-3 py-2 font-bold">{b.rood_naam || "-"}</td>
                           <td className="px-3 py-2">{b.rood_gym || "-"}</td>
