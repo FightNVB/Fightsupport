@@ -1811,10 +1811,7 @@ export default function PartijDetailPage() {
     partijNr: number;
     ctxRow?: AnyRow | null;
   }): Promise<ControleResultaatRow[]> {
-    const { runId, partijNr, ctxRow } = opts;
-    const boutId = asUuid(ctxRow?.bout_id);
-    const mmId = String(matchmakingId ?? "").trim();
-
+    const { runId, partijNr } = opts;
     const queries: any[] = [];
 
     if (runId) {
@@ -1832,28 +1829,9 @@ export default function PartijDetailPage() {
       );
     }
 
-    // Weegstation-meldingen staan ook in controle_resultaten, maar kunnen
-    // vanuit een andere flow met alleen matchmaking_id/partij_nr of bout_id zijn opgeslagen.
-    // Daarom halen we die bewust mee, zonder de rest van deze goed werkende pagina te veranderen.
-    if (mmId) {
-      queries.push(
-        supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("matchmaking_id", mmId)
-          .eq("partij_nr", partijNr),
-      );
-    }
-
-    if (mmId && boutId) {
-      queries.push(
-        supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("matchmaking_id", mmId)
-          .eq("bout_id", boutId),
-      );
-    }
+    // Geen brede fallback op alleen matchmaking_id + partij_nr/bout_id:
+    // die zou resultaten uit oudere controleruns opnieuw meenemen.
+    // De actuele matchmakerpagina toont uitsluitend resultaten van runId.
 
     const results = await Promise.all(queries);
     const allRows: ControleResultaatRow[] = [];
@@ -2078,12 +2056,40 @@ export default function PartijDetailPage() {
 
         await loadMyRoles();
 
-        // De partij wordt rechtstreeks gevonden op matchmaking_id + partij_nr.
-        // controle_runs is alleen metadata van de context, niet de zoekingang.
+        // Gebruik uitsluitend de nieuwste controlerun voor deze matchmaking.
+        // Zo kunnen oude controle-contexten/resultaten van hetzelfde partij_nr
+        // niet opnieuw in de actuele matchmakerweergave terechtkomen.
+        const { data: latestCtxRows, error: latestCtxErr } = await supabase
+          .from("controle_bout_context")
+          .select("controle_run_id, created_at")
+          .eq("matchmaking_id", matchmakingId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (latestCtxErr) throw latestCtxErr;
+
+        const latestRunId = String(
+          (latestCtxRows?.[0] as AnyRow | undefined)?.controle_run_id ?? "",
+        ).trim();
+
+        if (!latestRunId) {
+          setRun(null);
+          setCtx(null);
+          setRegels([]);
+          setAllPartijNrs([]);
+          setUitslagenRood([]);
+          setUitslagenBlauw([]);
+          setDispSent(false);
+          setDispDecisionStatus("none");
+          setDispDecisionReason(null);
+          return;
+        }
+
         const { data: pnRows, error: pnErr } = await supabase
           .from("controle_bout_context")
           .select("partij_nr")
           .eq("matchmaking_id", matchmakingId)
+          .eq("controle_run_id", latestRunId)
           .order("partij_nr", { ascending: true });
 
         if (pnErr) throw pnErr;
@@ -2102,6 +2108,7 @@ export default function PartijDetailPage() {
           .from("controle_bout_context")
           .select("*")
           .eq("matchmaking_id", matchmakingId)
+          .eq("controle_run_id", latestRunId)
           .eq("partij_nr", partijNr)
           .limit(1);
 
