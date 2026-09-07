@@ -236,6 +236,7 @@ export default function DispensatiePage() {
   const [error, setError] = useState<string | null>(null);
   const [allRows, setAllRows] = useState<RequestRow[]>([]);
   const [myRole, setMyRole] = useState<string | null>(null);
+  const [tab, setTab] = useState<"open" | "handled">("open");
 
   const canDelete = myRole === "admin" || myRole === "superadmin";
 
@@ -336,7 +337,7 @@ export default function DispensatiePage() {
 
   function downloadCsv() {
     const header = ["Status", "Evenement", "Datum", "Partij", "Rule / reden"];
-    const lines = rows.map((r) =>
+    const lines = visibleRows.map((r) =>
       [
         statusLabel(r.status),
         r.evenement_naam,
@@ -363,6 +364,14 @@ export default function DispensatiePage() {
   }, []);
 
   const rows = useMemo(() => allRows.filter(isDispensatieRow), [allRows]);
+
+  const visibleRows = useMemo(() => {
+    return rows.filter((r) => {
+      const status = effectiveStatus(r);
+      const handled = ["approved", "rejected", "afgehandeld", "closed"].includes(status);
+      return tab === "handled" ? handled : !handled;
+    });
+  }, [rows, tab]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {
@@ -428,6 +437,31 @@ export default function DispensatiePage() {
           </div>
         )}
 
+        <div className="flex flex-wrap gap-2 border-b border-zinc-700 px-4 pt-4">
+          <button
+            type="button"
+            onClick={() => setTab("open")}
+            className={`border px-4 py-2 text-sm font-black uppercase transition ${
+              tab === "open"
+                ? "border-[#ff4d00] bg-[#ff4d00] !text-black"
+                : "border-zinc-500 bg-[#242424] text-zinc-200 hover:border-zinc-300"
+            }`}
+          >
+            Openstaand ({(counts.nieuw || 0) + (counts.open || 0) + (counts.pending || 0)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("handled")}
+            className={`border px-4 py-2 text-sm font-black uppercase transition ${
+              tab === "handled"
+                ? "border-green-500 bg-green-600 text-white"
+                : "border-zinc-500 bg-[#242424] text-zinc-200 hover:border-zinc-300"
+            }`}
+          >
+            Afgehandeld ({(counts.approved || 0) + (counts.rejected || 0) + (counts.afgehandeld || 0)})
+          </button>
+        </div>
+
         <div className="overflow-x-auto p-4">
           <table className="w-full border-collapse text-sm">
             <thead className="bg-[#252525] text-left text-xs uppercase text-zinc-300">
@@ -453,17 +487,17 @@ export default function DispensatiePage() {
                     Laden...
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : visibleRows.length === 0 ? (
                 <tr className="bg-[#171717]">
                   <td
                     colSpan={6}
                     className="border border-zinc-800 p-4 text-zinc-300"
                   >
-                    Geen dispensatie-aanvragen gevonden.
+                    {tab === "handled" ? "Geen afgehandelde dispensaties gevonden." : "Geen openstaande dispensatie-aanvragen gevonden."}
                   </td>
                 </tr>
               ) : (
-                rows.map((r, index) => {
+                visibleRows.map((r, index) => {
                   const dark = index % 2 === 1;
                   const st = effectiveStatus(r);
                   return (

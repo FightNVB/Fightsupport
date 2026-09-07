@@ -62,6 +62,18 @@ type AttachmentRow = {
   uploaded_at: string | null;
 };
 
+type ControleResultaatRow = {
+  partij_nr: number | null;
+  bout_id?: string | null;
+  hoek?: string | null;
+  resultaat?: string | null;
+  rule?: string | null;
+  rule_code?: string | null;
+  boodschap?: string | null;
+  review_status?: string | null;
+  original_resultaat?: string | null;
+};
+
 function normStatus(s: any) {
   const x = String(s ?? "")
     .trim()
@@ -208,6 +220,7 @@ export default function DispensatieDetailPage() {
   const [votes, setVotes] = useState<VoteRow[]>([]);
   const [messages, setMessages] = useState<MsgRow[]>([]);
   const [attachments, setAttachments] = useState<AttachmentRow[]>([]);
+  const [controleResultaten, setControleResultaten] = useState<ControleResultaatRow[]>([]);
   const [myRole, setMyRole] = useState<string | null>(null);
   const [msgText, setMsgText] = useState("");
   const [voteNote, setVoteNote] = useState("");
@@ -254,6 +267,26 @@ export default function DispensatieDetailPage() {
         .single();
       if (rErr) throw rErr;
       setReqRow(r as any);
+
+      const req = r as any;
+      const reqPartijNr = Number(req?.partij_nr);
+      const reqRunId = String(req?.controle_run_id ?? "").trim();
+      if (Number.isFinite(reqPartijNr) && reqPartijNr > 0) {
+        let resultQuery = supabase
+          .from("controle_resultaten")
+          .select(
+            "partij_nr,bout_id,hoek,resultaat,rule,rule_code,boodschap,review_status,original_resultaat",
+          )
+          .eq("partij_nr", reqPartijNr);
+
+        if (reqRunId) resultQuery = resultQuery.eq("controle_run_id", reqRunId);
+
+        const { data: resultRows, error: resultErr } = await resultQuery;
+        if (resultErr) throw resultErr;
+        setControleResultaten((resultRows ?? []) as ControleResultaatRow[]);
+      } else {
+        setControleResultaten([]);
+      }
 
       const mmId = (r as any)?.matchmaking_id
         ? String((r as any).matchmaking_id)
@@ -321,6 +354,7 @@ export default function DispensatieDetailPage() {
       setVotes([]);
       setMessages([]);
       setAttachments([]);
+      setControleResultaten([]);
     } finally {
       setLoading(false);
     }
@@ -612,6 +646,49 @@ export default function DispensatieDetailPage() {
                       {fmtDateNL(a.uploaded_at, true)}
                     </div>
                   </button>
+                ))
+              )}
+            </div>
+          </DarkPanel>
+
+          <DarkPanel className="xl:col-span-12">
+            <PanelTitle title="Controle resultaat / reden dispensatie" />
+            <p className="mt-2 text-sm text-zinc-400">
+              Dit zijn de oorspronkelijke controlemeldingen van deze partij waarop de dispensatie is gebaseerd.
+            </p>
+            <div className="mt-3 space-y-2">
+              {controleResultaten.length === 0 ? (
+                <div className="border border-zinc-700 bg-[#202020] px-3 py-3 text-sm text-zinc-400">
+                  Geen controle_resultaten gevonden voor deze partij/controlerun.
+                </div>
+              ) : (
+                controleResultaten.map((cr, index) => (
+                  <div
+                    key={`${cr.rule_code ?? cr.rule ?? "resultaat"}-${index}`}
+                    className="border px-4 py-3"
+                    style={{
+                      backgroundColor: index % 2 === 0 ? "#ffffff" : "#0f0f0f",
+                      color: index % 2 === 0 ? "#111111" : "#ffffff",
+                      borderColor: index % 2 === 0 ? "#d4d4d8" : "#3f3f46",
+                    }}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <b style={{ color: NVB_ORANGE }}>
+                        {cr.rule || cr.rule_code || "Controle"}
+                      </b>
+                      {cr.resultaat ? (
+                        <span className="border border-zinc-500 px-2 py-0.5 text-[11px] font-black uppercase">
+                          {String(cr.resultaat).toUpperCase()}
+                        </span>
+                      ) : null}
+                      {cr.hoek ? (
+                        <span className="text-xs opacity-70">{String(cr.hoek).toUpperCase()}</span>
+                      ) : null}
+                    </div>
+                    <div className="mt-2 text-sm font-semibold leading-6">
+                      {cr.boodschap || "Geen controlemelding opgeslagen."}
+                    </div>
+                  </div>
                 ))
               )}
             </div>
