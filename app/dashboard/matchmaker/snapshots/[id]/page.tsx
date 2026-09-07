@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Archive } from "lucide-react";
+import { authedFetch } from "@/lib/api/authedFetch";
 
 type Snapshot = {
   id: string;
@@ -27,7 +28,7 @@ export default function MatchmakerSnapshotDetailPage() {
     if (!id) return;
     void (async () => {
       try {
-        const res = await fetch(`/api/matchmaker/snapshots/${id}`, { cache: "no-store" });
+        const res = await authedFetch(`/api/matchmaker/snapshots/${id}`, { cache: "no-store" });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json?.error || "Snapshot laden mislukt.");
         setSnapshot(json.snapshot);

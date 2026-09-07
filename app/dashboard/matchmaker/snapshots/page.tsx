@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, ArrowLeft, CalendarDays, MapPin, RefreshCcw } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { authedFetch } from "@/lib/api/authedFetch";
 
 type SnapshotRow = {
   id: string;
@@ -50,7 +51,7 @@ export default function MatchmakerSnapshotsPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/matchmaker/snapshots", { cache: "no-store" });
+      const res = await authedFetch("/api/matchmaker/snapshots", { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Snapshots laden mislukt.");
       setRows(Array.isArray(json?.rows) ? json.rows : []);
