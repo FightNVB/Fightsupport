@@ -86,17 +86,17 @@ export default function MatchmakerSnapshotDetailPage() {
                       return (
                         <tr
                           key={b.id ?? `${b.partij_nr}-${i}`}
-                          className={i % 2 === 0 ? "bg-white text-[#111]" : "bg-[#111318] text-white"}
+                          style={{ backgroundColor: i % 2 === 0 ? "#ffffff" : "#111318", color: i % 2 === 0 ? "#111111" : "#ffffff" }}
                         >
                           <td className="px-3 py-2 font-bold text-[#ff4d00]">{b.partij_nr ?? "-"}</td>
-                          <td className="px-3 py-2 font-bold">{b.rood_naam || "-"}</td>
-                          <td className="px-3 py-2">{b.rood_gym || "-"}</td>
-                          <td className="px-3 py-2">{b.rood_gewicht || "-"}</td>
-                          <td className="px-3 py-2">{b.klasse || "-"}</td>
-                          <td className="px-3 py-2 font-bold">{b.blauw_naam || "-"}</td>
-                          <td className="px-3 py-2">{b.blauw_gym || "-"}</td>
-                          <td className="px-3 py-2">{b.blauw_gewicht || "-"}</td>
-                          <td className="px-3 py-2">{disp.length ? disp.map((d: any) => d.status || d.decision || "aanvraag").join(", ") : "-"}</td>
+                          <td className="px-3 py-2 font-bold" style={{ color: "inherit" }}>{b.rood_naam || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "inherit" }}>{b.rood_gym || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "inherit" }}>{b.rood_gewicht || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "inherit" }}>{b.klasse || "-"}</td>
+                          <td className="px-3 py-2 font-bold" style={{ color: "inherit" }}>{b.blauw_naam || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "inherit" }}>{b.blauw_gym || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "inherit" }}>{b.blauw_gewicht || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "inherit" }}>{disp.length ? disp.map((d: any) => d.status || d.decision || "aanvraag").join(", ") : "-"}</td>
                         </tr>
                       );
                     })}

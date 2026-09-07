@@ -171,14 +171,14 @@ export default function MatchmakerSnapshotsPage() {
                 ) : rows.map((row, index) => (
                   <tr
                     key={row.id}
-                    className={index % 2 === 0 ? "bg-white text-[#111]" : "bg-[#111318] text-white"}
+                    style={{ backgroundColor: index % 2 === 0 ? "#ffffff" : "#111318", color: index % 2 === 0 ? "#111111" : "#ffffff" }}
                   >
-                    <td className="px-4 py-3 font-bold">{row.evenement_naam || "-"}</td>
-                    <td className="px-4 py-3"><span className="inline-flex items-center gap-2"><CalendarDays size={14} className="text-[#ff4d00]" />{fmtDate(row.evenement_datum)}</span></td>
-                    <td className="px-4 py-3"><span className="inline-flex items-center gap-2"><MapPin size={14} className={index % 2 === 0 ? "text-black/45" : "text-white/45"} />{row.locatie || "-"}</span></td>
-                    <td className="px-4 py-3">{row.totaal_partijen ?? 0}</td>
-                    <td className="px-4 py-3">{row.bondteam || "-"}</td>
-                    <td className="px-4 py-3">{fmtDateTime(row.created_at)}</td>
+                    <td className="px-4 py-3 font-bold" style={{ color: "inherit" }}>{row.evenement_naam || "-"}</td>
+                    <td className="px-4 py-3" style={{ color: "inherit" }}><span className="inline-flex items-center gap-2"><CalendarDays size={14} className="text-[#ff4d00]" />{fmtDate(row.evenement_datum)}</span></td>
+                    <td className="px-4 py-3" style={{ color: "inherit" }}><span className="inline-flex items-center gap-2"><MapPin size={14} className={index % 2 === 0 ? "text-black/45" : "text-white/45"} />{row.locatie || "-"}</span></td>
+                    <td className="px-4 py-3" style={{ color: "inherit" }}>{row.totaal_partijen ?? 0}</td>
+                    <td className="px-4 py-3" style={{ color: "inherit" }}>{row.bondteam || "-"}</td>
+                    <td className="px-4 py-3" style={{ color: "inherit" }}>{fmtDateTime(row.created_at)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
