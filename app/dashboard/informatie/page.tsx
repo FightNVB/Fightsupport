@@ -203,9 +203,9 @@ export default function InformatiePage() {
       icon: Users,
     },
     {
-      label: "Aanvraag Talentstatus",
-      subtitle: "Talentstatus vanaf 16 jaar",
-      external: "https://form.jotform.com/252374009578059",
+      label: "Aanvraag formulieren",
+      subtitle: "Open de NVB aanvraagformulieren",
+      external: "https://nvbformulieren.nl/",
       icon: Scale,
     },
     {
