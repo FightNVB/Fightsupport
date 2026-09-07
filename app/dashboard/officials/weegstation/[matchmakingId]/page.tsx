@@ -2254,7 +2254,7 @@ export default function WeegstationDetailPage() {
 
               <div className="flex items-center gap-2 shrink-0">
                 <Link
-                  href="/dashboard/officials/weegstation"
+                  href={isMatchmakerOnly ? "/dashboard/matchmaker" : "/dashboard/officials/weegstation"}
                   className="px-3 py-1.5 text-[12px] font-black text-white"
                   style={{
                     borderRadius: 4,

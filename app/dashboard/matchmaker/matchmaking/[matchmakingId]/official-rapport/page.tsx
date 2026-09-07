@@ -625,7 +625,7 @@ export default function OfficialRapportPage() {
       `}</style>
 
       <div className="no-print mx-auto mb-3 flex max-w-[1120px] justify-between gap-2">
-        <button onClick={() => router.back()} className="rounded-md border border-zinc-500 bg-[#242428] px-4 py-2 text-sm font-black text-white hover:border-[#ff4d00]">← Terug</button>
+        <button onClick={() => router.push("/dashboard/matchmaker")} className="rounded-md border border-zinc-500 bg-[#242428] px-4 py-2 text-sm font-black text-white hover:border-[#ff4d00]">← Terug</button>
         <button onClick={() => window.print()} className="rounded-md border border-[#ff6a2a] bg-[#ff4d00] px-4 py-2 text-sm font-black text-black shadow-[0_0_18px_rgba(255,77,0,0.25)]">Print / PDF</button>
       </div>
 
