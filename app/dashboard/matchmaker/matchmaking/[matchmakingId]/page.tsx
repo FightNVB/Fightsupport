@@ -1604,6 +1604,14 @@ function mergeRawMaxWeightIntoContextRows(ctxRows: AnyRow[], rawRows: AnyRow[]):
 
     const next = { ...ctx };
 
+    // Actuele VA-nummers komen uit matchmaking_bouts_raw.
+    // Zo is "Geen info" onafhankelijk van andere statussen en verdwijnt
+    // deze vlag zodra de ontbrekende VA is toegevoegd/gecorrigeerd.
+    next.va_rood = raw?.va_rood ?? null;
+    next.va_blauw = raw?.va_blauw ?? null;
+    next.rood_va_mm = raw?.va_rood ?? null;
+    next.blauw_va_mm = raw?.va_blauw ?? null;
+
     const maxWeight = getResolvedMaxWeightRaw(raw);
     if (firstFilled(next.max_gewicht, next.max_gewicht_mm, next.matchmaking_bouts_raw_max_gewicht) == null && maxWeight != null) {
       next.max_gewicht = maxWeight;
@@ -3272,7 +3280,7 @@ export default function ControleMatchmakingPage() {
 
       const { data: rawRows, error: rawErr } = await supabase
         .from("matchmaking_bouts_raw")
-        .select("id, bout_uid, source_matchmaker_bout_id, partij_nr, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
+        .select("id, bout_uid, source_matchmaker_bout_id, partij_nr, va_rood, va_blauw, max_gewicht, max_gewicht_notatie, max_gewicht_type, raw_json")
         .eq("matchmaking_id", matchmakingId);
 
       if (rawErr) throw rawErr;
@@ -3557,6 +3565,26 @@ export default function ControleMatchmakingPage() {
     return m;
   }, [rows, approvedLicentieByPartij, resultatenByPartij]);
 
+  const geenInfoByPartij = useMemo(() => {
+    const m: Record<number, boolean> = {};
+
+    for (const r of rows) {
+      const pn = Number(r.partij_nr);
+      if (!Number.isFinite(pn)) continue;
+      if (isExactBoksen(r)) continue;
+
+      const rr = resultatenByPartij[pn] ?? [];
+      const heeftFightPassportMelding = rr.some(isFightPassportOntbreektRow);
+      const actueleInfoOntbreekt = !isContextCompleet(r);
+
+      // Losse filterstatus: mag tegelijk bestaan met afkeur, geen licentie,
+      // actie, dispensatie of verbod.
+      if (heeftFightPassportMelding || actueleInfoOntbreekt) m[pn] = true;
+    }
+
+    return m;
+  }, [rows, resultatenByPartij]);
+
   const hasAfkeurByPartij = useMemo(() => {
     const m: Record<number, boolean> = {};
     for (const [pnStr, rr] of Object.entries(resultatenByPartij) as [string, ResRow[]][]) {
@@ -3651,7 +3679,7 @@ export default function ControleMatchmakingPage() {
 
       if (s === "verbod") verbod++;
       else if (s === "ok") ok++;
-      else if (s === "geen_info") geen++;
+      if (geenInfoByPartij[pn]) geen++;
 
       if (verbodByPartij[pn] && s !== "verbod") verbod++;
       if (hasAfkeurByPartij[pn]) afk++;
@@ -3681,6 +3709,7 @@ export default function ControleMatchmakingPage() {
   }, [
     gewoneRows,
     statusByPartij,
+    geenInfoByPartij,
     verbodByPartij,
     countByPartij,
     missingLicentieByPartij,
@@ -3708,7 +3737,7 @@ export default function ControleMatchmakingPage() {
 
       if (s === "verbod") verbod++;
       else if (s === "ok") ok++;
-      else if (s === "geen_info") geen++;
+      if (geenInfoByPartij[pn]) geen++;
 
       if (verbodByPartij[pn] && s !== "verbod") verbod++;
       if (hasAfkeurByPartij[pn]) afk++;
@@ -3732,6 +3761,7 @@ export default function ControleMatchmakingPage() {
   }, [
     gewoneRows,
     statusByPartij,
+    geenInfoByPartij,
     verbodByPartij,
     missingLicentieByPartij,
     hasAfkeurByPartij,
@@ -3757,6 +3787,7 @@ export default function ControleMatchmakingPage() {
       if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
       if (filter === "afgekeurd") return !!hasAfkeurByPartij[pn];
       if (filter === "actie") return !!hasActieByPartij[pn];
+      if (filter === "geen_info") return !!geenInfoByPartij[pn];
       if (filter !== "all") {
         const s = statusByPartij[pn] ?? "geen_info";
         if (s !== filter) return false;
@@ -3796,6 +3827,7 @@ export default function ControleMatchmakingPage() {
     statusByPartij,
     hasAfkeurByPartij,
     hasActieByPartij,
+    geenInfoByPartij,
     hasDispByPartij,
     dispRequestByPartij,
     verbodByPartij,
