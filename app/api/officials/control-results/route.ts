@@ -14,15 +14,22 @@ async function authorize(req: NextRequest, matchmakingId: string) {
 export async function GET(req: NextRequest) {
   try {
     const matchmakingId = clean(req.nextUrl.searchParams.get("matchmaking_id"));
+    const controleRunId = clean(req.nextUrl.searchParams.get("controle_run_id"));
     const partijNr = Number(req.nextUrl.searchParams.get("partij_nr"));
-    if (!matchmakingId || !Number.isInteger(partijNr) || partijNr < 1) return privateJson({ error: "Ongeldige selectie." }, 400);
+    if (!matchmakingId || !controleRunId || !Number.isInteger(partijNr) || partijNr < 1) {
+      return privateJson({ error: "Ongeldige selectie." }, 400);
+    }
+
     await authorize(req, matchmakingId);
+
     const result = await supabaseAdmin
       .from("controle_resultaten")
       .select("*")
       .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
       .eq("partij_nr", partijNr)
       .order("created_at", { ascending: true });
+
     if (result.error) throw result.error;
     return privateJson({ rows: result.data ?? [] });
   } catch (error) {

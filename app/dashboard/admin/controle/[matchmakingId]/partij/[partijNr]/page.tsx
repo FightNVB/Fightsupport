@@ -1774,55 +1774,20 @@ export default function PartijDetailPage() {
     partijNr: number;
     ctxRow?: AnyRow | null;
   }): Promise<ControleResultaatRow[]> {
-    const { runId, partijNr, ctxRow } = opts;
-    const boutId = asUuid(ctxRow?.bout_id);
-    const mmId = String(matchmakingId ?? "").trim();
+    const { runId, partijNr } = opts;
 
-    const queries = [
-      supabase
-        .from("controle_resultaten")
-        .select("*")
-        .eq("controle_run_id", runId)
-        .eq("partij_nr", partijNr),
-      supabase
-        .from("controle_resultaten")
-        .select("*")
-        .eq("run_id", runId)
-        .eq("partij_nr", partijNr),
-    ];
+    const { data, error } = await supabase
+      .from("controle_resultaten")
+      .select("*")
+      .eq("controle_run_id", runId)
+      .eq("partij_nr", partijNr)
+      .order("created_at", { ascending: true });
 
-    // Weegstation-meldingen staan ook in controle_resultaten, maar kunnen
-    // vanuit een andere flow met alleen matchmaking_id/partij_nr of bout_id zijn opgeslagen.
-    // Daarom halen we die bewust mee, zonder de rest van deze goed werkende pagina te veranderen.
-    if (mmId) {
-      queries.push(
-        supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("matchmaking_id", mmId)
-          .eq("partij_nr", partijNr),
-      );
-    }
+    if (error) throw error;
 
-    if (mmId && boutId) {
-      queries.push(
-        supabase
-          .from("controle_resultaten")
-          .select("*")
-          .eq("matchmaking_id", mmId)
-          .eq("bout_id", boutId),
-      );
-    }
-
-    const results = await Promise.all(queries);
-    const allRows: ControleResultaatRow[] = [];
-
-    for (const res of results) {
-      if (res.error) throw res.error;
-      allRows.push(...((res.data ?? []) as unknown as ControleResultaatRow[]));
-    }
-
-    return dedupeControleResultatenRows(allRows);
+    return dedupeControleResultatenRows(
+      (data ?? []) as unknown as ControleResultaatRow[],
+    );
   }
 
   async function reloadRegels() {

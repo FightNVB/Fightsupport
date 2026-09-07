@@ -1755,7 +1755,10 @@ export default function PartijDetailPage() {
     const mmId = String(matchmakingId ?? "").trim();
 
     if (!mmId) return [];
-    const response = await authedFetch(`/api/officials/control-results?matchmaking_id=${encodeURIComponent(mmId)}&partij_nr=${encodeURIComponent(String(partijNr))}`, { cache: "no-store" });
+    const response = await authedFetch(
+      `/api/officials/control-results?matchmaking_id=${encodeURIComponent(mmId)}&controle_run_id=${encodeURIComponent(runId)}&partij_nr=${encodeURIComponent(String(partijNr))}`,
+      { cache: "no-store" },
+    );
     const json = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(json?.error || "Controleresultaten laden mislukt.");
     return dedupeControleResultatenRows((json?.rows ?? []) as ControleResultaatRow[]);
