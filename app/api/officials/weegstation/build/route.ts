@@ -123,6 +123,29 @@ export async function POST(req: Request) {
       if (snapshotPart.error) throw snapshotPart.error;
     }
 
+    const latestUpload = (uploadRes.data ?? [])[0] ?? null;
+
+    let snapshotPromotor =
+      String(mmRow?.promotor ?? "").trim() ||
+      String(latestUpload?.promotor ?? "").trim();
+
+    if (!snapshotPromotor) {
+      const eventId = String(
+        mmRow?.event_id ?? latestUpload?.event_id ?? "",
+      ).trim();
+
+      if (eventId) {
+        const { data: eventRow, error: eventErr } = await admin
+          .from("events")
+          .select("promotor")
+          .eq("id", eventId)
+          .maybeSingle();
+
+        if (eventErr) throw eventErr;
+        snapshotPromotor = String(eventRow?.promotor ?? "").trim();
+      }
+    }
+
     const snapshotPayload = {
       matchmaking: mmRow,
       bouts: rawBoutsRes.data ?? [],
@@ -139,11 +162,11 @@ export async function POST(req: Request) {
         matchmaking_id: matchmakingId,
         matchmaker_user_id: snapshotOwner,
         snapshot_type: "overdracht_weegstation",
-        evenement_naam: mmRow?.naam ?? null,
-        evenement_datum: mmRow?.datum ?? null,
-        locatie: mmRow?.locatie ?? null,
-        promotor: mmRow?.promotor ?? null,
-        bondteam: mmRow?.bondteam ?? null,
+        evenement_naam: mmRow?.naam ?? latestUpload?.evenement_naam ?? null,
+        evenement_datum: mmRow?.datum ?? latestUpload?.evenement_datum ?? null,
+        locatie: mmRow?.locatie ?? latestUpload?.locatie ?? null,
+        promotor: snapshotPromotor || null,
+        bondteam: mmRow?.bondteam ?? latestUpload?.bondteam ?? null,
         status_op_moment: mmRow?.status ?? null,
         stadium_op_moment: mmRow?.stadium ?? null,
         totaal_partijen: (rawBoutsRes.data ?? []).length,
