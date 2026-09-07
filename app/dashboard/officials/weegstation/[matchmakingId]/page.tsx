@@ -1387,6 +1387,7 @@ export default function WeegstationDetailPage() {
   const [rows, setRows] = useState<WeighInBout[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftState>>({});
   const [roleNames, setRoleNames] = useState<RoleName[]>([]);
+  const [activeRole, setActiveRole] = useState<RoleName | "">("");
   const [myBondteam, setMyBondteam] = useState("");
 
   const [search, setSearch] = useState("");
@@ -1400,20 +1401,29 @@ export default function WeegstationDetailPage() {
     [roleNames],
   );
 
-  // Matchmakers can view weegstation read-only but cannot edit weights, penalties or dispensaties
+  // Als de gebruiker op dit moment als matchmaker werkt, is het weegstation
+  // altijd alleen-lezen. Ook wanneer hetzelfde account daarnaast admin/superadmin
+  // of official-rechten heeft. Wegen is uitsluitend een taak van NVB officials.
   const isMatchmakerOnly = useMemo(
-    () =>
-      roleNames.includes("matchmaker") &&
-      !roleNames.some((r) =>
-        [
-          "official",
-          "hoofdofficial",
-          "admin",
-          "superadmin",
-          "dispensatie_admin",
-        ].includes(r),
-      ),
-    [roleNames],
+    () => {
+      if (activeRole === "matchmaker") return true;
+
+      // Fallback voor oudere profielen zonder active_role.
+      return (
+        !activeRole &&
+        roleNames.includes("matchmaker") &&
+        !roleNames.some((r) =>
+          [
+            "official",
+            "hoofdofficial",
+            "admin",
+            "superadmin",
+            "dispensatie_admin",
+          ].includes(r),
+        )
+      );
+    },
+    [activeRole, roleNames],
   );
 
   const canAccess = useMemo(
@@ -1599,12 +1609,13 @@ export default function WeegstationDetailPage() {
 
         const { data: profile, error: profileErr } = await supabase
           .from("user_profiles")
-          .select("id, bondteam")
+          .select("id, bondteam, active_role")
           .eq("id", uid)
           .single();
 
         if (profileErr) throw profileErr;
         setMyBondteam(String(profile?.bondteam ?? "").trim());
+        setActiveRole(normalizeRoleName(profile?.active_role));
 
         const { data: userRoles, error: urErr } = await supabase
           .from("user_roles")
@@ -2579,8 +2590,8 @@ export default function WeegstationDetailPage() {
 
                   {isMatchmakerOnly && (
                     <div className="mb-3 rounded-[8px] border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
-                      👁 Alleen-lezen modus — matchmakers mogen gewichten
-                      bekijken maar niet wijzigen.
+                      👁 Alleen meekijken — wegen en gewichten opslaan wordt
+                      uitsluitend door NVB officials gedaan.
                     </div>
                   )}
 
@@ -2708,7 +2719,7 @@ export default function WeegstationDetailPage() {
                         />
                         <div className="mt-2 text-xs font-semibold text-zinc-500">
                           {isMatchmakerOnly
-                            ? "Alleen-lezen — matchmakers mogen geen gewichten wijzigen."
+                            ? "Wegen wordt door NVB officials uitgevoerd. Als matchmaker kun je hier alleen live meekijken."
                             : "Typ gewicht en druk op Enter om direct op te slaan."}
                         </div>
                       </div>

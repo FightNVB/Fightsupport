@@ -57,13 +57,103 @@ export async function POST(req: Request) {
 
     const { data: mmRow, error: mmReadErr } = await admin
       .from("matchmakings")
-      .select("id, bondteam")
+      .select("*")
       .eq("id", matchmakingId)
       .single();
     if (mmReadErr) throw mmReadErr;
 
     const nowIso = new Date().toISOString();
     const nextBondteam = String(mmRow?.bondteam ?? "").trim() || null;
+
+    // Maak vóór de overdracht één immutable snapshot voor de oorspronkelijke matchmaker.
+    // Bij een retry blijft het eerste overdrachtsmoment leidend.
+    const snapshotOwner = String(
+      mmRow?.matchmaker_id ?? mmRow?.maker_user_id ?? mmRow?.sent_by ?? auth.authUserId ?? "",
+    ).trim();
+
+    if (!snapshotOwner) {
+      return NextResponse.json(
+        { error: "Snapshot kan niet worden gemaakt: matchmaker ontbreekt." },
+        { status: 409 },
+      );
+    }
+
+    const [rawBoutsRes, uploadRes, contextRes, tournamentRes, resultsRes, dispensationsRes] =
+      await Promise.all([
+        admin
+          .from("matchmaking_bouts_raw")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .order("partij_nr", { ascending: true }),
+        admin
+          .from("matchmaking_uploads")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .order("created_at", { ascending: false }),
+        admin
+          .from("controle_bout_context")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .order("partij_nr", { ascending: true }),
+        admin
+          .from("controle_toernooi_context")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .order("partij_nr", { ascending: true }),
+        admin
+          .from("controle_resultaten")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .order("partij_nr", { ascending: true }),
+        admin
+          .from("dispensatie_requests")
+          .select("*")
+          .eq("matchmaking_id", matchmakingId)
+          .order("partij_nr", { ascending: true }),
+      ]);
+
+    for (const snapshotPart of [
+      rawBoutsRes,
+      uploadRes,
+      contextRes,
+      tournamentRes,
+      resultsRes,
+      dispensationsRes,
+    ]) {
+      if (snapshotPart.error) throw snapshotPart.error;
+    }
+
+    const snapshotPayload = {
+      matchmaking: mmRow,
+      bouts: rawBoutsRes.data ?? [],
+      uploads: uploadRes.data ?? [],
+      controle_bout_context: contextRes.data ?? [],
+      controle_toernooi_context: tournamentRes.data ?? [],
+      controle_resultaten: resultsRes.data ?? [],
+      dispensatie_requests: dispensationsRes.data ?? [],
+    };
+
+    const { error: snapshotInsertErr } = await admin
+      .from("matchmaker_matchmaking_snapshots")
+      .insert({
+        matchmaking_id: matchmakingId,
+        matchmaker_user_id: snapshotOwner,
+        snapshot_type: "overdracht_weegstation",
+        evenement_naam: mmRow?.naam ?? null,
+        evenement_datum: mmRow?.datum ?? null,
+        locatie: mmRow?.locatie ?? null,
+        promotor: mmRow?.promotor ?? null,
+        bondteam: mmRow?.bondteam ?? null,
+        status_op_moment: mmRow?.status ?? null,
+        stadium_op_moment: mmRow?.stadium ?? null,
+        totaal_partijen: (rawBoutsRes.data ?? []).length,
+        snapshot_data: snapshotPayload,
+        created_by: auth.authUserId,
+      });
+
+    if (snapshotInsertErr && snapshotInsertErr.code !== "23505") {
+      throw snapshotInsertErr;
+    }
 
     await cleanupOldWeegstationData(admin, matchmakingId);
 

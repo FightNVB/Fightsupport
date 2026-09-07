@@ -10,7 +10,7 @@ import {
   Users,
   Trophy,
   ArrowLeft,
-  FileText,
+  Archive,
   Award,
 } from "lucide-react";
 
@@ -208,10 +208,10 @@ export default function MatchmakerDashboardPage() {
       icon: Trophy as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
-      label: "Dispensatie aanvragen",
-      subtitle: "Open het NVB dispensatieformulier",
-      external: "https://nvbformulieren.nl/dispensatie",
-      icon: FileText as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
+      label: "Mijn snapshots",
+      subtitle: "Bekijk overgedragen matchmakings",
+      href: "/dashboard/matchmaker/snapshots",
+      icon: Archive as React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>,
     },
     {
       label: "Licentie verlengen",
