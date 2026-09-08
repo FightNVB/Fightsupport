@@ -1,27 +1,30 @@
 // app/api/control-engine/admin/start/route.ts
 //
-// Flow:
-// 1. toegang / eigen bondteam via bestaande assertCanAccessMatchmaking
-// 2. nieuwe controle_run
-// 3. dezelfde DB-rebuild als de matchmaker: refreshMatchmaking()
-// 4. alleen actuele FightPassport live-check:
-//      licentie / startverbod / keurmerk
-// 5. live waarden in DEZE controle_run over de DB-context leggen
-// 6. rulesEngine opnieuw draaien; dit is de uiteindelijke wedstrijddagwaarheid
+// Admincontrole gebruikt bewust een EIGEN scraperbestand:
+//   ControlEngine/scrapers/fp_bundle_admin/scraper_fp_admin.js
 //
-// Dispensatie:
-// dispensatie_requests wordt hier NOOIT verwijderd.
-// Daardoor blijft een goedgekeurde/afgewezen aanvraag gekoppeld over nieuwe controles.
+// Dat bestand is inhoudelijk gelijk aan de actuele Total-scraper, maar deze route
+// geeft hem uitsluitend de VA-nummers uit één matchmaking_id mee.
+//
+// Flow:
+// 1. admin/superadmin + toegang matchmaking
+// 2. nieuwe controle_run
+// 3. alle unieke VA-nummers uit actieve partijen verzamelen
+// 4. admin scraper draaien in 3 processen x 8 workers
+// 5. Total-tabellen zijn daarna actueel voor precies deze vechters
+// 6. oude live-snapshot van deze matchmaking verwijderen, zodat die de verse
+//    Total-data niet kan overschrijven
+// 7. controle-context opnieuw bouwen + enrich + rulesEngine
+//
+// Dispensatie_requests worden hier NOOIT verwijderd.
 
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
-import {
-  buildControleBoutContext,
-  buildToernooiContext,
-} from "@/lib/control/buildControleBoutContext";
+import { buildControleBoutContext } from "@/lib/control/buildControleBoutContext";
 import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
 import { rulesEngine } from "@/lib/rulesEngine";
 import {
@@ -38,9 +41,9 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 
-// Admin heeft bewust een eigen directe live-scraper (geen queue).
-// Daarna gebruikt admin dezelfde centrale build/enrich/rules/save-keten als MM en officials.
 const SCRAPER_FILE = "scraper_fp_admin.js";
+const PROCESS_COUNT = 3;
+const WORKERS_PER_PROCESS = 8;
 
 function toVaStrict(value: any): string | null {
   const digits = String(value ?? "").replace(/\D/g, "");
@@ -50,16 +53,16 @@ function toVaStrict(value: any): string | null {
 function pickVA(row: any, side: "rood" | "blauw"): string | null {
   if (side === "rood") {
     return (
-      toVaStrict(row?.rood_va) ??
       toVaStrict(row?.va_rood) ??
+      toVaStrict(row?.rood_va) ??
       toVaStrict(row?.rood_va_mm) ??
       null
     );
   }
 
   return (
-    toVaStrict(row?.blauw_va) ??
     toVaStrict(row?.va_blauw) ??
+    toVaStrict(row?.blauw_va) ??
     toVaStrict(row?.blauw_va_mm) ??
     null
   );
@@ -77,7 +80,6 @@ function isRoleAllowedForRoute(role: string | null | undefined) {
 
 function resolveScriptPath(...parts: string[]) {
   const root = process.cwd();
-
   const candidates = [
     path.join(root, ...parts),
     path.join(root, "ControlEngine", ...parts),
@@ -91,7 +93,6 @@ function resolveScriptPath(...parts: string[]) {
   throw new Error(`Script niet gevonden:\n- ${candidates.join("\n- ")}`);
 }
 
-
 function runNodeScript(
   scriptPath: string,
   args: string[],
@@ -99,60 +100,55 @@ function runNodeScript(
   logPrefix?: string,
 ): Promise<{ stdout: string; stderr: string; ms: number }> {
   return new Promise((resolve, reject) => {
-        const startedAt = Date.now();
+    const startedAt = Date.now();
 
-        const child = spawn(process.execPath, [scriptPath, ...args], {
-          stdio: ["ignore", "pipe", "pipe"],
-          shell: false,
-          cwd: path.dirname(scriptPath),
-          windowsHide: true,
-          env: {
-            ...process.env,
-            ...envExtra,
-          },
-        });
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      cwd: path.dirname(scriptPath),
+      windowsHide: true,
+      env: {
+        ...process.env,
+        ...envExtra,
+      },
+    });
 
-        let stdout = "";
-        let stderr = "";
+    let stdout = "";
+    let stderr = "";
 
-        child.stdout?.on("data", (data) => {
-          const text = data.toString();
-          stdout += text;
-          process.stdout.write(
-            logPrefix ? `[${logPrefix}] ${text}` : text,
-          );
-        });
+    child.stdout?.on("data", (data) => {
+      const text = data.toString();
+      stdout += text;
+      process.stdout.write(logPrefix ? `[${logPrefix}] ${text}` : text);
+    });
 
-        child.stderr?.on("data", (data) => {
-          const text = data.toString();
-          stderr += text;
-          process.stderr.write(
-            logPrefix ? `[${logPrefix}] ${text}` : text,
-          );
-        });
+    child.stderr?.on("data", (data) => {
+      const text = data.toString();
+      stderr += text;
+      process.stderr.write(logPrefix ? `[${logPrefix}] ${text}` : text);
+    });
 
-        child.on("error", (error) => {
-          reject(
-            new Error(
-              `Script spawn error: ${error?.message ?? error}\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`,
-            ),
-          );
-        });
+    child.on("error", (error) => {
+      reject(
+        new Error(
+          `Script spawn error: ${error?.message ?? error}\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`,
+        ),
+      );
+    });
 
-        child.on("close", (code) => {
-          const ms = Date.now() - startedAt;
+    child.on("close", (code) => {
+      const ms = Date.now() - startedAt;
+      if (code === 0) {
+        resolve({ stdout, stderr, ms });
+        return;
+      }
 
-          if (code === 0) {
-            resolve({ stdout, stderr, ms });
-            return;
-          }
-
-          reject(
-            new Error(
-              `Script failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`,
-            ),
-          );
-        });
+      reject(
+        new Error(
+          `Script failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`,
+        ),
+      );
+    });
   });
 }
 
@@ -166,7 +162,10 @@ async function updateRunProgress(
     .eq("id", controle_run_id);
 
   if (error) {
-    console.warn("[control-engine/admin/start] progress update warning:", error.message);
+    console.warn(
+      "[control-engine/admin/start] progress update warning:",
+      error.message,
+    );
   }
 }
 
@@ -178,7 +177,7 @@ async function abortActiveRuns(matchmaking_id: string) {
       afgerond_op: new Date().toISOString(),
       is_latest: false,
       foutmelding:
-        "Automatisch afgebroken omdat een nieuwe controle is gestart.",
+        "Automatisch afgebroken omdat een nieuwe admincontrole is gestart.",
     })
     .eq("matchmaking_id", matchmaking_id)
     .eq("status", "running");
@@ -199,7 +198,7 @@ async function createControleRun(args: {
       gestart_door_rol: args.role,
       status: "running",
       gestart_op: new Date().toISOString(),
-      run_type: "control-engine",
+      run_type: "control-engine-admin-total",
       is_latest: true,
       totaal_aantal: 0,
       verwerkt_aantal: 0,
@@ -229,11 +228,9 @@ async function createControleRun(args: {
 }
 
 async function cleanupPreviousControlView(matchmaking_id: string) {
-  // Bewust GEEN fighters_raw / uitslagen_raw verwijderen:
-  // de volledige controle wordt nu uit de DB opgebouwd.
-  //
-  // Bewust GEEN dispensatie_requests verwijderen:
-  // goedgekeurde/afgewezen dispensaties moeten over nieuwe controles blijven bestaan.
+  // Bewust GEEN dispensatie_requests verwijderen.
+  // Bewust GEEN centrale Total-tabellen verwijderen: de admin-scraper ververst
+  // alleen de VA's die in deze matchmaking voorkomen.
   const tables = [
     "controle_resultaten",
     "controle_bout_context",
@@ -247,12 +244,22 @@ async function cleanupPreviousControlView(matchmaking_id: string) {
       .delete()
       .eq("matchmaking_id", matchmaking_id);
 
-    if (
-      error &&
-      String((error as any)?.code ?? "") !== "42P01"
-    ) {
+    if (error && String((error as any)?.code ?? "") !== "42P01") {
       throw error;
     }
+  }
+}
+
+async function cleanupStaleLiveRows(matchmaking_id: string) {
+  // De oude admin/official live-snapshot mag de verse Total-equivalente scrape
+  // niet overschrijven in buildControleBoutContext/enrichControleBoutContext.
+  const { error } = await supabase
+    .from("controle_fighter_actueel")
+    .delete()
+    .eq("matchmaking_id", matchmaking_id);
+
+  if (error && String((error as any)?.code ?? "") !== "42P01") {
+    throw error;
   }
 }
 
@@ -266,97 +273,6 @@ async function loadActiveBouts(matchmaking_id: string) {
 
   if (error) throw error;
   return data ?? [];
-}
-
-async function loadLiveChecks(
-  matchmaking_id: string,
-  controle_run_id: string,
-) {
-  const { data, error } = await supabase
-    .from("controle_fighter_actueel")
-    .select(
-      "va_nummer,licentie_ok,startverbod_actief,keurmerk_ok,sportschool,land,keurmerk_schild_gevonden,error_message,checked_at",
-    )
-    .eq("matchmaking_id", matchmaking_id)
-    .eq("controle_run_id", controle_run_id);
-
-  if (error) throw error;
-  return data ?? [];
-}
-
-async function applyLiveChecksToCurrentContext(args: {
-  matchmaking_id: string;
-  controle_run_id: string;
-  liveRows: any[];
-}) {
-  const liveByVa = new Map(
-    args.liveRows.map((row) => [String(row.va_nummer), row]),
-  );
-
-  const { data: contextRows, error } = await supabase
-    .from("controle_bout_context")
-    .select("*")
-    .eq("matchmaking_id", args.matchmaking_id)
-    .eq("controle_run_id", args.controle_run_id)
-    .order("partij_nr", { ascending: true });
-
-  if (error) throw error;
-
-  for (const context of contextRows ?? []) {
-    const roodVa =
-      toVaStrict(context?.rood_va_mm) ??
-      toVaStrict(context?.va_rood) ??
-      toVaStrict(context?.rood_va);
-
-    const blauwVa =
-      toVaStrict(context?.blauw_va_mm) ??
-      toVaStrict(context?.va_blauw) ??
-      toVaStrict(context?.blauw_va);
-
-    const rood = roodVa ? liveByVa.get(roodVa) : null;
-    const blauw = blauwVa ? liveByVa.get(blauwVa) : null;
-
-    if (roodVa && !rood) {
-      throw new Error(
-        `Actuele FightPassport-check ontbreekt voor rode hoek VA ${roodVa}, partij ${context?.partij_nr ?? "?"}.`,
-      );
-    }
-
-    if (blauwVa && !blauw) {
-      throw new Error(
-        `Actuele FightPassport-check ontbreekt voor blauwe hoek VA ${blauwVa}, partij ${context?.partij_nr ?? "?"}.`,
-      );
-    }
-
-    const patch: Record<string, any> = {};
-
-    if (rood) {
-      patch.rood_licentie = rood.licentie_ok ? "Ja" : "Nee";
-      patch.rood_heeft_startverbod = rood.startverbod_actief
-        ? "true"
-        : "false";
-    }
-
-    if (blauw) {
-      patch.blauw_licentie = blauw.licentie_ok ? "Ja" : "Nee";
-      patch.blauw_heeft_startverbod = blauw.startverbod_actief
-        ? "true"
-        : "false";
-    }
-
-    if (!Object.keys(patch).length) continue;
-
-    const { error: updateError } = await supabase
-      .from("controle_bout_context")
-      .update(patch)
-      .eq("id", context.id)
-      .eq("matchmaking_id", args.matchmaking_id)
-      .eq("controle_run_id", args.controle_run_id);
-
-    if (updateError) throw updateError;
-  }
-
-  return contextRows?.length ?? 0;
 }
 
 export async function POST(req: Request) {
@@ -389,27 +305,19 @@ export async function POST(req: Request) {
       role,
     });
 
-    const workersPerProcess = 10;
-    const processCount = 3;
-    const stagger_ms = clampInt(body?.stagger_ms ?? 2500, 2500, 0, 10000);
-    // Exact dezelfde operationele timing als de werkende Total start-route.
-    const tab_attempts = clampInt(body?.tab_attempts ?? 3, 3, 1, 30);
-    const soft_wait_ms = clampInt(
-      body?.soft_wait_ms ?? 1500,
-      1500,
-      200,
-      5000,
-    );
-    const between_attempts_ms = clampInt(
-      body?.between_attempts_ms ?? 700,
-      700,
+    const staggerMs = clampInt(body?.stagger_ms ?? 450, 450, 0, 5000);
+    const tabAttempts = clampInt(body?.tab_attempts ?? 5, 5, 1, 30);
+    const softWaitMs = clampInt(body?.soft_wait_ms ?? 200, 200, 0, 5000);
+    const betweenAttemptsMs = clampInt(
+      body?.between_attempts_ms ?? 350,
+      350,
       0,
       5000,
     );
-    const live_timeout_ms = clampInt(
-      body?.live_timeout_ms ?? 150000,
-      150000,
-      5000,
+    const scrapeTimeoutMs = clampInt(
+      body?.scrape_timeout_ms ?? 120000,
+      120000,
+      30000,
       300000,
     );
 
@@ -424,11 +332,10 @@ export async function POST(req: Request) {
 
     await updateRunProgress(controle_run_id, {
       progress: 5,
-      current_step: "Partijen en VA-nummers voorbereiden...",
+      current_step: "Partijen en VA-nummers verzamelen...",
     });
 
     const bouts = await loadActiveBouts(matchmaking_id);
-
     if (!bouts.length) {
       throw new Error(
         "Deze matchmaking bevat geen actieve partijen om te controleren.",
@@ -443,19 +350,19 @@ export async function POST(req: Request) {
       if (blauw) vaSet.add(blauw);
     }
 
-    const va_nummers = [...vaSet];
-
-    if (!va_nummers.length) {
+    const vaNummers = [...vaSet];
+    if (!vaNummers.length) {
       throw new Error(
         "Geen geldige VA-nummers gevonden in deze matchmaking.",
       );
     }
 
     await updateRunProgress(controle_run_id, {
-      totaal_aantal: va_nummers.length,
+      totaal_aantal: vaNummers.length,
       verwerkt_aantal: 0,
-      progress: 45,
-      current_step: `Actuele FightPassport-check: ${va_nummers.length} vechters...`,
+      progress: 15,
+      current_step:
+        `Volledige FightPassport-scrape: ${vaNummers.length} vechters (3 x 8 workers)...`,
     });
 
     const scraperPath = resolveScriptPath(
@@ -464,153 +371,85 @@ export async function POST(req: Request) {
       SCRAPER_FILE,
     );
 
-    const chunks: string[][] = Array.from({ length: processCount }, () => []);
-    va_nummers.forEach((va, index) => {
-      chunks[index % processCount].push(va);
+    const chunks: string[][] = Array.from(
+      { length: PROCESS_COUNT },
+      () => [],
+    );
+
+    vaNummers.forEach((va, index) => {
+      chunks[index % PROCESS_COUNT].push(va);
     });
 
     const activeChunks = chunks.filter((chunk) => chunk.length > 0);
-
-    const activeMatchmakingId = matchmaking_id;
-    const activeControleRunId = controle_run_id;
+    const adminBatchId = `admin-${matchmaking_id}-${crypto.randomUUID()}`;
 
     const scrapeResults = await Promise.all(
-        activeChunks.map((chunk, index) =>
-          runNodeScript(
-            scraperPath,
-            [activeMatchmakingId, activeControleRunId, ...chunk],
-            {
-              FP_MATCHMAKER_ID: "",
-              FP_SESSION_MODE: "master",
-              HEADLESS: process.env.HEADLESS ?? "false",
-              PUPPETEER_HEADLESS:
-                process.env.PUPPETEER_HEADLESS ??
-                process.env.HEADLESS ??
-                "false",
+      activeChunks.map((chunk, index) => {
+        const numeric = chunk.map(Number).filter(Number.isFinite);
+        const minVa = numeric.length ? Math.min(...numeric) : 1;
+        const maxVa = numeric.length ? Math.max(...numeric) : minVa;
 
-              WORKERS: String(workersPerProcess),
-              FP_ADMIN_WORKERS: String(workersPerProcess),
-              STAGGER_MS: String(stagger_ms),
-              TAB_ATTEMPTS: String(tab_attempts),
-              SOFT_WAIT_MS: String(soft_wait_ms),
-              BETWEEN_ATTEMPTS_MS: String(between_attempts_ms),
-              FP_ADMIN_TIMEOUT_MS: String(live_timeout_ms),
-              FP_ADMIN_ALLOW_INCOMPLETE_EXIT: "1",
-            },
-            `fp_admin_live_${index + 1}`,
-          ),
-        ),
-      );
-
-    console.log("[control-engine/admin/start] ✅ actuele scraper 3x10 klaar", {
-      process_count: activeChunks.length,
-      workers_per_process: workersPerProcess,
-      va_count: va_nummers.length,
-      ms: Math.max(...scrapeResults.map((r) => r.ms)),
-    });
-
-    let liveRows = await loadLiveChecks(
-      matchmaking_id,
-      controle_run_id,
-    );
-
-    const isCompleteLiveRow = (row: any) =>
-      !row?.error_message &&
-      typeof row?.licentie_ok === "boolean" &&
-      typeof row?.startverbod_actief === "boolean" &&
-      typeof row?.keurmerk_ok === "boolean";
-
-    const completeVaSet = new Set(
-      liveRows
-        .filter(isCompleteLiveRow)
-        .map((row: any) => String(row.va_nummer)),
-    );
-
-    const retryVas = va_nummers.filter(
-      (va) => !completeVaSet.has(String(va)),
-    );
-
-    if (retryVas.length > 0) {
-      console.warn(
-        `[control-engine/admin/start] ⚠️ herstelronde voor ${retryVas.length} ontbrekende VA('s): ${retryVas.join(", ")}`,
-      );
-
-      await updateRunProgress(controle_run_id, {
-        progress: 55,
-        current_step: `Herstelronde actuele FightPassport-check: ${retryVas.length} vechter(s)...`,
-      });
-
-      // Net als Total: alleen de mislukte VA's krijgen nog één volledig verse ronde.
-      // Maximaal 10 workers, want hier gaat het alleen om de restlijst.
-      await runNodeScript(
+        return runNodeScript(
           scraperPath,
-          [activeMatchmakingId, activeControleRunId, ...retryVas],
+          // De admin-scraper is een zelfstandige Total-variant. De scope komt
+          // uitsluitend via FP_TOTAL_VA_LIST; er wordt dus NOOIT een volledig
+          // VA-bereik doorlopen vanuit de admincontrole.
+          ["1", "1"],
           {
-            FP_MATCHMAKER_ID: "",
-            FP_SESSION_MODE: "master",
+            FP_TOTAL_VA_LIST: chunk.join(","),
+            FP_TOTAL_RUN_KIND: "retry",
+            FP_TOTAL_RESULTS: "true",
+            FP_TOTAL_WORKERS: String(WORKERS_PER_PROCESS),
+            WORKERS: String(WORKERS_PER_PROCESS),
+            FP_TOTAL_TIMEOUT_MS: String(scrapeTimeoutMs),
+            FP_TOTAL_LOGIN_RETRIES: "1",
+            FP_TOTAL_TRANSIENT_RETRIES: "1",
+            FP_SKIP_RUN_TERMINATOR: "true",
+            FP_TOTAL_BATCH_ID: adminBatchId,
+            FP_TOTAL_BATCH_PART: String(index + 1),
+            FP_TOTAL_BATCH_PARTS: String(activeChunks.length),
+            FP_TOTAL_BATCH_START_VA: String(minVa),
+            FP_TOTAL_BATCH_END_VA: String(maxVa),
+            STAGGER_MS: String(staggerMs),
+            TAB_ATTEMPTS: String(tabAttempts),
+            SOFT_WAIT_MS: String(softWaitMs),
+            BETWEEN_ATTEMPTS_MS: String(betweenAttemptsMs),
             HEADLESS: process.env.HEADLESS ?? "false",
             PUPPETEER_HEADLESS:
               process.env.PUPPETEER_HEADLESS ??
               process.env.HEADLESS ??
               "false",
-
-            WORKERS: String(Math.min(10, retryVas.length)),
-            FP_ADMIN_WORKERS: String(Math.min(10, retryVas.length)),
-            // In deze herstelronde nog één volledige interne transient retry toestaan.
-            FP_ADMIN_TRANSIENT_RETRIES: "1",
-            FP_ADMIN_LOGIN_RETRIES: "1",
-            STAGGER_MS: String(stagger_ms),
-            TAB_ATTEMPTS: String(tab_attempts),
-            SOFT_WAIT_MS: String(soft_wait_ms),
-            BETWEEN_ATTEMPTS_MS: String(between_attempts_ms),
-            FP_ADMIN_TIMEOUT_MS: String(live_timeout_ms),
-            FP_ADMIN_ALLOW_INCOMPLETE_EXIT: "1",
           },
-        "fp_admin_live_retry",
-      );
-
-      liveRows = await loadLiveChecks(
-        matchmaking_id,
-        controle_run_id,
-      );
-    }
-
-    const liveErrors = liveRows.filter(
-      (row: any) => !isCompleteLiveRow(row),
+          `fp_admin_total_${index + 1}`,
+        );
+      }),
     );
 
-    if (liveRows.length !== va_nummers.length || liveErrors.length) {
-      throw new Error(
-        `Actuele FightPassport-check niet compleet: ${liveRows.length}/${va_nummers.length} resultaten, ${liveErrors.length} fout(en).`,
-      );
-    }
+    console.log(
+      "[control-engine/admin/start] ✅ admin Total-equivalente scrape 3x8 klaar",
+      {
+        matchmaking_id,
+        controle_run_id,
+        process_count: activeChunks.length,
+        workers_per_process: WORKERS_PER_PROCESS,
+        va_count: vaNummers.length,
+        ms: Math.max(...scrapeResults.map((r) => r.ms)),
+      },
+    );
 
     await updateRunProgress(controle_run_id, {
-      verwerkt_aantal: va_nummers.length,
-      progress: 60,
-      current_step: "Partij-context één keer opbouwen...",
+      verwerkt_aantal: vaNummers.length,
+      progress: 65,
+      current_step: "Verse Total-data verwerken in admincontrole...",
     });
+
+    // Oude live-status verwijderen zodat de net gescrapete centrale Total-data
+    // leidend is. buildControleBoutContext valt dan voor licentie/startverbod
+    // rechtstreeks terug op fightpassport_fighters en voor uitslagen op
+    // fightpassport_results. Enrich gebruikt opgeslagen FP-sportschooldata.
+    await cleanupStaleLiveRows(matchmaking_id);
 
     await buildControleBoutContext(matchmaking_id, controle_run_id);
-
-    await updateRunProgress(controle_run_id, {
-      verwerkt_aantal: va_nummers.length,
-      progress: 70,
-      current_step:
-        "Actuele licentie/startverbod/keurmerkwaarden toepassen...",
-    });
-
-    const contextCount = await applyLiveChecksToCurrentContext({
-      matchmaking_id,
-      controle_run_id,
-      liveRows,
-    });
-
-    // Toernooi-context nogmaals voor deze run actualiseren, zonder extra FP-scrape.
-    // buildToernooiContext haalt licentie/startverbod nu uit controle_fighter_actueel.
-    await buildToernooiContext(matchmaking_id, controle_run_id);
-
-    // Centrale enrich bepaalt keurmerk/sportschool op basis van de gedeelde eindcontrolelogica.
     await enrichControleBoutContext(matchmaking_id, controle_run_id);
 
     const { data: ctxRows, error: ctxError } = await supabase
@@ -621,20 +460,17 @@ export async function POST(req: Request) {
       .order("partij_nr", { ascending: true });
 
     if (ctxError) throw ctxError;
-
     if (!ctxRows?.length) {
       throw new Error(
-        "Geen controle_bout_context gevonden na DB-rebuild.",
+        "Geen controle_bout_context gevonden na admin Total-rebuild.",
       );
     }
 
     await updateRunProgress(controle_run_id, {
       progress: 85,
-      current_step: "RulesEngine draait met actuele wedstrijddagcheck...",
+      current_step: "RulesEngine draait op de verse volledige scrape...",
     });
 
-    // refreshMatchmaking heeft de DB-rules al gedraaid.
-    // Deze tweede run is bewust de eindwaarheid met de drie live velden eroverheen.
     const hits = await rulesEngine({
       matchmaking_id,
       controle_run_id,
@@ -642,8 +478,8 @@ export async function POST(req: Request) {
     });
 
     await updateRunProgress(controle_run_id, {
-      totaal_aantal: va_nummers.length,
-      verwerkt_aantal: va_nummers.length,
+      totaal_aantal: vaNummers.length,
+      verwerkt_aantal: vaNummers.length,
       progress: 100,
       current_step: "Controle klaar.",
       status: "klaar",
@@ -656,16 +492,18 @@ export async function POST(req: Request) {
       ok: true,
       matchmaking_id,
       controle_run_id,
-      source: "database_plus_fightpassport_live",
-      live_check: {
-        va_count: va_nummers.length,
-        result_count: liveRows.length,
-        checks: ["licentie", "startverbod", "keurmerk"],
+      source: "admin_total_matchmaking",
+      scraper: {
+        file: SCRAPER_FILE,
+        scope: "matchmaking_va_list_only",
+        va_count: vaNummers.length,
+        processes: activeChunks.length,
+        configured_processes: PROCESS_COUNT,
+        workers_per_process: WORKERS_PER_PROCESS,
+        batch_id: adminBatchId,
       },
-      context_rows: contextCount,
+      context_rows: ctxRows.length,
       rules_hits: Array.isArray(hits) ? hits.length : 0,
-      scraper_processes: processCount,
-      workers_per_process: workersPerProcess,
     });
   } catch (error: any) {
     console.error("[control-engine/admin/start] ❌ fout:", error);
