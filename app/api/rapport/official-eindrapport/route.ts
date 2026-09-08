@@ -10,6 +10,18 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 
+function isAdminOfficialReportRequest(req: Request) {
+  const referer = String(req.headers.get("referer") ?? "").trim();
+  if (!referer) return false;
+
+  try {
+    const pathname = new URL(referer).pathname;
+    return /^\/dashboard\/admin\/controle\/[^/]+\/official-rapport\/?$/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -20,17 +32,39 @@ export async function GET(req: Request) {
 
     await requireMatchmakingAccess(req, matchmakingId);
 
-    const { data: runRows, error: runErr } = await supabase
+    const adminReport = isAdminOfficialReportRequest(req);
+
+    let runQuery = supabase
       .from("controle_runs")
       .select("*")
-      .eq("matchmaking_id", matchmakingId)
+      .eq("matchmaking_id", matchmakingId);
+
+    // De admin-versie van het compacte eindrapport hoort bij de gewone
+    // admincontrole. Die controle draait de volledige matchmaking-scrape en heeft
+    // run_type control-engine-admin-total. Een latere official/matchmaker-run mag
+    // dus niet ongemerkt de bron van het adminrapport worden.
+    if (adminReport) {
+      runQuery = runQuery
+        .eq("run_type", "control-engine-admin-total")
+        .eq("status", "klaar");
+    }
+
+    const { data: runRows, error: runErr } = await runQuery
       .order("gestart_op", { ascending: false })
       .limit(1);
     if (runErr) throw runErr;
 
     const run = runRows?.[0] ?? null;
     if (!run?.id) {
-      return privateJson({ ok: false, error: "Geen controlerun gevonden." }, 404);
+      return privateJson(
+        {
+          ok: false,
+          error: adminReport
+            ? "Nog geen afgeronde admincontrole gevonden. Draai eerst de admincontrole."
+            : "Geen controlerun gevonden.",
+        },
+        404,
+      );
     }
 
     const [eventQ, ctxQ, tournamentQ, currentQ, resultQ, dispQ] = await Promise.all([
