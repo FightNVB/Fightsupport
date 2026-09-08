@@ -51,7 +51,7 @@ export default function AdminOfficialReportButton() {
         event.preventDefault();
         event.stopPropagation();
         router.push(
-          `/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/official-rapport`,
+          `/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}/eindrapport`,
         );
       });
 
