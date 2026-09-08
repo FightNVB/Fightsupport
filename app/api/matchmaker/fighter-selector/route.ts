@@ -11,6 +11,10 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalise(value: unknown) {
+  return clean(value).toLocaleLowerCase("nl-NL");
+}
+
 type SchoolRow = {
   sportschool_id: number;
   naam: string;
@@ -26,7 +30,6 @@ async function loadSchoolsWithAliases(
   const schools: SchoolRow[] = [];
 
   if (Array.isArray(schoolIds) && schoolIds.length > 0) {
-    // Bij gekoppelde vechters is de lijst beperkt en kan één IN-query volstaan.
     const { data, error } = await supabaseAdmin
       .from("sportscholen")
       .select("sportschool_id, naam, plaats")
@@ -36,9 +39,6 @@ async function loadSchoolsWithAliases(
     if (error) throw error;
     schools.push(...((data ?? []) as SchoolRow[]));
   } else {
-    // Supabase/PostgREST retourneert standaard maximaal circa 1000 regels.
-    // Haal daarom alle sportscholen paginagewijs op, anders stopt de dropdown
-    // alfabetisch rond de G en ontbreken onder meer sportscholen bij K.
     const pageSize = 1000;
 
     for (let from = 0; ; from += pageSize) {
@@ -56,6 +56,7 @@ async function loadSchoolsWithAliases(
       if (batch.length < pageSize) break;
     }
   }
+
   const ids = schools
     .map((school) => Number(school.sportschool_id))
     .filter(Number.isFinite);
@@ -65,8 +66,6 @@ async function loadSchoolsWithAliases(
   const aliasRows: any[] = [];
   const aliasBatchSize = 500;
 
-  // Ook de aliasquery in kleinere ID-batches uitvoeren. Daarmee vermijden we
-  // een te lange IN-filter en verliezen we geen aliassen door een row-limit.
   for (let index = 0; index < ids.length; index += aliasBatchSize) {
     const idBatch = ids.slice(index, index + aliasBatchSize);
     const pageSize = 1000;
@@ -147,10 +146,27 @@ async function attachSchools(fighters: any[]) {
   }));
 }
 
+function fighterMatchesSearch(fighter: any, q: string, geboortedatum: string) {
+  if (geboortedatum && clean(fighter?.geboortedatum) !== geboortedatum) return false;
+  if (!q) return true;
+
+  const needle = normalise(q);
+  return (
+    normalise(fighter?.naam).includes(needle) ||
+    normalise(fighter?.va_nummer).includes(needle)
+  );
+}
+
 export async function GET(req: Request) {
   try {
     await requireUserFromAuthHeader(req);
-    const allowed = await hasAnyRoleFromReq(req, ["matchmaker", "admin", "superadmin"]);
+    const allowed = await hasAnyRoleFromReq(req, [
+      "matchmaker",
+      "official",
+      "hoofdofficial",
+      "admin",
+      "superadmin",
+    ]);
     if (!allowed) {
       return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
     }
@@ -158,14 +174,12 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const sportschoolId = clean(url.searchParams.get("sportschool_id"));
     const q = clean(url.searchParams.get("q"));
+    const geboortedatum = clean(url.searchParams.get("geboortedatum"));
 
-    if (!sportschoolId && !q) {
+    if (!sportschoolId && !q && !geboortedatum) {
       const schools = await loadSchoolsWithAliases();
 
       return NextResponse.json({
-        // Altijd exact één rij per sportschool_id. Aliassen blijven als
-        // zoeknamen aan de canonieke sportschool gekoppeld, zodat de UI geen
-        // dubbele React-keys of dubbele dropdownopties krijgt.
         sportscholen: schools.map((school) => ({
           ...school,
           zoeknamen: [school.naam, ...(school.aliases ?? [])],
@@ -188,9 +202,6 @@ export async function GET(req: Request) {
     const fighterColumns =
       "va_nummer, naam, geboortedatum, geslacht, primary_discipline, nulmeting_discipline, berekende_klasse, nulmeting_klasse, nulmeting_gewicht, email, fit_to_fight, licentie_actief, heeft_startverbod";
 
-    // Een sportschool kan veel meer dan 75 actieve vechters hebben. Laad de
-    // gekoppelde VA-nummers daarom in veilige batches en geef alle unieke
-    // vechters terug. Zo vermijden we ook een te lange enkele IN-query.
     if (vaFilter) {
       const batchSize = 75;
       const loaded: any[] = [];
@@ -198,12 +209,14 @@ export async function GET(req: Request) {
       for (let index = 0; index < vaFilter.length; index += batchSize) {
         const batch = vaFilter.slice(index, index + batchSize);
 
-        const { data, error } = await supabaseAdmin
+        let query = supabaseAdmin
           .from("fightpassport_fighters")
           .select(fighterColumns)
-          .in("va_nummer", batch)
-          .order("naam", { ascending: true });
+          .in("va_nummer", batch);
 
+        if (geboortedatum) query = query.eq("geboortedatum", geboortedatum);
+
+        const { data, error } = await query.order("naam", { ascending: true });
         if (error) throw error;
         loaded.push(...(data ?? []));
       }
@@ -211,14 +224,16 @@ export async function GET(req: Request) {
       const uniqueByVa = new Map<string, any>();
       for (const fighter of loaded) {
         const va = clean(fighter?.va_nummer);
-        if (va && !uniqueByVa.has(va)) uniqueByVa.set(va, fighter);
+        if (va && !uniqueByVa.has(va) && fighterMatchesSearch(fighter, q, geboortedatum)) {
+          uniqueByVa.set(va, fighter);
+        }
       }
 
-      const fighters = Array.from(uniqueByVa.values()).sort((a, b) =>
-        clean(a?.naam).localeCompare(clean(b?.naam), "nl", {
-          sensitivity: "base",
-        }),
-      );
+      const fighters = Array.from(uniqueByVa.values())
+        .sort((a, b) =>
+          clean(a?.naam).localeCompare(clean(b?.naam), "nl", { sensitivity: "base" }),
+        )
+        .slice(0, 75);
 
       return NextResponse.json({
         fighters: await attachSchools(fighters),
@@ -230,6 +245,10 @@ export async function GET(req: Request) {
     let fighterQuery = supabaseAdmin
       .from("fightpassport_fighters")
       .select(fighterColumns);
+
+    if (geboortedatum) {
+      fighterQuery = fighterQuery.eq("geboortedatum", geboortedatum);
+    }
 
     if (q) {
       const safe = q.replace(/[,%()]/g, " ").trim();
