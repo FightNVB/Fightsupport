@@ -35,11 +35,23 @@ function fmtDate(value?: string | null) {
 
 function findEditModal(): HTMLElement | null {
   const dialogs = Array.from(document.querySelectorAll<HTMLElement>("[role='dialog']"));
-  const dialog = dialogs.find((el) => /Bewerk persoon/i.test(el.textContent ?? ""));
+  const dialog = dialogs.find((el) => /Bewerk persoon/i.test(el.textContent ?? "") && el.querySelector("input"));
   if (dialog) return dialog;
 
-  const textNodes = Array.from(document.querySelectorAll<HTMLElement>("div,section"));
-  return textNodes.find((el) => /Bewerk persoon/i.test(el.textContent ?? "") && el.querySelector("input")) ?? null;
+  // De bestaande partijpagina's gebruiken geen role=dialog. Kies daarom niet
+  // de eerste grote pagina-container met deze tekst, maar juist de kleinste
+  // container die de editvelden bevat. Dat is het witte max-w-lg editvenster.
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>("div,section"))
+    .filter((el) => /Bewerk persoon/i.test(el.textContent ?? "") && el.querySelector("input"))
+    .sort((a, b) => {
+      const aInputs = a.querySelectorAll("input").length;
+      const bInputs = b.querySelectorAll("input").length;
+      if (aInputs !== bInputs) return aInputs - bInputs;
+      return a.querySelectorAll("*").length - b.querySelectorAll("*").length;
+    });
+
+  const editCard = candidates.find((el) => el.classList.contains("max-w-lg"));
+  return editCard ?? candidates[0] ?? null;
 }
 
 function findLabelInput(modal: HTMLElement, label: RegExp): HTMLInputElement | null {
@@ -178,9 +190,6 @@ export default function PartyEditFighterSearch() {
     if (vaInput) setReactInputValue(vaInput, clean(fighter.va_nummer));
     if (nameInput) setReactInputValue(nameInput, clean(fighter.naam));
 
-    // Bij zoeken op persoon blijft de sportschool uit de matchmaking bewust staan.
-    // Die vechter kan inmiddels aan een andere/nog niet gekoppelde sportschool horen.
-    // Alleen wanneer expliciet eerst een sportschool is gekozen, nemen we die school over.
     if (mode === "sportschool" && selectedSchool && gymInput) {
       setReactInputValue(gymInput, clean(selectedSchool.naam));
     }
@@ -206,7 +215,7 @@ export default function PartyEditFighterSearch() {
         setError("");
         setOpen(true);
       }}
-      className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/50 bg-orange-500/10 px-2.5 py-1.5 text-xs font-bold text-orange-300 hover:bg-orange-500/20"
+      className="inline-flex items-center gap-1.5 rounded-md border border-orange-500 bg-orange-50 px-2.5 py-1.5 text-xs font-extrabold text-orange-700 hover:bg-orange-100"
     >
       <Search size={14} /> Zoeken
     </button>
@@ -215,7 +224,7 @@ export default function PartyEditFighterSearch() {
   return (
     <>
       {createPortal(
-        <div className="mt-2 flex justify-end" data-party-fighter-search="true">{button}</div>,
+        <div className="mt-3 flex justify-end" data-party-fighter-search="true">{button}</div>,
         host,
       )}
 
