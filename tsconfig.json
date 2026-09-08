@@ -19,6 +19,12 @@
     "incremental": true,
 
     "paths": {
+      "@/lib/rulesEngine": [
+        "./lib/rulesEngineWrapper.ts"
+      ],
+      "@/lib/matchmaker/rulesEngine": [
+        "./lib/matchmaker/rulesEngineWrapper.ts"
+      ],
       "@/*": [
         "./*"
       ],
