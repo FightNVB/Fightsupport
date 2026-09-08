@@ -48,18 +48,26 @@ export async function POST(req: Request) {
     const matchmakingId = s(body?.matchmaking_id);
     const requestedMatchmakerId = s(body?.matchmaker_id);
     const vaNummer = s(body?.va_nummer);
+    const manualWithoutVa = body?.manual_without_va === true || (!vaNummer && !!s(body?.naam));
+    const manualName = s(body?.naam);
     const sportschoolIdRaw = s(body?.sportschool_id);
     const sportschoolId = sportschoolIdRaw ? Number(sportschoolIdRaw) : null;
     const manualSchoolName = s(body?.gym);
     const requestedDiscipline = normalizeDiscipline(body?.discipline);
     const requestedClass = s(body?.klasse).toUpperCase();
     const gewicht = n(body?.gewicht);
+    const geslacht = s(body?.geslacht);
+    const email = s(body?.email);
+    const telefoon = s(body?.telefoon);
 
     if (!matchmakingId) {
       return NextResponse.json({ error: "matchmaking_id ontbreekt" }, { status: 400 });
     }
-    if (!vaNummer) {
+    if (!manualWithoutVa && !vaNummer) {
       return NextResponse.json({ error: "Kies een vechter uit FightPassport." }, { status: 400 });
+    }
+    if (manualWithoutVa && !manualName) {
+      return NextResponse.json({ error: "Vul de naam van de vechter in." }, { status: 400 });
     }
     if (sportschoolId !== null && !Number.isFinite(sportschoolId)) {
       return NextResponse.json({ error: "Ongeldige sportschool gekozen." }, { status: 400 });
@@ -121,6 +129,110 @@ export async function POST(req: Request) {
         { error: "Je kunt alleen toevoegen aan een eigen matchmaking die in de app is gemaakt." },
         { status: 403 },
       );
+    }
+
+    if (manualWithoutVa) {
+      let schoolName = manualSchoolName;
+      if (sportschoolId !== null) {
+        const { data: school, error: schoolError } = await supabaseAdmin
+          .from("sportscholen")
+          .select("sportschool_id, naam")
+          .eq("sportschool_id", sportschoolId)
+          .maybeSingle();
+        if (schoolError) throw schoolError;
+        if (!school) {
+          return NextResponse.json({ error: "Sportschool niet gevonden." }, { status: 404 });
+        }
+        schoolName = s(school.naam);
+      }
+
+      const { data: existingWithoutVa, error: duplicateError } = await supabaseAdmin
+        .from("aanmeldingen")
+        .select("id, naam, gym, gewicht")
+        .eq("matchmaking_id", matchmakingId)
+        .is("va_nummer", null)
+        .ilike("naam", manualName)
+        .limit(20);
+      if (duplicateError) throw duplicateError;
+
+      const duplicate = (existingWithoutVa ?? []).find(
+        (row: any) => s(row?.gym).toLocaleLowerCase("nl-NL") === schoolName.toLocaleLowerCase("nl-NL"),
+      );
+      if (duplicate) {
+        return NextResponse.json(
+          {
+            error: `${manualName} zonder VA staat al voor ${schoolName} in deze matchmaking.`,
+            duplicate: true,
+            existing: duplicate,
+          },
+          { status: 409 },
+        );
+      }
+
+      const row = {
+        matchmaking_id: matchmakingId,
+        row_nr: null,
+        status: "rauw",
+        discipline: requestedDiscipline,
+        klasse: requestedClass,
+        geslacht: geslacht || null,
+        voornaam: null,
+        achternaam: null,
+        naam: manualName,
+        email: email || null,
+        telefoon: telefoon || null,
+        gym: schoolName,
+        va_nummer: null,
+        gewicht,
+        win: n(body?.win) ?? 0,
+        loss: n(body?.loss) ?? 0,
+        draw: n(body?.draw) ?? 0,
+        demo: n(body?.demo) ?? 0,
+        opmerkingen: s(body?.opmerkingen) || null,
+        raw: {
+          handmatig_toegevoegd: true,
+          zonder_va: true,
+          bron: "handmatige_aanmelding_zonder_va",
+          matchmaking_id: matchmakingId,
+          matchmaker_id: dbMatchmakerId || null,
+          sportschool_id: sportschoolId,
+          discipline_opgegeven: requestedDiscipline,
+          klasse_opgegeven: requestedClass,
+          gewicht_opgegeven: gewicht,
+          toegevoegd_door: user.id,
+          toegevoegd_op: new Date().toISOString(),
+        },
+        uploaded_by: user.id,
+      };
+
+      const { data, error } = await supabaseAdmin
+        .from("aanmeldingen")
+        .insert(row)
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      await supabaseAdmin
+        .from("matchmakings")
+        .update({ last_updated_at: new Date().toISOString(), last_updated_by: user.id })
+        .eq("id", matchmakingId);
+
+      const processing = await processMatchmakingFighters({
+        supabase: supabaseAdmin,
+        matchmakingId,
+        aanmeldingId: data.id,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        fighter: data,
+        without_va: true,
+        fighter_processing: {
+          processed: processing.processed,
+          controle_run_id: processing.controleRunId,
+          rule_hits: processing.hits.length,
+        },
+      });
     }
 
     const [{ data: fighter, error: fighterError }, { data: activeSchoolLinks, error: linkError }] =
