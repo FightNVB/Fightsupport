@@ -16,7 +16,7 @@ function isAdminOfficialReportRequest(req: Request) {
 
   try {
     const pathname = new URL(referer).pathname;
-    return /^\/dashboard\/admin\/controle\/[^/]+\/official-rapport\/?$/.test(pathname);
+    return /^\/dashboard\/admin\/controle\/[^/]+\/(?:official-rapport|eindrapport)\/?$/.test(pathname);
   } catch {
     return false;
   }
@@ -27,7 +27,8 @@ function norm(v: any) {
 }
 
 function va(v: any) {
-  return String(v ?? "").replace(/\D/g, "").trim();
+  const digits = String(v ?? "").replace(/\D/g, "").trim();
+  return /^\d{3,6}$/.test(digits) ? digits : "";
 }
 
 function activeResult(row: any) {
