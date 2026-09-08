@@ -203,6 +203,9 @@ export async function GET(req: Request) {
       "va_nummer, naam, geboortedatum, geslacht, primary_discipline, nulmeting_discipline, berekende_klasse, nulmeting_klasse, nulmeting_gewicht, email, fit_to_fight, licentie_actief, heeft_startverbod";
 
     if (vaFilter) {
+      // De batchgrootte is alleen bedoeld om grote .in()-queries veilig te houden.
+      // De uiteindelijke lijst mag NIET op 75 worden afgekapt: bij een gekozen
+      // sportschool moet iedere actief gekoppelde vechter selecteerbaar zijn.
       const batchSize = 75;
       const loaded: any[] = [];
 
@@ -223,17 +226,15 @@ export async function GET(req: Request) {
 
       const uniqueByVa = new Map<string, any>();
       for (const fighter of loaded) {
-        const va = clean(fighter?.va_nummer);
-        if (va && !uniqueByVa.has(va) && fighterMatchesSearch(fighter, q, geboortedatum)) {
-          uniqueByVa.set(va, fighter);
+        const fighterVa = clean(fighter?.va_nummer);
+        if (fighterVa && !uniqueByVa.has(fighterVa) && fighterMatchesSearch(fighter, q, geboortedatum)) {
+          uniqueByVa.set(fighterVa, fighter);
         }
       }
 
-      const fighters = Array.from(uniqueByVa.values())
-        .sort((a, b) =>
-          clean(a?.naam).localeCompare(clean(b?.naam), "nl", { sensitivity: "base" }),
-        )
-        .slice(0, 75);
+      const fighters = Array.from(uniqueByVa.values()).sort((a, b) =>
+        clean(a?.naam).localeCompare(clean(b?.naam), "nl", { sensitivity: "base" }),
+      );
 
       return NextResponse.json({
         fighters: await attachSchools(fighters),
