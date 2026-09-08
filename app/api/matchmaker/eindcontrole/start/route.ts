@@ -15,7 +15,7 @@ import {
   buildControleBoutContext,
   buildToernooiContext,
 } from "@/lib/matchmaker/buildControleBoutContext";
-import { enrichControleBoutContext } from "@/lib/matchmaker/enrichControleBoutContext";
+import { enrichEindcontroleBoutContext } from "@/lib/matchmaker/enrichEindcontroleBoutContext";
 import { rulesEngine } from "@/lib/matchmaker/rulesEngine";
 import {
   assertCanAccessMatchmaking,
@@ -358,7 +358,7 @@ async function finalizeInBackground(args: {
       progress: 80,
       current_step: "Sportschool aanwijzingen combineren en keurmerk op MM-sportschool controleren...",
     });
-    await enrichControleBoutContext(args.matchmakingId, args.controleRunId);
+    await enrichEindcontroleBoutContext(args.matchmakingId, args.controleRunId);
 
     const { data: rawCtxRows, error: ctxError } = await supabase
       .from("controle_bout_context")
