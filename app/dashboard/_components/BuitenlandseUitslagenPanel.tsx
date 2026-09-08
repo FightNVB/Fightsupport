@@ -21,6 +21,18 @@ const emptyForm = {
   bewijs_opmerking: "",
 };
 
+function s(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+function pick(row: Row | null | undefined, keys: string[]) {
+  for (const key of keys) {
+    const value = s(row?.[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
 function normaliseHeaderText(v: string) {
   return String(v ?? "")
     .replace(/[–—]/g, "-")
@@ -40,8 +52,6 @@ function findResultHeaders(): Array<{ el: HTMLElement; hoek: Hoek }> {
     if (txt === "BLAUW - UITSLAGEN") out.push({ el, hoek: "blauw" });
   }
 
-  // Pak alleen de kleinste/exacte titel-elementen; voorkom dat een bovenliggende container
-  // met dezelfde samengestelde tekst óók een knop krijgt.
   return out.filter(({ el }) => {
     return !Array.from(el.children).some((child) => {
       const txt = normaliseHeaderText((child as HTMLElement).textContent ?? "");
@@ -64,6 +74,55 @@ function inferFighterFromNearbyDom(header: HTMLElement, hoek: Hoek) {
   return { va_nummer: va || "" };
 }
 
+function fighterFromBout(bout: Row | null | undefined, aanmeldingen: Row[], hoek: Hoek) {
+  if (!bout) return {};
+
+  const prefix = hoek === "rood" ? "rood" : "blauw";
+  const english = hoek === "rood" ? "red" : "blue";
+  const inschrijvingId = pick(bout, [
+    `${prefix}_inschrijving_id`,
+    `${english}_inschrijving_id`,
+    `${prefix}_aanmelding_id`,
+    `${english}_aanmelding_id`,
+  ]);
+  const aanmelding = inschrijvingId
+    ? aanmeldingen.find((row) => s(row?.id) === inschrijvingId) ?? null
+    : null;
+
+  const vaNummer =
+    pick(bout, [
+      `va_${prefix}`,
+      `${prefix}_va`,
+      `${prefix}_va_mm`,
+      `${prefix}_va_fp`,
+      `${english}_va`,
+    ]) ||
+    pick(aanmelding, ["va_nummer", "va", "fightpaspoort_nummer"]);
+
+  const naam =
+    pick(bout, [
+      `${prefix}_naam`,
+      `${prefix}_naam_mm`,
+      `${prefix}_naam_fp`,
+      `${english}_naam`,
+    ]) ||
+    pick(aanmelding, ["naam", "fighter_naam", "vechter_naam"]);
+
+  const discipline =
+    pick(bout, ["discipline", "discipline_mm", "sport"]) ||
+    pick(aanmelding, ["discipline", "sport"]);
+  const klasse =
+    pick(bout, ["klasse_mm", "klasse"]) ||
+    pick(aanmelding, ["klasse", "klasse_mm"]);
+
+  return {
+    va_nummer: vaNummer,
+    vechter_naam: naam,
+    discipline,
+    klasse,
+  };
+}
+
 export default function BuitenlandseUitslagenPanel() {
   const path = usePathname() ?? "";
   const mm = path.match(/^\/dashboard\/matchmaker\/matchmaking\/([^/]+)\/partij\/(\d+)/);
@@ -77,6 +136,7 @@ export default function BuitenlandseUitslagenPanel() {
   const [activeHoek, setActiveHoek] = useState<Hoek>("rood");
   const [rows, setRows] = useState<Row[]>([]);
   const [saving, setSaving] = useState(false);
+  const [prefillLoading, setPrefillLoading] = useState(false);
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState(emptyForm);
 
@@ -93,6 +153,40 @@ export default function BuitenlandseUitslagenPanel() {
     const j = await r.json().catch(() => ({}));
     if (r.ok) {
       setRows((j.uitslagen ?? []).filter((x: Row) => String(x.partij_nr ?? "") === partijNr));
+    }
+  }
+
+  async function prefillFighter(header: HTMLElement, hoek: Hoek) {
+    const domFallback = inferFighterFromNearbyDom(header, hoek);
+    setForm({ ...emptyForm, ...domFallback });
+    if (!matchmakingId) return;
+
+    setPrefillLoading(true);
+    try {
+      const res = await authedFetch(`/api/matchmaker/${encodeURIComponent(matchmakingId)}`, {
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Vechtergegevens laden mislukt");
+
+      const bouts: Row[] = Array.isArray(json?.bouts)
+        ? json.bouts
+        : Array.isArray(json?.matches)
+          ? json.matches
+          : [];
+      const aanmeldingen: Row[] = Array.isArray(json?.aanmeldingen) ? json.aanmeldingen : [];
+      const bout = bouts.find((row) => String(row?.partij_nr ?? "") === String(partijNr)) ?? null;
+      const fighter = fighterFromBout(bout, aanmeldingen, hoek);
+
+      setForm((current) => ({
+        ...current,
+        ...fighter,
+        va_nummer: s((fighter as any).va_nummer) || current.va_nummer,
+      }));
+    } catch (e: any) {
+      setMsg(e?.message || "Vechtergegevens konden niet automatisch worden ingevuld.");
+    } finally {
+      setPrefillLoading(false);
     }
   }
 
@@ -124,10 +218,7 @@ export default function BuitenlandseUitslagenPanel() {
           event.stopPropagation();
           setActiveHoek(hoek);
           setMsg("");
-          if (!isAdmin) {
-            const inferred = inferFighterFromNearbyDom(el, hoek);
-            setForm({ ...emptyForm, ...inferred });
-          }
+          if (!isAdmin) void prefillFighter(el, hoek);
           setOpen(true);
         };
         button.addEventListener("click", onClick);
@@ -226,6 +317,19 @@ export default function BuitenlandseUitslagenPanel() {
 
             {!isAdmin && (
               <form onSubmit={submit} className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="md:col-span-3 rounded border border-zinc-700 bg-zinc-900 p-3">
+                  <div className="text-xs font-black uppercase tracking-wide text-[#ff4d00]">Vechter</div>
+                  {prefillLoading ? (
+                    <div className="mt-1 text-sm text-zinc-300">Vechtergegevens laden…</div>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-sm text-zinc-200">
+                      <b>{form.vechter_naam || "Naam onbekend"}</b>
+                      <span>VA {form.va_nummer || "ontbreekt"}</span>
+                      <span>{form.discipline || "Discipline onbekend"}</span>
+                      <span>{form.klasse ? `Klasse ${form.klasse}` : "Klasse onbekend"}</span>
+                    </div>
+                  )}
+                </div>
                 <input required placeholder="VA-nummer *" value={form.va_nummer} onChange={(e) => setForm({ ...form, va_nummer: e.target.value })} className="rounded border border-zinc-600 bg-zinc-900 p-2" />
                 <input placeholder="Naam vechter" value={form.vechter_naam} onChange={(e) => setForm({ ...form, vechter_naam: e.target.value })} className="rounded border border-zinc-600 bg-zinc-900 p-2" />
                 <input type="date" value={form.datum} onChange={(e) => setForm({ ...form, datum: e.target.value })} className="rounded border border-zinc-600 bg-zinc-900 p-2" />
@@ -239,7 +343,7 @@ export default function BuitenlandseUitslagenPanel() {
                 <input placeholder="Organisatie / bond" value={form.organisatie} onChange={(e) => setForm({ ...form, organisatie: e.target.value })} className="rounded border border-zinc-600 bg-zinc-900 p-2" />
                 <input placeholder="Land" value={form.land} onChange={(e) => setForm({ ...form, land: e.target.value })} className="rounded border border-zinc-600 bg-zinc-900 p-2" />
                 <textarea placeholder="Bewijs / opmerking" value={form.bewijs_opmerking} onChange={(e) => setForm({ ...form, bewijs_opmerking: e.target.value })} className="rounded border border-zinc-600 bg-zinc-900 p-2 md:col-span-2" />
-                <button disabled={saving} className="rounded bg-[#ff4d00] px-4 py-2 font-black text-white disabled:opacity-50">
+                <button disabled={saving || prefillLoading} className="rounded bg-[#ff4d00] px-4 py-2 font-black text-white disabled:opacity-50">
                   {saving ? "Opslaan…" : "Toevoegen voor NVB-controle"}
                 </button>
               </form>
