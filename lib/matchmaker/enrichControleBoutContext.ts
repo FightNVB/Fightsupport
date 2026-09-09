@@ -153,6 +153,11 @@ function isTR(v: any) {
   return s === "tr" || s === "turkije" || s === "turkey" || s === "türkiye" || s === "turkiye";
 }
 
+function isDK(v: any) {
+  const s = normLand(v);
+  return s === "dk" || s === "denmark" || s === "danmark" || s === "denemarken";
+}
+
 type LandHint =
   | "NL" | "AT" | "BE" | "BG" | "HR" | "CY" | "CZ" | "DK" | "EE" | "FI"
   | "FR" | "DE" | "GR" | "HU" | "IE" | "IT" | "LV" | "LT" | "LU" | "MT"
@@ -180,6 +185,7 @@ function normalizeCountryCodeOrName(raw: string): LandHint | null {
   if (["duitsland", "deutschland", "germany"].includes(s)) return "DE";
   if (["frankrijk", "france"].includes(s)) return "FR";
   if (["spanje", "spain", "españa", "espana"].includes(s)) return "ES";
+  if (["denmark", "danmark", "denemarken"].includes(s)) return "DK";
   if (["uk", "gb", "eng", "groot brittannie", "groot-brittannie", "groot brittannië", "groot-brittannië", "verenigd koninkrijk", "united kingdom", "engeland", "england"].includes(s)) return "UK";
   if (["tr", "turkije", "turkey", "türkiye", "turkiye"].includes(s)) return "TR";
 
@@ -210,6 +216,7 @@ function detectLandHintFromGymText(rawGym: string): LandHint | null {
   if (lower.includes("nederland") || lower.includes("the netherlands") || lower.includes("netherlands")) return "NL";
   if (lower.includes("frankrijk") || lower.includes("france")) return "FR";
   if (lower.includes("spanje") || lower.includes("spain") || lower.includes("españa") || lower.includes("espana")) return "ES";
+  if (lower.includes("denmark") || lower.includes("danmark") || lower.includes("denemarken")) return "DK";
   if (lower.includes("united kingdom") || lower.includes("verenigd koninkrijk") || lower.includes("engeland") || lower.includes("england")) return "UK";
   if (lower.includes("turkije") || lower.includes("turkey") || lower.includes("türkiye") || lower.includes("turkiye")) return "TR";
 
@@ -250,6 +257,7 @@ function landMatchesHint(landValue: any, hint: LandHint | null) {
   if (hint === "DE") return isDE(landValue);
   if (hint === "FR") return isFR(landValue);
   if (hint === "ES") return isES(landValue);
+  if (hint === "DK") return isDK(landValue);
   if (hint === "UK") return isUK(landValue);
   if (hint === "TR") return isTR(landValue);
   if (hint === "FOREIGN") return isForeignNonNL(landValue);
@@ -560,12 +568,12 @@ function stripCountryHintsFromRaw(raw: string) {
 
   s = s.replace(/\(([A-Z]{2}|ENG)\)/gi, " ");
   s = s.replace(
-    /\((Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\)/gi,
+    /\((Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|Denmark|Danmark|Denemarken|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\)/gi,
     " "
   );
   s = s.replace(/\b(NL|AT|BE|BG|HR|CY|CZ|DK|EE|FI|FR|DE|GR|HU|IE|IT|LV|LT|LU|MT|PL|PT|RO|SK|SI|ES|SE|UK|GB|ENG|TR)\b/gi, " ");
   s = s.replace(
-    /\b(Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\b/gi,
+    /\b(Nederland|België|Belgie|Duitsland|Deutschland|Germany|Frankrijk|France|Spanje|Spain|Espana|España|Denmark|Danmark|Denemarken|United Kingdom|Verenigd Koninkrijk|Engeland|England|Turkije|Turkey|Türkiye|Turkiye)\b/gi,
     " "
   );
   s = s.replace(/\s+/g, " ").trim();
