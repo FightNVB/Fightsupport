@@ -1,15 +1,12 @@
-// Matchmaker FULL scraper entrypoint.
+// Matchmaker eindcontrole: geen full/Total scrape meer.
 //
-// Bewust een eigen scraperbestand/bundle voor de matchmaker-eindcontrole.
-// De volledige scrape-engine is dezelfde bewezen Total-engine; deze entrypoint
-// houdt de matchmaker los van admin/official zodat de route en defaults per rol
-// afzonderlijk kunnen worden aangepast zonder de official gameday-scraper te raken.
+// De laatste matchmakercontrole heeft alleen actuele FightPassport-data nodig voor:
+// - licentie
+// - Fit to fight / startverbod
+// - huidige sportschool + keurmerk
 //
-// Scope wordt uitsluitend via FP_TOTAL_VA_LIST aangeleverd door
-// /api/matchmaker/eindcontrole/start.
+// Die lichte scrape draait direct hierna via scraper_fp_matchmaker_school.js,
+// die dezelfde bewezen scraper-engine gebruikt als Officials. Deze entrypoint
+// blijft bewust bestaan zodat de bestaande eindcontrole-route niet breekt.
 
-process.env.FP_TOTAL_RUN_KIND = process.env.FP_TOTAL_RUN_KIND || "retry";
-process.env.FP_TOTAL_RESULTS = process.env.FP_TOTAL_RESULTS || "true";
-process.env.FP_SKIP_RUN_TERMINATOR = process.env.FP_SKIP_RUN_TERMINATOR || "true";
-
-await import("../fp_total/scraper_fp_total.js");
+console.log("[fp-matchmaker] lichte eindcontrole: full/Total scrape overgeslagen; licentie/startverbod/keurmerk volgt in lichte pass.");
