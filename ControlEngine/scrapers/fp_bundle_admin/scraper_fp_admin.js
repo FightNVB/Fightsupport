@@ -43,6 +43,9 @@ const BATCH_PART = Number(process.env.FP_TOTAL_BATCH_PART || "1");
 const BATCH_PARTS = Number(process.env.FP_TOTAL_BATCH_PARTS || "1");
 const BATCH_START_VA = Number(process.env.FP_TOTAL_BATCH_START_VA || START_VA);
 const BATCH_END_VA = Number(process.env.FP_TOTAL_BATCH_END_VA || END_VA);
+const ADMIN_MATCHMAKING_ID = String(process.env.FP_ADMIN_MATCHMAKING_ID || "").trim();
+const ADMIN_CONTROLE_RUN_ID = String(process.env.FP_ADMIN_CONTROLE_RUN_ID || "").trim();
+const ADMIN_CONTROL_MODE = !!ADMIN_MATCHMAKING_ID && !!ADMIN_CONTROLE_RUN_ID;
 const BATCH_META = BATCH_ID ? {
   batch_id: BATCH_ID,
   batch_part: Number.isFinite(BATCH_PART) ? BATCH_PART : 1,
@@ -66,11 +69,6 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
   });
 }
 
-/**
- * HARD timeout wrapper.
- * Let op: Promise.race annuleert de onderliggende async NIET.
- * Daarom killen we bij timeout de worker-context (hard stop).
- */
 async function withTimeout(promiseFactory, ms, label, onTimeout) {
   let t;
   const controller = new AbortController();
@@ -122,7 +120,6 @@ async function closeAnyModal(page) {
   } catch {}
 }
 
-
 async function closeDetailsExact(page, va = "", signal = null) {
   throwIfAborted(signal, va);
 
@@ -150,8 +147,6 @@ async function closeDetailsExact(page, va = "", signal = null) {
     throw new Error(`DETAILS sluitknop #sluit_inr_detail niet gevonden — VA ${va}`);
   }
 
-  // Niet opnieuw navigeren. Alleen kort wachten tot de UITSLAGEN-tegel op
-  // dezelfde VA-tab weer zichtbaar/klikbaar is.
   const startedAt = Date.now();
   while (Date.now() - startedAt < 3000) {
     throwIfAborted(signal, va);
@@ -178,14 +173,8 @@ async function closeDetailsExact(page, va = "", signal = null) {
   throw new Error(`DETAILS gesloten maar UITSLAGEN-tegel niet vrij — VA ${va}`);
 }
 
-
 async function closeDetailsModalVerified(page, va = "") {
   const closeSelector = "button#sluit_inr_detail";
-
-  // FightPassport houdt de sluitknop soms in de DOM nadat het detailscherm is
-  // gesloten. Daarom NIET controleren of de knop uit de DOM verdwijnt.
-  // Klik de echte DETAILS-sluitknop rechtstreeks en controleer daarna of de
-  // UITSLAGEN-tegel weer daadwerkelijk klikbaar is.
   const clicked = await page.evaluate((selector) => {
     const buttons = [...document.querySelectorAll(selector)];
     const button =
@@ -211,7 +200,6 @@ async function closeDetailsModalVerified(page, va = "") {
     console.log(`[fp-total] ⚠️ VA ${va} DETAILS sluitknop niet gevonden; probeer UITSLAGEN-ready controle`);
   }
 
-  // Geef FightPassport tijd om zijn modal/overlay-state af te bouwen.
   await sleep(700);
 
   const startedAt = Date.now();
@@ -251,8 +239,6 @@ async function closeDetailsModalVerified(page, va = "") {
     await sleep(200);
   }
 
-  // Eén gerichte tweede klik, geen Escape-cascade. Sommige FightPassport-renders
-  // verwerken de eerste klik niet terwijl de modal nog aan het opbouwen is.
   const retried = await page.evaluate((selector) => {
     const buttons = [...document.querySelectorAll(selector)];
     const button = buttons.find((el) => {
@@ -271,13 +257,9 @@ async function closeDetailsModalVerified(page, va = "") {
   }, closeSelector).catch(() => false);
 
   if (retried) await sleep(800);
-
-  // Niet de hele fighter afbreken alleen omdat FightPassport de sluitknop in DOM
-  // laat staan. openResultsTileVerified krijgt hierna zelf nog zijn normale retry.
   console.log(`[fp-total] ⚠️ VA ${va} DETAILS sluiting niet volledig verifieerbaar; UITSLAGEN krijgt eigen retry`);
   return true;
 }
-
 
 async function readHeaderInfo(page) {
   try {
@@ -312,7 +294,6 @@ async function isLoginPage(page) {
         );
       }
 
-      // Unlockpagina is geen gewone loginpagina.
       const pincode =
         document.querySelector("input.pincode") ||
         document.querySelector("input.target_input.pincode") ||
@@ -330,9 +311,6 @@ async function isLoginPage(page) {
   return false;
 }
 
-/**
- * Hard close page: stopLoading + close (best effort)
- */
 async function hardClosePage(page) {
   if (!page) return;
 
@@ -347,12 +325,6 @@ async function hardClosePage(page) {
   } catch {}
 }
 
-/**
- * Compat worker-context:
- * - Puppeteer nieuw: createBrowserContext()
- * - Puppeteer klassiek: createIncognitoBrowserContext()
- * - Geen support: null (fallback)
- */
 async function createWorkerContext(browser) {
   if (browser && typeof browser.createBrowserContext === "function") {
     return await browser.createBrowserContext();
@@ -380,11 +352,6 @@ async function closeWorkerContext(ctx) {
   } catch {}
 }
 
-/* -------------------------------------------------------
-   CORE: Open tab DIRECT fighter-url, verify header,
-   else close and reopen until correct.
-   (context-aware, fallback naar browser.newPage)
-------------------------------------------------------- */
 async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   const {
     maxAttempts = 4,
@@ -470,7 +437,6 @@ async function openTabToFighterVerified(browser, context, cookies, va, opts) {
   return null;
 }
 
-
 function parseNlDate(v) {
   if (!v) return null;
   const s = String(v).trim();
@@ -499,7 +465,6 @@ function numFrom(v) {
   return s ? Number(s[0]) : null;
 }
 
-
 function normalizeClass(v) {
   const s = String(v ?? "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (s.includes("JEUGD") || s.includes("YOUTH") || /^J\+?$/.test(s.trim())) return "J";
@@ -510,7 +475,6 @@ function normalizeClass(v) {
   if (s.includes("R KLASSE") || s.includes("R CLASS") || /\bR\b/.test(s)) return "R";
   return null;
 }
-
 
 function parseTalentstatusFromNulmeting(opmerking) {
   const text = String(opmerking ?? "").replace(/\u00a0/g, " ").trim();
@@ -571,7 +535,7 @@ async function syncTalentstatusVechterFromFighter(payload, results = []) {
         console.log(`[fp-total] 🏆 VA ${va} automatische talentstatus bijgewerkt`);
       }
     }
-    return; // handmatige/admin-status nooit overschrijven
+    return;
   }
 
   const firstGym = Array.isArray(results)
@@ -604,9 +568,7 @@ async function syncTalentstatusVechterFromFighter(payload, results = []) {
     return;
   }
 
-  console.log(
-    `[fp-total] ⭐ VA ${va} automatisch toegevoegd aan talentstatus_vechters`
-  );
+  console.log(`[fp-total] ⭐ VA ${va} automatisch toegevoegd aan talentstatus_vechters`);
 }
 
 function isKbTb(v) {
@@ -648,6 +610,7 @@ function deriveCurrentClassification(results, nulmeting) {
   const primaryDiscipline = mmaRows.length && !kbRows.length ? "MMA" : kbRows.length ? "KB/TB" : isMma(nulDiscipline) ? "MMA" : isKbTb(nulDiscipline) ? "KB/TB" : null;
   return { berekende_klasse: current, mma_level: mmaLevel, primary_discipline: primaryDiscipline };
 }
+
 async function readHeaderAndSummary(page, va, opts = {}) {
   const {
     timeoutMs = 15000,
@@ -793,7 +756,6 @@ async function clickTile(page, va, title) {
   return clicked;
 }
 
-
 async function forceExactFighterUrl(page, va, timeoutMs = 30000, signal = null) {
   const requestedVa = String(va);
   const url = fighterUrl(va);
@@ -878,14 +840,11 @@ async function openDetailsLikeBundle(page, va, signal = null) {
   throwIfAborted(signal, va);
   await closeAnyModal(page).catch(() => {});
 
-  // Voor DETAILS eerst nogmaals expliciet exact deze fighter-url forceren.
   const exactVaLoaded = await forceExactFighterUrl(page, va, 15000, signal);
   if (!exactVaLoaded) return false;
 
   const startedAt = Date.now();
 
-  // Zelfde tegel-detectie als de werkende bundle:
-  // alleen de echte enabled DETAILS-header accepteren.
   while (Date.now() - startedAt < 15000) {
     throwIfAborted(signal, va);
     const clicked = await page.evaluate((requestedVa) => {
@@ -904,12 +863,7 @@ async function openDetailsLikeBundle(page, va, signal = null) {
       return true;
     }, va).catch(() => false);
 
-    if (clicked) {
-      // Geen vaste wachttijd: scrapeDetailsFromPage controleert direct of de
-      // benodigde DETAILS-inhoud/modalvelden daadwerkelijk beschikbaar zijn.
-      return true;
-    }
-
+    if (clicked) return true;
     await sleep(100);
   }
 
@@ -919,7 +873,6 @@ async function openDetailsLikeBundle(page, va, signal = null) {
 async function waitForDetailsTileContentLikeBundle(page, va, signal = null) {
   let last = null;
 
-  // Bundle pollt de tegelinhoud; total krijgt bewust meer tijd.
   for (let attempt = 1; attempt <= 60; attempt++) {
     throwIfAborted(signal, va);
     last = await page.evaluate((requestedVa) => {
@@ -981,8 +934,6 @@ async function waitForDetailsTileContentLikeBundle(page, va, signal = null) {
 }
 
 async function readDetailsModal(page) {
-  // Het e-mailveld staat lager in het modal. Scrollen is niet vereist als het al in DOM staat;
-  // anders scrollen we het modal gecontroleerd naar beneden.
   for (let i = 0; i < 20; i++) {
     const has = await page.$("input.dv2factemail");
     if (has) break;
@@ -1014,20 +965,6 @@ async function readDetailsModal(page) {
       return String(el.value ?? "").trim() || null;
     };
 
-    const findValueNearLabel = (label) => {
-      const labels = [...visibleModal.querySelectorAll("label, div, span")];
-      const lab = labels.find((el) => String(el.textContent || "").trim().toLowerCase() === label.toLowerCase());
-      if (!lab) return null;
-      const parent = lab.parentElement;
-      const field = parent?.querySelector("input, select, textarea") || lab.nextElementSibling?.querySelector?.("input, select, textarea") || lab.nextElementSibling;
-      if (!field) return null;
-      if (field.tagName === "SELECT") return field.options?.[field.selectedIndex]?.textContent?.trim() || field.value || null;
-      return String(field.value ?? field.textContent ?? "").trim() || null;
-    };
-
-    // Nulmeting uitsluitend via de unieke FightPassport classes lezen.
-    // NIET via findValueNearLabel(): meerdere nulmetingvelden zitten in dezelfde
-    // container en dan kan querySelector steeds de eerste input (gewicht) pakken.
     const nul = {
       gewicht: byClass("input.dfva_nulmeting_gewicht"),
       discipline: byClass("select.dvnulmetingdisciplineoms"),
@@ -1058,7 +995,6 @@ async function readDetailsModal(page) {
     };
   });
 }
-
 
 function detailsScrapeSucceeded(details) {
   if (!details || typeof details !== "object") return false;
@@ -1107,7 +1043,6 @@ function detailsScrapeSucceeded(details) {
     /persoonlijk/i.test(text) &&
     (/licentie\s*:/i.test(text) || /wedstrijden\s*:/i.test(text) || /gewonnen\s*:/i.test(text));
 
-  // Alleen echte fighter-inhoud telt; generieke body/logintekst is onvoldoende.
   return hasNulmeting || hasEmail || hasMeaningfulFields || hasMeaningfulText;
 }
 
@@ -1126,9 +1061,6 @@ async function extractVisibleTables(page) {
           String(c.innerText || c.textContent || "").replace(/\s+/g, " ").trim()
         );
 
-        // Bewaar daarnaast metadata van de hele rij. Bij SPORTSCHOLEN staat
-        // het keurmerk-schildje in een aparte (lege) eerste kolom en zou dat
-        // met alleen innerText verloren gaan.
         const rowMeta = {
           html: tr.innerHTML || "",
           images: [...tr.querySelectorAll("img")].map((img) => ({
@@ -1160,9 +1092,6 @@ function tableToObjects(tables) {
 
       const obj = {};
       headers.forEach((h, i) => { if (h) obj[h] = row[i] ?? null; });
-
-      // Interne scraper-metadata; wordt gebruikt om het blauwe keurmerkschild
-      // per sportschoolkoppeling te herkennen.
       obj.__row_meta = rowEntry.rowMeta || null;
 
       if (Object.keys(obj).length) out.push(obj);
@@ -1174,9 +1103,6 @@ function tableToObjects(tables) {
 function rowHasKeurmerkShield(row) {
   const meta = row?.__row_meta || {};
   const html = String(meta.html || "");
-
-  // FightPassport toont het actuele keurmerk als SVG-sprite #img_132
-  // in de eerste kolom van de betreffende sportschoolrij.
   return /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(html);
 }
 
@@ -1189,6 +1115,112 @@ async function scrapeTileTable(page, va, title) {
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(100);
   return rows;
+}
+
+async function readCurrentSportschool(page, va, signal = null) {
+  throwIfAborted(signal, va);
+  const opened = await clickTile(page, va, "SPORTSCHOLEN");
+  if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
+
+  await sleep(400);
+  throwIfAborted(signal, va);
+
+  const state = await page.evaluate(() => {
+    const clean = (value) => String(value || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const visible = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      return r.width > 200 && r.height > 30 && st.display !== "none" && st.visibility !== "hidden";
+    };
+
+    const candidates = [];
+    for (const table of [...document.querySelectorAll("table")].filter(visible)) {
+      const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
+        .filter((row) => !row.classList.contains("filler"));
+
+      for (const row of rows) {
+        const cells = [...row.querySelectorAll("td")];
+        if (cells.length < 4) continue;
+
+        const sportschool = clean(cells[1]?.textContent);
+        const plaats = clean(cells[2]?.textContent);
+        const land = clean(cells[cells.length - 2]?.textContent);
+
+        if (!sportschool || !land) continue;
+        if (/^organisatie\s*naam$/i.test(sportschool)) continue;
+        if (/^land$/i.test(land)) continue;
+
+        candidates.push({
+          sportschool,
+          plaats,
+          land,
+          keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(
+            String(row.innerHTML || "")
+          ),
+        });
+      }
+    }
+
+    return candidates.length
+      ? { ok: true, ...candidates[candidates.length - 1] }
+      : { ok: false };
+  }).catch(() => ({ ok: false }));
+
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(100);
+
+  if (!state?.ok) {
+    throw new Error(`Sportschooltabel niet compleet voor VA ${va}`);
+  }
+  return state;
+}
+
+function calculateKeurmerkOk(land, shield) {
+  const normalizedLand = String(land ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  if (normalizedLand !== "nederland") return true;
+  return shield === true;
+}
+
+async function saveAdminCurrentFighter({ va, summary, school, error_message = null }) {
+  if (!ADMIN_CONTROL_MODE) return;
+
+  const shield = typeof school?.keurmerk_schild_gevonden === "boolean"
+    ? school.keurmerk_schild_gevonden
+    : null;
+
+  const { error } = await supabase
+    .from("controle_fighter_actueel")
+    .upsert(
+      {
+        matchmaking_id: ADMIN_MATCHMAKING_ID,
+        controle_run_id: ADMIN_CONTROLE_RUN_ID,
+        va_nummer: String(va),
+        licentie_ok: boolFromJaNee(summary?.licentie),
+        startverbod_actief: summary?.heeft_startverbod === true,
+        keurmerk_ok: school ? calculateKeurmerkOk(school.land, shield) : null,
+        sportschool: school?.sportschool ?? null,
+        land: school?.land ?? null,
+        keurmerk_schild_gevonden: shield,
+        source: "fightpassport_live",
+        checked_at: new Date().toISOString(),
+        error_message,
+      },
+      { onConflict: "matchmaking_id,controle_run_id,va_nummer" }
+    );
+
+  if (error) {
+    throw new Error(`controle_fighter_actueel opslaan mislukt voor VA ${va}: ${error.message}`);
+  }
 }
 
 function val(obj, names) {
@@ -1219,8 +1251,6 @@ async function waitForAnySelectorInAnyFrame(page, selectors, timeoutMs = 45000) 
 
 async function openResultsTileVerified(page, va, timeoutMs = 20000, signal = null) {
   throwIfAborted(signal, va);
-  // UITSLAGEN-flow bewust gelijk aan fp_bundle:
-  // modal sluiten, UITSLAGEN-tegel klikken, uitsluitend wachten op de Excel-knop.
   await closeAnyModal(page);
 
   const start = Date.now();
@@ -1249,7 +1279,6 @@ async function openResultsTileVerified(page, va, timeoutMs = 20000, signal = nul
       continue;
     }
 
-    // Geen vaste wachttijd: de downloadknop is het bewijs dat UITSLAGEN klaar is.
     const found = await findResultsDownloadControl(page, 8000, signal);
     if (found) return found;
 
@@ -1336,7 +1365,6 @@ function cleanupDownloadDir(dir) {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {}
 
-  // Ruim ook de bovenliggende downloads-map op als die leeg is.
   try {
     const parent = path.dirname(dir);
     if (
@@ -1354,9 +1382,6 @@ async function downloadResultsExcel(page, va, initialFound = null, signal = null
   const dir = path.resolve(__dirname, "downloads", `${va}_${crypto.randomUUID().slice(0, 8)}`);
   fs.mkdirSync(dir, { recursive: true });
 
-  // Iedere VA houdt zijn eigen downloadmap. We blijven bewust page-scoped werken:
-  // Browser.setDownloadBehavior is browser-context scoped en alle 20 workers delen
-  // dezelfde browsercontext; daarmee zouden downloadPaths elkaar juist kunnen overschrijven.
   const client = await page.target().createCDPSession();
   await client.send("Page.enable").catch(() => {});
   await client.send("Page.setDownloadBehavior", {
@@ -1442,8 +1467,6 @@ async function downloadResultsExcel(page, va, initialFound = null, signal = null
       })[0] || null;
   };
 
-  // De huidige scraper laadt UITSLAGEN direct. Als een klik echt een download
-  // veroorzaakt, zien we normaal meteen een CDP download-event of het .xlsx-bestand.
   const firstStartWaitMs = Math.max(
     500,
     Number(process.env.FP_RESULTS_DOWNLOAD_START_TIMEOUT_MS ?? "2500")
@@ -1472,17 +1495,17 @@ async function downloadResultsExcel(page, va, initialFound = null, signal = null
     console.log(`[fp-total] ⬇️ VA ${va} UITSLAGEN downloadklik`);
     await clickDownload();
 
-    let signal = await waitForStartOrFile(firstStartWaitMs);
+    let downloadSignal = await waitForStartOrFile(firstStartWaitMs);
 
-    if (!signal.started && !signal.candidate) {
+    if (!downloadSignal.started && !downloadSignal.candidate) {
       console.log(
         `[fp-total] 🔁 VA ${va} geen downloadstart binnen ${firstStartWaitMs}ms; één directe herklik`
       );
       await clickDownload().catch(() => {});
-      signal = await waitForStartOrFile(retryStartWaitMs);
+      downloadSignal = await waitForStartOrFile(retryStartWaitMs);
     }
 
-    if (!signal.started && !signal.candidate) {
+    if (!downloadSignal.started && !downloadSignal.candidate) {
       const filesNow = listFiles();
       console.log(`[fp-total] ❌ VA ${va} Chrome startte geen uitslagen-download`, {
         waitedMs: firstStartWaitMs + retryStartWaitMs,
@@ -1523,9 +1546,7 @@ async function downloadResultsExcel(page, va, initialFound = null, signal = null
               `[fp-total] ✅ VA ${va} uitslagen Excel volledig binnen (${size} bytes)`
             );
             return { file: candidate, dir };
-          } catch {
-            // Chrome kan het bestand nét vóór de laatste flush zichtbaar maken.
-          }
+          } catch {}
         }
       }
 
@@ -1557,7 +1578,6 @@ async function downloadResultsExcel(page, va, initialFound = null, signal = null
 async function parseResultsExcel(filePath, va) {
   const rows = await readXlsxToRows(filePath, { sheetIndex: 0 });
 
-  // Bewust exact dezelfde Excel-opbouw als de stabiele bundle scraper.
   const headerRow = rows[4] || [];
   const headers = headerRow.map((h) => (h ? String(h).trim() : ""));
 
@@ -1716,11 +1736,7 @@ async function scrapeResults(page, va, signal = null) {
       lastError = e;
       const msg = e?.message ?? String(e);
 
-      // LOGIN_PAGE en echte abort nooit degraderen tot alleen UITSLAGEN=error.
-      // De worker moet dan de sessie herstellen / de VA stoppen.
       if (msg === "LOGIN_PAGE" || msg === "SCRAPE_ABORTED") throw e;
-
-      // Net als bundle: tijdelijke downloadmap bij scrape/parsefout opruimen.
       if (dl?.dir) cleanupDownloadDir(dl.dir);
 
       if (attempt >= maxTries) {
@@ -1814,15 +1830,9 @@ async function saveFighter(all) {
   await saveChildSnapshot("fightpassport_licenses", all.va, all.licenses, (r, ts) => ({
     va_nummer: String(all.va), soort: val(r, ["soort", "licentie"]), status: val(r, ["status"]), geldig_van: parseNlDate(val(r, ["van", "ingang"])), geldig_tot: parseNlDate(val(r, ["tot", "einde", "vervaldatum"])), bond: val(r, ["bond"]), raw_json: r, last_seen_at: ts,
   }));
-
 }
 
 async function saveResultsSnapshot(va, results) {
-  // Alleen aanroepen nadat de UITSLAGEN-stap aantoonbaar succesvol is.
-  // Een tijdelijke fout of mislukte download mag bestaande uitslagen nooit wissen.
-  //
-  // FightPassport kan dezelfde uitslagregel dubbel in één Excelbestand bevatten.
-  // Dedupliceer daarom exact op dezelfde velden als fightpassport_results_dedupe_idx.
   const uniqueResults = [
     ...new Map(
       (results || []).map((r) => {
@@ -1859,8 +1869,7 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
   throwIfAborted(signal, va);
 
   // Eén lineaire VA-flow:
-  // VA openen -> DETAILS openen/lezen -> DETAILS exact sluiten -> UITSLAGEN openen
-  // op DEZELFDE tab -> Excel lezen -> VA-tab sluiten.
+  // VA -> DETAILS -> sluiten -> UITSLAGEN -> sluiten -> SPORTSCHOLEN -> sluiten -> VA-tab dicht.
   let currentPage = page;
 
   const summary = await readHeaderAndSummary(currentPage, va, {
@@ -1913,9 +1922,6 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
     throw new Error("DETAILS geopend maar inhoud onvoldoende/lege scrape");
   }
 
-  // DETAILS maximaal drie pogingen. Alleen wanneer de huidige VA-tab echt fout is,
-  // openen we voor dezelfde VA een vervangende tab. Een geslaagde DETAILS-tab blijft
-  // daarna open voor UITSLAGEN; hij wordt dus NIET meer tussendoor hard gesloten.
   let detailsLastError = null;
   for (let detailsAttempt = 1; detailsAttempt <= 3; detailsAttempt++) {
     throwIfAborted(signal, va);
@@ -1934,7 +1940,6 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
 
       if (detailsAttempt >= 3) break;
 
-      // Deze tab is niet bruikbaar. Sluit hem en open exact dezelfde VA opnieuw.
       await hardClosePage(currentPage).catch(() => {});
       throwIfAborted(signal, va);
       currentPage = await openFreshPage(`DETAILS poging ${detailsAttempt + 1}`, signal);
@@ -1955,8 +1960,6 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
     );
   }
 
-  // Exact de door FightPassport gebruikte DETAILS-sluitknop. Geen reload,
-  // geen nieuwe VA-tab en geen algemene modal-cascade.
   throwIfAborted(signal, va);
   await closeDetailsExact(currentPage, va, signal);
   throwIfAborted(signal, va);
@@ -1979,10 +1982,29 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
     }
   }
 
-  // Alles van deze VA zit nu in geheugen/downloadbestand. Sluit de URL/tab meteen;
-  // database-opslag heeft de FightPassport-pagina niet meer nodig.
+  if (ADMIN_CONTROL_MODE) {
+    try {
+      throwIfAborted(signal, va);
+      await closeAnyModal(currentPage).catch(() => {});
+      console.log(`[fp-total] 🏫 VA ${va} SPORTSCHOLEN opent op dezelfde VA-tab`);
+      const currentSchool = await readCurrentSportschool(currentPage, va, signal);
+      gyms.push(currentSchool);
+      await saveAdminCurrentFighter({ va, summary, school: currentSchool });
+      console.log(
+        `[fp-total] ✅ VA ${va} SPORTSCHOLEN klaar: ${currentSchool.sportschool} | ${currentSchool.land} | keurmerk=${
+          calculateKeurmerkOk(currentSchool.land, currentSchool.keurmerk_schild_gevonden) ? "Ja" : "Nee"
+        }`
+      );
+    } catch (e) {
+      const msg = e?.message ?? String(e);
+      if (msg === "LOGIN_PAGE" || msg === "SCRAPE_ABORTED") throw e;
+      await saveAdminCurrentFighter({ va, summary, school: null, error_message: msg }).catch(() => {});
+      throw new Error(`SPORTSCHOLEN verplicht maar niet gelukt voor VA ${va}: ${msg}`);
+    }
+  }
+
   await hardClosePage(currentPage).catch(() => {});
-  console.log(`[fp-total] 🧹 VA ${va} VA-tab gesloten na DETAILS + UITSLAGEN`);
+  console.log(`[fp-total] 🧹 VA ${va} VA-tab gesloten na DETAILS + UITSLAGEN + SPORTSCHOLEN`);
   throwIfAborted(signal, va);
 
   await saveFighter({ va, summary, details, gyms, startbans, licenses, results });
@@ -2020,7 +2042,6 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
   };
 }
 
-
 async function loadConfirmedDeletedVaNumbers(startVa, endVa) {
   const skipped = new Set();
   const pageSize = 1000;
@@ -2034,7 +2055,6 @@ async function loadConfirmedDeletedVaNumbers(startVa, endVa) {
       .range(from, from + pageSize - 1);
 
     if (error) {
-      // Migratie mogelijk nog niet uitgevoerd: de scraper blijft dan veilig werken zonder skip-optimalisatie.
       console.log(`[fp-total] ⚠️ confirmed_deleted lijst niet beschikbaar: ${error.message}`);
       return skipped;
     }
@@ -2110,8 +2130,6 @@ async function resolveMissingVa(va, runId) {
 }
 
 async function confirmProfileMissing(browser, context, cookies, va, label) {
-  // De eerste volledige openTab-cyclus is al mislukt. Doe nog twee onafhankelijke
-  // verificatiecycli. Alleen drie mislukte profielverificaties samen gelden als 'niet gevonden'.
   for (let retry = 1; retry <= 2; retry++) {
     await sleep(1000 * retry);
     const retryPage = await openTabToFighterVerified(browser, context, cookies, va, {
@@ -2204,6 +2222,7 @@ async function upsertSyncItem(runId, va, patch) {
 
   if (error) console.log(`[fp-total] sync item log fout VA ${va}: ${error.message}`);
 }
+
 async function loadExistingRunItems(runId) {
   const items = [];
   const pageSize = 1000;
@@ -2437,17 +2456,10 @@ async function main() {
     finally { masterRefreshPromise = null; }
   }
 
-  // Ultieme vangrail voor één complete VA. De oude 480s maskeerde vastlopers;
-  // de huidige directe DETAILS/UITSLAGEN-flow hoort ruim binnen 120s klaar te zijn.
   const SCRAPE_TIMEOUT_RAW = Number(process.env.FP_TOTAL_TIMEOUT_MS ?? "120000");
   const SCRAPE_TIMEOUT_MS = Number.isFinite(SCRAPE_TIMEOUT_RAW)
     ? Math.max(30000, SCRAPE_TIMEOUT_RAW)
     : 120000;
-  // Zelfde model als Historisch: geen globale startwachtrij en geen aparte browsercontext per worker.
-  // Alleen een kleine optionele stagger om niet alle eerste tabs exact in dezelfde milliseconde te openen.
-  // Workers bewust uit fase laten starten. Er is géén fasebarrière:
-  // iedere worker verwerkt zijn eigen VA volledig (fighter -> DETAILS -> UITSLAGEN)
-  // en pakt daarna direct de volgende. De offset voorkomt alleen "golven".
   const STAGGER = Math.max(0, Number(process.env.STAGGER_MS ?? "450"));
   const WORKER_DRIFT_MAX_MS = Math.max(
     0,
@@ -2455,21 +2467,9 @@ async function main() {
   );
 
   let idx = 0;
-
-  // Houd bij hoeveel VA-pogingen nog echt bezig zijn. Een worker die tijdelijk
-  // aan het einde van vaList komt, mag pas stoppen als NIEMAND meer bezig is
-  // die nog een VA achteraan kan zetten (login/browser/tijdelijke retry).
   let activeAttempts = 0;
-
-  // LOGIN_PAGE is geen inhoudelijke VA-fout. We sluiten de getroffen tab,
-  // herstellen de gedeelde sessie en plannen exact die VA opnieuw in.
-  // Begrens dit om een echte login-storing niet eindeloos te laten rondgaan.
   const loginRetryCounts = new Map();
   const MAX_LOGIN_RETRIES_PER_VA = Math.max(1, Number(process.env.FP_TOTAL_LOGIN_RETRIES ?? "1"));
-
-  // Tijdelijke VA-problemen niet minutenlang repareren op dezelfde tab.
-  // Sluit alles van die poging en zet exact dezelfde VA achteraan.
-  // Default: 1 herkansing = maximaal 2 volledige verse pogingen per VA.
   const transientRetryCounts = new Map();
   const MAX_TRANSIENT_RETRIES_PER_VA = Math.max(
     0,
@@ -2493,7 +2493,6 @@ async function main() {
       finished_at: null,
     });
 
-    // Altijd pushen: het oorspronkelijke exemplaar staat uiteraard al eerder in vaList.
     vaList.push(key);
     console.log(
       `[fp-total] ♻️ ${label} VA ${va} achteraan opnieuw ingepland ` +
@@ -2533,12 +2532,7 @@ async function main() {
     const workerStartDelay = workerIdx * STAGGER;
     if (workerStartDelay > 0) await sleep(workerStartDelay);
 
-    // Historisch-model: worker = alleen async taakverdeler.
-    // Geen incognito/browsercontext per worker; alle tabs delen dezelfde masterbrowser + sessiecookies.
-
     while (!stopRequested) {
-      // Tijdelijk geen werk zichtbaar? Wacht zolang een andere worker nog bezig
-      // is; die kan door login/browserherstel een VA achteraan toevoegen.
       if (idx >= vaList.length) {
         if (activeAttempts > 0) {
           await sleep(100);
@@ -2557,18 +2551,12 @@ async function main() {
       const va = vaList[myIdx];
       const label = `worker${workerIdx + 1}/${WORKERS}`;
       const itemStartedAt = new Date().toISOString();
-
-      // Onthoud met welke browsergeneratie deze VA daadwerkelijk begint.
-      // Wanneer een andere worker de gedeelde browser inmiddels al herstelt,
-      // mag een fout uit deze oude generatie niet nóg een volledige herstart veroorzaken.
       const vaBrowserGeneration = browserGeneration;
 
       console.log(`[fp-total] 🤖 ${label} → VA ${va}`);
       await upsertSyncItem(run.id, va, { status: "processing", started_at: itemStartedAt, finished_at: null });
 
       let page = null;
-      // Alle tabs die tijdens deze VA worden geopend bijhouden. Bij een hard timeout
-      // moeten ook verse DETAILS/UITSLAGEN-tabs dicht, niet alleen de eerste tab.
       const vaPages = new Set();
       try {
         page = await openFighterPageVerified(browser, null, cookies, va, {
@@ -2629,8 +2617,6 @@ async function main() {
           SCRAPE_TIMEOUT_MS,
           `fp-total ${va}`,
           async () => {
-            // Promise.race annuleert de onderliggende async niet. Daarom alle tabs
-            // van deze VA hard sluiten, inclusief verse UITSLAGEN-tabs.
             for (const p of vaPages) {
               await hardClosePage(p).catch(() => {});
             }
@@ -2689,8 +2675,6 @@ async function main() {
         const msg = e?.message ?? String(e);
 
         if (msg === "LOGIN_PAGE") {
-          // De worker-tab is op login beland: meteen sluiten zodat die niet blijft
-          // meedraaien terwijl de master-sessie wordt hersteld.
           for (const p of vaPages) {
             await hardClosePage(p).catch(() => {});
           }
@@ -2717,8 +2701,6 @@ async function main() {
             await refreshMasterSessionLocked(`LOGIN_PAGE from ${label} VA ${va}`);
 
             if (retryNr <= MAX_LOGIN_RETRIES_PER_VA) {
-              // Altijd opnieuw achteraan toevoegen: de oorspronkelijke VA staat uiteraard
-              // al in vaList en een includes()-controle zou requeue dus blokkeren.
               vaList.push(retryKey);
               console.log(`[fp-total] ♻️ ${label} VA ${va} opnieuw ingepland na verse login`);
             } else {
@@ -2749,8 +2731,6 @@ async function main() {
 
           try {
             if (vaBrowserGeneration === browserGeneration) {
-              // Alleen de eerste worker die een fout uit deze browsergeneratie ziet,
-              // mag de volledige gedeelde browser opnieuw starten.
               await restartBrowserLocked(`${label} VA ${va}`);
             } else {
               console.log(
@@ -2782,8 +2762,6 @@ async function main() {
             console.log(`[fp-total] 🧠 ${label} VA ${va}: browserprobleem na 2 pogingen naar AI Controle`);
           }
         } else {
-          // Geen lange reparatie op een verdachte/vaste tab: alles wordt in finally
-          // gesloten en dezelfde VA gaat als volledig verse poging achteraan.
           const requeued = await requeueTransientVa(va, label, msg);
 
           if (!requeued) {
@@ -2805,8 +2783,6 @@ async function main() {
         }
       } finally {
         try {
-          // Best-effort alle tabs van deze VA opruimen. Gesloten pages mogen hier
-          // opnieuw langskomen; hardClosePage vangt dat veilig af.
           for (const p of vaPages) {
             await closeAnyModal(p).catch(() => {});
             await hardClosePage(p).catch(() => {});
@@ -2819,9 +2795,6 @@ async function main() {
 
         activeAttempts = Math.max(0, activeAttempts - 1);
 
-        // Kleine worker-specifieke drift zodat workers na een paar VA's niet
-        // opnieuw exact gelijk gaan lopen. Geen batch-wachtpunt: deze worker
-        // gaat hierna zelfstandig meteen verder met de volgende VA.
         if (!stopRequested && WORKER_DRIFT_MAX_MS > 0) {
           const driftMs =
             ((workerIdx + 1) * 37 + (Number(va) % 97)) %
@@ -2836,15 +2809,7 @@ async function main() {
     await Promise.all(Array.from({ length: WORKERS }, (_, i) => workerLoop(i)));
     await updateRunProgress();
 
-    // Een run mag NOOIT completed worden zolang een aangevraagde VA nog
-    // pending/processing is. processed alleen is daarvoor onvoldoende, omdat
-    // retries dezelfde VA meerdere keren door de worker-loop kunnen laten gaan.
     const finalSyncRunId = activeRun?.id || run.id;
-
-    // Supabase geeft zonder expliciete pagination standaard maar een beperkt aantal
-    // regels terug. Bij grote ranges (bijv. 10.785 VA's) leek daardoor het grootste
-    // deel van de run nog pending/processing, terwijl alle VA's al terminaal waren.
-    // Lees daarom ALLE sync-items paginagewijs voordat we de eindstatus bepalen.
     const finalItems = [];
     const finalPageSize = 1000;
     let finalFrom = 0;
@@ -2950,7 +2915,6 @@ async function main() {
 
     if (allDone && !SKIP_RUN_TERMINATOR) {
       await terminateSyncRun({ syncRunId: run.id }).catch((error) => {
-        // De scrape blijft voltooid; de fout is zichtbaar en de admin endpoint kan handmatig opnieuw worden gestart.
         console.log(`[TERMINATOR] Fout na total run ${run.id}:`, error?.message ?? String(error));
       });
     }
