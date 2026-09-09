@@ -2577,30 +2577,14 @@ export default function ControleMatchmakingPage() {
     [],
   );
 
-  async function openExcel() {
-    await authedDownload(`/api/rapport/excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "controle.xlsx");
-  }
-
   function openRapport() {
     router.push(
       `/dashboard/officials/controle/${encodeURIComponent(matchmakingId)}/rapport`,
     );
   }
 
-  async function openLineupExcel() {
-    await authedDownload(`/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "jury-lineup.xlsx");
-  }
-
-  async function openVoorlopigeLineupExcel() {
-    await authedDownload(`/api/rapport/voorlopige-lineup-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "voorlopige-lineup.xlsx");
-  }
-
   async function openOfficialExcel() {
     await authedDownload(`/api/rapport/official-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "official.xlsx");
-  }
-
-  async function openSportdataCsv() {
-    await authedDownload(`/api/rapport/sportdata-csv?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "sportdata.csv");
   }
 
   function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
@@ -4015,22 +3999,8 @@ export default function ControleMatchmakingPage() {
               <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/55">
-                    Feedback
+                    Rapportage
                   </span>
-                  <DarkActionButton
-                    label={headerBusy === "excel" ? "Bezig..." : "Excel"}
-                    tone="silver"
-                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
-                    onClick={() =>
-                      withHeaderBusy("excel", async () => openExcel())
-                    }
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Niet tijdens lineup bouwen."
-                        : "Feedback naar matchmaker."
-                    }
-                  />
                   <DarkActionButton
                     label={headerBusy === "rapport" ? "Bezig..." : "Rapport"}
                     tone="silver"
@@ -4044,56 +4014,11 @@ export default function ControleMatchmakingPage() {
                     title={
                       lineupMode
                         ? "Niet tijdens lineup bouwen."
-                        : "Feedback naar matchmaker."
+                        : "Open het controlerapport."
                     }
                   />
-
-                  <span className="mx-1 hidden h-6 w-px bg-white/15 sm:inline-block" />
-                  <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-orange-100/70">
-                    Lineup
-                  </span>
                   <DarkActionButton
-                    label={headerBusy === "lineup" ? "Bezig..." : "Lineup"}
-                    tone="orange"
-                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
-                    onClick={() =>
-                      withHeaderBusy("lineup", async () => openLineupExcel())
-                    }
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Niet tijdens lineup bouwen."
-                        : "Voor matchmaker en official."
-                    }
-                  />
-
-                  <DarkActionButton
-                    label={
-                      headerBusy === "voorlopige-lineup"
-                        ? "Bezig..."
-                        : "Voorlopige"
-                    }
-                    tone="orange"
-                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
-                    onClick={() =>
-                      withHeaderBusy("voorlopige-lineup", async () =>
-                        openVoorlopigeLineupExcel(),
-                      )
-                    }
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Niet tijdens lineup bouwen."
-                        : "Voorlopige lineup inclusief open licentie- en keurmerkmeldingen."
-                    }
-                  />
-
-                  <span className="mx-1 hidden h-6 w-px bg-white/15 sm:inline-block" />
-                  <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-blue-100/70">
-                    Official
-                  </span>
-                  <DarkActionButton
-                    label={headerBusy === "official" ? "Bezig..." : "Info"}
+                    label={headerBusy === "official" ? "Bezig..." : "Official info"}
                     tone="blue"
                     icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
                     onClick={() =>
@@ -4105,25 +4030,7 @@ export default function ControleMatchmakingPage() {
                     title={
                       lineupMode
                         ? "Niet tijdens lineup bouwen."
-                        : "Officials upload."
-                    }
-                  />
-                  <DarkActionButton
-                    label={
-                      headerBusy === "sportdata" ? "Bezig..." : "Sportdata"
-                    }
-                    tone="green"
-                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
-                    onClick={() =>
-                      withHeaderBusy("sportdata", async () =>
-                        openSportdataCsv(),
-                      )
-                    }
-                    disabled={lineupMode || !!headerBusy}
-                    title={
-                      lineupMode
-                        ? "Niet tijdens lineup bouwen."
-                        : "Sportdata export."
+                        : "Download de officials-informatie."
                     }
                   />
                 </div>

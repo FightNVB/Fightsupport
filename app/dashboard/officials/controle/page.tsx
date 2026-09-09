@@ -19,7 +19,6 @@ const NVB_ORANGE = "#ff4d00";
 
 const API_OVERVIEW = "/api/officials/matchmakings-overzicht";
 const API_START_CONTROLE = "/api/officials/start";
-const API_ACTUELE_CHECK = "/api/control-engine/officials/live-check";
 const API_DELETE_MATCHMAKING = "/api/control-engine/delete-matchmaking";
 const API_NAAR_UITSLAGEN = "/api/matchmaking/naar-uitslagen";
 const API_VERPLAATS_NAAR_ADMIN_ARCHIEF = "/api/officials/archive";
@@ -387,7 +386,6 @@ function ActionSquare({
 const ACTION_COLORS = {
   matchmaking: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
   controle: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
-  actueel: "linear-gradient(180deg, #0f9f8a 0%, #087265 100%)",
   weegstation: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
   uitslagen: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
   archief: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
@@ -556,8 +554,8 @@ export default function OfficialsOverzichtPage() {
     try {
       setIsBusy(true);
       setBusyId(matchmakingId);
-      setOverlayTitle("Controle loopt");
-      setOverlayMessage("De controle wordt uitgevoerd. Een ogenblik geduld...");
+      setOverlayTitle("Eindcontrole loopt");
+      setOverlayMessage("De eindcontrole wordt uitgevoerd. Een ogenblik geduld...");
       setOverlaySubMessage(
         "Sluit deze pagina niet af totdat de resultaten zijn geladen."
       );
@@ -585,8 +583,8 @@ export default function OfficialsOverzichtPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok) {
-        console.warn("Start controle response was niet OK:", json);
-        setOverlayTitle("Controle wordt afgerond");
+        console.warn("Start eindcontrole response was niet OK:", json);
+        setOverlayTitle("Eindcontrole wordt afgerond");
         setOverlayMessage(
           "De controle wordt afgerond. Het overzicht wordt automatisch bijgewerkt..."
         );
@@ -600,56 +598,6 @@ export default function OfficialsOverzichtPage() {
       }
 
       setOverlayMessage("De resultaten worden verwerkt...");
-      await load();
-    } finally {
-      setBusyId(null);
-      setIsBusy(false);
-      setOverlayOpen(false);
-      setOverlayMessage("");
-      setOverlayTitle("Even wachten");
-      setOverlaySubMessage(
-        "Sluit deze pagina niet af totdat de resultaten zijn geladen."
-      );
-    }
-  }
-
-  async function startActueleCheck(matchmakingId: string) {
-    try {
-      setIsBusy(true);
-      setBusyId(matchmakingId);
-      setOverlayTitle("Actuele check");
-      setOverlayMessage(
-        "FightPassport controleert nu alleen licentie, startverbod en keurmerk..."
-      );
-      setOverlaySubMessage(
-        "De volledige databasecontrole wordt hierbij niet opnieuw opgebouwd."
-      );
-      setOverlayOpen(true);
-
-      const res = await authedFetch(API_ACTUELE_CHECK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchmaking_id: matchmakingId,
-          workers: 8,
-          stagger_ms: 250,
-          tab_attempts: 8,
-          soft_wait_ms: 900,
-          between_attempts_ms: 450,
-          live_timeout_ms: 45000,
-        }),
-      });
-
-      const json = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        alert(json?.error ?? "Actuele FightPassport-check mislukt.");
-        return;
-      }
-
-      setOverlayMessage(
-        "Actuele licentie-, startverbod- en keurmerkgegevens zijn bijgewerkt."
-      );
       await load();
     } finally {
       setBusyId(null);
@@ -1261,7 +1209,7 @@ export default function OfficialsOverzichtPage() {
                         <span className="h-3 w-3 rounded-sm bg-[#238a3b]" /> Matchmaking / weegstation
                       </span>
                       <span className="inline-flex items-center gap-1">
-                        <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Start controle / uitslagen
+                        <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Eindcontrole / uitslagen
                       </span>
                       <span className="inline-flex items-center gap-1">
                         <span className="h-3 w-3 rounded-sm bg-[#0f9f8a]" /> Actuele FP-check
@@ -1403,15 +1351,6 @@ export default function OfficialsOverzichtPage() {
                                           {activeTab === "weegstation" ? "⚖" : "M"}
                                         </ActionSquare>
 
-                                        <ActionSquare
-                                          onClick={() => startActueleCheck(r.id)}
-                                          disabled={rowBusy || isBusy}
-                                          title="Actuele FightPassport-check: licentie, startverbod en keurmerk"
-                                          color={ACTION_COLORS.actueel}
-                                        >
-                                          {rowBusy && isBusy ? "…" : "✓"}
-                                        </ActionSquare>
-
                                         {activeTab === "uploaded" ? (
                                           <>
                                             <ActionSquare
@@ -1420,7 +1359,7 @@ export default function OfficialsOverzichtPage() {
                                               title={
                                                 isRunningStatus(rowStatus)
                                                   ? "Controle loopt"
-                                                  : "Start volledige controle"
+                                                  : "Start eindcontrole"
                                               }
                                               color={ACTION_COLORS.controle}
                                             >

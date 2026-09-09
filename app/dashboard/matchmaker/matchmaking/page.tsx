@@ -346,6 +346,7 @@ function ActionFileSquare({
 const ACTION_COLORS = {
   matchmaking: "linear-gradient(180deg, #238a3b 0%, #146126 100%)",
   controle: "linear-gradient(180deg, #2f75d6 0%, #174a91 100%)",
+  dbcontrole: "linear-gradient(180deg, #0f9f8f 0%, #0a665d 100%)",
   admin: "linear-gradient(180deg, #8b4ab8 0%, #5b2a7d 100%)",
   herupload: "linear-gradient(180deg, #ff8a1f 0%, #d94700 100%)",
   verwijderen: "linear-gradient(180deg, #c53636 0%, #7a1717 100%)",
@@ -361,7 +362,10 @@ function ActionLegend() {
         <span className="h-3 w-3 rounded-sm bg-[#238a3b]" /> Matchmaking / upload
       </span>
       <span className="inline-flex items-center gap-1">
-        <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Start controle / matchen
+        <span className="h-3 w-3 rounded-sm bg-[#2f75d6]" /> Matchen
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <span className="h-3 w-3 rounded-sm bg-[#0f9f8f]" /> DB-controle
       </span>
       <span className="inline-flex items-center gap-1">
         <span className="h-3 w-3 rounded-sm bg-[#8b4ab8]" /> Aanmeldingen / naar NVB
@@ -1126,7 +1130,6 @@ function MatchmakingPageContent() {
       setSuccessMsg(
         `✅ Databasecontrole afgerond: ${bouts} partijen opnieuw opgebouwd.`,
       );
-      setViewTab("uploads");
       await load();
 
       // API is klaar: wachtscherm direct sluiten.
@@ -1895,10 +1898,10 @@ function MatchmakingPageContent() {
                                             </ActionSquare>
 
                                             <ActionSquare
-                                              title={busyId === r.id ? "Controle bezig" : "Start controle"}
+                                              title={busyId === r.id ? "DB-controle bezig" : "DB-controle"}
                                               onClick={() => void startControle(r)}
                                               disabled={busyId === r.id}
-                                              color={ACTION_COLORS.controle}
+                                              color={ACTION_COLORS.dbcontrole}
                                             >
                                               {busyId === r.id ? "…" : "▶"}
                                             </ActionSquare>
@@ -1941,6 +1944,15 @@ function MatchmakingPageContent() {
                                             </ActionSquare>
 
                                             <ActionSquare
+                                              title={busyId === r.id ? "DB-controle bezig" : "DB-controle"}
+                                              onClick={() => void startControle(r)}
+                                              disabled={busyId === r.id}
+                                              color={ACTION_COLORS.dbcontrole}
+                                            >
+                                              {busyId === r.id ? "…" : "▶"}
+                                            </ActionSquare>
+
+                                            <ActionSquare
                                               title="Stuur naar NVB"
                                               onClick={() => stuurNaarAdmin(r)}
                                               disabled={busyId === r.id}
@@ -1978,6 +1990,15 @@ function MatchmakingPageContent() {
                                               color={ACTION_COLORS.matchmaking}
                                             >
                                               M
+                                            </ActionSquare>
+
+                                            <ActionSquare
+                                              title={busyId === r.id ? "DB-controle bezig" : "DB-controle"}
+                                              onClick={() => void startControle(r)}
+                                              disabled={busyId === r.id}
+                                              color={ACTION_COLORS.dbcontrole}
+                                            >
+                                              {busyId === r.id ? "…" : "▶"}
                                             </ActionSquare>
 
                                             <ActionSquare
