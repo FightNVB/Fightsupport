@@ -223,6 +223,7 @@ const ALLOWED_BONDTEAMS = new Set([
   "WPKL",
   "WMTA",
   "VON",
+  "UMC",
   "FOG",
   "MMAAN",
   "MON",
