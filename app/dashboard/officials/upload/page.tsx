@@ -22,6 +22,7 @@ import { authedFetch } from "@/lib/api/authedFetch";
 
 type Profile = {
   role?: string | null;
+  active_role?: string | null;
   bondteam?: string | null;
   full_name?: string | null;
 };
@@ -183,7 +184,10 @@ export default function UploadMatchmakingOfficialPage() {
   const { user } = useAuth();
 
   const [profile, setProfile] = useState<Profile>({});
-  const allowed = useMemo(() => canOfficialUpload(profile.role), [profile.role]);
+  const allowed = useMemo(
+    () => canOfficialUpload(profile.role) || canOfficialUpload(profile.active_role),
+    [profile.role, profile.active_role],
+  );
 
   const [file, setFile] = useState<File | null>(null);
 
@@ -206,7 +210,7 @@ export default function UploadMatchmakingOfficialPage() {
 
       const { data, error } = await supabase
         .from("user_profiles")
-        .select("role,bondteam,full_name")
+        .select("role,active_role,bondteam,full_name")
         .eq("id", user.id)
         .maybeSingle();
 
