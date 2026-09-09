@@ -109,6 +109,11 @@ export async function POST(req: NextRequest) {
           null
         : null;
 
+    const matchmakerIdForChain =
+      currentOwnerType === "matchmaker"
+        ? currentOwnerUserId || userId
+        : s((mm as any)?.matchmaker_id) || null;
+
     const bronType =
       s((mm as any)?.bron_type) ||
       (role === "matchmaker"
@@ -124,7 +129,7 @@ export async function POST(req: NextRequest) {
       naam: (mm as any)?.naam ?? null,
       datum: (mm as any)?.datum ?? null,
       locatie: (mm as any)?.locatie ?? null,
-      matchmakerId: (mm as any)?.matchmaker_id ?? userId,
+      matchmakerId: matchmakerIdForChain,
       bronType,
       stage: currentStage as any,
       ownerType: currentOwnerType as any,
@@ -161,6 +166,7 @@ export async function POST(req: NextRequest) {
     const { error: mmUpdateErr } = await supabaseAdmin
       .from("matchmakings")
       .update({
+        ...(matchmakerIdForChain ? { matchmaker_id: matchmakerIdForChain } : {}),
         stadium: "ingediend_admin",
         status: "ingediend_admin",
         final_status: "ingediend_admin",
