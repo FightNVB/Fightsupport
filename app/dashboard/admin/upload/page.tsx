@@ -22,6 +22,7 @@ import { authedFetch } from "@/lib/api/authedFetch";
 
 type Profile = {
   role?: string | null;
+  active_role?: string | null;
   bondteam?: string | null;
   full_name?: string | null;
 };
@@ -34,7 +35,7 @@ function isEmpty(v: unknown) {
   return norm(v).length === 0;
 }
 
-const BONDTEAMS = ["IRO", "NKF", "WPKL", "WMTA", "VON", "FOG", "MMAAN", "MON"];
+const BONDTEAMS = ["IRO", "NKF", "WPKL", "WMTA", "VON", "UMC", "FOG", "MMAAN", "MON"];
 const logoSrc = "/branding/fightsupport/excel-logo.png";
 const NVB_ORANGE = "#ff4d00";
 
@@ -180,7 +181,10 @@ export default function UploadMatchmakingAdminPage() {
   const { user } = useAuth();
 
   const [profile, setProfile] = useState<Profile>({});
-  const isAdmin = useMemo(() => isAdminRole(profile.role), [profile.role]);
+  const isAdmin = useMemo(
+    () => isAdminRole(profile.role) || isAdminRole(profile.active_role),
+    [profile.role, profile.active_role],
+  );
 
   const [file, setFile] = useState<File | null>(null);
 
@@ -204,7 +208,7 @@ export default function UploadMatchmakingAdminPage() {
 
       const { data, error } = await supabase
         .from("user_profiles")
-        .select("role,bondteam,full_name")
+        .select("role,active_role,bondteam,full_name")
         .eq("id", user.id)
         .maybeSingle();
 
