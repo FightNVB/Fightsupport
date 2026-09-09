@@ -85,7 +85,6 @@ function reviewKey(row: {
   return `${partij}|${bout}|${code}|${hoek}|${toernooi}|${fighter}|${toernooiVa}`;
 }
 
-
 function duplicateRowKey(row: {
   partij_nr: any;
   bout_id: any;
@@ -175,10 +174,6 @@ export async function saveControleResultaten(opts: {
 
   const hitsIn = Array.isArray(opts?.hits) ? opts.hits : [];
 
-  // Als deze functie zonder bout_id/partij_nr wordt aangeroepen vanuit een deel-save
-  // (bijvoorbeeld eerst gewone partijen en daarna toernooi-vechters), mag de tweede
-  // save niet de eerste groep verwijderen. Daarom bepalen we bij unscoped saves of
-  // de hits alleen toernooi of alleen wedstrijden bevatten.
   const unscoped = !scopedBoutId && scopedPartijNr == null;
   const hitGroups = hitsIn.reduce(
     (acc, hit) => {
@@ -192,14 +187,18 @@ export async function saveControleResultaten(opts: {
   const unscopedOnlyToernooi = unscoped && hitGroups.toernooi > 0 && hitGroups.wedstrijd === 0;
   const unscopedOnlyWedstrijd = unscoped && hitGroups.wedstrijd > 0 && hitGroups.toernooi === 0;
 
-  // 0) bestaande reviews ophalen vóór delete
+  // Bestaande reviews ophalen over ALLE runs van deze matchmaking. De matchmaker-
+  // eindcontrole maakt telkens een nieuwe controle_run_id, maar een eerder bewust
+  // goed-/afgekeurde identieke melding moet bij opnieuw controleren behouden blijven.
+  // Oudste eerst: als dezelfde melding vaker beoordeeld is, wint de nieuwste review
+  // doordat die later in reviewMap wordt gezet.
   let exQ = supabaseAdmin
     .from("controle_resultaten")
     .select(
       "partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,original_resultaat,resultaat,actie_status"
     )
-    .eq("controle_run_id", controle_run_id)
-    .eq("matchmaking_id", matchmaking_id);
+    .eq("matchmaking_id", matchmaking_id)
+    .order("reviewed_at", { ascending: true, nullsFirst: true });
 
   if (scopedBoutId) {
     exQ = exQ.eq("bout_id", scopedBoutId);
@@ -229,7 +228,9 @@ export async function saveControleResultaten(opts: {
     }
   }
 
-  // 1) oude resultaten scoped verwijderen
+  // Alleen resultaten van DEZE run/scoped save vervangen. Oudere runs blijven
+  // beschikbaar totdat de normale lifecycle/cleanup ze opruimt en dienen hier
+  // uitsluitend als bron voor eerder genomen reviewbesluiten.
   let delQ = supabaseAdmin
     .from("controle_resultaten")
     .delete()
@@ -249,10 +250,6 @@ export async function saveControleResultaten(opts: {
   const { error: delErr } = await delQ;
   if (delErr) throw delErr;
 
-  // 2) rows bouwen + reviews terugzetten
-  // Safety-net: rulesEngine kan dezelfde melding via meerdere routes aanleveren
-  // (bijv. gewone save + toernooi/deel-save). Sla exact dezelfde zichtbare melding
-  // binnen dezelfde scope maar één keer op.
   const rowsToInsert: any[] = [];
   const insertedKeys = new Set<string>();
 
@@ -269,17 +266,11 @@ export async function saveControleResultaten(opts: {
       normStr((hit as any)?.va_nummer) ??
       normStr(hit?.fighter_id);
 
-    // controle_resultaten heeft géén kolom va_nummer.
-    // Gewone partij-vechters gaan in fighter_id.
-    // Toernooi-vechters gaan in toernooi_va_nummer.
     const fighter_id = isToernooiHit ? null : hitVa;
     const toernooi_va_nummer = isToernooiHit ? hitVa : null;
 
-    // safety:
-    // - scoped op bout: alleen skippen als hit expliciet een andere bout_id heeft
     if (scopedBoutId && hitBoutId && hitBoutId !== scopedBoutId) continue;
 
-    // - scoped op partij: alleen skippen als hit expliciet een andere partij_nr heeft
     if (
       scopedBoutId == null &&
       scopedPartijNr != null &&
@@ -289,7 +280,6 @@ export async function saveControleResultaten(opts: {
       continue;
     }
 
-    // helemaal onbruikbare hit overslaan
     if (partij_nr == null && bout_id == null && !toernooi_code) {
       continue;
     }
@@ -351,10 +341,7 @@ export async function saveControleResultaten(opts: {
     rowsToInsert.push(baseRow);
   }
 
-  // 3) Geen hits? Dan toch placeholder row schrijven voor scoped save
-  // Zo blijft een partij/bout zonder VA of zonder rule hits bestaan.
   if (rowsToInsert.length === 0) {
-    // scoped op bout of partij -> placeholder opslaan
     if (scopedBoutId || scopedPartijNr != null) {
       const placeholderFromHit = hitsIn[0] ?? null;
       const key = makePlaceholderKey({
@@ -423,8 +410,6 @@ export async function saveControleResultaten(opts: {
 
       rowsToInsert.push(placeholderRow);
     } else {
-      // hele run zonder hits: dan is er niets te schrijven
-      // maar dit is bewust, want zonder scope weten we niet welke partijen placeholders moeten krijgen
       return;
     }
   }
