@@ -4,14 +4,12 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  type ReactNode,
 } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/api/authedFetch";
 import {
-  Activity,
   Archive,
   ArrowLeft,
   BarChart3,
@@ -21,7 +19,6 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
-  ClipboardCheck,
   Cog,
   FileText,
   GitBranch,
@@ -139,7 +136,7 @@ const primaryModules: PortalLink[] = [
 const portalSections: PortalSection[] = [
   {
     title: "Beheer",
-    subtitle: "Accounts, sportscholen, planning en interne administratie",
+    subtitle: "Accounts, sportscholen, planning, sancties en interne administratie",
     items: [
       {
         title: "Gebruikersbeheer",
@@ -166,6 +163,18 @@ const portalSections: PortalSection[] = [
         icon: Link2,
       },
       {
+        title: "Afmeldingen",
+        description: "Afmeldingen van vechters bekijken en administratief verwerken.",
+        href: "/dashboard/admin/algemeen/afmeldingen",
+        icon: UserMinus,
+      },
+      {
+        title: "Sancties & waarschuwingen",
+        description: "Overtredingen, sancties, waarschuwingen en minpunten beheren.",
+        href: "/dashboard/admin/algemeen/overtredingen",
+        icon: ShieldAlert,
+      },
+      {
         title: "Contactpersonen",
         description: "Trainer-logins koppelen en Fightcrew-toegang klaarzetten.",
         href: "/dashboard/admin/beheer/sportscholen/contactpersonen",
@@ -187,7 +196,7 @@ const portalSections: PortalSection[] = [
   },
   {
     title: "Algemeen",
-    subtitle: "Matchmakings, afmeldingen, archief, sancties en historie",
+    subtitle: "Matchmakings, evenementen, archief en historie",
     items: [
       {
         title: "Matchmakingoverzicht",
@@ -202,22 +211,10 @@ const portalSections: PortalSection[] = [
         icon: CalendarDays,
       },
       {
-        title: "Afmeldingen",
-        description: "Afmeldingen van vechters bekijken en administratief verwerken.",
-        href: "/dashboard/admin/algemeen/afmeldingen",
-        icon: UserMinus,
-      },
-      {
         title: "Archief",
         description: "Afgeronde evenementen, partijen, rapporten en dossiers openen.",
         href: "/dashboard/admin/algemeen/archief",
         icon: Archive,
-      },
-      {
-        title: "Sancties & waarschuwingen",
-        description: "Overtredingen, sancties, waarschuwingen en minpunten beheren.",
-        href: "/dashboard/admin/algemeen/overtredingen",
-        icon: ShieldAlert,
       },
       {
         title: "Matchmaking-snapshots",
@@ -296,9 +293,7 @@ export default function AdminDashboardPage() {
           ),
         ]);
 
-        if (!cancelled) {
-          setProfile(data);
-        }
+        if (!cancelled) setProfile(data);
       } catch (error) {
         console.error("Adminprofiel laden mislukt", error);
         if (!cancelled) {
@@ -308,9 +303,7 @@ export default function AdminDashboardPage() {
           );
         }
       } finally {
-        if (!cancelled) {
-          setProfileLoading(false);
-        }
+        if (!cancelled) setProfileLoading(false);
       }
     }
 
@@ -325,13 +318,7 @@ export default function AdminDashboardPage() {
   const isAdmin = normalizedRole === "admin";
   const isSuperadmin = normalizedRole === "superadmin";
   const isNvbOrNoBondteam = normalizedBondteam === "" || normalizedBondteam === "NVB";
-
-  // Bestaande toegangscontrole behouden:
-  // - superadmin mag altijd het admin-portaal openen;
-  // - admin alleen als bondteam leeg of NVB is.
   const mayOpenAdminPortal = isSuperadmin || (isAdmin && isNvbOrNoBondteam);
-
-  // Root-adminonderdelen blijven uitsluitend beschikbaar voor NVB/leeg.
   const mayOpenRootAdminTiles = (isAdmin || isSuperadmin) && isNvbOrNoBondteam;
 
   const visiblePrimaryModules = useMemo(
@@ -339,10 +326,7 @@ export default function AdminDashboardPage() {
     [mayOpenRootAdminTiles],
   );
 
-  if (loading || profileLoading) {
-    return <CenteredMessage text="Bezig met laden..." />;
-  }
-
+  if (loading || profileLoading) return <CenteredMessage text="Bezig met laden..." />;
   if (!user) return null;
 
   if (profileError) {
@@ -353,11 +337,7 @@ export default function AdminDashboardPage() {
           <ShieldAlert size={42} />
           <h1>Profiel laden mislukt</h1>
           <p>{profileError}</p>
-          <button
-            type="button"
-            className="fs-silver-button"
-            onClick={() => window.location.reload()}
-          >
+          <button type="button" className="fs-silver-button" onClick={() => window.location.reload()}>
             Opnieuw proberen
           </button>
         </div>
@@ -463,13 +443,7 @@ export default function AdminDashboardPage() {
   );
 }
 
-function Sidebar({
-  open,
-  onNavigate,
-}: {
-  open: boolean;
-  onNavigate: (href: string) => void;
-}) {
+function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: (href: string) => void }) {
   const items: Array<{ label: string; href: string; icon: LucideIcon; active?: boolean }> = [
     { label: "Admin", href: "/dashboard/admin", icon: Home, active: true },
     { label: "Controle", href: "/dashboard/admin/controle", icon: Scale },
@@ -501,20 +475,12 @@ function Sidebar({
         ))}
       </nav>
 
-      <div className="fs-sidebar-bottom">
-        <ChevronDown size={19} />
-      </div>
+      <div className="fs-sidebar-bottom"><ChevronDown size={19} /></div>
     </aside>
   );
 }
 
-function Header({
-  onDashboard,
-  onSmartDashboard,
-}: {
-  onDashboard: () => void;
-  onSmartDashboard: () => void;
-}) {
+function Header({ onDashboard, onSmartDashboard }: { onDashboard: () => void; onSmartDashboard: () => void }) {
   return (
     <header className="fs-header">
       <div className="fs-header-metal" aria-hidden="true" />
@@ -542,29 +508,6 @@ function Header({
   );
 }
 
-function StatusItem({
-  icon: Icon,
-  value,
-  label,
-  sublabel,
-}: {
-  icon: LucideIcon;
-  value: string;
-  label: string;
-  sublabel: string;
-}) {
-  return (
-    <div className="fs-status-item">
-      <div className="fs-status-icon"><Icon size={26} strokeWidth={2.05} /></div>
-      <div>
-        <strong>{value}</strong>
-        <span>{label}</span>
-        <small>{sublabel}</small>
-      </div>
-    </div>
-  );
-}
-
 function SectionHeading({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="fs-section-heading">
@@ -574,29 +517,16 @@ function SectionHeading({ title, subtitle }: { title: string; subtitle?: string 
   );
 }
 
-function ModuleCard({
-  item,
-  onOpen,
-  compact = false,
-}: {
-  item: PortalLink;
-  onOpen: () => void;
-  compact?: boolean;
-}) {
+function ModuleCard({ item, onOpen, compact = false }: { item: PortalLink; onOpen: () => void; compact?: boolean }) {
   const Icon = item.icon;
-
   return (
     <article className={`fs-module-card${compact ? " fs-module-card-compact" : ""}`}>
       <button type="button" className="fs-module-click" onClick={onOpen} aria-label={`${item.title} openen`}>
         <span className="fs-card-top-glow" aria-hidden="true" />
-        <div className="fs-silver-icon">
-          <Icon size={compact ? 25 : 27} strokeWidth={2.05} />
-        </div>
+        <div className="fs-silver-icon"><Icon size={compact ? 25 : 27} strokeWidth={2.05} /></div>
         <h3>{item.title}</h3>
         <p>{item.description}</p>
-        <span className="fs-card-open">
-          Openen <ChevronRight size={16} />
-        </span>
+        <span className="fs-card-open">Openen <ChevronRight size={16} /></span>
       </button>
     </article>
   );
@@ -620,21 +550,22 @@ function GlobalStyles() {
       }
 
       * { box-sizing: border-box; }
-
       html, body { margin: 0; background: #171a1e; }
-
       button, input, select, textarea { font: inherit; }
 
       .fs-page {
         min-height: 100vh;
         color: #f4f4f4;
-        background:
-          radial-gradient(circle at 52% 0%, rgba(214,220,228,.12), transparent 24%),
-          radial-gradient(circle at 50% 100%, rgba(160,168,178,.08), transparent 32%),
-          linear-gradient(180deg, #30353b 0%, #202429 48%, #292e34 100%);
+        background: #171a1e;
       }
 
-      .fs-shell { margin-left: var(--fs-sidebar-width); min-height: 100vh; }
+      .fs-shell {
+        margin-left: var(--fs-sidebar-width);
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 52% 0%, rgba(255,255,255,.72), transparent 30%),
+          linear-gradient(180deg, #eceff1 0%, #d8dde1 46%, #eef0f2 100%);
+      }
 
       .fs-sidebar {
         position: fixed;
@@ -693,12 +624,7 @@ function GlobalStyles() {
       }
 
       .fs-nav-item:hover { background: rgba(255,255,255,.045); color: #fff; }
-
-      .fs-nav-active {
-        color: var(--fs-orange);
-        background: linear-gradient(90deg, rgba(255,77,0,.12), rgba(255,255,255,.025));
-      }
-
+      .fs-nav-active { color: var(--fs-orange); background: linear-gradient(90deg, rgba(255,77,0,.12), rgba(255,255,255,.025)); }
       .fs-nav-active::before {
         content: "";
         position: absolute;
@@ -710,13 +636,7 @@ function GlobalStyles() {
         box-shadow: 0 0 14px rgba(255,77,0,.7);
       }
 
-      .fs-sidebar-bottom {
-        height: 76px;
-        display: grid;
-        place-items: center;
-        color: #ddd;
-      }
-
+      .fs-sidebar-bottom { height: 76px; display: grid; place-items: center; color: #ddd; }
       .fs-sidebar-bottom svg {
         width: 38px;
         height: 38px;
@@ -730,7 +650,7 @@ function GlobalStyles() {
         position: relative;
         border-bottom: 1px solid rgba(255,255,255,.11);
         background: #07090b;
-        box-shadow: 0 14px 30px rgba(0,0,0,.42);
+        box-shadow: 0 14px 30px rgba(0,0,0,.34);
       }
 
       .fs-header-metal {
@@ -746,7 +666,6 @@ function GlobalStyles() {
         border-bottom: 1px solid rgba(255,255,255,.12);
         box-shadow: inset 0 1px rgba(255,255,255,.08), inset 0 -16px 26px rgba(0,0,0,.5);
       }
-
 
       .fs-header-metal::before {
         content: "";
@@ -839,85 +758,67 @@ function GlobalStyles() {
       .fs-content {
         width: min(1440px, calc(100% - 34px));
         margin: 0 auto;
-        padding: 16px 0 18px;
+        padding: 18px 0 22px;
+        color: #14181d;
       }
-
-      .fs-status-strip {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0,1fr));
-        border: 1px solid rgba(220,224,229,.48);
-        border-left-color: rgba(226,230,235,.72);
-        border-right-color: rgba(226,230,235,.72);
-        background:
-          linear-gradient(90deg, rgba(255,255,255,.07), transparent 16%, transparent 84%, rgba(255,255,255,.07)),
-          linear-gradient(180deg,#454b52,#282d32 72%,#383e44);
-        box-shadow: inset 0 1px rgba(255,255,255,.08), inset 0 -1px rgba(0,0,0,.8), 0 12px 28px rgba(0,0,0,.35);
-      }
-
-      .fs-status-item {
-        min-width: 0;
-        min-height: 58px;
-        display: flex;
-        align-items: center;
-        gap: 11px;
-        padding: 10px 14px;
-        border-right: 1px solid rgba(255,255,255,.10);
-      }
-      .fs-status-item:last-child { border-right: 0; }
-
-      .fs-status-icon {
-        width: 44px;
-        height: 44px;
-        flex: 0 0 44px;
-        display: grid;
-        place-items: center;
-        color: #e6e6e6;
-        border: 1px solid rgba(255,255,255,.23);
-        clip-path: polygon(50% 0, 91% 22%, 91% 78%, 50% 100%, 9% 78%, 9% 22%);
-        background: linear-gradient(145deg,#1b1f24,#07090c 72%,#1a1d22);
-        box-shadow: inset 0 1px rgba(255,255,255,.10), 0 0 0 1px rgba(255,77,0,.16);
-      }
-
-      .fs-status-item strong { display: block; font-size: 22px; line-height: 1; color: #ededed; }
-      .fs-status-item span { display: block; margin-top: 4px; font-size: 10px; text-transform: uppercase; font-weight: 900; }
-      .fs-status-item small { display: block; margin-top: 3px; color: #bfc1c4; font-size: 10px; }
 
       .fs-section { margin-top: 16px; }
-      .fs-section-heading { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 9px; padding-bottom: 7px; border-bottom: 1px solid rgba(214,219,225,.22); }
-      .fs-section-heading h2 { margin: 0; color: #f2f3f5; text-transform: uppercase; font-size: 19px; letter-spacing: .6px; text-shadow: 0 1px rgba(255,255,255,.18); }
-      .fs-section-heading span { color: var(--fs-orange); text-transform: uppercase; font-size: 10px; letter-spacing: 1.4px; font-weight: 800; }
+      .fs-section-heading {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 9px;
+        padding-bottom: 7px;
+        border-bottom: 1px solid rgba(28,34,40,.24);
+      }
+      .fs-section-heading h2 {
+        margin: 0;
+        color: #171b20;
+        text-transform: uppercase;
+        font-size: 19px;
+        letter-spacing: .6px;
+        text-shadow: 0 1px rgba(255,255,255,.75);
+      }
+      .fs-section-heading span {
+        color: var(--fs-orange);
+        text-transform: uppercase;
+        font-size: 10px;
+        letter-spacing: 1.4px;
+        font-weight: 900;
+      }
 
       .fs-quick-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
       .fs-quick-action {
-        min-height: 44px;
+        min-height: 46px;
         padding: 0 15px;
-        border: 1px solid rgba(220,224,230,.42);
-        background: linear-gradient(180deg,#252a31,#0d1014 70%,#1c2026);
-        color: #eee;
+        border: 1px solid rgba(72,78,85,.78);
+        background: linear-gradient(180deg,#262c33,#0b0e12 72%,#1a1f25);
+        color: #f4f4f4;
         display: flex;
         align-items: center;
         gap: 11px;
         cursor: pointer;
-        box-shadow: inset 0 1px rgba(255,255,255,.14), inset 0 -1px rgba(0,0,0,.72), 0 6px 12px rgba(0,0,0,.28);
+        box-shadow: inset 0 1px rgba(255,255,255,.12), 0 6px 12px rgba(0,0,0,.18);
         transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
       }
-      .fs-quick-action:hover { border-color: var(--fs-orange); transform: translateY(-2px); box-shadow: 0 0 14px rgba(255,77,0,.10); }
+      .fs-quick-action:hover { border-color: var(--fs-orange); transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(255,77,0,.08), 0 10px 18px rgba(0,0,0,.20); }
       .fs-quick-action svg { color: #d9d9d9; }
       .fs-quick-action span { min-width: 0; font-size: 12px; font-weight: 750; }
       .fs-quick-chevron { margin-left: auto; color: var(--fs-orange) !important; }
 
-      .fs-primary-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 8px; }
-      .fs-card-grid { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 8px; }
+      .fs-primary-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+      .fs-card-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; }
 
       .fs-module-card {
         position: relative;
         min-width: 0;
-        min-height: 126px;
-        border: 1px solid rgba(226,230,235,.62);
+        min-height: 132px;
+        border: 1px solid rgba(81,88,96,.95);
         background:
-          linear-gradient(120deg, rgba(255,255,255,.14), transparent 22%),
-          linear-gradient(180deg,#59616a,#30363c 64%,#464d55);
-        box-shadow: inset 0 1px rgba(255,255,255,.24), inset 0 -1px rgba(0,0,0,.85), inset 1px 0 rgba(255,255,255,.10), 0 10px 18px rgba(0,0,0,.34);
+          linear-gradient(120deg, rgba(255,255,255,.07), transparent 22%),
+          linear-gradient(180deg,#2c333a,#11161b 66%,#22282e);
+        box-shadow: inset 0 1px rgba(255,255,255,.12), inset 0 -1px rgba(0,0,0,.85), 0 8px 16px rgba(33,38,43,.22);
         transition: transform 170ms ease, border-color 170ms ease, box-shadow 170ms ease;
       }
       .fs-module-card::before,
@@ -928,16 +829,16 @@ function GlobalStyles() {
         height: 18px;
         pointer-events: none;
       }
-      .fs-module-card::before { left: -1px; top: -1px; border-left: 2px solid #d8dde3; border-top: 2px solid #d8dde3; }
-      .fs-module-card::after { right: -1px; bottom: -1px; border-right: 2px solid #d8dde3; border-bottom: 2px solid #d8dde3; }
-      .fs-module-card:hover { transform: translateY(-3px); border-color: rgba(255,90,10,.72); box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 0 16px rgba(255,77,0,.10), 0 15px 25px rgba(0,0,0,.48); }
-      .fs-module-card-compact { min-height: 120px; }
+      .fs-module-card::before { left: -1px; top: -1px; border-left: 2px solid #b7bec6; border-top: 2px solid #b7bec6; }
+      .fs-module-card::after { right: -1px; bottom: -1px; border-right: 2px solid #b7bec6; border-bottom: 2px solid #b7bec6; }
+      .fs-module-card:hover { transform: translateY(-3px); border-color: rgba(255,90,10,.82); box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 0 16px rgba(255,77,0,.10), 0 14px 24px rgba(30,34,39,.28); }
+      .fs-module-card-compact { min-height: 126px; }
 
       .fs-module-click {
         width: 100%;
         height: 100%;
         min-height: inherit;
-        padding: 9px 9px 8px;
+        padding: 10px 10px 9px;
         border: 0;
         background: transparent;
         color: inherit;
@@ -954,25 +855,24 @@ function GlobalStyles() {
         left: 30%;
         right: 30%;
         height: 8px;
-        background: radial-gradient(circle,rgba(240,243,247,.95),rgba(188,195,204,.30) 40%,transparent 75%);
+        background: radial-gradient(circle,rgba(240,243,247,.9),rgba(188,195,204,.25) 40%,transparent 75%);
         filter: blur(1.5px);
-        opacity: .52;
+        opacity: .42;
       }
 
       .fs-silver-icon {
-        width: 38px;
-        height: 38px;
+        width: 40px;
+        height: 40px;
         display: grid;
         place-items: center;
         margin-bottom: 5px;
-        color: #e7e7e7;
+        color: #eceff1;
         clip-path: polygon(50% 0, 89% 21%, 89% 79%, 50% 100%, 11% 79%, 11% 21%);
         border: 1px solid rgba(235,238,242,.42);
         background:
           linear-gradient(145deg, rgba(255,255,255,.34), transparent 30%),
           linear-gradient(160deg,#8d949d 0%,#3b4149 32%,#0c0f13 68%,#4d545d 100%);
-        box-shadow: inset 0 1px rgba(255,255,255,.28), inset 0 -1px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.08), 0 0 10px rgba(255,77,0,.05);
-        text-shadow: 0 2px 3px #000;
+        box-shadow: inset 0 1px rgba(255,255,255,.28), inset 0 -1px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.08);
       }
 
       .fs-module-card h3 {
@@ -980,7 +880,7 @@ function GlobalStyles() {
         min-height: 30px;
         display: grid;
         place-items: center;
-        color: #ededed;
+        color: #f1f3f4;
         font-size: 12px;
         line-height: 1.18;
         text-transform: uppercase;
@@ -988,18 +888,18 @@ function GlobalStyles() {
       }
 
       .fs-module-card p {
-        margin: 4px 0 6px;
-        color: #f0f1f2;
-        font-size: 8.5px;
-        line-height: 1.28;
+        margin: 4px 0 7px;
+        color: #d9dde1;
+        font-size: 8.8px;
+        line-height: 1.3;
         flex: 1;
       }
 
       .fs-card-open {
         width: 100%;
         min-height: 30px;
-        border: 1px solid rgba(220,224,230,.38);
-        background: linear-gradient(180deg,#252a31,#090c10 68%,#1b2026);
+        border: 1px solid rgba(220,224,230,.28);
+        background: linear-gradient(180deg,#20262c,#070a0d 68%,#171c21);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1013,11 +913,11 @@ function GlobalStyles() {
       .fs-module-card:hover .fs-card-open { border-color: rgba(255,77,0,.75); background: linear-gradient(180deg,#2b3037,#0d1014 68%,#20252b); }
 
       .fs-footer {
-        margin-top: 20px;
+        margin-top: 22px;
         padding: 12px;
         text-align: center;
-        border-top: 1px solid rgba(255,255,255,.11);
-        color: rgba(255,255,255,.42);
+        border-top: 1px solid rgba(31,37,43,.18);
+        color: rgba(31,37,43,.52);
         font-size: 9px;
         letter-spacing: 2px;
       }
@@ -1033,6 +933,7 @@ function GlobalStyles() {
         box-shadow: 0 18px 36px rgba(0,0,0,.55);
         padding: 28px 34px;
         text-align: center;
+        color: #f4f4f4;
       }
       .fs-access-card h1 { margin: 12px 0 4px; }
       .fs-access-card p { color: #c8c8c8; }
@@ -1052,9 +953,6 @@ function GlobalStyles() {
       @media (max-width: 1320px) {
         .fs-card-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
         .fs-primary-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
-        .fs-status-strip { grid-template-columns: repeat(3, minmax(0,1fr)); }
-        .fs-status-item:nth-child(3) { border-right: 0; }
-        .fs-status-item:nth-child(n+4) { border-top: 1px solid rgba(255,255,255,.10); }
       }
 
       @media (max-width: 980px) {
@@ -1069,11 +967,7 @@ function GlobalStyles() {
       @media (max-width: 720px) {
         :root { --fs-sidebar-width: 0px; }
         .fs-shell { margin-left: 0; }
-        .fs-sidebar {
-          width: 112px;
-          transform: translateX(-102%);
-          transition: transform 180ms ease;
-        }
+        .fs-sidebar { width: 112px; transform: translateX(-102%); transition: transform 180ms ease; }
         .fs-sidebar-open { transform: translateX(0); }
         .fs-mobile-menu-button {
           display: grid;
@@ -1089,14 +983,7 @@ function GlobalStyles() {
           color: #fff;
           cursor: pointer;
         }
-        .fs-mobile-overlay {
-          display: block;
-          position: fixed;
-          z-index: 30;
-          inset: 0;
-          border: 0;
-          background: rgba(0,0,0,.68);
-        }
+        .fs-mobile-overlay { display: block; position: fixed; z-index: 30; inset: 0; border: 0; background: rgba(0,0,0,.68); }
         .fs-logo-wrap { width: 92vw; height: 82px; }
         .fs-header-metal { height: 84px; }
         .fs-title-band { padding: 72px 12px 16px; }
@@ -1105,10 +992,6 @@ function GlobalStyles() {
         .fs-header-left { left: 64px; }
         .fs-header-right { right: 12px; }
         .fs-content { width: calc(100% - 20px); padding-top: 12px; }
-        .fs-status-strip { grid-template-columns: 1fr; }
-        .fs-status-item { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.10); min-height: 82px; }
-        .fs-status-item:nth-child(n+4) { border-top: 0; }
-        .fs-status-item:last-child { border-bottom: 0; }
         .fs-quick-grid, .fs-primary-grid, .fs-card-grid { grid-template-columns: 1fr; }
         .fs-module-card, .fs-module-card-compact { min-height: 138px; }
       }
