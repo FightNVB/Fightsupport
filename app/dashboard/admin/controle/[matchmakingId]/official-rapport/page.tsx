@@ -12,6 +12,7 @@ type Issue = {
   hoek: string;
   naam: string;
   va: string;
+  sportschool: string;
   code: string;
   label: string;
   detail: string;
@@ -147,6 +148,26 @@ function StatusCard({ label, value, ok, detail }: { label: string; value: string
   );
 }
 
+function LicensePanel({ issues }: { issues: Issue[] }) {
+  if (!issues.length) return null;
+  return (
+    <section className="report-section overflow-hidden rounded-lg border border-[#ff4d00] bg-[#151518]">
+      <div className="flex items-center justify-between bg-[#3a3f46] px-3 py-2 text-[12px] font-black uppercase tracking-[0.06em] text-white">
+        <span>Vechters zonder geldige licentie</span><span>{issues.length}</span>
+      </div>
+      {issues.map((issue) => (
+        <div key={issue.key} className="grid grid-cols-[58px_minmax(0,1fr)] gap-2 border-b border-zinc-700 px-3 py-2 text-[12px] last:border-0">
+          <b className="text-[#ff7a42]">P{issue.partij}</b>
+          <div className="min-w-0">
+            <b className="text-white">{issue.naam}</b>
+            {issue.sportschool && issue.sportschool !== "-" ? <div className="mt-0.5 text-zinc-400">{issue.sportschool}</div> : null}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function IssuePanel({ title, issues }: { title: string; issues: Issue[] }) {
   if (!issues.length) return null;
   return (
@@ -223,13 +244,17 @@ export default function AdminEindrapportPage() {
       const naam = side
         ? text(ctxRow?.[`${side}_naam_fp`] ?? ctxRow?.[`${side}_naam_mm`] ?? ctxRow?.[`${side}_naam`], va ? `VA ${va}` : "Onbekende vechter")
         : text(row?.fighter_name ?? row?.naam, va ? `VA ${va}` : "Partijcontrole");
+      const sportschool = side
+        ? text(ctxRow?.[`${side}_gym_mm`] ?? ctxRow?.[`${side}_gym_fp`] ?? ctxRow?.[`${side}_gym`] ?? ctxRow?.[`${side}_sportschool_mm`] ?? ctxRow?.[`${side}_sportschool`])
+        : "-";
       const code = String(row?.rule_code ?? row?.rule ?? "").toUpperCase();
       return {
         key: String(row?.id ?? `${pn}-${side}-${code}-${index}`),
-        partij: Number.isFinite(pn) && pn > 0 ? String(pn) : text(row?.toernooi_code, "-") ,
+        partij: Number.isFinite(pn) && pn > 0 ? String(pn) : text(row?.toernooi_code, "-"),
         hoek: side,
         naam,
         va,
+        sportschool,
         code,
         label: text(row?.rule ?? row?.rule_code, text(row?.resultaat)),
         detail: text(row?.boodschap ?? row?.message ?? row?.rule),
@@ -244,7 +269,6 @@ export default function AdminEindrapportPage() {
     const startverbod = issues.filter((x) => x.code.includes("STARTVERBOD"));
     const keurmerk = issues.filter((x) => x.code.includes("KEURMERK") || x.code.includes("SPORTSCHOOL_NIET_GEVONDEN"));
     const verboden = issues.filter((x) => x.resultaat === "VERBOD" && !x.code.includes("STARTVERBOD"));
-    const acties = issues.filter((x) => x.resultaat === "ACTIE");
     const afkeur = issues.filter((x) => x.resultaat === "AFKEUR");
     const dispIssues = issues.filter((x) => x.resultaat === "DISPENSATIE" || x.code.includes("DISPENSATIE"));
 
@@ -296,7 +320,6 @@ export default function AdminEindrapportPage() {
       startverbod,
       keurmerk,
       verboden,
-      acties,
       overige,
       afkeur,
       dispIssues,
@@ -387,13 +410,12 @@ export default function AdminEindrapportPage() {
           </div>
 
           <div className="mt-3 grid gap-3">
-            <IssuePanel title="Vechters zonder geldige licentie" issues={summary.license} />
+            <LicensePanel issues={summary.license} />
             <IssuePanel title="FightPassport ontbreekt / vechtergegevens controleren" issues={summary.fightpassport} />
             <IssuePanel title="Actieve startverboden" issues={summary.startverbod} />
             <IssuePanel title="Sportschool / keurmerk" issues={summary.keurmerk} />
             <IssuePanel title="Verboden partijen" issues={summary.verboden} />
             <IssuePanel title="Overige blokkerende controles" issues={summary.overige} />
-            <IssuePanel title="Aandachtspunten" issues={summary.acties} />
           </div>
 
           {summary.dispBlocking.length ? (
