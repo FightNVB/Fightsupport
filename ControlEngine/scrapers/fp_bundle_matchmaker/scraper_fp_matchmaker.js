@@ -1,12 +1,11 @@
-// Matchmaker eindcontrole: geen full/Total scrape meer.
+// Matchmaker lichte eindcontrole.
 //
-// De laatste matchmakercontrole heeft alleen actuele FightPassport-data nodig voor:
-// - licentie
+// De eindcontrole gebruikt dezelfde actuele FightPassport-checks als Officials:
+// - licentie Ja/Nee
 // - Fit to fight / startverbod
 // - huidige sportschool + keurmerk
 //
-// Die lichte scrape draait direct hierna via scraper_fp_matchmaker_school.js,
-// die dezelfde bewezen scraper-engine gebruikt als Officials. Deze entrypoint
-// blijft bewust bestaan zodat de bestaande eindcontrole-route niet breekt.
+// De eindcontrole-route geeft matchmaking_id, controle_run_id en alle VA-nummers
+// als argv mee. De verwerking na de scrape blijft in de gewone lib/control-keten.
 
-console.log("[fp-matchmaker] lichte eindcontrole: full/Total scrape overgeslagen; licentie/startverbod/keurmerk volgt in lichte pass.");
+await import("../fp_bundle_officials/scraper_fp_officials.js");
