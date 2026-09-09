@@ -5,7 +5,6 @@ import BuitenlandseUitslagenPanel from "./_components/BuitenlandseUitslagenPanel
 import AanmeldingZonderVa from "./_components/AanmeldingZonderVa";
 import AdminForeignResultsIndicators from "./_components/AdminForeignResultsIndicators";
 import AdminOfficialReportButton from "./_components/AdminOfficialReportButton";
-import BondteamOptionsSync from "./_components/BondteamOptionsSync";
 
 export const metadata: Metadata = { robots: NO_INDEX };
 
@@ -18,7 +17,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <AanmeldingZonderVa />
       <AdminForeignResultsIndicators />
       <AdminOfficialReportButton />
-      <BondteamOptionsSync />
     </>
   );
 }
