@@ -1,22 +1,21 @@
 // app/api/matchmaker/eindcontrole/start/route.ts
 //
-// BELANGRIJK:
-// - deze full scraper hangt ALLEEN aan de MATCHMAKER EINDCONTROLE;
-// - de controle bij inleveren/submit wordt hier NIET aangepast;
-// - official houdt zijn eigen kleine gameday-scraper.
+// Laatste matchmakercontrole:
+// - lichte FightPassport-check: licentie, startverbod en huidige sportschool/keurmerk
+// - daarna de gewone control build/enrich/rules-keten
+// - de DB-controle tijdens het bouwen van matchmaking blijft lib/matchmaker/* gebruiken
 
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import {
   buildControleBoutContext,
   buildToernooiContext,
-} from "@/lib/matchmaker/buildControleBoutContext";
-import { enrichEindcontroleBoutContext } from "@/lib/matchmaker/enrichEindcontroleBoutContext";
-import { rulesEngine } from "@/lib/matchmaker/rulesEngine";
+} from "@/lib/control/buildControleBoutContext";
+import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
+import { rulesEngine } from "@/lib/rulesEngine";
 import {
   assertCanAccessMatchmaking,
   requireUserWithRole,
@@ -32,26 +31,37 @@ const supabase = createClient(
 );
 
 const FINAL_RUN_TYPE = "matchmaker_eindcontrole";
-const PROCESS_COUNT = 3;
-const WORKERS_PER_PROCESS = 8;
-const FULL_SCRAPER = "scraper_fp_matchmaker.js";
-const SCHOOL_SCRAPER = "scraper_fp_matchmaker_school.js";
+const WORKERS = 10;
+const SCRAPER_FILE = "scraper_fp_matchmaker.js";
 
-function norm(v: unknown) {
-  return String(v ?? "").trim();
+type ReviewRow = {
+  partij_nr?: number | null;
+  bout_id?: string | null;
+  rule_code?: string | null;
+  hoek?: string | null;
+  toernooi_code?: string | null;
+  fighter_id?: string | null;
+  toernooi_va_nummer?: string | null;
+  review_status?: string | null;
+  review_note?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  aantekeningen?: string | null;
+};
+
+function norm(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-function toVaStrict(v: unknown): string | null {
-  const digits = String(v ?? "").replace(/\D/g, "");
+function toVaStrict(value: unknown): string | null {
+  const digits = String(value ?? "").replace(/\D/g, "");
   return /^\d{3,6}$/.test(digits) ? digits : null;
 }
 
 function pickVA(row: any, side: "rood" | "blauw") {
-  const candidates =
-    side === "rood"
-      ? [row?.rood_va, row?.va_rood, row?.rood_va_mm, row?.rood_va_nummer, row?.rood_fighter_id]
-      : [row?.blauw_va, row?.va_blauw, row?.blauw_va_mm, row?.blauw_va_nummer, row?.blauw_fighter_id];
-
+  const candidates = side === "rood"
+    ? [row?.rood_va, row?.va_rood, row?.rood_va_mm, row?.rood_va_nummer, row?.rood_fighter_id]
+    : [row?.blauw_va, row?.va_blauw, row?.blauw_va_mm, row?.blauw_va_nummer, row?.blauw_fighter_id];
   for (const value of candidates) {
     const va = toVaStrict(value);
     if (va) return va;
@@ -80,7 +90,6 @@ function resolveScriptPath(file: string) {
     path.join(root, "control-engine", "control-engine", "scrapers", "fp_bundle_matchmaker", file),
     path.join(root, "scrapers", "fp_bundle_matchmaker", file),
   ];
-
   const found = candidates.find((candidate) => fs.existsSync(candidate));
   if (!found) throw new Error(`Matchmaker scraper niet gevonden: ${file}\n- ${candidates.join("\n- ")}`);
   return found;
@@ -104,37 +113,27 @@ function runNodeScript(
 
     let stdout = "";
     let stderr = "";
-
     child.stdout?.on("data", (data) => {
       const text = data.toString();
       stdout += text;
       process.stdout.write(logPrefix ? `[${logPrefix}] ${text}` : text);
     });
-
     child.stderr?.on("data", (data) => {
       const text = data.toString();
       stderr += text;
       process.stderr.write(logPrefix ? `[${logPrefix}] ${text}` : text);
     });
-
-    child.on("error", (error) => reject(error));
+    child.on("error", reject);
     child.on("close", (code) => {
       const ms = Date.now() - startedAt;
       if (code === 0) return resolve({ stdout, stderr, ms });
-      reject(
-        new Error(
-          `Script failed: ${scriptPath} (exit code ${code})\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`,
-        ),
-      );
+      reject(new Error(`Script failed: ${scriptPath} (exit code ${code})\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`));
     });
   });
 }
 
 async function updateRun(controleRunId: string, patch: Record<string, unknown>) {
-  const { error } = await supabase
-    .from("controle_runs")
-    .update(patch)
-    .eq("id", controleRunId);
+  const { error } = await supabase.from("controle_runs").update(patch).eq("id", controleRunId);
   if (error) console.warn("[matchmaker-eindcontrole] run update mislukt", error);
 }
 
@@ -175,15 +174,15 @@ async function createFinalRun(args: {
     })
     .select("id")
     .single();
-
   if (error) throw error;
   if (!data?.id) throw new Error("Geen controle_run_id ontvangen.");
 
-  await supabase
+  const { error: latestError } = await supabase
     .from("controle_runs")
     .update({ is_latest: false })
     .eq("matchmaking_id", args.matchmakingId)
     .neq("id", data.id);
+  if (latestError) console.warn("[matchmaker-eindcontrole] is_latest update warning", latestError);
 
   return String(data.id);
 }
@@ -203,9 +202,7 @@ async function collectVaNumbers(matchmakingId: string) {
     ]);
 
   if (boutsError) throw boutsError;
-  if (tournamentError && String((tournamentError as any)?.code ?? "") !== "42P01") {
-    throw tournamentError;
-  }
+  if (tournamentError && String((tournamentError as any)?.code ?? "") !== "42P01") throw tournamentError;
 
   const vaSet = new Set<string>();
   for (const bout of bouts ?? []) {
@@ -214,104 +211,133 @@ async function collectVaNumbers(matchmakingId: string) {
     if (rood) vaSet.add(rood);
     if (blauw) vaSet.add(blauw);
   }
-
   for (const row of tournamentRows ?? []) {
     const va = toVaStrict((row as any)?.va_nummer) ?? toVaStrict((row as any)?.fighter_id);
     if (va) vaSet.add(va);
   }
-
   return { vaNumbers: [...vaSet], bouts: bouts ?? [] };
 }
 
-function uniqueBy<T>(arr: T[], getKey: (row: T) => string): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const row of arr) {
-    const key = getKey(row);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(row);
+async function cleanupPreviousContext(matchmakingId: string) {
+  for (const table of ["controle_bout_context", "controle_toernooi_context", "controle_uitslagen"] as const) {
+    const { error } = await supabase.from(table).delete().eq("matchmaking_id", matchmakingId);
+    if (error && String((error as any)?.code ?? "") !== "42P01") throw error;
   }
-  return out;
+  const { error: liveError } = await supabase
+    .from("controle_fighter_actueel")
+    .delete()
+    .eq("matchmaking_id", matchmakingId);
+  if (liveError && String((liveError as any)?.code ?? "") !== "42P01") throw liveError;
 }
 
-async function runFullMatchmakerScrape(args: {
+function normalizeReviewStatus(value: unknown): "approved" | "rejected" | null {
+  const status = norm(value).toLowerCase();
+  if (["approved", "approve", "goedgekeurd", "ok"].includes(status)) return "approved";
+  if (["rejected", "reject", "afgekeurd", "afkeur"].includes(status)) return "rejected";
+  return null;
+}
+
+function reviewKey(row: ReviewRow, includeBoutId: boolean) {
+  return [
+    String(row?.partij_nr ?? ""),
+    includeBoutId ? String(row?.bout_id ?? "") : "",
+    norm(row?.rule_code).toLowerCase(),
+    norm(row?.hoek).toLowerCase(),
+    norm(row?.toernooi_code).toUpperCase(),
+    String(row?.fighter_id ?? "").replace(/\D/g, ""),
+    String(row?.toernooi_va_nummer ?? "").replace(/\D/g, ""),
+  ].join("|");
+}
+
+async function loadPreviousReviewedResults(matchmakingId: string): Promise<ReviewRow[]> {
+  const { data, error } = await supabase
+    .from("controle_resultaten")
+    .select("partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,created_at")
+    .eq("matchmaking_id", matchmakingId)
+    .not("review_status", "is", null)
+    .order("reviewed_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).filter((row: any) => !!normalizeReviewStatus(row?.review_status));
+}
+
+async function carryForwardReviews(args: {
+  matchmakingId: string;
+  controleRunId: string;
+  previous: ReviewRow[];
+}) {
+  if (!args.previous.length) return 0;
+
+  const strictMap = new Map<string, ReviewRow>();
+  const fallbackMap = new Map<string, ReviewRow>();
+  for (const row of args.previous) {
+    const strict = reviewKey(row, true);
+    const fallback = reviewKey(row, false);
+    if (!strictMap.has(strict)) strictMap.set(strict, row);
+    if (!fallbackMap.has(fallback)) fallbackMap.set(fallback, row);
+  }
+
+  const { data: current, error } = await supabase
+    .from("controle_resultaten")
+    .select("id,partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer")
+    .eq("matchmaking_id", args.matchmakingId)
+    .eq("controle_run_id", args.controleRunId);
+  if (error) throw error;
+
+  let carried = 0;
+  for (const row of current ?? []) {
+    const previous = strictMap.get(reviewKey(row, true)) ?? fallbackMap.get(reviewKey(row, false));
+    if (!previous) continue;
+    const normalized = normalizeReviewStatus(previous.review_status);
+    if (!normalized) continue;
+
+    const patch: Record<string, any> = {
+      review_status: previous.review_status ?? null,
+      review_note: previous.review_note ?? null,
+      reviewed_by: previous.reviewed_by ?? null,
+      reviewed_at: previous.reviewed_at ?? null,
+      aantekeningen: previous.aantekeningen ?? null,
+      resultaat: normalized === "approved" ? "OK" : "AFKEUR",
+      actie_status: normalized === "approved" ? "goedgekeurd" : "afgekeurd",
+    };
+    const { error: updateError } = await supabase
+      .from("controle_resultaten")
+      .update(patch)
+      .eq("id", (row as any).id);
+    if (updateError) throw updateError;
+    carried += 1;
+  }
+  return carried;
+}
+
+async function deleteOldResultRows(matchmakingId: string, controleRunId: string) {
+  const { error } = await supabase
+    .from("controle_resultaten")
+    .delete()
+    .eq("matchmaking_id", matchmakingId)
+    .neq("controle_run_id", controleRunId);
+  if (error) throw error;
+}
+
+async function runLightScrape(args: {
   matchmakingId: string;
   controleRunId: string;
   vaNumbers: string[];
-  staggerMs: number;
-  tabAttempts: number;
-  softWaitMs: number;
-  betweenAttemptsMs: number;
   scrapeTimeoutMs: number;
 }) {
-  const scriptPath = resolveScriptPath(FULL_SCRAPER);
-  const chunks: string[][] = Array.from({ length: PROCESS_COUNT }, () => []);
-  args.vaNumbers.forEach((va, index) => chunks[index % PROCESS_COUNT].push(va));
-  const activeChunks = chunks.filter((chunk) => chunk.length > 0);
-  const batchId = `matchmaker-${args.matchmakingId}-${crypto.randomUUID()}`;
-
-  await Promise.all(
-    activeChunks.map((chunk, index) => {
-      const numeric = chunk.map(Number).filter(Number.isFinite);
-      const minVa = numeric.length ? Math.min(...numeric) : 1;
-      const maxVa = numeric.length ? Math.max(...numeric) : minVa;
-
-      return runNodeScript(
-        scriptPath,
-        ["1", "1"],
-        {
-          FP_TOTAL_VA_LIST: chunk.join(","),
-          FP_TOTAL_RUN_KIND: "retry",
-          FP_TOTAL_RESULTS: "true",
-          FP_TOTAL_WORKERS: String(WORKERS_PER_PROCESS),
-          WORKERS: String(WORKERS_PER_PROCESS),
-          FP_TOTAL_TIMEOUT_MS: String(args.scrapeTimeoutMs),
-          FP_TOTAL_LOGIN_RETRIES: "1",
-          FP_TOTAL_TRANSIENT_RETRIES: "1",
-          FP_SKIP_RUN_TERMINATOR: "true",
-          FP_TOTAL_BATCH_ID: batchId,
-          FP_TOTAL_BATCH_PART: String(index + 1),
-          FP_TOTAL_BATCH_PARTS: String(activeChunks.length),
-          FP_TOTAL_BATCH_START_VA: String(minVa),
-          FP_TOTAL_BATCH_END_VA: String(maxVa),
-          STAGGER_MS: String(args.staggerMs),
-          TAB_ATTEMPTS: String(args.tabAttempts),
-          SOFT_WAIT_MS: String(args.softWaitMs),
-          BETWEEN_ATTEMPTS_MS: String(args.betweenAttemptsMs),
-          HEADLESS: process.env.HEADLESS ?? "false",
-          PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
-        },
-        `fp_matchmaker_full_${index + 1}`,
-      );
-    }),
-  );
-
-  return { batchId, processes: activeChunks.length };
-}
-
-async function runSportschoolEvidencePass(args: {
-  matchmakingId: string;
-  controleRunId: string;
-  vaNumbers: string[];
-  scrapeTimeoutMs: number;
-}) {
-  // Dit is GEEN tweede rules/control-flow. Deze pass leest alleen de actuele
-  // SPORTSCHOLEN-tegel (plus de bestaande kleine profielvelden) zodat enrich
-  // de actuele FP-sportschool als aanwijzing kan gebruiken.
-  const scriptPath = resolveScriptPath(SCHOOL_SCRAPER);
-  await runNodeScript(
+  const scriptPath = resolveScriptPath(SCRAPER_FILE);
+  return runNodeScript(
     scriptPath,
     [args.matchmakingId, args.controleRunId, ...args.vaNumbers],
     {
-      FP_OFFICIALS_WORKERS: String(WORKERS_PER_PROCESS),
-      WORKERS: String(WORKERS_PER_PROCESS),
+      FP_OFFICIALS_WORKERS: String(WORKERS),
+      WORKERS: String(WORKERS),
       FP_OFFICIALS_TIMEOUT_MS: String(args.scrapeTimeoutMs),
-      FP_OFFICIALS_ALLOW_INCOMPLETE_EXIT: "1",
+      FP_OFFICIALS_ALLOW_INCOMPLETE_EXIT: "0",
       HEADLESS: process.env.HEADLESS ?? "false",
       PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
     },
-    "fp_matchmaker_sportschool",
+    "fp_matchmaker_light",
   );
 }
 
@@ -320,82 +346,64 @@ async function finalizeInBackground(args: {
   controleRunId: string;
   vaNumbers: string[];
   boutCount: number;
-  staggerMs: number;
-  tabAttempts: number;
-  softWaitMs: number;
-  betweenAttemptsMs: number;
   scrapeTimeoutMs: number;
+  previousReviews: ReviewRow[];
 }) {
   try {
     await updateRun(args.controleRunId, {
       progress: 8,
-      current_step: `Volledige FightPassport-scrape draait (${args.vaNumbers.length} vechters, 3 x 8 workers)...`,
+      current_step: `Licentie, startverbod en keurmerk controleren (${args.vaNumbers.length} vechters)...`,
     });
 
-    const full = await runFullMatchmakerScrape(args);
+    const scrape = await runLightScrape(args);
 
     await updateRun(args.controleRunId, {
-      progress: 58,
+      progress: 55,
       verwerkt_aantal: args.vaNumbers.length,
-      current_step: "Actuele SPORTSCHOLEN-tegel uitlezen als extra bewijs...",
-    });
-
-    await runSportschoolEvidencePass(args);
-
-    await updateRun(args.controleRunId, {
-      progress: 68,
-      current_step: "Matchmaker partij-context opnieuw opbouwen...",
+      current_step: "Control partij-context opnieuw opbouwen...",
     });
     await buildControleBoutContext(args.matchmakingId, args.controleRunId);
 
     await updateRun(args.controleRunId, {
-      progress: 74,
-      current_step: "Matchmaker toernooi-context opnieuw opbouwen...",
+      progress: 65,
+      current_step: "Control toernooi-context opnieuw opbouwen...",
     });
     const toernooiRows = await buildToernooiContext(args.matchmakingId, args.controleRunId);
 
     await updateRun(args.controleRunId, {
-      progress: 80,
-      current_step: "Sportschool aanwijzingen combineren en keurmerk op MM-sportschool controleren...",
+      progress: 75,
+      current_step: "Control context verrijken met actuele FightPassport-data...",
     });
-    await enrichEindcontroleBoutContext(args.matchmakingId, args.controleRunId);
+    await enrichControleBoutContext(args.matchmakingId, args.controleRunId);
 
-    const { data: rawCtxRows, error: ctxError } = await supabase
+    const { data: ctxRows, error: ctxError } = await supabase
       .from("controle_bout_context")
       .select("*")
       .eq("matchmaking_id", args.matchmakingId)
-      .order("partij_nr", { ascending: true })
-      .order("created_at", { ascending: false });
-
+      .eq("controle_run_id", args.controleRunId)
+      .order("partij_nr", { ascending: true });
     if (ctxError) throw ctxError;
-
-    const currentRows = (rawCtxRows ?? []).filter(
-      (row: any) => norm(row?.controle_run_id) === args.controleRunId,
-    );
-    const ctxRows = currentRows.length
-      ? currentRows
-      : uniqueBy(rawCtxRows ?? [], (row: any) =>
-          norm(
-            row?.bout_id ??
-              row?.bout_uid ??
-              `${row?.partij_nr ?? ""}-${row?.rood_va_mm ?? ""}-${row?.blauw_va_mm ?? ""}`,
-          ),
-        );
-
-    if (args.boutCount > 0 && !ctxRows.length) {
-      throw new Error("Na build/enrich is geen controle_bout_context gevonden.");
+    if (args.boutCount > 0 && !(ctxRows ?? []).length) {
+      throw new Error("Na control build/enrich is geen controle_bout_context gevonden.");
     }
 
     await updateRun(args.controleRunId, {
-      progress: 90,
-      current_step: "Matchmaker RulesEngine draait op de verse full scrape...",
+      progress: 88,
+      current_step: "Control RulesEngine draait...",
     });
-
     const hits = await rulesEngine({
       matchmaking_id: args.matchmakingId,
       controle_run_id: args.controleRunId,
-      ctxRows: ctxRows as any[],
+      ctxRows: (ctxRows ?? []) as any[],
     });
+
+    const carried = await carryForwardReviews({
+      matchmakingId: args.matchmakingId,
+      controleRunId: args.controleRunId,
+      previous: args.previousReviews,
+    });
+
+    await deleteOldResultRows(args.matchmakingId, args.controleRunId);
 
     await updateRun(args.controleRunId, {
       status: "klaar",
@@ -412,11 +420,11 @@ async function finalizeInBackground(args: {
       matchmakingId: args.matchmakingId,
       controleRunId: args.controleRunId,
       vaCount: args.vaNumbers.length,
-      batchId: full.batchId,
-      processes: full.processes,
-      ctxRows: ctxRows.length,
+      scrapeMs: scrape.ms,
+      ctxRows: (ctxRows ?? []).length,
       toernooiRows: Array.isArray(toernooiRows) ? toernooiRows.length : 0,
       hits: Array.isArray(hits) ? hits.length : 0,
+      carriedReviews: carried,
     });
   } catch (error: any) {
     console.error("[matchmaker-eindcontrole] mislukt", error);
@@ -445,7 +453,7 @@ export async function POST(req: Request) {
     await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId, role });
 
     await abortOlderFinalRuns(matchmakingId);
-
+    const previousReviews = await loadPreviousReviewedResults(matchmakingId);
     const { vaNumbers, bouts } = await collectVaNumbers(matchmakingId);
     if (!vaNumbers.length) {
       return NextResponse.json(
@@ -461,24 +469,17 @@ export async function POST(req: Request) {
       total: vaNumbers.length,
     });
 
-    const staggerMs = clampInt(body?.stagger_ms ?? 450, 450, 0, 5000);
-    const tabAttempts = clampInt(body?.tab_attempts ?? 5, 5, 1, 30);
-    const softWaitMs = clampInt(body?.soft_wait_ms ?? 200, 200, 0, 5000);
-    const betweenAttemptsMs = clampInt(body?.between_attempts_ms ?? 350, 350, 0, 5000);
+    await cleanupPreviousContext(matchmakingId);
+
     const scrapeTimeoutMs = clampInt(body?.scrape_timeout_ms ?? 120000, 120000, 30000, 300000);
 
-    // Zelf-gehoste Next/PM2: de full scrape + sportschoolpass + build/enrich/rules
-    // mogen na de 202-response doorlopen. Dit raakt UITSLUITEND de eindcontrole.
     void finalizeInBackground({
       matchmakingId,
       controleRunId,
       vaNumbers,
       boutCount: bouts.length,
-      staggerMs,
-      tabAttempts,
-      softWaitMs,
-      betweenAttemptsMs,
       scrapeTimeoutMs,
+      previousReviews,
     });
 
     return NextResponse.json(
@@ -489,7 +490,8 @@ export async function POST(req: Request) {
         controle_run_id: controleRunId,
         va_count: vaNumbers.length,
         status: "running",
-        scraper: "matchmaker_full",
+        scraper: "matchmaker_light",
+        pipeline: "control",
         scope: "eindcontrole_only",
       },
       { status: 202 },
@@ -508,7 +510,6 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const matchmakingId = norm(url.searchParams.get("matchmaking_id"));
     const controleRunId = norm(url.searchParams.get("controle_run_id"));
-
     if (!matchmakingId && !controleRunId) {
       return NextResponse.json(
         { error: "matchmaking_id of controle_run_id ontbreekt" },
@@ -517,9 +518,7 @@ export async function GET(req: Request) {
     }
 
     const { userId, role } = await requireUserWithRole(req);
-    if (!isRoleAllowed(role)) {
-      return NextResponse.json({ error: "Geen toegang" }, { status: 403 });
-    }
+    if (!isRoleAllowed(role)) return NextResponse.json({ error: "Geen toegang" }, { status: 403 });
     if (matchmakingId) {
       await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId, role });
     }
@@ -528,7 +527,6 @@ export async function GET(req: Request) {
       .from("controle_runs")
       .select("id,matchmaking_id,status,gestart_op,afgerond_op,run_type,progress,current_step,totaal_aantal,verwerkt_aantal,foutmelding")
       .eq("run_type", FINAL_RUN_TYPE);
-
     if (controleRunId) query = query.eq("id", controleRunId);
     if (matchmakingId) query = query.eq("matchmaking_id", matchmakingId);
 
@@ -536,7 +534,6 @@ export async function GET(req: Request) {
       .order("gestart_op", { ascending: false, nullsFirst: false })
       .limit(1)
       .maybeSingle();
-
     if (error) throw error;
     return NextResponse.json({ ok: true, run: data ?? null });
   } catch (error: any) {
