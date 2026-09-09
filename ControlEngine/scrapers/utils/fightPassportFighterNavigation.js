@@ -95,6 +95,8 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
   const betweenAttemptsMs = opts.betweenAttemptsMs ?? 1200;
   const requestedVa = String(va);
   const verifyWindowMs = Math.max(15000, softWaitMs * 8);
+  const freshRetryOnLogin = opts.freshRetryOnLogin === true;
+  const onLoginPage = typeof opts.onLoginPage === "function" ? opts.onLoginPage : null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const page = context ? await context.newPage() : await browser.newPage();
@@ -107,10 +109,15 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
       forced = await forceExactFighterUrl(page, va, 30000);
     } catch (error) {
       if (error?.message === "LOGIN_PAGE") {
-        // Deze workerpage is lokaal in deze helper aangemaakt.
-        // Direct sluiten vóór LOGIN_PAGE naar de caller gaat, anders heeft
-        // de caller nog page=null en blijft de login-tab zichtbaar hangen.
         await hardCloseFightPassportPage(page).catch(() => {});
+        if (freshRetryOnLogin) {
+          await onLoginPage?.({ va: requestedVa, attempt }).catch(() => {});
+          if (attempt < maxAttempts) {
+            await sleep(50);
+            continue;
+          }
+          return null;
+        }
         throw error;
       }
       forced = false;
@@ -123,9 +130,15 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
 
     await sleep(softWaitMs);
     const startedAt = Date.now();
+    let retryFresh = false;
     while (Date.now() - startedAt < verifyWindowMs) {
       if (await isFightPassportLoginPage(page)) {
         await hardCloseFightPassportPage(page);
+        if (freshRetryOnLogin) {
+          await onLoginPage?.({ va: requestedVa, attempt }).catch(() => {});
+          retryFresh = true;
+          break;
+        }
         throw new Error("LOGIN_PAGE");
       }
       const info = await readFighterHeader(page);
@@ -136,6 +149,15 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
       }
       await sleep(250);
     }
+
+    if (retryFresh) {
+      if (attempt < maxAttempts) {
+        await sleep(50);
+        continue;
+      }
+      return null;
+    }
+
     await hardCloseFightPassportPage(page);
     await sleep(betweenAttemptsMs);
   }
