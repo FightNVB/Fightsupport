@@ -59,11 +59,15 @@ export async function POST(req: NextRequest) {
           locatie,
           bondteam,
           matchmaker_id,
+          maker_type,
+          maker_user_id,
           bron_type,
           stadium,
           huidige_eigenaar_type,
           huidige_eigenaar_user_id,
-          huidige_eigenaar_bondteam
+          huidige_eigenaar_bondteam,
+          vorige_eigenaar_type,
+          vorige_eigenaar_user_id
         `
       )
       .eq("id", matchmakingId)
@@ -77,11 +81,25 @@ export async function POST(req: NextRequest) {
       return jsonError("Matchmaking niet gevonden.", 404);
     }
 
-    const targetMatchmakerId = s((mm as any)?.matchmaker_id);
+    const makerType = s((mm as any)?.maker_type).toLowerCase();
+    const currentOwnerType = s((mm as any)?.huidige_eigenaar_type).toLowerCase();
+    const previousOwnerType = s((mm as any)?.vorige_eigenaar_type).toLowerCase();
+
+    const targetMatchmakerId =
+      s((mm as any)?.matchmaker_id) ||
+      (["matchmaker", "matchmaker_upload"].includes(makerType)
+        ? s((mm as any)?.maker_user_id)
+        : "") ||
+      (["matchmaker", "matchmaker_upload"].includes(previousOwnerType)
+        ? s((mm as any)?.vorige_eigenaar_user_id)
+        : "") ||
+      (["matchmaker", "matchmaker_upload"].includes(currentOwnerType)
+        ? s((mm as any)?.huidige_eigenaar_user_id)
+        : "");
 
     if (!targetMatchmakerId) {
       return jsonError(
-        "Geen matchmaker_id gevonden; kan niet terugsturen naar matchmaker.",
+        "Geen matchmaker in de matchmaking-keten gevonden; kan niet terugsturen naar matchmaker.",
         400,
         { matchmaking_id: matchmakingId }
       );
@@ -94,7 +112,7 @@ export async function POST(req: NextRequest) {
       naam: (mm as any)?.naam ?? null,
       datum: (mm as any)?.datum ?? null,
       locatie: (mm as any)?.locatie ?? null,
-      matchmakerId: (mm as any)?.matchmaker_id ?? null,
+      matchmakerId: targetMatchmakerId,
       bronType:
         (mm as any)?.bron_type ??
         (role === "admin" || role === "superadmin"
@@ -113,7 +131,7 @@ export async function POST(req: NextRequest) {
       ) as any,
       ownerUserId:
         (mm as any)?.huidige_eigenaar_type === "matchmaker"
-          ? (mm as any)?.huidige_eigenaar_user_id
+          ? targetMatchmakerId
           : null,
       ownerBondteam:
         (mm as any)?.huidige_eigenaar_bondteam ??
@@ -122,8 +140,9 @@ export async function POST(req: NextRequest) {
       actorUserId: userId,
       actorRole: role,
       metadata: {
-        route: "api/matchmaker/return-to-matchmaker/route",
+        route: "api/admin/controle/return-to-matchmaker/route",
         ensured: true,
+        recovered_matchmaker_id: targetMatchmakerId,
       },
     });
 
@@ -136,7 +155,7 @@ export async function POST(req: NextRequest) {
       actorRole: role,
       opmerking: reason,
       metadata: {
-        route: "api/matchmaker/return-to-matchmaker/route",
+        route: "api/admin/controle/return-to-matchmaker/route",
         target_matchmaker_id: targetMatchmakerId,
       },
     });
@@ -144,6 +163,7 @@ export async function POST(req: NextRequest) {
     const { error: mmUpdateErr } = await supabaseAdmin
       .from("matchmakings")
       .update({
+        matchmaker_id: targetMatchmakerId,
         stadium: "concept_matchmaking",
         status: "retour_naar_matchmaker",
         huidige_eigenaar_type: "matchmaker",
@@ -192,8 +212,7 @@ export async function POST(req: NextRequest) {
       matchmaking_id: matchmakingId,
       matchmaker_id: targetMatchmakerId,
       lifecycle: moved,
-      message:
-        "Matchmaking is teruggestuurd naar matchmaker.",
+      message: "Matchmaking is teruggestuurd naar matchmaker.",
     });
   } catch (err: any) {
     return jsonError(err?.message ?? "Onbekende fout.", 500);
