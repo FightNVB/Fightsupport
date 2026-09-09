@@ -4,7 +4,7 @@
 // - eigen full scraper: fp_bundle_admin/scraper_fp_admin.js
 // - scope: uitsluitend VA's uit deze matchmaking
 // - 3 processen x 8 workers
-// - daarna verse SPORTSCHOLEN-tegel als extra bewijs voor enrich
+// - SPORTSCHOLEN-tegel wordt per VA in dezelfde full-scrape uitgelezen
 // - rulesEngine bouwt de actuele meldingen volledig opnieuw op
 // - eerdere handmatige reviews worden alleen teruggezet als dezelfde regel
 //   in de nieuwe run opnieuw bestaat
@@ -35,7 +35,6 @@ const supabase = createClient(
 );
 
 const FULL_SCRAPER_FILE = "scraper_fp_admin.js";
-const SCHOOL_SCRAPER_FILE = "scraper_fp_admin_school.js";
 const PROCESS_COUNT = 3;
 const WORKERS_PER_PROCESS = 8;
 
@@ -344,6 +343,7 @@ async function deleteOldResultRows(matchmaking_id: string, controle_run_id: stri
 
 async function runAdminFullScrape(args: {
   matchmaking_id: string;
+  controle_run_id: string;
   vaNummers: string[];
   staggerMs: number;
   tabAttempts: number;
@@ -381,6 +381,8 @@ async function runAdminFullScrape(args: {
           FP_TOTAL_BATCH_PARTS: String(activeChunks.length),
           FP_TOTAL_BATCH_START_VA: String(minVa),
           FP_TOTAL_BATCH_END_VA: String(maxVa),
+          FP_ADMIN_MATCHMAKING_ID: args.matchmaking_id,
+          FP_ADMIN_CONTROLE_RUN_ID: args.controle_run_id,
           STAGGER_MS: String(args.staggerMs),
           TAB_ATTEMPTS: String(args.tabAttempts),
           SOFT_WAIT_MS: String(args.softWaitMs),
@@ -398,28 +400,6 @@ async function runAdminFullScrape(args: {
     processes: activeChunks.length,
     maxMs: scrapeResults.length ? Math.max(...scrapeResults.map((r) => r.ms)) : 0,
   };
-}
-
-async function runAdminSportschoolPass(args: {
-  matchmaking_id: string;
-  controle_run_id: string;
-  vaNummers: string[];
-  scrapeTimeoutMs: number;
-}) {
-  const schoolPath = resolveScriptPath(SCHOOL_SCRAPER_FILE);
-  await runNodeScript(
-    schoolPath,
-    [args.matchmaking_id, args.controle_run_id, ...args.vaNummers],
-    {
-      FP_OFFICIALS_WORKERS: String(WORKERS_PER_PROCESS),
-      WORKERS: String(WORKERS_PER_PROCESS),
-      FP_OFFICIALS_TIMEOUT_MS: String(args.scrapeTimeoutMs),
-      FP_OFFICIALS_ALLOW_INCOMPLETE_EXIT: "1",
-      HEADLESS: process.env.HEADLESS ?? "false",
-      PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
-    },
-    "fp_admin_sportschool",
-  );
 }
 
 export async function POST(req: Request) {
@@ -484,8 +464,13 @@ export async function POST(req: Request) {
       current_step: `Volledige admin FightPassport-scrape: ${vaNummers.length} vechters (3 x 8 workers)...`,
     });
 
+    // De full scraper schrijft per VA ook direct de actuele SPORTSCHOLEN/keurmerk-data.
+    // Ruim daarom de vorige live rows op vóór deze ene scrape begint.
+    await cleanupStaleLiveRows(matchmaking_id);
+
     const full = await runAdminFullScrape({
       matchmaking_id,
+      controle_run_id,
       vaNummers,
       staggerMs,
       tabAttempts,
@@ -496,20 +481,6 @@ export async function POST(req: Request) {
 
     await updateRunProgress(controle_run_id, {
       verwerkt_aantal: vaNummers.length,
-      progress: 62,
-      current_step: "Actuele SPORTSCHOLEN-tegel uitlezen als extra bewijs...",
-    });
-
-    // Alleen stale live rows verwijderen VOORDAT de nieuwe sportschoolpass draait.
-    await cleanupStaleLiveRows(matchmaking_id);
-    await runAdminSportschoolPass({
-      matchmaking_id,
-      controle_run_id,
-      vaNummers,
-      scrapeTimeoutMs,
-    });
-
-    await updateRunProgress(controle_run_id, {
       progress: 74,
       current_step: "Verse data verwerken: context + sportschoolherkenning...",
     });
@@ -569,7 +540,6 @@ export async function POST(req: Request) {
       source: "admin_total_matchmaking",
       scraper: {
         file: FULL_SCRAPER_FILE,
-        school_file: SCHOOL_SCRAPER_FILE,
         scope: "matchmaking_va_list_only",
         va_count: vaNummers.length,
         processes: full.processes,
