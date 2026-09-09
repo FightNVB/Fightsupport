@@ -5,6 +5,15 @@ const nextConfig = {
   // Disable the X-Powered-By header to avoid leaking framework info
   poweredByHeader: false,
 
+  async rewrites() {
+    return [
+      {
+        source: "/api/matchmaker/eindcontrole/start",
+        destination: "/api/control-engine/matchmaker/start",
+      },
+    ];
+  },
+
   async headers() {
     return [
       {
@@ -92,4 +101,3 @@ const nextConfig = {
 };
 
 export default nextConfig;
-
