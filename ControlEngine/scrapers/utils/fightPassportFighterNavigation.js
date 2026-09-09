@@ -95,7 +95,9 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
   const betweenAttemptsMs = opts.betweenAttemptsMs ?? 1200;
   const requestedVa = String(va);
   const verifyWindowMs = Math.max(15000, softWaitMs * 8);
-  const freshRetryOnLogin = opts.freshRetryOnLogin === true;
+  const freshRetryOnLogin =
+    opts.freshRetryOnLogin === true ||
+    !!String(process.env.FP_ADMIN_MATCHMAKING_ID || "").trim();
   const onLoginPage = typeof opts.onLoginPage === "function" ? opts.onLoginPage : null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -111,12 +113,12 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
       if (error?.message === "LOGIN_PAGE") {
         await hardCloseFightPassportPage(page).catch(() => {});
         if (freshRetryOnLogin) {
+          console.log(`[fighter-nav] 🔐 VA ${requestedVa}: loginpagina direct gesloten; verse harde VA-tab poging ${attempt}/${maxAttempts}`);
           await onLoginPage?.({ va: requestedVa, attempt }).catch(() => {});
           if (attempt < maxAttempts) {
             await sleep(50);
             continue;
           }
-          return null;
         }
         throw error;
       }
@@ -135,6 +137,7 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
       if (await isFightPassportLoginPage(page)) {
         await hardCloseFightPassportPage(page);
         if (freshRetryOnLogin) {
+          console.log(`[fighter-nav] 🔐 VA ${requestedVa}: loginpagina tijdens verificatie direct gesloten; verse harde VA-tab`);
           await onLoginPage?.({ va: requestedVa, attempt }).catch(() => {});
           retryFresh = true;
           break;
@@ -155,7 +158,7 @@ export async function openFighterPageVerified(browser, context, cookies, va, opt
         await sleep(50);
         continue;
       }
-      return null;
+      throw new Error("LOGIN_PAGE");
     }
 
     await hardCloseFightPassportPage(page);
