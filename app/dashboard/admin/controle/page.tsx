@@ -336,9 +336,6 @@ export default function ControleOverzichtPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
-  const [sportsBusy, setSportsBusy] = useState(false);
-  const [sportsMsg, setSportsMsg] = useState<string>("");
-
   const [editId, setEditId] = useState<string | null>(null);
   const [editNaam, setEditNaam] = useState("");
   const [editLocatie, setEditLocatie] = useState("");
@@ -529,7 +526,6 @@ export default function ControleOverzichtPage() {
 
   async function load() {
     setLoading(true);
-    setSportsMsg("");
 
     try {
       const res = await authedFetch("/api/admin/beheer/matchmakings-overzicht", {
@@ -686,48 +682,6 @@ export default function ControleOverzichtPage() {
       setRows([]);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function runSportscholen() {
-    try {
-      setSportsMsg("");
-      setSportsBusy(true);
-
-      openScrapeOverlay({
-        title: "Sportscholen sync",
-        message: "Sportscholen worden opgehaald uit FightPassport...",
-        sub: "Laat dit venster open. Als FightPassport een unlockcode vraagt, verschijnt hier een knop.",
-      });
-
-      const res = await authedFetch("/api/control-engine/sportscholen", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (!res.ok) {
-        const t = await res.text();
-        console.error("Sportscholen run failed:", res.status, t);
-
-        const session = await checkFightPassportSession();
-        if (isFightPassportUnlockStatus(session?.status)) {
-          return;
-        }
-
-        closeScrapeOverlay();
-        setSportsMsg(`❌ Sportscholen sync mislukt (${res.status}).`);
-        return;
-      }
-
-      setSportsMsg("✅ Sportscholen sync gestart/afgerond.");
-      await load();
-      closeScrapeOverlay();
-    } catch (e) {
-      console.error(e);
-      closeScrapeOverlay();
-      setSportsMsg("❌ Onverwachte fout bij sportscholen sync.");
-    } finally {
-      setSportsBusy(false);
     }
   }
 
@@ -1204,32 +1158,7 @@ export default function ControleOverzichtPage() {
                   </div>
                 </div>
 
-                <div className="flex min-w-[240px] flex-col items-end gap-2 justify-self-end">
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      onClick={runSportscholen}
-                      disabled={sportsBusy}
-                      className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-2 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black disabled:opacity-60"
-                      title="Update sportscholen tabel (keurmerk data)"
-                    >
-                      {sportsBusy ? "Sportscholen…" : "Sportscholen sync"}
-                    </button>
-
-                    <button
-                      onClick={() => (window.location.href = "/dashboard/admin/controle/yoc")}
-                      className="rounded border border-[var(--brand-orange)] bg-[#2f2f33] px-3 py-2 text-sm text-white hover:bg-[var(--brand-orange)] hover:text-black"
-                      title="Open YOC controle"
-                    >
-                      Controle YOC
-                    </button>
-                  </div>
-
-                  {sportsMsg ? (
-                    <span className="text-xs" style={{ color: "var(--brand-orange)" }}>
-                      {sportsMsg}
-                    </span>
-                  ) : null}
-                </div>
+<div className="hidden xl:block" />
               </div>
             </div>
 

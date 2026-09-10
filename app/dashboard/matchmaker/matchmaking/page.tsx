@@ -1237,7 +1237,7 @@ function MatchmakingPageContent() {
       }
 
       setSuccessMsg("✅ Herupload is gelukt. De upload is bijgewerkt.");
-      setViewTab("uploads");
+      setViewTab(isRetourVanNvb(row) ? "retour" : "uploads");
       await load();
     } catch (e) {
       console.error(e);
@@ -1960,6 +1960,15 @@ function MatchmakingPageContent() {
                                             >
                                               ⇧
                                             </ActionSquare>
+
+                                            <ActionFileSquare
+                                              title={reuploadingId === r.id ? "Herupload bezig" : "Nieuwe versie uploaden"}
+                                              disabled={reuploadingId === r.id}
+                                              color={ACTION_COLORS.herupload}
+                                              onFile={(file) => void reuploadMM(r, file)}
+                                            >
+                                              {reuploadingId === r.id ? "…" : "⬆"}
+                                            </ActionFileSquare>
 
                                             <ActionSquare
                                               title={rowBusy ? "Verwijderen bezig" : "Verwijderen"}

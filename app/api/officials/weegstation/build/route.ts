@@ -22,11 +22,6 @@ async function cleanupOldWeegstationData(admin: any, matchmakingId: string) {
     .eq("matchmaking_id", matchmakingId)
     .ilike("rule", "weegstation%");
   if (oldWeegResultsByRuleErr) throw oldWeegResultsByRuleErr;
-
-  // We verwijderen weigh_in_bouts hier bewust niet.
-  // Refresh bouwt de actuele rijen opnieuw op en koppelt bestaande wegingen
-  // per vechter/VA terug aan de juiste hoek. Als build eerst alles wist,
-  // zijn die gewichten niet meer veilig te herstellen.
 }
 
 export async function POST(req: Request) {
@@ -45,6 +40,7 @@ export async function POST(req: Request) {
       "dispensatie_admin",
       "matchmaker",
     ]);
+
     if (auth.role !== "dispensatie_admin") {
       await assertCanAccessMatchmaking({
         matchmaking_id: matchmakingId,
@@ -52,6 +48,7 @@ export async function POST(req: Request) {
         role: auth.role,
       });
     }
+
     const admin = supabaseAdmin;
     const userId = auth.authUserId;
 
@@ -65,8 +62,6 @@ export async function POST(req: Request) {
     const nowIso = new Date().toISOString();
     const nextBondteam = String(mmRow?.bondteam ?? "").trim() || null;
 
-    // Maak vóór de overdracht één immutable snapshot voor de oorspronkelijke matchmaker.
-    // Bij een retry blijft het eerste overdrachtsmoment leidend.
     const snapshotOwner = String(
       mmRow?.matchmaker_id ?? mmRow?.maker_user_id ?? mmRow?.sent_by ?? auth.authUserId ?? "",
     ).trim();
@@ -78,13 +73,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const [rawBoutsRes, uploadRes, contextRes, tournamentRes, resultsRes, dispensationsRes] =
+    const [uploadRes, contextRes, tournamentRes, resultsRes, dispensationsRes] =
       await Promise.all([
-        admin
-          .from("matchmaking_bouts_raw")
-          .select("*")
-          .eq("matchmaking_id", matchmakingId)
-          .order("partij_nr", { ascending: true }),
         admin
           .from("matchmaking_uploads")
           .select("*")
@@ -113,7 +103,6 @@ export async function POST(req: Request) {
       ]);
 
     for (const snapshotPart of [
-      rawBoutsRes,
       uploadRes,
       contextRes,
       tournamentRes,
@@ -146,14 +135,48 @@ export async function POST(req: Request) {
       }
     }
 
+    await cleanupOldWeegstationData(admin, matchmakingId);
+
+    const refreshReq = new Request(req.url, {
+      method: "POST",
+      headers: req.headers,
+      body: JSON.stringify({ matchmakingId }),
+    });
+
+    const refreshRes = await refreshAuthorizedWeegstation(
+      refreshReq,
+      matchmakingId,
+      admin,
+      userId,
+    );
+
+    const refreshJson = await refreshRes.json().catch(() => ({}));
+
+    if (!refreshRes.ok) {
+      return NextResponse.json(refreshJson, { status: refreshRes.status });
+    }
+
+    const transferredBouts = Array.isArray(refreshJson?.rows)
+      ? refreshJson.rows
+      : [];
+
     const snapshotPayload = {
       matchmaking: mmRow,
-      bouts: rawBoutsRes.data ?? [],
+      bouts: transferredBouts,
       uploads: uploadRes.data ?? [],
       controle_bout_context: contextRes.data ?? [],
       controle_toernooi_context: tournamentRes.data ?? [],
       controle_resultaten: resultsRes.data ?? [],
       dispensatie_requests: dispensationsRes.data ?? [],
+      overdracht_weegstation: {
+        count: Number(refreshJson?.count ?? transferredBouts.length),
+        inserted: Number(refreshJson?.inserted ?? 0),
+        updated: Number(refreshJson?.updated ?? 0),
+        unchanged: Number(refreshJson?.unchanged ?? 0),
+        deleted: Number(refreshJson?.deleted ?? 0),
+        toernooi_count: Number(refreshJson?.toernooi_count ?? 0),
+        rows: transferredBouts,
+      },
     };
 
     const { error: snapshotInsertErr } = await admin
@@ -169,31 +192,13 @@ export async function POST(req: Request) {
         bondteam: mmRow?.bondteam ?? latestUpload?.bondteam ?? null,
         status_op_moment: mmRow?.status ?? null,
         stadium_op_moment: mmRow?.stadium ?? null,
-        totaal_partijen: (rawBoutsRes.data ?? []).length,
+        totaal_partijen: transferredBouts.length,
         snapshot_data: snapshotPayload,
         created_by: auth.authUserId,
       });
 
     if (snapshotInsertErr && snapshotInsertErr.code !== "23505") {
       throw snapshotInsertErr;
-    }
-
-    await cleanupOldWeegstationData(admin, matchmakingId);
-
-    const refreshReq = new Request(req.url, {
-      method: "POST",
-      headers: req.headers,
-      body: JSON.stringify({ matchmakingId }),
-    });
-    const refreshRes = await refreshAuthorizedWeegstation(
-      refreshReq,
-      matchmakingId,
-      admin,
-      userId,
-    );
-    const refreshJson = await refreshRes.json().catch(() => ({}));
-    if (!refreshRes.ok) {
-      return NextResponse.json(refreshJson, { status: refreshRes.status });
     }
 
     const { error: mmErr } = await admin
@@ -213,6 +218,7 @@ export async function POST(req: Request) {
         last_updated_by: userId,
       })
       .eq("id", matchmakingId);
+
     if (mmErr) throw mmErr;
 
     return NextResponse.json({
@@ -222,9 +228,11 @@ export async function POST(req: Request) {
       stadium: "klaar_voor_weegstation",
       owner_type: "bondteam",
       owner_bondteam: nextBondteam,
+      snapshot_count: transferredBouts.length,
     });
   } catch (e: any) {
     if (e instanceof Response) return e;
+
     return NextResponse.json(
       { error: e?.message ?? "Build van weegstation mislukt." },
       { status: 500 },

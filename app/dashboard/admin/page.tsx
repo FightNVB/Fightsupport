@@ -53,6 +53,7 @@ type PortalLink = {
   description: string;
   href?: string;
   external?: string;
+  action?: "sportscholen_sync";
   icon: LucideIcon;
   rootAdminOnly?: boolean;
 };
@@ -128,6 +129,20 @@ const primaryModules: PortalLink[] = [
     title: "Doping Autoriteit",
     description: "Vechters, mailingen en certificaten beheren.",
     href: "/dashboard/admin/doping",
+    icon: ShieldCheck,
+    rootAdminOnly: true,
+  },
+  {
+    title: "Sportschool sync",
+    description: "Sportscholen en keurmerkdata synchroniseren vanuit FightPassport.",
+    action: "sportscholen_sync",
+    icon: School,
+    rootAdminOnly: true,
+  },
+  {
+    title: "Controle YOC",
+    description: "Open de YOC-controle voor FightPassport-gegevens.",
+    href: "/dashboard/admin/controle/yoc",
     icon: ShieldCheck,
     rootAdminOnly: true,
   },
@@ -266,6 +281,8 @@ export default function AdminDashboardPage() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sportsBusy, setSportsBusy] = useState(false);
+  const [sportsMsg, setSportsMsg] = useState<string>("");
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -361,7 +378,39 @@ export default function AdminDashboardPage() {
     );
   }
 
+  async function runSportscholen() {
+    if (sportsBusy) return;
+
+    try {
+      setSportsBusy(true);
+      setSportsMsg("Sportscholen worden gesynchroniseerd...");
+
+      const res = await authedFetch("/api/control-engine/sportscholen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!res.ok) {
+        const message = await res.text().catch(() => "");
+        console.error("Sportscholen sync mislukt:", res.status, message);
+        setSportsMsg(`❌ Sportscholen sync mislukt (${res.status}).`);
+        return;
+      }
+
+      setSportsMsg("✅ Sportscholen sync gestart/afgerond.");
+    } catch (error) {
+      console.error("Sportscholen sync mislukt:", error);
+      setSportsMsg("❌ Onverwachte fout bij sportscholen sync.");
+    } finally {
+      setSportsBusy(false);
+    }
+  }
+
   function openItem(item: PortalLink) {
+    if (item.action === "sportscholen_sync") {
+      void runSportscholen();
+      return;
+    }
     if (item.href) router.push(item.href);
     if (item.external) window.open(item.external, "_blank", "noopener,noreferrer");
   }
@@ -420,9 +469,16 @@ export default function AdminDashboardPage() {
             <SectionHeading title="Hoofdmodules" subtitle="Beheer, controle en systeemfuncties" />
             <div className="fs-primary-grid">
               {visiblePrimaryModules.map((item) => (
-                <ModuleCard key={item.title} item={item} compact onOpen={() => openItem(item)} />
+                <ModuleCard
+                  key={item.title}
+                  item={item}
+                  compact
+                  disabled={item.action === "sportscholen_sync" && sportsBusy}
+                  onOpen={() => openItem(item)}
+                />
               ))}
             </div>
+            {sportsMsg ? <div className="fs-action-status">{sportsMsg}</div> : null}
           </section>
 
           {portalSections.map((section) => (
@@ -517,11 +573,27 @@ function SectionHeading({ title, subtitle }: { title: string; subtitle?: string 
   );
 }
 
-function ModuleCard({ item, onOpen, compact = false }: { item: PortalLink; onOpen: () => void; compact?: boolean }) {
+function ModuleCard({
+  item,
+  onOpen,
+  compact = false,
+  disabled = false,
+}: {
+  item: PortalLink;
+  onOpen: () => void;
+  compact?: boolean;
+  disabled?: boolean;
+}) {
   const Icon = item.icon;
   return (
     <article className={`fs-module-card${compact ? " fs-module-card-compact" : ""}`}>
-      <button type="button" className="fs-module-click" onClick={onOpen} aria-label={`${item.title} openen`}>
+      <button
+        type="button"
+        className="fs-module-click"
+        onClick={onOpen}
+        disabled={disabled}
+        aria-label={`${item.title} openen`}
+      >
         <span className="fs-card-top-glow" aria-hidden="true" />
         <div className="fs-silver-icon"><Icon size={compact ? 25 : 27} strokeWidth={2.05} /></div>
         <h3>{item.title}</h3>
@@ -552,6 +624,7 @@ function GlobalStyles() {
       * { box-sizing: border-box; }
       html, body { margin: 0; background: #171a1e; }
       button, input, select, textarea { font: inherit; }
+      button:disabled { cursor: not-allowed; opacity: .58; }
 
       .fs-page {
         min-height: 100vh;
@@ -763,6 +836,15 @@ function GlobalStyles() {
       }
 
       .fs-section { margin-top: 16px; }
+      .fs-action-status {
+        margin-top: 10px;
+        padding: 9px 12px;
+        border: 1px solid rgba(255,77,0,.28);
+        background: rgba(255,255,255,.55);
+        color: #24282e;
+        font-size: 12px;
+        font-weight: 800;
+      }
       .fs-section-heading {
         display: flex;
         align-items: baseline;
