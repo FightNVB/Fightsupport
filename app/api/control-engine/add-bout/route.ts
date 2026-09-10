@@ -280,13 +280,13 @@ export async function POST(req: NextRequest) {
       rood_naam: clean(body?.rood_naam),
       rood_gym: clean(body?.rood_gym),
       va_rood: vaRood,
-      rood_geboortedatum: null,
+      rood_geboortedatum: clean(body?.rood_geboortedatum),
       rood_gewicht: toNum(body?.rood_gewicht),
 
       blauw_naam: clean(body?.blauw_naam),
       blauw_gym: clean(body?.blauw_gym),
       va_blauw: vaBlauw,
-      blauw_geboortedatum: null,
+      blauw_geboortedatum: clean(body?.blauw_geboortedatum),
       blauw_gewicht: toNum(body?.blauw_gewicht),
 
       discipline: clean(body?.discipline),
