@@ -2836,6 +2836,17 @@ async function enrichRowsWithUitslagenClasses(
   });
 }
 
+
+type NvbCorrectie = {
+  id: number;
+  partij_nr: number | null;
+  veld: string;
+  hoek: string | null;
+  oude_waarde: string | null;
+  nieuwe_waarde: string | null;
+  created_at: string;
+};
+
 export default function ControleMatchmakingPage() {
   const params = useParams();
   const router = useRouter();
@@ -2858,6 +2869,7 @@ export default function ControleMatchmakingPage() {
   const [runMeldingen, setRunMeldingen] = useState<ResRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string>("");
+  const [nvbCorrecties, setNvbCorrecties] = useState<NvbCorrectie[]>([]);
   const [busyPartij, setBusyPartij] = useState<Record<number, string>>({});
   const [hasDispByPartij, setHasDispByPartij] = useState<
     Record<number, boolean>
@@ -2930,6 +2942,38 @@ export default function ControleMatchmakingPage() {
       cancelled = true;
     };
   }, [matchmakingId]);
+
+
+  useEffect(() => {
+    if (!matchmakingId) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await authedFetch(
+          `/api/matchmaker/corrections-summary?matchmaking_id=${encodeURIComponent(
+            matchmakingId,
+          )}`,
+          { cache: "no-store" },
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || "Correcties laden mislukt.");
+        if (!cancelled) {
+          setNvbCorrecties(
+            Array.isArray(json?.correcties) ? json.correcties : [],
+          );
+        }
+      } catch (e) {
+        console.warn("[matchmaker] NVB-correcties laden mislukt", e);
+        if (!cancelled) setNvbCorrecties([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [matchmakingId, reloadTick]);
 
   function openPublishedPage(token: unknown) {
     const value = String(token ?? "").trim();
@@ -4739,6 +4783,55 @@ export default function ControleMatchmakingPage() {
               {matchmakingId}
             </div>
           </div>
+
+
+          {nvbCorrecties.length > 0 ? (
+            <div
+              className={`${inter.className} mt-4 rounded-xl border px-4 py-3`}
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(255,247,237,0.98) 0%, rgba(255,237,213,0.98) 100%)",
+                borderColor: "rgba(255,77,0,0.45)",
+                boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+              }}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-black text-white"
+                  style={{ background: NVB_ORANGE }}
+                >
+                  ✓
+                </span>
+                <div className="font-extrabold text-zinc-900">
+                  NVB heeft {nvbCorrecties.length}{" "}
+                  {nvbCorrecties.length === 1 ? "gegeven" : "gegevens"} gecorrigeerd
+                </div>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+                {nvbCorrecties.map((correctie) => (
+                  <div
+                    key={correctie.id}
+                    className="rounded-lg border border-orange-200 bg-white/85 px-3 py-2 text-xs font-semibold text-zinc-800"
+                  >
+                    <span className="font-black">
+                      {correctie.veld}
+                      {correctie.partij_nr != null
+                        ? ` partij ${correctie.partij_nr}`
+                        : ""}
+                      {correctie.hoek ? ` ${correctie.hoek}` : ""}
+                    </span>
+                    <span className="mx-1 text-zinc-400">·</span>
+                    <span className="text-zinc-500">
+                      {correctie.oude_waarde || "leeg"}
+                    </span>
+                    <span className="mx-1 font-black text-orange-600">→</span>
+                    <span>{correctie.nieuwe_waarde || "leeg"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="my-4" style={separator} />
 
