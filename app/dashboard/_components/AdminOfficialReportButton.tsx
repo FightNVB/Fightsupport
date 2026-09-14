@@ -17,6 +17,40 @@ export default function AdminOfficialReportButton() {
   const router = useRouter();
 
   useEffect(() => {
+    // Het gewone admin-rapport bevat historisch nog een teruglink naar de
+    // matchmaker-route. Corrigeer die op de admin-route naar de admincontrole.
+    const reportMatch = pathname.match(
+      /^\/dashboard\/admin\/controle\/([^/]+)\/rapport\/?$/,
+    );
+
+    if (reportMatch) {
+      const matchmakingId = decodeURIComponent(reportMatch[1]);
+      const adminHref = `/dashboard/admin/controle/${encodeURIComponent(matchmakingId)}`;
+
+      const fixBackLink = () => {
+        const links = Array.from(document.querySelectorAll<HTMLAnchorElement>("a"));
+        const backLink = links.find((link) => {
+          const label = String(link.textContent ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+          const href = link.getAttribute("href") ?? "";
+          return (
+            label === "← terug" &&
+            href.includes(`/dashboard/matchmaker/matchmaking/${matchmakingId}`)
+          );
+        });
+
+        if (backLink) backLink.setAttribute("href", adminHref);
+      };
+
+      fixBackLink();
+      const observer = new MutationObserver(fixBackLink);
+      observer.observe(document.body, { childList: true, subtree: true });
+
+      return () => observer.disconnect();
+    }
+
     const match = pathname.match(/^\/dashboard\/admin\/controle\/([^/]+)\/?$/);
     if (!match) return;
 
