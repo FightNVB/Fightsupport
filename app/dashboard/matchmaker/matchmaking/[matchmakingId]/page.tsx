@@ -4457,7 +4457,7 @@ export default function ControleMatchmakingPage() {
                         />
                         <DarkActionButton
                           label={headerBusy === "eindrapport" ? "Bezig..." : "Eindrapport"}
-                          tone={eindrapportReady ? "green" : "silver"}
+                          tone="green"
                           icon={<FileText className="h-3.5 w-3.5" />}
                           onClick={() =>
                             withHeaderBusy("eindrapport", async () =>
