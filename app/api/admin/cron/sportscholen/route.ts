@@ -99,7 +99,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const child = spawn(process.execPath, [scraperPath, "run"], {
+    const child = spawn(process.execPath, [scraperPath, "run-all"], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -138,7 +138,7 @@ export async function POST(req: Request) {
       ok: true,
       started: true,
       pid: child.pid,
-      mode: "run",
+      mode: "run-all",
       message: "De sportscholenscraper is gestart.",
     });
   } catch (error: any) {
