@@ -16,11 +16,6 @@ function normalizeStatus(value: unknown): ReviewStatus {
   return null;
 }
 
-function isRecordDifferenceRule(ruleCode: unknown): boolean {
-  const code = String(ruleCode ?? "").trim().toUpperCase();
-  return !!code && (code.includes("PARTIJVERSCHIL") || code.includes("RECORDVERSCHIL"));
-}
-
 function cleanVa(value: unknown): string | null {
   const digits = String(value ?? "").replace(/\D/g, "");
   return /^\d{3,6}$/.test(digits) ? digits : null;
@@ -64,48 +59,41 @@ function findContext(lookup: Map<string, any>, row: any): any | null {
 
 function pairing(args: CarryReviewArgs, ctx: any): string | null {
   if (!ctx) return null;
-  return args.pairingIdentity(
-    args.matchmakingId,
-    vaFromContext(ctx, "rood"),
-    vaFromContext(ctx, "blauw"),
-  );
-}
-
-function subjectKey(args: CarryReviewArgs, row: any, ctx: any): string | null {
-  const tournament = String(row?.toernooi_code ?? "").trim().toUpperCase();
-  const explicitVa = cleanVa(row?.toernooi_va_nummer) ?? cleanVa(row?.fighter_id);
-  if (explicitVa) return tournament ? `TOERNOOI:${tournament}:VA:${explicitVa}` : `VA:${explicitVa}`;
-
-  const hoek = String(row?.hoek ?? "").trim().toLowerCase();
-  if (hoek === "rood" || hoek === "blauw") {
-    const va = vaFromContext(ctx, hoek);
-    if (va) return `VA:${va}`;
-  }
-
-  const pair = pairing(args, ctx);
-  return pair ? `PAIR:${pair}` : null;
+  return args.pairingIdentity(args.matchmakingId, vaFromContext(ctx, "rood"), vaFromContext(ctx, "blauw"));
 }
 
 function issueKey(args: CarryReviewArgs, row: any, ctx: any): string | null {
   const ruleCode = String(row?.rule_code ?? "").trim().toUpperCase();
   if (!ruleCode || ruleCode === "__NO_RULES__") return null;
-  const subject = subjectKey(args, row, ctx);
-  return subject ? `${subject}|RULE:${ruleCode}` : null;
+
+  const tournament = String(row?.toernooi_code ?? "").trim().toUpperCase();
+  const explicitVa = cleanVa(row?.toernooi_va_nummer) ?? cleanVa(row?.fighter_id);
+  if (explicitVa) {
+    const subject = tournament ? `TOERNOOI:${tournament}:VA:${explicitVa}` : `VA:${explicitVa}`;
+    return `${subject}|RULE:${ruleCode}`;
+  }
+
+  const hoek = String(row?.hoek ?? "").trim().toLowerCase();
+  if (hoek === "rood" || hoek === "blauw") {
+    const va = vaFromContext(ctx, hoek);
+    if (va) return `VA:${va}|RULE:${ruleCode}`;
+  }
+
+  const pair = pairing(args, ctx);
+  return pair ? `PAIR:${pair}|RULE:${ruleCode}` : null;
 }
 
-function hasManualData(row: any): boolean {
-  return !!normalizeStatus(row?.review_status) ||
-    !!row?.reviewed_at ||
-    !!String(row?.review_note ?? "").trim() ||
-    !!String(row?.aantekeningen ?? "").trim();
+function hasDecision(row: any): boolean {
+  return normalizeStatus(row?.review_status) !== null;
 }
 
-function reviewPatch(oldRow: any, recordDifference: boolean): Record<string, unknown> | null {
+function reviewPatch(oldRow: any): Record<string, unknown> | null {
   const status = normalizeStatus(oldRow?.review_status);
-  if (recordDifference && status !== "approved") return null;
+  if (!status) return null;
 
   const patch: Record<string, unknown> = {
-    review_status: status ?? oldRow?.review_status ?? null,
+    // Bewaar de bestaande FightSupport-statuswoorden. De UI/API's gebruiken deze al.
+    review_status: status === "approved" ? "goedgekeurd" : "afgekeurd",
     review_note: oldRow?.review_note ?? null,
     reviewed_by: oldRow?.reviewed_by ?? null,
     reviewed_at: oldRow?.reviewed_at ?? null,
@@ -115,7 +103,7 @@ function reviewPatch(oldRow: any, recordDifference: boolean): Record<string, unk
   if (status === "approved") {
     patch.resultaat = "OK";
     patch.actie_status = "goedgekeurd";
-  } else if (status === "rejected") {
+  } else {
     patch.resultaat = "AFKEUR";
     patch.actie_status = "afgekeurd";
   }
@@ -123,14 +111,17 @@ function reviewPatch(oldRow: any, recordDifference: boolean): Record<string, unk
 }
 
 /**
- * Draagt handmatige besluiten alleen over vanuit de DIRECT VOORGAANDE,
- * afgeronde controle van dezelfde rol/flow.
+ * Behoudt een handmatig besluit zolang DEZELFDE melding onafgebroken aanwezig is.
  *
- * Daardoor geldt:
- * - dezelfde melding bestaat nog -> besluit blijft staan;
- * - melding is in de vorige controle verdwenen -> oud besluit komt niet terug;
- * - nieuwe melding -> geen oud besluit;
- * - Admin/Matchmaker/Officials blijven van elkaar geïsoleerd.
+ * Dit sluit aan op saveControleResultaten:
+ * - dezelfde melding opnieuw -> goedkeuring OF afkeur blijft staan;
+ * - tussentijdse controle heeft de melding niet -> keten stopt, oud besluit komt niet terug;
+ * - nieuwe melding -> open;
+ * - verschillende rollen/flows blijven geïsoleerd via runTypes.
+ *
+ * We lopen meerdere voorgaande runs terug omdat een tussenliggende run door een eerdere
+ * bug het review_status al als open kan hebben opgeslagen. Zolang de melding in ELKE
+ * tussenliggende run aanwezig bleef, mag het laatste echte handmatige besluit worden hersteld.
  */
 export async function carryReviewDecisions(args: CarryReviewArgs): Promise<number> {
   const { supabase, matchmakingId, runId, currentContextRows, runTypes } = args;
@@ -143,51 +134,47 @@ export async function carryReviewDecisions(args: CarryReviewArgs): Promise<numbe
     .eq("status", "klaar")
     .neq("id", runId)
     .order("gestart_op", { ascending: false, nullsFirst: false })
-    .limit(1);
+    .limit(25);
   if (runsError) throw runsError;
 
-  const previousRunId = String(previousRuns?.[0]?.id ?? "").trim();
-  if (!previousRunId) return 0;
+  const runIds = (previousRuns ?? []).map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
+  if (!runIds.length) return 0;
 
-  const { data: previousRows, error: previousError } = await supabase
+  const { data: previousRows, error: rowsError } = await supabase
     .from("controle_resultaten")
     .select("id,controle_run_id,partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,created_at")
     .eq("matchmaking_id", matchmakingId)
-    .eq("controle_run_id", previousRunId)
-    .order("reviewed_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
-  if (previousError) throw previousError;
-
-  const reviewedRows = (previousRows ?? []).filter((row: any) => hasManualData(row));
-  if (!reviewedRows.length) return 0;
+    .in("controle_run_id", runIds);
+  if (rowsError) throw rowsError;
 
   const { data: oldContexts, error: contextError } = await supabase
     .from("controle_bout_context")
     .select("*")
     .eq("matchmaking_id", matchmakingId)
-    .eq("controle_run_id", previousRunId);
+    .in("controle_run_id", runIds);
   if (contextError) throw contextError;
 
-  const oldLookup = makeLookup(oldContexts ?? []);
-  const previousByIssue = new Map<string, any>();
-  const approvedRecordByPairRule = new Map<string, any>();
+  const contextsByRun = new Map<string, Map<string, any>>();
+  for (const ctx of oldContexts ?? []) {
+    const rid = String(ctx?.controle_run_id ?? "").trim();
+    if (!rid) continue;
+    if (!contextsByRun.has(rid)) contextsByRun.set(rid, new Map());
+    const lookup = contextsByRun.get(rid)!;
+    for (const key of rowKeys(ctx)) if (!lookup.has(key)) lookup.set(key, ctx);
+  }
 
-  for (const oldRow of reviewedRows) {
-    const oldCtx = findContext(oldLookup, oldRow);
-    const ruleCode = String(oldRow?.rule_code ?? "").trim().toUpperCase();
-    if (!ruleCode || ruleCode === "__NO_RULES__") continue;
-
-    if (isRecordDifferenceRule(ruleCode)) {
-      if (normalizeStatus(oldRow?.review_status) !== "approved") continue;
-      const pair = pairing(args, oldCtx);
-      if (!pair) continue;
-      const key = `${pair}|${ruleCode}`;
-      if (!approvedRecordByPairRule.has(key)) approvedRecordByPairRule.set(key, oldRow);
-      continue;
-    }
-
-    const key = issueKey(args, oldRow, oldCtx);
-    if (key && !previousByIssue.has(key)) previousByIssue.set(key, oldRow);
+  const issuesByRun = new Map<string, Map<string, any>>();
+  for (const row of previousRows ?? []) {
+    const rid = String(row?.controle_run_id ?? "").trim();
+    if (!rid) continue;
+    const ctx = findContext(contextsByRun.get(rid) ?? new Map(), row);
+    const key = issueKey(args, row, ctx);
+    if (!key) continue;
+    if (!issuesByRun.has(rid)) issuesByRun.set(rid, new Map());
+    const map = issuesByRun.get(rid)!;
+    const existing = map.get(key);
+    // Als dezelfde issue dubbel staat, heeft een echte beslissing voorrang.
+    if (!existing || (!hasDecision(existing) && hasDecision(row))) map.set(key, row);
   }
 
   const { data: currentRows, error: currentError } = await supabase
@@ -201,26 +188,24 @@ export async function carryReviewDecisions(args: CarryReviewArgs): Promise<numbe
   let carried = 0;
 
   for (const currentRow of currentRows ?? []) {
-    const ruleCode = String(currentRow?.rule_code ?? "").trim().toUpperCase();
-    if (!ruleCode || ruleCode === "__NO_RULES__") continue;
     const currentCtx = findContext(currentLookup, currentRow);
+    const key = issueKey(args, currentRow, currentCtx);
+    if (!key) continue;
 
-    let oldRow: any | null = null;
-    let recordDifference = false;
+    let decisionRow: any | null = null;
 
-    if (isRecordDifferenceRule(ruleCode)) {
-      const pair = pairing(args, currentCtx);
-      if (!pair) continue;
-      oldRow = approvedRecordByPairRule.get(`${pair}|${ruleCode}`) ?? null;
-      recordDifference = true;
-    } else {
-      const key = issueKey(args, currentRow, currentCtx);
-      if (!key) continue;
-      oldRow = previousByIssue.get(key) ?? null;
+    // Alleen teruglopen zolang de melding onafgebroken in iedere controle aanwezig was.
+    for (const rid of runIds) {
+      const oldRow = issuesByRun.get(rid)?.get(key) ?? null;
+      if (!oldRow) break;
+      if (hasDecision(oldRow)) {
+        decisionRow = oldRow;
+        break;
+      }
     }
 
-    if (!oldRow) continue;
-    const patch = reviewPatch(oldRow, recordDifference);
+    if (!decisionRow) continue;
+    const patch = reviewPatch(decisionRow);
     if (!patch) continue;
 
     const { error: updateError } = await supabase
