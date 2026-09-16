@@ -8,8 +8,10 @@ const nextConfig = {
   async rewrites() {
     return [
       {
+        // Matchmaker Eindcontrole must do a live FightPassport scrape.
+        // The normal matchmaker/start route is DB-only and intentionally does not scrape.
         source: "/api/matchmaker/eindcontrole/start",
-        destination: "/api/control-engine/matchmaker/start",
+        destination: "/api/control-engine/matchmaker/full/start",
       },
     ];
   },
