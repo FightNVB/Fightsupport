@@ -731,8 +731,11 @@ function isKeurmerkOpenIssue(row: ResultRow) {
 }
 
 async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
+  let upload: any = null;
+  let event: any = null;
+
   try {
-    const { data: up, error: upErr } = await supabase
+    const { data, error } = await supabase
       .from("matchmaking_uploads")
       .select("event_id, evenement_naam, evenement_datum, matchmaking_id, bondteam, matchmaker, promotor, locatie")
       .or(`id.eq.${matchmaking_id},matchmaking_id.eq.${matchmaking_id}`)
@@ -740,55 +743,40 @@ async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
       .limit(1)
       .maybeSingle();
 
-    if (upErr) throw upErr;
+    if (error) console.warn("matchmaking_uploads header load failed:", error.message);
+    else upload = data;
+  } catch (error) {
+    console.warn("matchmaking_uploads header load failed:", error);
+  }
 
-    const uploadEventId = (up as any)?.event_id ? String((up as any).event_id) : null;
+  const uploadEventId = safeRaw(upload?.event_id) || null;
 
-    if (uploadEventId) {
-      const { data: ev, error: evErr } = await supabase
+  if (uploadEventId) {
+    try {
+      const { data, error } = await supabase
         .from("events")
-        .select("id, naam, datum")
+        .select("id, naam, datum, locatie, promotor")
         .eq("id", uploadEventId)
         .maybeSingle();
 
-      if (!evErr && ev) {
-        return {
-          id: String((ev as any)?.id ?? uploadEventId),
-          event_id: uploadEventId,
-          naam: (ev as any)?.naam ?? (up as any)?.evenement_naam ?? null,
-          datum: (ev as any)?.datum ?? (up as any)?.evenement_datum ?? null,
-          bondteam: (up as any)?.bondteam ?? null,
-          matchmaker: (up as any)?.matchmaker ?? null,
-          promotor: (up as any)?.promotor ?? null,
-          locatie: (up as any)?.locatie ?? null,
-          source: "events",
-        };
-      }
+      if (error) console.warn("events header load failed:", error.message);
+      else event = data;
+    } catch (error) {
+      console.warn("events header load failed:", error);
     }
-
-    return {
-      id: String((up as any)?.matchmaking_id ?? matchmaking_id),
-      event_id: uploadEventId,
-      naam: (up as any)?.evenement_naam ?? null,
-      datum: (up as any)?.evenement_datum ?? null,
-      bondteam: (up as any)?.bondteam ?? null,
-      matchmaker: (up as any)?.matchmaker ?? null,
-      promotor: (up as any)?.promotor ?? null,
-      locatie: (up as any)?.locatie ?? null,
-      source: "matchmaking_uploads",
-    };
-  } catch {
-    return {
-      id: null,
-      naam: null,
-      datum: null,
-      bondteam: null,
-      matchmaker: null,
-      promotor: null,
-      locatie: null,
-      source: null,
-    };
   }
+
+  return {
+    id: safeRaw(event?.id) || safeRaw(upload?.matchmaking_id) || matchmaking_id || null,
+    event_id: uploadEventId,
+    naam: safeRaw(event?.naam) || safeRaw(upload?.evenement_naam) || null,
+    datum: safeRaw(event?.datum) || safeRaw(upload?.evenement_datum) || null,
+    bondteam: safeRaw(upload?.bondteam) || null,
+    matchmaker: safeRaw(upload?.matchmaker) || null,
+    promotor: safeRaw(upload?.promotor) || safeRaw(event?.promotor) || null,
+    locatie: safeRaw(upload?.locatie) || safeRaw(event?.locatie) || null,
+    source: event ? "events" : upload ? "matchmaking_uploads" : null,
+  };
 }
 
 export default function RapportPage() {

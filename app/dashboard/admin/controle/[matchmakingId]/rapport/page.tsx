@@ -732,28 +732,29 @@ function isKeurmerkOpenIssue(row: ResultRow) {
 }
 
 async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
-  // De matchmakings-tabel is de primaire bron voor de rapportheader.
-  // Alleen voor oudere matchmakings zonder rij in deze tabel vallen we terug
-  // op matchmaking_uploads en eventueel events.
+  let matchmaking: any = null;
+  let upload: any = null;
+  let event: any = null;
+  let matchmakerNaam = "";
+
   try {
-    const { data: matchmaking, error: matchmakingErr } = await supabase
+    const { data, error } = await supabase
       .from("matchmakings")
-      .select("id, naam, datum, locatie, promotor, bondteam, matchmaker_naam, matchmaker_id, maker_user_id, uploaded_by")
+      .select("id, naam, datum, locatie, bondteam, matchmaker_naam, matchmaker_id, maker_user_id, uploaded_by")
       .eq("id", matchmaking_id)
       .maybeSingle();
 
-    if (!matchmakingErr && matchmaking) {
-      let matchmakerNaam =
-        safeRaw((matchmaking as any).matchmaker_naam) ||
-        safeRaw((matchmaking as any).matchmaker);
+    if (error) console.warn("matchmakings header load failed:", error.message);
+    else matchmaking = data;
 
-      // Oudere matchmakings hebben vaak nog geen matchmaker_naam opgeslagen.
-      // Haal de naam dan op uit user_profiles via de gebruiker die de matchmaking bezit/uploadde.
+    if (matchmaking) {
+      matchmakerNaam = safeRaw(matchmaking.matchmaker_naam) || safeRaw(matchmaking.matchmaker);
+
       if (!matchmakerNaam) {
         const profielId =
-          safeRaw((matchmaking as any).matchmaker_id) ||
-          safeRaw((matchmaking as any).maker_user_id) ||
-          safeRaw((matchmaking as any).uploaded_by);
+          safeRaw(matchmaking.matchmaker_id) ||
+          safeRaw(matchmaking.maker_user_id) ||
+          safeRaw(matchmaking.uploaded_by);
 
         if (profielId) {
           const { data: profiel, error: profielErr } = await supabase
@@ -762,36 +763,17 @@ async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
             .eq("id", profielId)
             .maybeSingle();
 
-          if (!profielErr) {
-            matchmakerNaam = safeRaw((profiel as any)?.full_name);
-          } else {
-            console.warn("matchmakernaam uit user_profiles laden mislukt:", profielErr.message);
-          }
+          if (!profielErr) matchmakerNaam = safeRaw((profiel as any)?.full_name);
+          else console.warn("matchmakernaam uit user_profiles laden mislukt:", profielErr.message);
         }
       }
-
-      return {
-        id: String((matchmaking as any).id ?? matchmaking_id),
-        event_id: null,
-        naam: (matchmaking as any).naam ?? null,
-        datum: (matchmaking as any).datum ?? null,
-        bondteam: (matchmaking as any).bondteam ?? null,
-        matchmaker: matchmakerNaam || null,
-        promotor: (matchmaking as any).promotor ?? null,
-        locatie: (matchmaking as any).locatie ?? null,
-        source: "matchmakings",
-      };
-    }
-
-    if (matchmakingErr) {
-      console.warn("matchmakings header load failed:", matchmakingErr.message);
     }
   } catch (error) {
     console.warn("matchmakings header load failed:", error);
   }
 
   try {
-    const { data: up, error: upErr } = await supabase
+    const { data, error } = await supabase
       .from("matchmaking_uploads")
       .select("event_id, evenement_naam, evenement_datum, matchmaking_id, bondteam, matchmaker, promotor, locatie")
       .or(`id.eq.${matchmaking_id},matchmaking_id.eq.${matchmaking_id}`)
@@ -799,58 +781,39 @@ async function getEventMeta(matchmaking_id: string): Promise<EventMeta> {
       .limit(1)
       .maybeSingle();
 
-    if (upErr) throw upErr;
+    if (error) console.warn("matchmaking_uploads header load failed:", error.message);
+    else upload = data;
+  } catch (error) {
+    console.warn("matchmaking_uploads header load failed:", error);
+  }
 
-    const uploadEventId = (up as any)?.event_id ? String((up as any).event_id) : null;
+  const uploadEventId = safeRaw(upload?.event_id) || null;
 
-    if (uploadEventId) {
-      const { data: ev, error: evErr } = await supabase
+  if (uploadEventId) {
+    try {
+      const { data, error } = await supabase
         .from("events")
-        .select("id, naam, datum")
+        .select("id, naam, datum, locatie, promotor")
         .eq("id", uploadEventId)
         .maybeSingle();
 
-      if (!evErr && ev) {
-        return {
-          id: String((ev as any)?.id ?? uploadEventId),
-          event_id: uploadEventId,
-          naam: (ev as any)?.naam ?? (up as any)?.evenement_naam ?? null,
-          datum: (ev as any)?.datum ?? (up as any)?.evenement_datum ?? null,
-          bondteam: (up as any)?.bondteam ?? null,
-          matchmaker: (up as any)?.matchmaker ?? null,
-          promotor: (up as any)?.promotor ?? null,
-          locatie: (up as any)?.locatie ?? null,
-          source: "events",
-        };
-      }
+      if (error) console.warn("events header load failed:", error.message);
+      else event = data;
+    } catch (error) {
+      console.warn("events header load failed:", error);
     }
-
-    if (up) {
-      return {
-        id: String((up as any)?.matchmaking_id ?? matchmaking_id),
-        event_id: uploadEventId,
-        naam: (up as any)?.evenement_naam ?? null,
-        datum: (up as any)?.evenement_datum ?? null,
-        bondteam: (up as any)?.bondteam ?? null,
-        matchmaker: (up as any)?.matchmaker ?? null,
-        promotor: (up as any)?.promotor ?? null,
-        locatie: (up as any)?.locatie ?? null,
-        source: "matchmaking_uploads",
-      };
-    }
-  } catch (error) {
-    console.warn("oude eventheader fallback load failed:", error);
   }
 
   return {
-    id: matchmaking_id || null,
-    naam: null,
-    datum: null,
-    bondteam: null,
-    matchmaker: null,
-    promotor: null,
-    locatie: null,
-    source: null,
+    id: safeRaw(matchmaking?.id) || safeRaw(event?.id) || safeRaw(upload?.matchmaking_id) || matchmaking_id || null,
+    event_id: uploadEventId,
+    naam: safeRaw(matchmaking?.naam) || safeRaw(event?.naam) || safeRaw(upload?.evenement_naam) || null,
+    datum: safeRaw(matchmaking?.datum) || safeRaw(event?.datum) || safeRaw(upload?.evenement_datum) || null,
+    bondteam: safeRaw(matchmaking?.bondteam) || safeRaw(upload?.bondteam) || null,
+    matchmaker: matchmakerNaam || safeRaw(upload?.matchmaker) || null,
+    promotor: safeRaw(upload?.promotor) || safeRaw(event?.promotor) || null,
+    locatie: safeRaw(matchmaking?.locatie) || safeRaw(upload?.locatie) || safeRaw(event?.locatie) || null,
+    source: matchmaking ? "matchmakings" : event ? "events" : upload ? "matchmaking_uploads" : null,
   };
 }
 
