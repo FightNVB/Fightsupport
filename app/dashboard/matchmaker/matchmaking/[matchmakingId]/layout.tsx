@@ -9,8 +9,6 @@ type RunStatus = {
   status?: string | null;
   progress?: number | null;
   current_step?: string | null;
-  totaal_aantal?: number | null;
-  verwerkt_aantal?: number | null;
   foutmelding?: string | null;
 };
 
@@ -33,7 +31,7 @@ export default function MatchmakingLayout({ children }: { children: ReactNode })
         const payload = await res.json().catch(() => ({}));
         if (!cancelled && res.ok) setRun(payload?.run ?? null);
       } catch {
-        // De detailpagina zelf mag nooit stukgaan als alleen de statuscheck tijdelijk faalt.
+        // Navigeren moet blijven werken als alleen de statuscheck tijdelijk faalt.
       }
 
       if (!cancelled) timer = setTimeout(poll, 3000);
@@ -49,7 +47,6 @@ export default function MatchmakingLayout({ children }: { children: ReactNode })
   const status = String(run?.status ?? "").toLowerCase();
   const running = status === "running";
   const failed = ["failed", "fout", "error", "aborted"].includes(status);
-  const done = ["klaar", "done", "completed", "ok"].includes(status);
   const progress = Math.max(0, Math.min(100, Number(run?.progress ?? 0)));
 
   return (
@@ -73,7 +70,6 @@ export default function MatchmakingLayout({ children }: { children: ReactNode })
           </div>
         </div>
       )}
-      {done && false ? <span /> : null}
       {children}
     </>
   );
