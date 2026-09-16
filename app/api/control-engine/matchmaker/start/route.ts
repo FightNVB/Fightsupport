@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { buildControleBoutContext, buildToernooiContext } from "@/lib/matchmaker/buildControleBoutContext";
 import { enrichControleBoutContext } from "@/lib/matchmaker/enrichControleBoutContext";
 import { rulesEngine } from "@/lib/matchmaker/rulesEngine";
+import { carryApprovedRecordDifferenceReviews } from "@/lib/matchmaker/carryRecordDifferenceReview";
 import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
@@ -109,8 +110,18 @@ async function finalizeDbControl(args: {
       ctxRows: (ctxRows ?? []) as any[],
     });
 
+    // Pas NA de actuele RulesEngine toe: alleen besluiten voor meldingen die in deze
+    // nieuwe run opnieuw bestaan worden meegenomen. Verdwenen meldingen blijven historie.
+    // Dezelfde helper bewaakt ook de speciale stabiele VA-pair regel voor partijverschil.
+    const carriedRecordDifferences = await carryApprovedRecordDifferenceReviews({
+      supabase,
+      matchmakingId: args.matchmakingId,
+      runId: args.controleRunId,
+      currentContextRows: (ctxRows ?? []) as any[],
+    });
+
     // Bewust GEEN delete van eerdere controle_resultaten/context/runs.
-    // Historie en eerder genomen NVB-besluiten moeten beschikbaar blijven voor rapport/24u-vergelijking.
+    // Historie en eerder genomen besluiten blijven beschikbaar.
     await updateRun(args.controleRunId, {
       status: "klaar",
       afgerond_op: new Date().toISOString(),
@@ -127,6 +138,7 @@ async function finalizeDbControl(args: {
       ctxRows: (ctxRows ?? []).length,
       toernooiRows: Array.isArray(toernooiRows) ? toernooiRows.length : 0,
       hits: Array.isArray(hits) ? hits.length : 0,
+      carriedRecordDifferences,
     });
   } catch (error: any) {
     console.error("[matchmaker-db-controle] mislukt", error);
