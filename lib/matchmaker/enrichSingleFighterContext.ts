@@ -267,6 +267,36 @@ function isForeignNonNL(landValue: any) {
   if (!landValue) return false;
   return !isNL(landValue);
 }
+
+function countryIdentity(landValue: any): string | null {
+  const x = normLand(landValue);
+  if (!x) return null;
+  if (isNL(x)) return "NL";
+  if (isBE(x)) return "BE";
+  if (isDE(x)) return "DE";
+  if (isFR(x)) return "FR";
+  if (isES(x)) return "ES";
+  if (isUK(x)) return "UK";
+  if (isTR(x)) return "TR";
+  return x.toUpperCase();
+}
+
+function countryDisplayLabel(landValue: any): string {
+  const id = countryIdentity(landValue);
+  const labels: Record<string, string> = { NL: "Nederland", BE: "België", DE: "Duitsland", FR: "Frankrijk", ES: "Spanje", UK: "United Kingdom", TR: "Turkije" };
+  return (id && labels[id]) || String(landValue ?? "Buitenland").trim() || "Buitenland";
+}
+
+function sameForeignCountryExactMatch(candidates: AnyRow[], gymNaam: string): GymMatch | null {
+  if (detectLandHintFromGymText(gymNaam)) return null;
+  if (candidates.length < 2) return null;
+  if (candidates.some((row) => isNL(row?.land ?? row?.country))) return null;
+  const foreign = candidates.filter((row) => isForeignNonNL(row?.land ?? row?.country));
+  if (foreign.length !== candidates.length) return null;
+  const countries = new Set(foreign.map((row) => countryIdentity(row?.land ?? row?.country)).filter(Boolean));
+  if (countries.size !== 1) return null;
+  return { row: { ...foreign[0], __foreignCountryInferred: true }, reason: null };
+}
 function buildForeignKeurmerkReason(opts: { gym: string; land: string | null; matchInfo?: string | null }) {
   const land = opts.land ?? "Buitenland";
   const basis = opts.matchInfo ?? (opts.gym ? `↳ [MM sportschool:] "${opts.gym}"` : `↳ [MM sportschool:] -`);
@@ -516,6 +546,9 @@ function chooseBestFromCandidates(
   if (candidates.length === 0) return { row: null, reason: "Geen match gevonden." };
   if (candidates.length === 1) return { row: candidates[0], reason: null };
 
+  const inferredForeign = sameForeignCountryExactMatch(candidates, gRaw);
+  if (inferredForeign) return inferredForeign;
+
   const withPlaats = candidates.filter((row) => hasPlaatsHint(gRaw, row?.plaats ?? row?.stad ?? ""));
   if (withPlaats.length === 1) return { row: withPlaats[0], reason: null };
 
@@ -750,7 +783,7 @@ Geen sportschool opgegeven.`.trim();
   }
 
   const landDb = found?.land ?? found?.country ?? null;
-  const land = landLabelForMatch(landDb, hint);
+  const land = landDb ? countryDisplayLabel(landDb) : landLabelForMatch(landDb, hint);
   const eindeIso = toIsoDateOnly(found?.keurmerk_eind ?? found?.keurmerk_einde ?? found?.einde_keurmerk);
   const naam = found.naam ?? found.name ?? found.sportschool ?? "?";
 
@@ -773,11 +806,12 @@ Geen sportschool opgegeven.`.trim();
 
     if (landDb ? isBE(landDb) : hint === "BE") {
       patch.keurmerk_status = "belgie_check";
-      patch.keurmerk_reden = buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "België", matchInfo });
     } else {
       patch.keurmerk_status = "buitenland";
-      patch.keurmerk_reden = buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo });
     }
+    patch.keurmerk_reden = found?.__foreignCountryInferred
+      ? `⚠️ Buitenlandse sportschool: ${gymValue} (${land ?? "Buitenland"}) — land automatisch herkend.`
+      : buildForeignKeurmerkReason({ gym: gymValue, land: land ?? "Buitenland", matchInfo });
 
     return patch;
   }

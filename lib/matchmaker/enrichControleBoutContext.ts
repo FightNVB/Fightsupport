@@ -397,6 +397,38 @@ function isForeignNonNL(landValue: any) {
   return !isNL(landValue);
 }
 
+function countryIdentity(landValue: any): string | null {
+  const s = normLand(landValue);
+  if (!s) return null;
+  if (isNL(s)) return "NL";
+  if (isBE(s)) return "BE";
+  if (isDE(s)) return "DE";
+  if (isFR(s)) return "FR";
+  if (isES(s)) return "ES";
+  if (isDK(s)) return "DK";
+  if (isUK(s)) return "UK";
+  if (isTR(s)) return "TR";
+  return s.toUpperCase();
+}
+
+function countryDisplayLabel(landValue: any): string {
+  const id = countryIdentity(landValue);
+  const labels: Record<string, string> = { NL: "Nederland", BE: "België", DE: "Duitsland", FR: "Frankrijk", ES: "Spanje", DK: "Denemarken", UK: "United Kingdom", TR: "Turkije" };
+  return (id && labels[id]) || String(landValue ?? "Buitenland").trim() || "Buitenland";
+}
+
+function sameForeignCountryExactMatch(candidates: any[], gymNaam: string): GymMatch | null {
+  if (detectLandHintFromGymText(gymNaam)) return null;
+  if (candidates.length < 2) return null;
+  if (candidates.some((row) => isNL(row?.land ?? row?.country))) return null;
+  const foreign = candidates.filter((row) => isForeignNonNL(row?.land ?? row?.country));
+  if (foreign.length !== candidates.length) return null;
+  const countries = new Set(foreign.map((row) => countryIdentity(row?.land ?? row?.country)).filter(Boolean));
+  if (countries.size !== 1) return null;
+  const row = { ...foreign[0], __foreignCountryInferred: true };
+  return { row, reason: null };
+}
+
 function findExactNameOrAliasFallback(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMaps): GymMatch {
   const raw = String(gymNaam ?? "").trim();
   if (!raw) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
@@ -430,7 +462,11 @@ function findExactNameOrAliasFallback(sportscholen: any[], gymNaam: string, alia
   if (nl.length > 1) return { row: null, reason: "Meerdere exacte Nederlandse sportschoolmatches — maak alias specifieker." };
   const foreign = candidates.filter((row) => isForeignNonNL(row?.land ?? row?.country));
   if (foreign.length === 1) return { row: foreign[0], reason: null };
-  if (foreign.length > 1) return { row: null, reason: "Meerdere exacte buitenlandse sportschoolmatches — voeg landcode of plaats toe." };
+  if (foreign.length > 1) {
+    const inferred = sameForeignCountryExactMatch(candidates, gymNaam);
+    if (inferred) return inferred;
+    return { row: null, reason: "Meerdere exacte buitenlandse sportschoolmatches uit verschillende landen — voeg landcode of plaats toe." };
+  }
   return { row: null, reason: "Geen exacte naam- of aliasmatch gevonden." };
 }
 
@@ -539,6 +575,8 @@ function scoreCandidate(x: any, g: string, gRaw: string, key: string, landHint: 
 function chooseBestFromCandidates(candidates: any[], g: string, gRaw: string, key: string, landHint: LandHint | null): GymMatch {
   if (candidates.length === 0) return { row: null, reason: "Geen match gevonden." };
   if (candidates.length === 1) return { row: candidates[0], reason: null };
+  const inferredForeign = sameForeignCountryExactMatch(candidates, gRaw);
+  if (inferredForeign) return inferredForeign;
   const withPlaats = candidates.filter((x) => hasPlaatsHint(gRaw, x?.plaats ?? x?.stad ?? ""));
   if (withPlaats.length === 1) return { row: withPlaats[0], reason: null };
   const withLand = candidates.filter((x) => landMatchesHint(x?.land ?? x?.country, landHint));
@@ -819,13 +857,15 @@ function buildKeurmerkPatchForGym(opts: { gym: string; evenement_datum?: string 
     return patch;
   }
   const landDb = found?.land ?? found?.country ?? null;
-  const land = landLabelForMatch(landDb, hint);
+  const land = landDb ? countryDisplayLabel(landDb) : landLabelForMatch(landDb, hint);
   const keurmerkStatus = getKeurmerkEventStatus(found, evenement_datum);
   const matchInfo = `${mmLine(gymValue)}\n↳ gematcht met "${found.naam}" (${found.plaats ?? found.stad ?? "?"}, ${land ?? "?"})`;
   const isForeign = landDb ? isForeignNonNL(landDb) : hint !== null && hint !== "NL";
   if (isForeign) {
     patch[valueKey] = true;
-    patch[reasonKey] = buildForeignKeurmerkReason({ gym: gymValue, land: land ?? (landDb && isBE(landDb) ? "België" : "Buitenland"), matchInfo });
+    patch[reasonKey] = found?.__foreignCountryInferred
+      ? `⚠️ Buitenlandse sportschool: ${gymValue} (${land ?? "Buitenland"}) — land automatisch herkend.`
+      : buildForeignKeurmerkReason({ gym: gymValue, land: land ?? (landDb && isBE(landDb) ? "België" : "Buitenland"), matchInfo });
     return patch;
   }
   patch[valueKey] = keurmerkStatus.geldig;
