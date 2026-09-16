@@ -2957,6 +2957,23 @@ export default function ControleMatchmakingPage() {
     [],
   );
 
+  async function startEindcontrole() {
+    const resp = await authedFetch("/api/officials/eindcontrole/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matchmaking_id: matchmakingId }),
+    });
+
+    const json = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      throw new Error(json?.error ?? "Eindcontrole starten mislukt.");
+    }
+
+    setMsg("Eindcontrole is gestart. FightPassport-gegevens worden bijgewerkt.");
+    await load();
+  }
+
   function openRapport() {
     router.push(
       `/dashboard/officials/controle/${encodeURIComponent(matchmakingId)}/rapport`,
@@ -4385,6 +4402,26 @@ export default function ControleMatchmakingPage() {
                   <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/55">
                     Rapportage
                   </span>
+                  <DarkActionButton
+                    label={
+                      headerBusy === "eindcontrole"
+                        ? "Eindcontrole starten..."
+                        : "Eindcontrole"
+                    }
+                    tone="green"
+                    icon={<Check className="h-3.5 w-3.5" />}
+                    onClick={() =>
+                      withHeaderBusy("eindcontrole", async () =>
+                        startEindcontrole(),
+                      )
+                    }
+                    disabled={lineupMode || !!headerBusy}
+                    title={
+                      lineupMode
+                        ? "Niet tijdens lineup bouwen."
+                        : "Voer de laatste Officials-controle uit."
+                    }
+                  />
                   <DarkActionButton
                     label={headerBusy === "rapport" ? "Bezig..." : "Rapport"}
                     tone="silver"
