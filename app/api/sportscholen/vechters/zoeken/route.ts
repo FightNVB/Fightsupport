@@ -38,18 +38,37 @@ export async function GET(req: Request) {
     if (error) throw error;
     const vaList = (data ?? []).map((x: any) => cleanVa(x.va_nummer)).filter(Boolean) as string[];
 
-    // Dit is de bron die de sportscholen-scraper vult via VECHTERS -> Excel.
-    const { data: links, error: linkError } = vaList.length
-      ? await supabaseAdmin
-          .from("fightpassport_school_fighters")
-          .select("va_nummer,sportschool_id,actief,last_seen_at,updated_at")
-          .in("va_nummer", vaList)
-          .order("actief", { ascending: false })
-          .order("last_seen_at", { ascending: false, nullsFirst: false })
-          .order("updated_at", { ascending: false })
-      : { data: [], error: null };
+    // De teamlijst kan een vechter historisch bij meerdere sportscholen bevatten.
+    // last_seen_at is alleen het scrape-moment en mag daarom NIET bepalen welke gym actueel is.
+    // De meest recente FightPassport-uitslag bevat de sportschool waaronder de vechter het laatst uitkwam.
+    const [{ data: results, error: resultError }, { data: links, error: linkError }] = vaList.length
+      ? await Promise.all([
+          supabaseAdmin
+            .from("fightpassport_results")
+            .select("va_nummer,datum,sportschool")
+            .in("va_nummer", vaList)
+            .not("sportschool", "is", null)
+            .order("datum", { ascending: false, nullsFirst: false }),
+          supabaseAdmin
+            .from("fightpassport_school_fighters")
+            .select("va_nummer,sportschool_id,actief,last_seen_at,updated_at")
+            .in("va_nummer", vaList)
+            .order("actief", { ascending: false })
+            .order("last_seen_at", { ascending: false, nullsFirst: false }),
+        ])
+      : [{ data: [], error: null }, { data: [], error: null }];
+    if (resultError) throw resultError;
     if (linkError) throw linkError;
 
+    const latestResultGym = new Map<string, string>();
+    for (const row of results ?? []) {
+      const va = cleanVa((row as any).va_nummer);
+      const gym = String((row as any).sportschool ?? "").trim();
+      if (va && gym && !latestResultGym.has(va)) latestResultGym.set(va, gym);
+    }
+
+    // Fallback voor debutanten zonder uitslag: gebruik de door de sportscholen-scraper
+    // gevonden teamkoppeling. Dit is alleen fallback, nooit sterker dan een recente uitslag.
     const schoolIds = Array.from(new Set((links ?? []).map((row: any) => Number(row.sportschool_id)).filter(Number.isFinite)));
     const { data: schools, error: schoolError } = schoolIds.length
       ? await supabaseAdmin.from("sportscholen").select("sportschool_id,naam,plaats").in("sportschool_id", schoolIds)
@@ -57,17 +76,14 @@ export async function GET(req: Request) {
     if (schoolError) throw schoolError;
 
     const schoolById = new Map<number, any>((schools ?? []).map((school: any) => [Number(school.sportschool_id), school]));
-    const currentGym = new Map<string, string>();
-    const lastGym = new Map<string, string>();
-
+    const fallbackGym = new Map<string, string>();
     for (const row of links ?? []) {
       const va = cleanVa((row as any).va_nummer);
+      if (!va || fallbackGym.has(va)) continue;
       const school = schoolById.get(Number((row as any).sportschool_id));
       const name = String(school?.naam ?? "").trim();
-      if (!va || !name) continue;
-      const label = school?.plaats ? `${name} (${school.plaats})` : name;
-      if (!lastGym.has(va)) lastGym.set(va, label);
-      if ((row as any).actief === true && !currentGym.has(va)) currentGym.set(va, label);
+      if (!name) continue;
+      fallbackGym.set(va, school?.plaats ? `${name} (${school.plaats})` : name);
     }
 
     return NextResponse.json({
@@ -78,7 +94,7 @@ export async function GET(req: Request) {
           va_nummer: va,
           naam: fighter.naam ?? null,
           leeftijd: ageFromBirthdate(fighter.geboortedatum),
-          huidige_sportschool: currentGym.get(va) ?? lastGym.get(va) ?? null,
+          huidige_sportschool: latestResultGym.get(va) ?? fallbackGym.get(va) ?? null,
         };
       }),
     });
