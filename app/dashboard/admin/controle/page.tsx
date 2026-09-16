@@ -731,7 +731,6 @@ export default function ControleOverzichtPage() {
           setScrapeOverlaySub("Nog heel even geduld.");
           await load();
           closeScrapeOverlay();
-          window.open(`/dashboard/admin/controle/run/${finishedRunId}`, "_blank");
           return;
         }
 
@@ -752,7 +751,6 @@ export default function ControleOverzichtPage() {
       await load();
       closeScrapeOverlay();
       if (startJson?.controle_run_id) {
-        window.open(`/dashboard/admin/controle/run/${startJson.controle_run_id}`, "_blank");
       }
     } catch (e) {
       console.error("Start controle request gaf een fout of timeout:", e);
@@ -772,7 +770,6 @@ export default function ControleOverzichtPage() {
         setScrapeOverlaySub("Nog heel even geduld.");
         await load();
         closeScrapeOverlay();
-        window.open(`/dashboard/admin/controle/run/${finishedRunId}`, "_blank");
         return;
       }
 
