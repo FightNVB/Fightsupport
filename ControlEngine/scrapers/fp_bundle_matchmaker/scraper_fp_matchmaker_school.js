@@ -1,13 +1,8 @@
-// Matchmaker lichte eindcontrole.
+// Admin sportschool-bewijspass.
 //
-// De matchmaker heeft in de laatste controle dezelfde actuele FightPassport-checks
-// nodig als Officials:
-// - licentie Ja/Nee
-// - Fit to fight / startverbod
-// - huidige sportschool + keurmerk
-//
-// De route geeft al matchmaking_id, controle_run_id en de VA-nummers mee.
-// Daarom hergebruiken we hier rechtstreeks de stabiele Officials-scraper.
-// De verwerking daarna blijft volledig matchmaker-eigen via lib/matchmaker/*.
+// Hoort uitsluitend bij de admincontrole. Na de eigen full admin-scrape leest
+// deze pass de actuele SPORTSCHOLEN-tegel per VA en vult controle_fighter_actueel.
+// De live sportschool is alleen bewijs voor enrich; de MM-sportschool blijft
+// de harde waarheid waarvan het keurmerk op de eventdatum moet worden gevonden.
 
-await import("../fp_bundle_officials/scraper_fp_officials.js");
+await import("../fp_mm/scraper_fp_mm.js");
