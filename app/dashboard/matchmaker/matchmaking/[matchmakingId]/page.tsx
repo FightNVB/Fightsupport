@@ -4464,13 +4464,11 @@ export default function ControleMatchmakingPage() {
                               Promise.resolve(openOfficialReport()),
                             )
                           }
-                          disabled={lineupMode || !!headerBusy || !eindrapportReady}
+                          disabled={lineupMode || !!headerBusy}
                           title={
                             lineupMode
                               ? "Niet tijdens lineup bouwen."
-                              : eindrapportReady
-                                ? "Open het eindrapport voor de dienstdoende hoofdofficial."
-                                : "Beschikbaar nadat de eindcontrole is afgerond."
+                              : "Open het Matchmaker eindrapport."
                           }
                         />
                       </div>
