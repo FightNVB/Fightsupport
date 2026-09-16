@@ -278,7 +278,7 @@ export async function POST(req: Request) {
     await updateRun(runId, {
       totaal_aantal: vaList.length,
       progress: 12,
-      current_step: `Volledige Matchmaker FightPassport-scrape: ${vaList.length} vechters (3 x 8 workers)...`,
+      current_step: `FightPassport-controle wordt uitgevoerd · ${vaList.length} vechters`,
     });
 
     const scrape = await runFullScrape(matchmakingId, runId, vaList, opts);
