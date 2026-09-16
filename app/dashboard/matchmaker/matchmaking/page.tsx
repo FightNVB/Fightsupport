@@ -1008,6 +1008,46 @@ function MatchmakingPageContent() {
     return false;
   }
 
+  async function startFullControle(target: MatchmakingRow) {
+    if (!target) return;
+
+    try {
+      setBusyId(target.id);
+      setSuccessMsg("");
+      setControleOverlayMode("running");
+      setControleOverlayTitle("Volledige Matchmaker-controle");
+      setControleOverlayMessage("FightPassport wordt opnieuw gescrapet...");
+      setControleOverlaySub("Daarna worden context en regels opnieuw opgebouwd.");
+      setControleOverlayOpen(true);
+
+      const res = await authedFetch("/api/control-engine/matchmaker/full/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchmaking_id: target.id }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.ok) {
+        throw new Error(payload?.error || "Volledige Matchmaker-controle mislukt.");
+      }
+
+      setSuccessMsg(
+        `✅ Volledige controle afgerond: ${Number(payload?.scraper?.va_count ?? 0)} vechters gescrapet, ${Number(payload?.context_rows ?? 0)} partijen gecontroleerd.`,
+      );
+      await load();
+      setControleOverlayOpen(false);
+    } catch (e: any) {
+      console.error("matchmaker full controle mislukt:", e);
+      setControleOverlayMode("error");
+      setControleOverlayTitle("Controle mislukt");
+      setControleOverlayMessage(e?.message || "Volledige Matchmaker-controle mislukt.");
+      setControleOverlaySub("Controleer de serverlog voor de exacte foutmelding.");
+      setSuccessMsg("🔴 Volledige Matchmaker-controle mislukt.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function startControle(target: MatchmakingRow) {
     if (!target) return;
 
@@ -1898,10 +1938,10 @@ function MatchmakingPageContent() {
                                             </ActionSquare>
 
                                             <ActionSquare
-                                              title={busyId === r.id ? "DB-controle bezig" : "DB-controle"}
-                                              onClick={() => void startControle(r)}
+                                              title={busyId === r.id ? "Volledige controle bezig" : "Volledige controle + FightPassport scrape"}
+                                              onClick={() => void startFullControle(r)}
                                               disabled={busyId === r.id}
-                                              color={ACTION_COLORS.dbcontrole}
+                                              color={ACTION_COLORS.controle}
                                             >
                                               {busyId === r.id ? "…" : "▶"}
                                             </ActionSquare>

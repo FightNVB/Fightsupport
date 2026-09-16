@@ -2349,7 +2349,7 @@ export default function RapportPage() {
       <div className="print-max mx-auto max-w-6xl px-4 py-5">
         <div className="no-print mb-4 flex items-center justify-between gap-3">
           <Link
-            href={`/dashboard/matchmaker/matchmaking/${matchmakingId}`}
+            href={`/dashboard/admin/controle/${matchmakingId}`}
             className="inline-flex items-center rounded-lg bg-black px-4 py-2 text-sm font-bold text-white hover:opacity-90"
           >
             ← Terug
