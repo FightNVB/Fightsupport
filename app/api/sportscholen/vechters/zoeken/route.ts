@@ -38,16 +38,36 @@ export async function GET(req: Request) {
     if (error) throw error;
     const vaList = (data ?? []).map((x: any) => cleanVa(x.va_nummer)).filter(Boolean) as string[];
 
-    const { data: gyms, error: gymError } = vaList.length
-      ? await supabaseAdmin.from("fightpassport_fighter_gyms").select("va_nummer,organisatie_naam,last_seen_at").in("va_nummer", vaList).order("last_seen_at", { ascending: false })
+    // Dit is de bron die de sportscholen-scraper vult via VECHTERS -> Excel.
+    const { data: links, error: linkError } = vaList.length
+      ? await supabaseAdmin
+          .from("fightpassport_school_fighters")
+          .select("va_nummer,sportschool_id,actief,last_seen_at,updated_at")
+          .in("va_nummer", vaList)
+          .order("actief", { ascending: false })
+          .order("last_seen_at", { ascending: false, nullsFirst: false })
+          .order("updated_at", { ascending: false })
       : { data: [], error: null };
-    if (gymError) throw gymError;
+    if (linkError) throw linkError;
 
-    const latestGym = new Map<string, string>();
-    for (const row of gyms ?? []) {
+    const schoolIds = Array.from(new Set((links ?? []).map((row: any) => Number(row.sportschool_id)).filter(Number.isFinite)));
+    const { data: schools, error: schoolError } = schoolIds.length
+      ? await supabaseAdmin.from("sportscholen").select("sportschool_id,naam,plaats").in("sportschool_id", schoolIds)
+      : { data: [], error: null };
+    if (schoolError) throw schoolError;
+
+    const schoolById = new Map<number, any>((schools ?? []).map((school: any) => [Number(school.sportschool_id), school]));
+    const currentGym = new Map<string, string>();
+    const lastGym = new Map<string, string>();
+
+    for (const row of links ?? []) {
       const va = cleanVa((row as any).va_nummer);
-      const gym = String((row as any).organisatie_naam ?? "").trim();
-      if (va && gym && !latestGym.has(va)) latestGym.set(va, gym);
+      const school = schoolById.get(Number((row as any).sportschool_id));
+      const name = String(school?.naam ?? "").trim();
+      if (!va || !name) continue;
+      const label = school?.plaats ? `${name} (${school.plaats})` : name;
+      if (!lastGym.has(va)) lastGym.set(va, label);
+      if ((row as any).actief === true && !currentGym.has(va)) currentGym.set(va, label);
     }
 
     return NextResponse.json({
@@ -58,7 +78,7 @@ export async function GET(req: Request) {
           va_nummer: va,
           naam: fighter.naam ?? null,
           leeftijd: ageFromBirthdate(fighter.geboortedatum),
-          huidige_sportschool: latestGym.get(va) ?? null,
+          huidige_sportschool: currentGym.get(va) ?? lastGym.get(va) ?? null,
         };
       }),
     });
