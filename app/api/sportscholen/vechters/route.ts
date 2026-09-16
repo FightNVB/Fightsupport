@@ -63,40 +63,54 @@ async function searchExistingFighters(query: string, sportschoolId: string) {
   const nr = Number(sportschoolId);
   const schoolValue: string | number = Number.isFinite(nr) ? nr : sportschoolId;
 
-  const [{ data: existing, error: linkError }, { data: gyms, error: gymError }] = await Promise.all([
-    supabaseAdmin
-      .from("fightpassport_school_fighters")
-      .select("va_nummer")
-      .eq("sportschool_id", schoolValue)
-      .eq("actief", true)
-      .in("va_nummer", vaList),
-    supabaseAdmin
-      .from("fightpassport_fighter_gyms")
-      .select("va_nummer,organisatie_naam,last_seen_at")
-      .in("va_nummer", vaList)
-      .order("last_seen_at", { ascending: false }),
-  ]);
-
+  // De sportscholen/team-scraper onderhoudt fightpassport_school_fighters.
+  // Gebruik dus exact die bron om de huidige/laatste FightPassport-sportschool te tonen.
+  const { data: teamLinks, error: linkError } = await supabaseAdmin
+    .from("fightpassport_school_fighters")
+    .select("sportschool_id,va_nummer,actief,last_seen_at,updated_at")
+    .in("va_nummer", vaList)
+    .order("last_seen_at", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false });
   if (linkError) throw linkError;
-  if (gymError) throw gymError;
 
-  const linked = new Set((existing ?? []).map((x: any) => cleanVa(x.va_nummer)).filter(Boolean));
-  const latestGymByVa = new Map<string, string>();
-  for (const gym of gyms ?? []) {
-    const va = cleanVa((gym as any).va_nummer);
-    const naam = String((gym as any).organisatie_naam ?? "").trim();
-    if (va && naam && !latestGymByVa.has(va)) latestGymByVa.set(va, naam);
+  const schoolIds = Array.from(new Set((teamLinks ?? []).map((x: any) => String(x.sportschool_id ?? "").trim()).filter(Boolean)));
+  let schools: any[] = [];
+  if (schoolIds.length) {
+    const numericIds = schoolIds.map(Number).filter(Number.isFinite);
+    const { data: schoolRows, error: schoolError } = await supabaseAdmin
+      .from("sportscholen")
+      .select("sportschool_id,naam,plaats,land")
+      .in("sportschool_id", numericIds);
+    if (schoolError) throw schoolError;
+    schools = schoolRows ?? [];
   }
 
-  // AVG: zoekresultaten geven bewust alleen herkenningsgegevens terug.
-  // Geboortedatum wordt uitsluitend server-side gebruikt om de leeftijd te berekenen.
+  const schoolById = new Map<string, any>();
+  for (const school of schools) schoolById.set(String(school.sportschool_id), school);
+
+  const linked = new Set<string>();
+  const currentGymByVa = new Map<string, string>();
+  const lastGymByVa = new Map<string, string>();
+
+  for (const link of teamLinks ?? []) {
+    const va = cleanVa((link as any).va_nummer);
+    if (!va) continue;
+    const linkSchoolId = String((link as any).sportschool_id ?? "").trim();
+    const school = schoolById.get(linkSchoolId);
+    const schoolName = String(school?.naam ?? "").trim();
+
+    if ((link as any).actief === true && linkSchoolId === String(schoolValue)) linked.add(va);
+    if (schoolName && !lastGymByVa.has(va)) lastGymByVa.set(va, schoolName);
+    if ((link as any).actief === true && schoolName && !currentGymByVa.has(va)) currentGymByVa.set(va, schoolName);
+  }
+
   return (data ?? []).map((fighter: any) => {
     const va = cleanVa(fighter.va_nummer) ?? "";
     return {
       va_nummer: va,
       naam: fighter.naam ?? null,
       leeftijd: ageFromBirthdate(fighter.geboortedatum),
-      huidige_sportschool: latestGymByVa.get(va) ?? null,
+      huidige_sportschool: currentGymByVa.get(va) ?? lastGymByVa.get(va) ?? null,
       al_gekoppeld: linked.has(va),
     };
   });
@@ -162,7 +176,7 @@ export async function POST(req: Request) {
       const { error } = await supabaseAdmin.from("fightpassport_school_fighters").insert({ sportschool_id:schoolValue, va_nummer:va, naam:fighter.naam ?? null, geslacht:fighter.geslacht ?? null, actief:true, updated_at:new Date().toISOString() }); if (error) throw error;
     }
     const melding = `Sportschool ${school.naam ?? sportschoolId} heeft ${fighter.naam ?? va} (VA ${va}) toegevoegd aan de fightcrew. Zet de sportschoolkoppeling ook om in FightPassport.`;
-    const { error:meldingError } = await supabaseAdmin.from("sportschool_vechter_meldingen").insert({ status:"open", fighter_id:va, sportschool_id:String(sportschoolId), sportschool_naam:school.naam ?? null, va_nummer:va, naam:fighter.naam ?? null, type:"sportschool_klopt_niet", melding, created_by:userId, raw:{ actie:"vechter_toegevoegd_uit_database", bron:"sportschool_dashboard", oude_koppeling_onbekend:true, sportschool_id:sportschoolId, va_nummer:va } });
+    const { error:meldingError } = await supabaseAdmin.from("sportschool_vechter_meldingen").insert({ status:"open", fighter_id:va, sportschool_id:String(sportschoolId), sportschool_naam:school.naam ?? null, va_nummer:va, naam:fighter.naam ?? null, type:"sportschool_klopt_niet", melding, created_by:userId, raw:{ actie:"vechter_toegevoegd_uit_fightpassport", bron:"sportschool_dashboard", oude_koppeling_onbekend:true, sportschool_id:sportschoolId, va_nummer:va } });
     if (meldingError) throw meldingError;
     return NextResponse.json({ ok:true, message:"Vechter toegevoegd. Admin heeft een melding gekregen om de koppeling in FightPassport over te nemen." });
   } catch (e:any) {
