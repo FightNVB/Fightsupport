@@ -8,6 +8,18 @@ function cleanVa(v: unknown) { const s = String(v ?? "").replace(/\D/g, ""); ret
 function jsonError(message: string, status = 500) { return NextResponse.json({ ok: false, error: message }, { status }); }
 async function jsonFromResponse(e: Response) { try { const text = await e.text(); if (!text) return {}; try { return JSON.parse(text); } catch { return { error: text }; } } catch { return {}; } }
 
+function ageFromBirthdate(value: unknown): number | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const birth = new Date(raw);
+  if (Number.isNaN(birth.getTime())) return null;
+  const now = new Date();
+  let age = now.getUTCFullYear() - birth.getUTCFullYear();
+  const month = now.getUTCMonth() - birth.getUTCMonth();
+  if (month < 0 || (month === 0 && now.getUTCDate() < birth.getUTCDate())) age -= 1;
+  return age >= 0 && age < 120 ? age : null;
+}
+
 async function getProfile(userId: string) {
   const { data, error } = await supabaseAdmin.from("user_profiles").select("id, role, email, full_name, meekijk_sportschool_id, active_sportschool_id").eq("id", userId).maybeSingle();
   if (error) throw error;
@@ -30,19 +42,64 @@ async function resolveAccess(req: Request) {
 async function searchExistingFighters(query: string, sportschoolId: string) {
   const q = query.trim();
   if (q.length < 2) return [];
+
+  const safeQ = q.replace(/[%_,()]/g, " ").trim();
   const digits = cleanVa(q);
-  let builder = supabaseAdmin.from("fightpassport_fighters").select("va_nummer,naam,geboortedatum,geslacht,primary_discipline,nulmeting_klasse,totaal_wedstrijden").limit(20);
-  builder = digits && digits.length >= 3 ? builder.or(`va_nummer.eq.${digits},naam.ilike.%${q.replace(/[%_,()]/g, " ")}%`) : builder.ilike("naam", `%${q.replace(/[%_,()]/g, " ")}%`);
+  let builder = supabaseAdmin
+    .from("fightpassport_fighters")
+    .select("va_nummer,naam,geboortedatum")
+    .limit(20);
+
+  builder = digits && digits.length >= 3
+    ? builder.or(`va_nummer.eq.${digits},naam.ilike.%${safeQ}%`)
+    : builder.ilike("naam", `%${safeQ}%`);
+
   const { data, error } = await builder.order("naam", { ascending: true });
   if (error) throw error;
+
   const vaList = (data ?? []).map((x: any) => cleanVa(x.va_nummer)).filter(Boolean) as string[];
   if (!vaList.length) return [];
+
   const nr = Number(sportschoolId);
   const schoolValue: string | number = Number.isFinite(nr) ? nr : sportschoolId;
-  const { data: existing, error: linkError } = await supabaseAdmin.from("fightpassport_school_fighters").select("va_nummer").eq("sportschool_id", schoolValue).eq("actief", true).in("va_nummer", vaList);
+
+  const [{ data: existing, error: linkError }, { data: gyms, error: gymError }] = await Promise.all([
+    supabaseAdmin
+      .from("fightpassport_school_fighters")
+      .select("va_nummer")
+      .eq("sportschool_id", schoolValue)
+      .eq("actief", true)
+      .in("va_nummer", vaList),
+    supabaseAdmin
+      .from("fightpassport_fighter_gyms")
+      .select("va_nummer,organisatie_naam,last_seen_at")
+      .in("va_nummer", vaList)
+      .order("last_seen_at", { ascending: false }),
+  ]);
+
   if (linkError) throw linkError;
+  if (gymError) throw gymError;
+
   const linked = new Set((existing ?? []).map((x: any) => cleanVa(x.va_nummer)).filter(Boolean));
-  return (data ?? []).map((x: any) => ({ ...x, va_nummer: cleanVa(x.va_nummer), al_gekoppeld: linked.has(cleanVa(x.va_nummer)) }));
+  const latestGymByVa = new Map<string, string>();
+  for (const gym of gyms ?? []) {
+    const va = cleanVa((gym as any).va_nummer);
+    const naam = String((gym as any).organisatie_naam ?? "").trim();
+    if (va && naam && !latestGymByVa.has(va)) latestGymByVa.set(va, naam);
+  }
+
+  // AVG: zoekresultaten geven bewust alleen herkenningsgegevens terug.
+  // Geboortedatum wordt uitsluitend server-side gebruikt om de leeftijd te berekenen.
+  return (data ?? []).map((fighter: any) => {
+    const va = cleanVa(fighter.va_nummer) ?? "";
+    return {
+      va_nummer: va,
+      naam: fighter.naam ?? null,
+      leeftijd: ageFromBirthdate(fighter.geboortedatum),
+      huidige_sportschool: latestGymByVa.get(va) ?? null,
+      al_gekoppeld: linked.has(va),
+    };
+  });
 }
 
 async function getFighters(sportschoolId: string) {
