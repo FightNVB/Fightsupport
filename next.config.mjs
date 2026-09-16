@@ -5,17 +5,6 @@ const nextConfig = {
   // Disable the X-Powered-By header to avoid leaking framework info
   poweredByHeader: false,
 
-  async rewrites() {
-    return [
-      {
-        // Matchmaker Eindcontrole must do a live FightPassport scrape.
-        // The normal matchmaker/start route is DB-only and intentionally does not scrape.
-        source: "/api/matchmaker/eindcontrole/start",
-        destination: "/api/control-engine/matchmaker/full/start",
-      },
-    ];
-  },
-
   async headers() {
     return [
       {
@@ -50,38 +39,12 @@ const nextConfig = {
         // Apply security headers to all routes
         source: "/(.*)",
         headers: [
-          // Prevent clickjacking
-          {
-            key: "X-Frame-Options",
-            value: "DENY",
-          },
-          // Prevent MIME-type sniffing
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff",
-          },
-          // Enable XSS protection in legacy browsers
-          {
-            key: "X-XSS-Protection",
-            value: "1; mode=block",
-          },
-          // Control referrer information
-          {
-            key: "Referrer-Policy",
-            value: "strict-origin-when-cross-origin",
-          },
-          // Restrict permissions/features
-          {
-            key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=(), payment=()",
-          },
-          // Enforce HTTPS in browsers
-          {
-            key: "Strict-Transport-Security",
-            value: "max-age=63072000; includeSubDomains; preload",
-          },
-          // Content Security Policy
-          // Adjust 'connect-src' to include your Supabase project URL if needed
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-XSS-Protection", value: "1; mode=block" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
           {
             key: "Content-Security-Policy",
             value: [
