@@ -1,10 +1,12 @@
 // app/api/rapport/matchmaker-eindrapport/route.ts
-// Zelfstandig Matchmaker-eindrapport. Leest uitsluitend de laatste afgeronde Matchmaker-eindcontrole.
+// Zelfstandig Matchmaker-eindrapport. Leest de laatste afgeronde live Matchmaker-eindcontrole.
 import { createClient } from "@supabase/supabase-js";
 import { privateJson, requireMatchmakingAccess, secureError } from "@/lib/api/secureRoute";
 
 export const runtime = "nodejs";
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth:{ persistSession:false } });
+
+const MATCHMAKER_FINAL_RUN_TYPES = ["control-engine-matchmaker-total", "matchmaker_eindcontrole"];
 
 export async function GET(req: Request) {
   try {
@@ -13,7 +15,7 @@ export async function GET(req: Request) {
     await requireMatchmakingAccess(req, matchmakingId);
 
     const { data:runs, error:runError } = await supabase.from("controle_runs").select("*")
-      .eq("matchmaking_id",matchmakingId).eq("run_type","matchmaker_eindcontrole").eq("status","klaar")
+      .eq("matchmaking_id",matchmakingId).in("run_type",MATCHMAKER_FINAL_RUN_TYPES).eq("status","klaar")
       .order("gestart_op",{ ascending:false }).limit(1);
     if (runError) throw runError; const run = runs?.[0];
     if (!run?.id) return privateJson({ ok:false, error:"Nog geen afgeronde Matchmaker-eindcontrole gevonden." },404);
