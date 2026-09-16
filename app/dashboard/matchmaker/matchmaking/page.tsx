@@ -1015,9 +1015,9 @@ function MatchmakingPageContent() {
       setBusyId(target.id);
       setSuccessMsg("");
       setControleOverlayMode("running");
-      setControleOverlayTitle("Volledige Matchmaker-controle");
-      setControleOverlayMessage("FightPassport wordt opnieuw gescrapet...");
-      setControleOverlaySub("Daarna worden context en regels opnieuw opgebouwd.");
+      setControleOverlayTitle("Terminator gestart");
+      setControleOverlayMessage("De matchmaking wordt gecontroleerd. Even geduld…");
+      setControleOverlaySub("");
       setControleOverlayOpen(true);
 
       const res = await authedFetch("/api/control-engine/matchmaker/full/start", {
@@ -1032,7 +1032,7 @@ function MatchmakingPageContent() {
       }
 
       setSuccessMsg(
-        `✅ Volledige controle afgerond: ${Number(payload?.scraper?.va_count ?? 0)} vechters gescrapet, ${Number(payload?.context_rows ?? 0)} partijen gecontroleerd.`,
+        `✅ Controle afgerond: ${Number(payload?.context_rows ?? 0)} partijen gecontroleerd.`,
       );
       await load();
       setControleOverlayOpen(false);
@@ -1040,9 +1040,9 @@ function MatchmakingPageContent() {
       console.error("matchmaker full controle mislukt:", e);
       setControleOverlayMode("error");
       setControleOverlayTitle("Controle mislukt");
-      setControleOverlayMessage(e?.message || "Volledige Matchmaker-controle mislukt.");
-      setControleOverlaySub("Controleer de serverlog voor de exacte foutmelding.");
-      setSuccessMsg("🔴 Volledige Matchmaker-controle mislukt.");
+      setControleOverlayMessage("Er is iets misgegaan tijdens de controle.");
+      setControleOverlaySub("");
+      setSuccessMsg("🔴 Controle niet afgerond.");
     } finally {
       setBusyId(null);
     }
