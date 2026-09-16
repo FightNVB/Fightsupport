@@ -1,15 +1,6 @@
 // app/api/control-engine/admin/start/route.ts
-//
-// ADMINCONTROLE
-// - eigen full scraper: fp_bundle_admin/scraper_fp_admin.js
-// - scope: uitsluitend VA's uit deze matchmaking
-// - 3 processen x 8 workers
-// - SPORTSCHOLEN-tegel wordt per VA in dezelfde full-scrape uitgelezen
-// - rulesEngine bouwt de actuele meldingen volledig opnieuw op
-// - eerdere handmatige reviews worden alleen teruggezet als dezelfde regel
-//   in de nieuwe run opnieuw bestaat
-//
-// Dispensatie_requests worden hier NOOIT verwijderd.
+// ADMINCONTROLE: eigen full scraper + eigen Admin libs/rules.
+// Oude runs/context/resultaten blijven historie. Dispensatie_requests worden nooit verwijderd.
 
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
@@ -19,11 +10,9 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { buildControleBoutContext } from "@/lib/control/buildControleBoutContext";
 import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
+import { carryApprovedAdminRecordDifferenceReviews } from "@/lib/control/carryRecordDifferenceReview";
 import { rulesEngine } from "@/lib/rulesEngine";
-import {
-  assertCanAccessMatchmaking,
-  requireUserWithRole,
-} from "@/app/api/_utils/authz";
+import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,61 +20,40 @@ export const dynamic = "force-dynamic";
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } },
+  { auth: { persistSession: false } }
 );
 
+const RUN_TYPE = "control-engine-admin-total";
 const FULL_SCRAPER_FILE = "scraper_fp_admin.js";
 const PROCESS_COUNT = 3;
 const WORKERS_PER_PROCESS = 8;
 
-type ReviewRow = {
-  partij_nr?: number | null;
-  bout_id?: string | null;
-  rule_code?: string | null;
-  hoek?: string | null;
-  toernooi_code?: string | null;
-  fighter_id?: string | null;
-  toernooi_va_nummer?: string | null;
-  review_status?: string | null;
-  review_note?: string | null;
-  reviewed_by?: string | null;
-  reviewed_at?: string | null;
-  aantekeningen?: string | null;
-};
-
-function toVaStrict(value: any): string | null {
+function toVaStrict(value: unknown): string | null {
   const digits = String(value ?? "").replace(/\D/g, "");
   return /^\d{3,6}$/.test(digits) ? digits : null;
 }
 
 function pickVA(row: any, side: "rood" | "blauw"): string | null {
-  if (side === "rood") {
-    return (
-      toVaStrict(row?.va_rood) ??
-      toVaStrict(row?.rood_va) ??
-      toVaStrict(row?.rood_va_mm) ??
-      null
-    );
+  const values = side === "rood"
+    ? [row?.va_rood, row?.rood_va, row?.rood_va_mm]
+    : [row?.va_blauw, row?.blauw_va, row?.blauw_va_mm];
+  for (const value of values) {
+    const va = toVaStrict(value);
+    if (va) return va;
   }
-  return (
-    toVaStrict(row?.va_blauw) ??
-    toVaStrict(row?.blauw_va) ??
-    toVaStrict(row?.blauw_va_mm) ??
-    null
-  );
+  return null;
 }
 
-function clampInt(value: any, fallback: number, min: number, max: number) {
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.max(min, Math.min(max, Math.floor(number)));
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, Math.floor(number))) : fallback;
 }
 
-function isRoleAllowedForRoute(role: string | null | undefined) {
+function isRoleAllowedForRoute(role: string | null | undefined): boolean {
   return role === "admin" || role === "superadmin";
 }
 
-function resolveScriptPath(file: string) {
+function resolveScriptPath(file: string): string {
   const root = process.cwd();
   const candidates = [
     path.join(root, "ControlEngine", "scrapers", "fp_bundle_admin", file),
@@ -102,8 +70,8 @@ function resolveScriptPath(file: string) {
 function runNodeScript(
   scriptPath: string,
   args: string[],
-  envExtra?: Record<string, string>,
-  logPrefix?: string,
+  envExtra: Record<string, string>,
+  logPrefix: string
 ): Promise<{ stdout: string; stderr: string; ms: number }> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -117,41 +85,31 @@ function runNodeScript(
 
     let stdout = "";
     let stderr = "";
-
     child.stdout?.on("data", (data) => {
       const text = data.toString();
       stdout += text;
-      process.stdout.write(logPrefix ? `[${logPrefix}] ${text}` : text);
+      process.stdout.write(`[${logPrefix}] ${text}`);
     });
     child.stderr?.on("data", (data) => {
       const text = data.toString();
       stderr += text;
-      process.stderr.write(logPrefix ? `[${logPrefix}] ${text}` : text);
+      process.stderr.write(`[${logPrefix}] ${text}`);
     });
-    child.on("error", (error) => reject(error));
+    child.on("error", reject);
     child.on("close", (code) => {
       const ms = Date.now() - startedAt;
       if (code === 0) return resolve({ stdout, stderr, ms });
-      reject(
-        new Error(
-          `Script failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`,
-        ),
-      );
+      reject(new Error(`Script failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`));
     });
   });
 }
 
-async function updateRunProgress(controle_run_id: string, patch: Record<string, any>) {
-  const { error } = await supabase
-    .from("controle_runs")
-    .update(patch)
-    .eq("id", controle_run_id);
-  if (error) {
-    console.warn("[control-engine/admin/start] progress update warning:", error.message);
-  }
+async function updateRunProgress(controleRunId: string, patch: Record<string, unknown>) {
+  const { error } = await supabase.from("controle_runs").update(patch).eq("id", controleRunId);
+  if (error) console.warn("[control-engine/admin/start] progress update warning:", error.message);
 }
 
-async function abortActiveRuns(matchmaking_id: string) {
+async function abortOwnActiveRuns(matchmakingId: string) {
   const { error } = await supabase
     .from("controle_runs")
     .update({
@@ -160,25 +118,22 @@ async function abortActiveRuns(matchmaking_id: string) {
       is_latest: false,
       foutmelding: "Automatisch afgebroken omdat een nieuwe admincontrole is gestart.",
     })
-    .eq("matchmaking_id", matchmaking_id)
+    .eq("matchmaking_id", matchmakingId)
+    .eq("run_type", RUN_TYPE)
     .eq("status", "running");
   if (error) throw error;
 }
 
-async function createControleRun(args: {
-  matchmaking_id: string;
-  userId: string | null;
-  role: string | null;
-}) {
+async function createControleRun(args: { matchmakingId: string; userId: string | null; role: string | null }) {
   const { data, error } = await supabase
     .from("controle_runs")
     .insert({
-      matchmaking_id: args.matchmaking_id,
+      matchmaking_id: args.matchmakingId,
       gestart_door_user_id: args.userId,
       gestart_door_rol: args.role,
       status: "running",
       gestart_op: new Date().toISOString(),
-      run_type: "control-engine-admin-total",
+      run_type: RUN_TYPE,
       is_latest: true,
       totaal_aantal: 0,
       verwerkt_aantal: 0,
@@ -194,156 +149,36 @@ async function createControleRun(args: {
   const { error: latestError } = await supabase
     .from("controle_runs")
     .update({ is_latest: false })
-    .eq("matchmaking_id", args.matchmaking_id)
+    .eq("matchmaking_id", args.matchmakingId)
+    .eq("run_type", RUN_TYPE)
     .neq("id", data.id);
-  if (latestError) {
-    console.warn("[control-engine/admin/start] andere runs is_latest=false warning:", latestError.message);
-  }
+  if (latestError) console.warn("[control-engine/admin/start] admin is_latest warning:", latestError.message);
 
   return String(data.id);
 }
 
-async function cleanupPreviousContext(matchmaking_id: string) {
-  // controle_resultaten bewust NOG NIET verwijderen: zolang de nieuwe run niet
-  // geslaagd is, blijft de vorige beoordeling beschikbaar. Na succes verwijderen
-  // we alleen de oude resultaat-rows. Dispensaties blijven altijd staan.
-  const tables = [
-    "controle_bout_context",
-    "controle_toernooi_context",
-    "controle_uitslagen",
-  ];
-
-  for (const table of tables) {
-    const { error } = await supabase
-      .from(table)
-      .delete()
-      .eq("matchmaking_id", matchmaking_id);
-    if (error && String((error as any)?.code ?? "") !== "42P01") throw error;
-  }
-}
-
-async function cleanupStaleLiveRows(matchmaking_id: string) {
-  const { error } = await supabase
-    .from("controle_fighter_actueel")
-    .delete()
-    .eq("matchmaking_id", matchmaking_id);
-  if (error && String((error as any)?.code ?? "") !== "42P01") throw error;
-}
-
-async function loadActiveBouts(matchmaking_id: string) {
+async function loadActiveBouts(matchmakingId: string): Promise<any[]> {
   const { data, error } = await supabase
     .from("matchmaking_bouts_raw")
     .select("*")
-    .eq("matchmaking_id", matchmaking_id)
+    .eq("matchmaking_id", matchmakingId)
     .or("verwijderd.is.null,verwijderd.eq.false")
     .order("partij_nr", { ascending: true });
   if (error) throw error;
   return data ?? [];
 }
 
-function normReviewStatus(value: any): "approved" | "rejected" | null {
-  const s = String(value ?? "").trim().toLowerCase();
-  if (["approved", "approve", "goedgekeurd", "ok"].includes(s)) return "approved";
-  if (["rejected", "reject", "afgekeurd", "afkeur"].includes(s)) return "rejected";
-  return null;
-}
-
-function reviewKey(row: ReviewRow, includeBoutId: boolean) {
-  const parts = [
-    String(row?.partij_nr ?? ""),
-    includeBoutId ? String(row?.bout_id ?? "") : "",
-    String(row?.rule_code ?? "").trim().toLowerCase(),
-    String(row?.hoek ?? "").trim().toLowerCase(),
-    String(row?.toernooi_code ?? "").trim().toUpperCase(),
-    String(row?.fighter_id ?? "").replace(/\D/g, ""),
-    String(row?.toernooi_va_nummer ?? "").replace(/\D/g, ""),
-  ];
-  return parts.join("|");
-}
-
-async function loadPreviousReviewedResults(matchmaking_id: string): Promise<ReviewRow[]> {
-  const { data, error } = await supabase
-    .from("controle_resultaten")
-    .select("partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,created_at")
-    .eq("matchmaking_id", matchmaking_id)
-    .not("review_status", "is", null)
-    .order("reviewed_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return (data ?? []).filter((row: any) => !!normReviewStatus(row?.review_status));
-}
-
-async function carryForwardReviews(args: {
-  matchmaking_id: string;
-  controle_run_id: string;
-  previous: ReviewRow[];
-}) {
-  if (!args.previous.length) return 0;
-
-  const strictMap = new Map<string, ReviewRow>();
-  const fallbackMap = new Map<string, ReviewRow>();
-  for (const row of args.previous) {
-    const strict = reviewKey(row, true);
-    const fallback = reviewKey(row, false);
-    if (!strictMap.has(strict)) strictMap.set(strict, row);
-    if (!fallbackMap.has(fallback)) fallbackMap.set(fallback, row);
-  }
-
-  const { data: current, error } = await supabase
-    .from("controle_resultaten")
-    .select("id,partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer")
-    .eq("matchmaking_id", args.matchmaking_id)
-    .eq("controle_run_id", args.controle_run_id);
-  if (error) throw error;
-
-  let carried = 0;
-  for (const row of current ?? []) {
-    const prev = strictMap.get(reviewKey(row, true)) ?? fallbackMap.get(reviewKey(row, false));
-    if (!prev) continue;
-
-    const normalized = normReviewStatus(prev.review_status);
-    if (!normalized) continue;
-
-    const patch: Record<string, any> = {
-      review_status: prev.review_status ?? null,
-      review_note: prev.review_note ?? null,
-      reviewed_by: prev.reviewed_by ?? null,
-      reviewed_at: prev.reviewed_at ?? null,
-      aantekeningen: prev.aantekeningen ?? null,
-    };
-
-    if (normalized === "approved") {
-      patch.resultaat = "OK";
-      patch.actie_status = "goedgekeurd";
-    } else {
-      patch.resultaat = "AFKEUR";
-      patch.actie_status = "afgekeurd";
-    }
-
-    const { error: updateError } = await supabase
-      .from("controle_resultaten")
-      .update(patch)
-      .eq("id", (row as any).id);
-    if (updateError) throw updateError;
-    carried += 1;
-  }
-
-  return carried;
-}
-
-async function deleteOldResultRows(matchmaking_id: string, controle_run_id: string) {
+async function cleanupStaleAdminLiveRows(matchmakingId: string) {
   const { error } = await supabase
-    .from("controle_resultaten")
+    .from("controle_fighter_actueel")
     .delete()
-    .eq("matchmaking_id", matchmaking_id)
-    .neq("controle_run_id", controle_run_id);
-  if (error) throw error;
+    .eq("matchmaking_id", matchmakingId);
+  if (error && String((error as any)?.code ?? "") !== "42P01") throw error;
 }
 
 async function runAdminFullScrape(args: {
-  matchmaking_id: string;
-  controle_run_id: string;
+  matchmakingId: string;
+  controleRunId: string;
   vaNummers: string[];
   staggerMs: number;
   tabAttempts: number;
@@ -355,7 +190,7 @@ async function runAdminFullScrape(args: {
   const chunks: string[][] = Array.from({ length: PROCESS_COUNT }, () => []);
   args.vaNummers.forEach((va, index) => chunks[index % PROCESS_COUNT].push(va));
   const activeChunks = chunks.filter((chunk) => chunk.length > 0);
-  const adminBatchId = `admin-${args.matchmaking_id}-${crypto.randomUUID()}`;
+  const adminBatchId = `admin-${args.matchmakingId}-${crypto.randomUUID()}`;
 
   const scrapeResults = await Promise.all(
     activeChunks.map((chunk, index) => {
@@ -381,8 +216,8 @@ async function runAdminFullScrape(args: {
           FP_TOTAL_BATCH_PARTS: String(activeChunks.length),
           FP_TOTAL_BATCH_START_VA: String(minVa),
           FP_TOTAL_BATCH_END_VA: String(maxVa),
-          FP_ADMIN_MATCHMAKING_ID: args.matchmaking_id,
-          FP_ADMIN_CONTROLE_RUN_ID: args.controle_run_id,
+          FP_ADMIN_MATCHMAKING_ID: args.matchmakingId,
+          FP_ADMIN_CONTROLE_RUN_ID: args.controleRunId,
           STAGGER_MS: String(args.staggerMs),
           TAB_ATTEMPTS: String(args.tabAttempts),
           SOFT_WAIT_MS: String(args.softWaitMs),
@@ -390,34 +225,32 @@ async function runAdminFullScrape(args: {
           HEADLESS: process.env.HEADLESS ?? "false",
           PUPPETEER_HEADLESS: process.env.PUPPETEER_HEADLESS ?? process.env.HEADLESS ?? "false",
         },
-        `fp_admin_full_${index + 1}`,
+        `fp_admin_full_${index + 1}`
       );
-    }),
+    })
   );
 
   return {
     batchId: adminBatchId,
     processes: activeChunks.length,
-    maxMs: scrapeResults.length ? Math.max(...scrapeResults.map((r) => r.ms)) : 0,
+    maxMs: scrapeResults.length ? Math.max(...scrapeResults.map((result) => result.ms)) : 0,
   };
 }
 
 export async function POST(req: Request) {
-  let matchmaking_id: string | null = null;
-  let controle_run_id: string | null = null;
+  let matchmakingId: string | null = null;
+  let controleRunId: string | null = null;
 
   try {
     const body = await req.json().catch(() => ({}));
-    matchmaking_id = String(body?.matchmaking_id ?? "").trim() || null;
-    if (!matchmaking_id) {
-      return NextResponse.json({ error: "matchmaking_id ontbreekt." }, { status: 400 });
-    }
+    matchmakingId = String(body?.matchmaking_id ?? "").trim() || null;
+    if (!matchmakingId) return NextResponse.json({ error: "matchmaking_id ontbreekt." }, { status: 400 });
 
     const { userId, role } = await requireUserWithRole(req);
     if (!isRoleAllowedForRoute(role)) {
       return NextResponse.json({ error: "Geen toegang tot admin start route." }, { status: 403 });
     }
-    await assertCanAccessMatchmaking({ matchmaking_id, userId, role });
+    await assertCanAccessMatchmaking({ matchmaking_id: matchmakingId, userId, role });
 
     const staggerMs = clampInt(body?.stagger_ms ?? 450, 450, 0, 5000);
     const tabAttempts = clampInt(body?.tab_attempts ?? 5, 5, 1, 30);
@@ -425,25 +258,18 @@ export async function POST(req: Request) {
     const betweenAttemptsMs = clampInt(body?.between_attempts_ms ?? 350, 350, 0, 5000);
     const scrapeTimeoutMs = clampInt(body?.scrape_timeout_ms ?? 120000, 120000, 30000, 300000);
 
-    await abortActiveRuns(matchmaking_id);
+    // Alleen een eerdere Admin-run van deze matchmaking afbreken. Matchmaker/Officials blijven onafhankelijk.
+    await abortOwnActiveRuns(matchmakingId);
 
-    // Reviews eerst veilig in geheugen pakken. De oude resultaat-rows blijven
-    // tijdens de nieuwe run ook nog staan, zodat een mislukte run niets wist.
-    const previousReviews = await loadPreviousReviewedResults(matchmaking_id);
-    await cleanupPreviousContext(matchmaking_id);
-
-    controle_run_id = await createControleRun({
-      matchmaking_id,
+    controleRunId = await createControleRun({
+      matchmakingId,
       userId: userId ?? null,
       role: role ?? null,
     });
 
-    await updateRunProgress(controle_run_id, {
-      progress: 5,
-      current_step: "Partijen en VA-nummers verzamelen...",
-    });
+    await updateRunProgress(controleRunId, { progress: 5, current_step: "Partijen en VA-nummers verzamelen..." });
 
-    const bouts = await loadActiveBouts(matchmaking_id);
+    const bouts = await loadActiveBouts(matchmakingId);
     if (!bouts.length) throw new Error("Deze matchmaking bevat geen actieve partijen om te controleren.");
 
     const vaSet = new Set<string>();
@@ -453,24 +279,21 @@ export async function POST(req: Request) {
       if (rood) vaSet.add(rood);
       if (blauw) vaSet.add(blauw);
     }
-
     const vaNummers = [...vaSet];
     if (!vaNummers.length) throw new Error("Geen geldige VA-nummers gevonden in deze matchmaking.");
 
-    await updateRunProgress(controle_run_id, {
+    await updateRunProgress(controleRunId, {
       totaal_aantal: vaNummers.length,
       verwerkt_aantal: 0,
       progress: 12,
       current_step: `Volledige admin FightPassport-scrape: ${vaNummers.length} vechters (3 x 8 workers)...`,
     });
 
-    // De full scraper schrijft per VA ook direct de actuele SPORTSCHOLEN/keurmerk-data.
-    // Ruim daarom de vorige live rows op vóór deze ene scrape begint.
-    await cleanupStaleLiveRows(matchmaking_id);
+    await cleanupStaleAdminLiveRows(matchmakingId);
 
     const full = await runAdminFullScrape({
-      matchmaking_id,
-      controle_run_id,
+      matchmakingId,
+      controleRunId,
       vaNummers,
       staggerMs,
       tabAttempts,
@@ -479,53 +302,47 @@ export async function POST(req: Request) {
       scrapeTimeoutMs,
     });
 
-    await updateRunProgress(controle_run_id, {
+    await updateRunProgress(controleRunId, {
       verwerkt_aantal: vaNummers.length,
       progress: 74,
       current_step: "Verse data verwerken: context + sportschoolherkenning...",
     });
 
-    await buildControleBoutContext(matchmaking_id, controle_run_id);
-    await enrichControleBoutContext(matchmaking_id, controle_run_id);
+    // Iedere run krijgt zijn eigen context. Oude context/resultaten worden niet verwijderd.
+    await buildControleBoutContext(matchmakingId, controleRunId);
+    await enrichControleBoutContext(matchmakingId, controleRunId);
 
     const { data: ctxRows, error: ctxError } = await supabase
       .from("controle_bout_context")
       .select("*")
-      .eq("matchmaking_id", matchmaking_id)
-      .eq("controle_run_id", controle_run_id)
+      .eq("matchmaking_id", matchmakingId)
+      .eq("controle_run_id", controleRunId)
       .order("partij_nr", { ascending: true });
-
     if (ctxError) throw ctxError;
     if (!ctxRows?.length) throw new Error("Geen controle_bout_context gevonden na admin rebuild.");
 
-    await updateRunProgress(controle_run_id, {
+    await updateRunProgress(controleRunId, {
       progress: 86,
       current_step: "RulesEngine draait op de verse volledige scrape...",
     });
 
-    const hits = await rulesEngine({
-      matchmaking_id,
-      controle_run_id,
-      ctxRows,
+    const hits = await rulesEngine({ matchmaking_id: matchmakingId, controle_run_id: controleRunId, ctxRows });
+
+    // Alleen partij-/recordverschil mag bij dezelfde twee VA's zijn eerdere goedkeuring behouden.
+    // Partijnummer, hoekvolgorde en technisch bout-id mogen wijzigen. Alle andere regels zijn actueel.
+    const carriedReviews = await carryApprovedAdminRecordDifferenceReviews({
+      supabase,
+      matchmakingId,
+      runId: controleRunId,
+      currentContextRows: ctxRows,
     });
 
-    // Alleen reviews terugzetten op regels die door DEZE verse rulesEngine-run
-    // opnieuw zijn aangemaakt. Verdwenen regels blijven dus echt verdwenen.
-    const carriedReviews = await carryForwardReviews({
-      matchmaking_id,
-      controle_run_id,
-      previous: previousReviews,
-    });
-
-    // Pas nu de oude meldingen verwijderen. Als de run eerder faalt blijven ze staan.
-    await deleteOldResultRows(matchmaking_id, controle_run_id);
-
-    await updateRunProgress(controle_run_id, {
+    await updateRunProgress(controleRunId, {
       totaal_aantal: vaNummers.length,
       verwerkt_aantal: vaNummers.length,
       progress: 100,
       current_step: carriedReviews > 0
-        ? `Controle klaar. ${carriedReviews} eerdere beoordeling(en) behouden.`
+        ? `Controle klaar. ${carriedReviews} eerder goedgekeurde partijverschil-beoordeling(en) behouden.`
         : "Controle klaar.",
       status: "klaar",
       afgerond_op: new Date().toISOString(),
@@ -535,8 +352,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      matchmaking_id,
-      controle_run_id,
+      matchmaking_id: matchmakingId,
+      controle_run_id: controleRunId,
       source: "admin_total_matchmaking",
       scraper: {
         file: FULL_SCRAPER_FILE,
@@ -549,31 +366,26 @@ export async function POST(req: Request) {
       },
       context_rows: ctxRows.length,
       rules_hits: Array.isArray(hits) ? hits.length : 0,
-      carried_reviews: carriedReviews,
+      carried_record_difference_reviews: carriedReviews,
     });
   } catch (error: any) {
     console.error("[control-engine/admin/start] ❌ fout:", error);
 
-    if (controle_run_id) {
+    if (controleRunId) {
       await supabase
         .from("controle_runs")
         .update({
           status: "failed",
           foutmelding: error?.message ?? String(error),
           afgerond_op: new Date().toISOString(),
-          current_step: "Controle mislukt. Vorige beoordeelde resultaten zijn niet opgeruimd.",
+          current_step: "Controle mislukt. Eerdere runs en beoordelingen zijn behouden.",
         })
-        .eq("id", controle_run_id);
+        .eq("id", controleRunId);
     }
 
     return NextResponse.json(
-      {
-        ok: false,
-        matchmaking_id,
-        controle_run_id,
-        error: error?.message ?? String(error),
-      },
-      { status: 500 },
+      { ok: false, matchmaking_id: matchmakingId, controle_run_id: controleRunId, error: error?.message ?? String(error) },
+      { status: 500 }
     );
   }
 }
