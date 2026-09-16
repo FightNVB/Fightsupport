@@ -1,21 +1,30 @@
 // lib/control/carryRecordDifferenceReview.ts
-// Admin-owned 24h helper. Intentionally not shared with Matchmaker/Officials.
-// Only an earlier APPROVED party/record-difference decision may be carried forward.
+// Admin-owned review carry helper. Intentionally not shared with Matchmaker/Officials.
+// A previous manual decision is carried only when the SAME rule is emitted again in
+// the new Admin run for the same fighter/pairing. Disappeared rules remain history only.
+// Party/record-difference keeps its special stable-VA-pair behaviour and only carries APPROVED.
 
 import { adminPairingIdentity } from "@/lib/control/pairingIdentity";
 
-function normalizeStatus(value: unknown): string {
-  return String(value ?? "").trim().toLowerCase();
-}
+const ADMIN_RUN_TYPES = ["control-engine-admin-total"];
 
-function isApproved(value: unknown): boolean {
-  return ["approved", "approve", "goedgekeurd", "ok"].includes(normalizeStatus(value));
+type ReviewStatus = "approved" | "rejected" | null;
+
+function normalizeStatus(value: unknown): ReviewStatus {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (["approved", "approve", "goedgekeurd", "ok"].includes(status)) return "approved";
+  if (["rejected", "reject", "afgekeurd"].includes(status)) return "rejected";
+  return null;
 }
 
 function isRecordDifferenceRule(ruleCode: unknown): boolean {
   const code = String(ruleCode ?? "").trim().toUpperCase();
-  if (!code) return false;
-  return code.includes("PARTIJVERSCHIL") || code.includes("RECORDVERSCHIL");
+  return !!code && (code.includes("PARTIJVERSCHIL") || code.includes("RECORDVERSCHIL"));
+}
+
+function cleanVa(value: unknown): string | null {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return /^\d{3,6}$/.test(digits) ? digits : null;
 }
 
 function vaFromContext(ctx: any, side: "rood" | "blauw"): string | null {
@@ -23,8 +32,8 @@ function vaFromContext(ctx: any, side: "rood" | "blauw"): string | null {
     ? [ctx?.rood_va_mm, ctx?.va_rood, ctx?.va_rood_mm, ctx?.rood_va_fp, ctx?.rood_va_scrape]
     : [ctx?.blauw_va_mm, ctx?.va_blauw, ctx?.va_blauw_mm, ctx?.blauw_va_fp, ctx?.blauw_va_scrape];
   for (const value of candidates) {
-    const digits = String(value ?? "").replace(/\D/g, "");
-    if (/^\d{3,6}$/.test(digits)) return digits;
+    const va = cleanVa(value);
+    if (va) return va;
   }
   return null;
 }
@@ -59,6 +68,57 @@ function pairing(matchmakingId: string, ctx: any): string | null {
   return adminPairingIdentity(matchmakingId, vaFromContext(ctx, "rood"), vaFromContext(ctx, "blauw"));
 }
 
+function subjectKey(matchmakingId: string, row: any, ctx: any): string | null {
+  const tournament = String(row?.toernooi_code ?? "").trim().toUpperCase();
+  const explicitVa = cleanVa(row?.toernooi_va_nummer) ?? cleanVa(row?.fighter_id);
+  if (explicitVa) return tournament ? `TOERNOOI:${tournament}:VA:${explicitVa}` : `VA:${explicitVa}`;
+
+  const hoek = String(row?.hoek ?? "").trim().toLowerCase();
+  if (hoek === "rood" || hoek === "blauw") {
+    const va = vaFromContext(ctx, hoek);
+    if (va) return `VA:${va}`;
+  }
+
+  const pair = pairing(matchmakingId, ctx);
+  return pair ? `PAIR:${pair}` : null;
+}
+
+function currentIssueKey(matchmakingId: string, row: any, ctx: any): string | null {
+  const ruleCode = String(row?.rule_code ?? "").trim().toUpperCase();
+  if (!ruleCode || ruleCode === "__NO_RULES__") return null;
+  const subject = subjectKey(matchmakingId, row, ctx);
+  return subject ? `${subject}|RULE:${ruleCode}` : null;
+}
+
+function hasManualData(row: any): boolean {
+  return !!normalizeStatus(row?.review_status) ||
+    !!row?.reviewed_at ||
+    !!String(row?.review_note ?? "").trim() ||
+    !!String(row?.aantekeningen ?? "").trim();
+}
+
+function reviewPatch(oldRow: any, recordDifference: boolean): Record<string, unknown> | null {
+  const status = normalizeStatus(oldRow?.review_status);
+  if (recordDifference && status !== "approved") return null;
+
+  const patch: Record<string, unknown> = {
+    review_status: status ?? oldRow?.review_status ?? null,
+    review_note: oldRow?.review_note ?? null,
+    reviewed_by: oldRow?.reviewed_by ?? null,
+    reviewed_at: oldRow?.reviewed_at ?? null,
+    aantekeningen: oldRow?.aantekeningen ?? null,
+  };
+
+  if (status === "approved") {
+    patch.resultaat = "OK";
+    patch.actie_status = "goedgekeurd";
+  } else if (status === "rejected") {
+    patch.resultaat = "AFKEUR";
+    patch.actie_status = "afgekeurd";
+  }
+  return patch;
+}
+
 export async function carryApprovedAdminRecordDifferenceReviews(args: {
   supabase: any;
   matchmakingId: string;
@@ -67,29 +127,37 @@ export async function carryApprovedAdminRecordDifferenceReviews(args: {
 }): Promise<number> {
   const { supabase, matchmakingId, runId, currentContextRows } = args;
 
+  // Role isolation: never import decisions from Matchmaker or Officials runs.
+  const { data: previousRuns, error: runsError } = await supabase
+    .from("controle_runs")
+    .select("id,run_type,gestart_op")
+    .eq("matchmaking_id", matchmakingId)
+    .in("run_type", ADMIN_RUN_TYPES)
+    .neq("id", runId)
+    .order("gestart_op", { ascending: false, nullsFirst: false });
+  if (runsError) throw runsError;
+
+  const previousRunIds = (previousRuns ?? []).map((run: any) => String(run?.id ?? "").trim()).filter(Boolean);
+  if (!previousRunIds.length) return 0;
+
   const { data: previousRows, error: previousError } = await supabase
     .from("controle_resultaten")
-    .select("id,controle_run_id,partij_nr,bout_id,rule_code,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,created_at")
+    .select("id,controle_run_id,partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status,review_note,reviewed_by,reviewed_at,aantekeningen,created_at")
     .eq("matchmaking_id", matchmakingId)
-    .neq("controle_run_id", runId)
-    .not("review_status", "is", null)
+    .in("controle_run_id", previousRunIds)
     .order("reviewed_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false });
   if (previousError) throw previousError;
 
-  const approved = (previousRows ?? []).filter(
-    (row: any) => isApproved(row?.review_status) && isRecordDifferenceRule(row?.rule_code)
-  );
-  if (!approved.length) return 0;
+  const reviewedRows = (previousRows ?? []).filter((row: any) => hasManualData(row));
+  if (!reviewedRows.length) return 0;
 
-  const runIds = [...new Set(approved.map((row: any) => String(row?.controle_run_id ?? "").trim()).filter(Boolean))];
-  if (!runIds.length) return 0;
-
+  const reviewedRunIds = [...new Set(reviewedRows.map((row: any) => String(row?.controle_run_id ?? "").trim()).filter(Boolean))];
   const { data: oldContexts, error: contextError } = await supabase
     .from("controle_bout_context")
     .select("*")
     .eq("matchmaking_id", matchmakingId)
-    .in("controle_run_id", runIds);
+    .in("controle_run_id", reviewedRunIds);
   if (contextError) throw contextError;
 
   const lookupByRun = new Map<string, Map<string, any>>();
@@ -101,51 +169,69 @@ export async function carryApprovedAdminRecordDifferenceReviews(args: {
     for (const key of rowKeys(ctx)) if (!lookup.has(key)) lookup.set(key, ctx);
   }
 
-  const approvedByPairRule = new Map<string, any>();
-  for (const oldRow of approved) {
+  // Rows are newest-first. First matching manual decision wins.
+  const previousByIssue = new Map<string, any>();
+  const approvedRecordByPairRule = new Map<string, any>();
+  for (const oldRow of reviewedRows) {
     const oldRunId = String(oldRow?.controle_run_id ?? "").trim();
     const oldCtx = findContext(lookupByRun.get(oldRunId) ?? new Map(), oldRow);
-    const pair = pairing(matchmakingId, oldCtx);
-    const code = String(oldRow?.rule_code ?? "").trim().toUpperCase();
-    if (!pair || !code) continue;
-    const key = `${pair}|${code}`;
-    if (!approvedByPairRule.has(key)) approvedByPairRule.set(key, oldRow);
+    const ruleCode = String(oldRow?.rule_code ?? "").trim().toUpperCase();
+    if (!ruleCode || ruleCode === "__NO_RULES__") continue;
+
+    if (isRecordDifferenceRule(ruleCode)) {
+      if (normalizeStatus(oldRow?.review_status) !== "approved") continue;
+      const pair = pairing(matchmakingId, oldCtx);
+      if (!pair) continue;
+      const key = `${pair}|${ruleCode}`;
+      if (!approvedRecordByPairRule.has(key)) approvedRecordByPairRule.set(key, oldRow);
+      continue;
+    }
+
+    const key = currentIssueKey(matchmakingId, oldRow, oldCtx);
+    if (key && !previousByIssue.has(key)) previousByIssue.set(key, oldRow);
   }
-  if (!approvedByPairRule.size) return 0;
 
   const { data: currentRows, error: currentError } = await supabase
     .from("controle_resultaten")
-    .select("id,partij_nr,bout_id,rule_code")
+    .select("id,partij_nr,bout_id,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer")
     .eq("matchmaking_id", matchmakingId)
     .eq("controle_run_id", runId);
   if (currentError) throw currentError;
 
   const currentLookup = makeLookup(currentContextRows);
-  let carried = 0;
+  let carriedRecordDifferences = 0;
+
   for (const currentRow of currentRows ?? []) {
-    if (!isRecordDifferenceRule(currentRow?.rule_code)) continue;
+    const ruleCode = String(currentRow?.rule_code ?? "").trim().toUpperCase();
+    if (!ruleCode || ruleCode === "__NO_RULES__") continue;
     const currentCtx = findContext(currentLookup, currentRow);
-    const pair = pairing(matchmakingId, currentCtx);
-    const code = String(currentRow?.rule_code ?? "").trim().toUpperCase();
-    if (!pair || !code) continue;
-    const oldRow = approvedByPairRule.get(`${pair}|${code}`);
+
+    let oldRow: any | null = null;
+    let recordDifference = false;
+
+    if (isRecordDifferenceRule(ruleCode)) {
+      const pair = pairing(matchmakingId, currentCtx);
+      if (!pair) continue;
+      oldRow = approvedRecordByPairRule.get(`${pair}|${ruleCode}`) ?? null;
+      recordDifference = true;
+    } else {
+      const key = currentIssueKey(matchmakingId, currentRow, currentCtx);
+      if (!key) continue;
+      oldRow = previousByIssue.get(key) ?? null;
+    }
+
     if (!oldRow) continue;
+    const patch = reviewPatch(oldRow, recordDifference);
+    if (!patch) continue;
 
     const { error: updateError } = await supabase
       .from("controle_resultaten")
-      .update({
-        review_status: oldRow.review_status ?? "approved",
-        review_note: oldRow.review_note ?? null,
-        reviewed_by: oldRow.reviewed_by ?? null,
-        reviewed_at: oldRow.reviewed_at ?? null,
-        aantekeningen: oldRow.aantekeningen ?? null,
-        resultaat: "OK",
-        actie_status: "goedgekeurd",
-      })
-      .eq("id", currentRow.id);
+      .update(patch)
+      .eq("id", currentRow.id)
+      .eq("controle_run_id", runId);
     if (updateError) throw updateError;
-    carried += 1;
+    if (recordDifference) carriedRecordDifferences += 1;
   }
 
-  return carried;
+  return carriedRecordDifferences;
 }
