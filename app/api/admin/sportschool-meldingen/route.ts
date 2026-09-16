@@ -138,6 +138,17 @@ export async function PATCH(req: Request) {
 
     if (!id) return bad("id ontbreekt");
 
+    // Lees eerst de melding, zodat een admin-afwijzing van een door de trainer
+    // toegevoegde vechter ook de tijdelijke fightcrew-koppeling kan terugdraaien.
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from("sportschool_vechter_meldingen")
+      .select("id,va_nummer,sportschool_id,raw")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (existingError) return bad("Melding laden mislukt", 500, existingError.message);
+    if (!existing) return bad("Melding niet gevonden", 404);
+
     const patch: Record<string, any> = {
       status,
       admin_opmerking: adminOpmerking || null,
@@ -159,6 +170,27 @@ export async function PATCH(req: Request) {
       .single();
 
     if (error) return bad("Melding bijwerken mislukt", 500, error.message);
+
+    const rawAction = s((existing as any)?.raw?.actie).toLowerCase();
+    if (status === "afgewezen" && rawAction === "vechter_toegevoegd_uit_fightpassport") {
+      const va = s((existing as any).va_nummer).replace(/\D/g, "");
+      const schoolIdRaw = s((existing as any).sportschool_id);
+      const schoolIdNumber = Number(schoolIdRaw);
+      const schoolValue: string | number = Number.isFinite(schoolIdNumber) ? schoolIdNumber : schoolIdRaw;
+
+      if (va && schoolIdRaw) {
+        const { error: unlinkError } = await supabaseAdmin
+          .from("fightpassport_school_fighters")
+          .update({ actief: false, updated_at: new Date().toISOString() })
+          .eq("sportschool_id", schoolValue)
+          .eq("va_nummer", va);
+
+        if (unlinkError) {
+          console.error("[admin/sportschool-meldingen] afgewezen koppeling verwijderen mislukt", unlinkError);
+          return bad("Melding is afgewezen, maar de vechter kon niet uit het sportschooloverzicht worden verwijderd", 500, unlinkError.message);
+        }
+      }
+    }
 
     return NextResponse.json({ ok: true, item: data });
   } catch (e: any) {
