@@ -133,7 +133,13 @@ function compactSpaces(v: string): string {
 }
 
 function cleanNamePart(v: any): string {
-  return compactSpaces(String(v ?? "").replace(/\s+/g, " ").trim());
+  return compactSpaces(
+    String(v ?? "")
+      .replace(/\b\d{1,2}\s*(?:jr|jaar)\b/gi, "")
+      .replace(/\s*\((?:v|m)\)\s*/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 function joinNameParts(...parts: Array<string | null | undefined>): string | null {
@@ -1545,6 +1551,18 @@ function findGlobalMinWeightCol(headers0: string[]): number | null {
   return null;
 }
 
+// Als er in een complete partijregel maar één generieke Gewicht/KG-kolom staat,
+// is dat het afgesproken maximale partijgewicht en geen individueel vechtergewicht.
+// Dit ondersteunt o.a. promotorlijsten met: [vechter 1] VS [vechter 2] Klasse Gewicht.
+function findSingleSharedWeightCol(headers0: string[]): number | null {
+  const cols: number[] = [];
+  for (let i = 0; i < headers0.length; i++) {
+    const h = headers0[i] || "";
+    if (isFighterWeightHeader(h)) cols.push(i + 1);
+  }
+  return cols.length === 1 ? cols[0] : null;
+}
+
 function findCornerStartsFromRowAbove(opts: { sheet: SheetLike; headerRowIndex: number; maxCol: number }): {
   redStart?: number;
   blueStart?: number;
@@ -1606,8 +1624,9 @@ function buildCornerMaps(opts: { sheet: SheetLike; headerRowIndex: number; maxCo
   const styleColIdx = headers0.findIndex((h) => h && (h.includes("stijl") || h.includes("discipline")));
   const classColIdx = headers0.findIndex((h) => h && (h.includes("klasse") || h.includes("class") || h.includes("categorie") || h.includes("cat")));
   const partijColIdx = headers0.findIndex((h) => h && (h.includes("partij") || h === "nr" || h.includes("partijnr")));
-  const maxGewCol = findGlobalMaxWeightCol(headers0);
+  let maxGewCol = findGlobalMaxWeightCol(headers0);
   const minGewCol = findGlobalMinWeightCol(headers0);
+  const sharedWeightCol = !maxGewCol ? findSingleSharedWeightCol(headers0) : null;
 
   const styleCol = styleColIdx >= 0 ? styleColIdx + 1 : null;
   const classCol = classColIdx >= 0 ? classColIdx + 1 : null;
@@ -1615,6 +1634,12 @@ function buildCornerMaps(opts: { sheet: SheetLike; headerRowIndex: number; maxCo
 
   const vsColIdx = headers0.findIndex((h) => h && (h === "vs" || h.includes("vs") || h.includes("v.s")));
   const vsCol = vsColIdx >= 0 ? vsColIdx + 1 : null;
+
+  // Eén generieke gewichtskolom bij een rood/VS/blauw-layout is partijniveau.
+  // Alleen toepassen wanneer die kolom niet vóór/ín de rode kant staat.
+  if (sharedWeightCol && vsCol && sharedWeightCol > vsCol) {
+    maxGewCol = sharedWeightCol;
+  }
 
   const voornaamCols: number[] = [];
   const achternaamCols: number[] = [];
