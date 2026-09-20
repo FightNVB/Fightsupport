@@ -814,7 +814,24 @@ function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMap
   }
   if (best && bestScore >= 0.7) {
     if (bestSecond && bestSecondScore >= bestScore - 0.03) return { row: null, reason: "Meerdere matches (ambigue) — maak alias aan." };
-    return { row: best, reason: null };
+
+    // Een globale fuzzy match mag nooit op alleen een generiek woord zoals
+    // "gym", "team" of "fighting" steunen. Vereis minstens twee gedeelde
+    // betekenisvolle naamdelen. Exacte namen/aliases en plaats/land-afhandeling
+    // zijn hierboven al verwerkt.
+    const genericGymTokens = new Set([
+      "gym", "team", "fighting", "fight", "center", "centre", "club",
+      "academy", "boxing", "kickboxing", "kickbox", "muay", "thai", "mma",
+      "sportschool", "sport", "school"
+    ]);
+    const inputTokens = tokenSet(scoreBase);
+    const bestTokens = tokenSet(norm(best?.naam));
+    const meaningfulShared = [...inputTokens].filter(
+      (t) => bestTokens.has(t) && t.length >= 3 && !genericGymTokens.has(t)
+    );
+
+    if (meaningfulShared.length >= 2) return { row: best, reason: null };
+    return { row: null, reason: "Geen betrouwbare naam- of aliasmatch gevonden — maak alias aan als dit dezelfde sportschool is." };
   }
   return { row: null, reason: "Geen match gevonden." };
 }
