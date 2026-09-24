@@ -46,8 +46,10 @@ function belongsToOwnFighter(x:any, ownCorner:"rood"|"blauw", own:any){
 }
 
 async function load(token:string){ const q=await supabaseAdmin.from("trainer_match_links").select("*").eq("token",token).eq("is_enabled",true).maybeSingle(); if(q.error)throw q.error; return q.data; }
+function expired(link:any){ return !!link?.expires_at && new Date(link.expires_at).getTime()<=Date.now(); }
+function expiredResponse(){ return NextResponse.json({error:"Deze uitnodigingslink is verlopen. Neem contact op met info@fightsupport.nl."},{status:410}); }
 export async function GET(_req:NextRequest,{params}:{params:Promise<{token:string}>}){
- try{ const {token}=await params; const link=await load(s(token)); if(!link)return NextResponse.json({error:"Deze trainerlink is niet beschikbaar"},{status:404});
+ try{ const {token}=await params; const link=await load(s(token)); if(!link)return NextResponse.json({error:"Deze trainerlink is niet beschikbaar"},{status:404}); if(expired(link))return expiredResponse();
   if(!link.opened_at) await supabaseAdmin.from("trainer_match_links").update({opened_at:new Date().toISOString()}).eq("id",link.id);
   const all=await buildTrainerReviewData(link.matchmaking_id); const gym=all.gyms.find(g=>g.key===link.sportschool_key); if(!gym)return NextResponse.json({error:"Sportschool niet meer gevonden in matchmaking"},{status:404});
   const rr=await supabaseAdmin.from("trainer_match_responses").select("*").eq("link_id",link.id); if(rr.error)throw rr.error;
@@ -119,7 +121,7 @@ async function syncBoutConfirmationStatus(matchmakingId:string,bout:any){
 }
 
 export async function POST(req:NextRequest,{params}:{params:Promise<{token:string}>}){
- try{ const {token}=await params; const link=await load(s(token)); if(!link)return NextResponse.json({error:"Deze trainerlink is niet beschikbaar"},{status:404}); const body=await req.json().catch(()=>({})); const boutId=s(body.boutId), status=s(body.status).toLowerCase(), opmerking=s(body.opmerking); if(!boutId||!["akkoord","afgewezen","bespreken"].includes(status))return NextResponse.json({error:"Ongeldige reactie"},{status:400});
+ try{ const {token}=await params; const link=await load(s(token)); if(!link)return NextResponse.json({error:"Deze trainerlink is niet beschikbaar"},{status:404}); if(expired(link))return expiredResponse(); const body=await req.json().catch(()=>({})); const boutId=s(body.boutId), status=s(body.status).toLowerCase(), opmerking=s(body.opmerking); if(!boutId||!["akkoord","afgewezen","bespreken"].includes(status))return NextResponse.json({error:"Ongeldige reactie"},{status:400});
   const all=await buildTrainerReviewData(link.matchmaking_id); const gym=all.gyms.find(g=>g.key===link.sportschool_key); const bout=gym?.bouts.find((b:any)=>b.id===boutId); if(!bout)return NextResponse.json({error:"Partij hoort niet bij deze sportschool"},{status:403});
   const ownCorner = gymKey(bout.red?.sportschool)===link.sportschool_key ? "rood" : "blauw";
   const own = ownCorner==="rood" ? bout.red : bout.blue;
