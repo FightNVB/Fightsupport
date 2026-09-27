@@ -726,104 +726,74 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
   const mm = String(gymNaam ?? "").trim();
   const va = String(vaNummer ?? "").trim();
   const explicitLandHint = detectLandHintFromGymText(mm);
-
-  // Als de MM-naam alleen de basisnaam bevat (bijv. "Fighting4all") en dus
-  // geen exacte officiële sportschoolnaam is, mag een letterlijke officiële
-  // FightPassport-naam die deze basisnaam bevat de dependance bepalen.
-  // Een expliciete/exacte MM-vestiging blijft altijd leidend.
-  const exactMmSchool = (sportscholen ?? []).find(
-    (school) => compactStrictName(school?.naam) === compactStrictName(mm)
-  );
-  const latestFpGym = va ? String(latestResultGymByVa.get(va)?.sportschool ?? "").trim() : "";
-  if (!exactMmSchool && latestFpGym) {
-    const exactFpSchools = (sportscholen ?? []).filter(
-      (school) => String(school?.naam ?? "").trim() === latestFpGym
-    );
-    if (exactFpSchools.length === 1) {
-      const mmStrictBase = compactStrictName(mm);
-      const fpStrict = compactStrictName(exactFpSchools[0]?.naam);
-      if (mmStrictBase && fpStrict && mmStrictBase.length >= 5 && fpStrict.includes(mmStrictBase)) {
-        return { row: exactFpSchools[0], reason: null };
-      }
-    }
-  }
-
-  // 1. De matchmaker geeft de HUIDIGE sportschool door. Zoek daarom eerst
-  //    welke officiële sportscholen bij die MM-naam kunnen horen.
   const mmStrict = compactStrictName(mm);
+
+  // De MM geeft de huidige gym. Verzamel alle vestigingen die bij die basisnaam
+  // horen. Bij meerdere vestigingen beslist de PLAATS uit FightPassport.
   const mmCandidates = (sportscholen ?? []).filter((school) => {
     if (mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return true;
-
-    // Een matchmaker kan een vestigingsnaam zonder plaats doorgeven, zoals
-    // "Fighting4all". Vergelijk daarom óók de letterlijke naam compact, zonder
-    // woorden als "fighting" weg te normaliseren. Zo worden zowel
-    // "Fighting 4 All Maassluis" als "Fighting4All Vlaardingen" kandidaten.
     const schoolStrict = compactStrictName(school?.naam);
     const minLen = Math.min(mmStrict.length, schoolStrict.length);
     return !!mmStrict && !!schoolStrict && minLen >= 5 &&
       (schoolStrict.includes(mmStrict) || mmStrict.includes(schoolStrict));
   });
 
-  if (mmCandidates.length === 1) {
-    return { row: mmCandidates[0], reason: null };
-  }
+  if (mmCandidates.length === 1) return { row: mmCandidates[0], reason: null };
 
-  // 2. Alleen als de MM-naam meerdere dependances kan betekenen, gebruiken
-  //    we FightPassport als disambiguatie. FightPassport-namen zijn officiële
-  //    namen: exact vergelijken met sportscholen.naam, zonder normalisatie.
   if (mmCandidates.length > 1 && va) {
-    const candidateIds = new Set(
-      mmCandidates.map((school) => String(school?.sportschool_id ?? "").trim()).filter(Boolean)
-    );
-    const evidenceIds = new Set<string>();
+    const placeVotes = new Set<string>();
 
-    // Laatste uitslag in FightPassport.
+    // FightPassport-resultaat: bij meerdere vestigingen staat de plaats achter
+    // de gymnaam. Vergelijk die plaats met sportscholen.plaats/stad.
     const resultGym = String(latestResultGymByVa.get(va)?.sportschool ?? "").trim();
     if (resultGym) {
-      const exactResultSchools = (sportscholen ?? []).filter(
-        (school) => String(school?.naam ?? "").trim() === resultGym
-      );
-      if (exactResultSchools.length === 1) {
-        const sid = String(exactResultSchools[0]?.sportschool_id ?? "").trim();
-        if (sid && candidateIds.has(sid)) evidenceIds.add(sid);
+      for (const candidate of mmCandidates) {
+        const place = String(candidate?.plaats ?? candidate?.stad ?? "").trim();
+        if (!place) continue;
+        const fp = normPlaats(resultGym);
+        const p = normPlaats(place);
+        if (p && fp && (fp === p || fp.endsWith(` ${p}`) || fp.includes(` ${p} `))) {
+          placeVotes.add(p);
+        }
       }
     }
 
-    // Sportschooltegel/koppeling van de vechter in FightPassport.
+    // De FightPassport-sportschooltegel is een tweede hint. De koppeling wijst
+    // naar een sportschool; daarvan gebruiken we eveneens alleen de plaats.
     const allLinks = schoolLinksByVa.get(va) ?? [];
     const activeLinks = allLinks.filter((link) => link?.actief !== false);
     const links = activeLinks.length > 0 ? activeLinks : allLinks;
     for (const link of links) {
-      const sid = String(link?.sportschool_id ?? "").trim();
-      if (sid && candidateIds.has(sid)) evidenceIds.add(sid);
+      const linkedSchool = findSportschoolBySportschoolId(sportscholen, link?.sportschool_id);
+      const linkedPlace = normPlaats(linkedSchool?.plaats ?? linkedSchool?.stad ?? "");
+      if (!linkedPlace) continue;
+      if (mmCandidates.some((candidate) => normPlaats(candidate?.plaats ?? candidate?.stad ?? "") === linkedPlace)) {
+        placeVotes.add(linkedPlace);
+      }
     }
 
-    if (evidenceIds.size === 1) {
-      const sid = Array.from(evidenceIds)[0];
-      const resolved = mmCandidates.find(
-        (school) => String(school?.sportschool_id ?? "").trim() === sid
+    if (placeVotes.size === 1) {
+      const place = Array.from(placeVotes)[0];
+      const byPlace = mmCandidates.filter(
+        (candidate) => normPlaats(candidate?.plaats ?? candidate?.stad ?? "") === place
       );
-      if (resolved) return { row: resolved, reason: null };
+      if (byPlace.length === 1) return { row: byPlace[0], reason: null };
     }
 
-    if (evidenceIds.size > 1) {
-      const names = mmCandidates
-        .filter((school) => evidenceIds.has(String(school?.sportschool_id ?? "").trim()))
-        .map((school) => String(school?.naam ?? "").trim())
-        .filter(Boolean);
+    if (placeVotes.size > 1) {
       return {
         row: null,
-        reason: `Matchmaker-sportschool "${mm}" heeft meerdere dependances en FightPassport geeft tegenstrijdige sportschoolinformatie: ${names.join(", ")}. Handmatige controle nodig.`,
+        reason: `Matchmaker-sportschool "${mm}" heeft meerdere vestigingen en FightPassport wijst naar verschillende plaatsen: ${Array.from(placeVotes).join(", ")}. Handmatige controle nodig.`,
       };
     }
 
     return {
       row: null,
-      reason: `Matchmaker-sportschool "${mm}" heeft meerdere mogelijke dependances, maar FightPassport kon voor VA ${va} geen van deze dependances betrouwbaar onderscheiden. Handmatige controle nodig.`,
+      reason: `Matchmaker-sportschool "${mm}" heeft meerdere vestigingen, maar uit FightPassport kon geen unieke plaats worden bepaald voor VA ${va}. Handmatige controle nodig.`,
     };
   }
 
-  // 3. Geen ambigue MM-match: bestaande matching/fallbacks blijven gelden.
+  // Geen meerdere vestigingen gevonden: bestaande algemene MM-matching blijft.
   if (explicitLandHint) {
     const explicit = findGymMatch(sportscholen, mm, aliasMaps);
     if (explicit.row) return explicit;
@@ -851,7 +821,6 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
   if (general.row && isForeignNonNL(general.row?.land ?? general.row?.country)) {
     return { row: null, reason: `Alleen een niet-exacte buitenlandse naam-match gevonden voor "${mm}". Zonder landcode accepteren we buitenland alleen bij een exacte DB-naam of exacte alias.` };
   }
-
   return general.row ? general : exactFallback;
 }
 
