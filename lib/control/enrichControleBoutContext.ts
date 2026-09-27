@@ -727,6 +727,27 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
   const va = String(vaNummer ?? "").trim();
   const explicitLandHint = detectLandHintFromGymText(mm);
 
+  // Als de MM-naam alleen de basisnaam bevat (bijv. "Fighting4all") en dus
+  // geen exacte officiële sportschoolnaam is, mag een letterlijke officiële
+  // FightPassport-naam die deze basisnaam bevat de dependance bepalen.
+  // Een expliciete/exacte MM-vestiging blijft altijd leidend.
+  const exactMmSchool = (sportscholen ?? []).find(
+    (school) => compactStrictName(school?.naam) === compactStrictName(mm)
+  );
+  const latestFpGym = va ? String(latestResultGymByVa.get(va)?.sportschool ?? "").trim() : "";
+  if (!exactMmSchool && latestFpGym) {
+    const exactFpSchools = (sportscholen ?? []).filter(
+      (school) => String(school?.naam ?? "").trim() === latestFpGym
+    );
+    if (exactFpSchools.length === 1) {
+      const mmStrictBase = compactStrictName(mm);
+      const fpStrict = compactStrictName(exactFpSchools[0]?.naam);
+      if (mmStrictBase && fpStrict && mmStrictBase.length >= 5 && fpStrict.includes(mmStrictBase)) {
+        return { row: exactFpSchools[0], reason: null };
+      }
+    }
+  }
+
   // 1. De matchmaker geeft de HUIDIGE sportschool door. Zoek daarom eerst
   //    welke officiële sportscholen bij die MM-naam kunnen horen.
   const mmStrict = compactStrictName(mm);
