@@ -729,9 +729,19 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
 
   // 1. De matchmaker geeft de HUIDIGE sportschool door. Zoek daarom eerst
   //    welke officiële sportscholen bij die MM-naam kunnen horen.
-  const mmCandidates = (sportscholen ?? []).filter((school) =>
-    mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)
-  );
+  const mmStrict = compactStrictName(mm);
+  const mmCandidates = (sportscholen ?? []).filter((school) => {
+    if (mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return true;
+
+    // Een matchmaker kan een vestigingsnaam zonder plaats doorgeven, zoals
+    // "Fighting4all". Vergelijk daarom óók de letterlijke naam compact, zonder
+    // woorden als "fighting" weg te normaliseren. Zo worden zowel
+    // "Fighting 4 All Maassluis" als "Fighting4All Vlaardingen" kandidaten.
+    const schoolStrict = compactStrictName(school?.naam);
+    const minLen = Math.min(mmStrict.length, schoolStrict.length);
+    return !!mmStrict && !!schoolStrict && minLen >= 5 &&
+      (schoolStrict.includes(mmStrict) || mmStrict.includes(schoolStrict));
+  });
 
   if (mmCandidates.length === 1) {
     return { row: mmCandidates[0], reason: null };
