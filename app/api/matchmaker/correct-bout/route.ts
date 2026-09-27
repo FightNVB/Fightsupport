@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { processMatchmakingFighters } from "@/lib/matchmaker/processMatchmakingFighters";
-import { buildControleBoutContext } from "@/lib/control/buildControleBoutContext";
-import { enrichControleBoutContext } from "@/lib/control/enrichControleBoutContext";
-import { rulesEngine } from "@/lib/rulesEngine";
+import { buildControleBoutContext } from "@/lib/matchmaker/buildControleBoutContext";
+import { enrichControleBoutContext } from "@/lib/matchmaker/enrichControleBoutContext";
+import { rulesEngine } from "@/lib/matchmaker/rulesEngine";
 import { assertCanAccessMatchmaking, requireUserWithRole } from "@/app/api/_utils/authz";
 
 export const runtime = "nodejs";
