@@ -646,19 +646,33 @@ function mmNameMatchesSchoolOrAlias(gymNaam: string, school: any, aliasMaps: Ali
 }
 
 function findGymMatchFromLatestResult(opts: { sportscholen: any[]; gymNaam: string; vaNummer: string; latestResultGymByVa: Map<string, FightPassportResultGym>; aliasMaps: AliasMaps }): GymMatch {
-  const { sportscholen, gymNaam, vaNummer, latestResultGymByVa, aliasMaps } = opts;
+  const { sportscholen, vaNummer, latestResultGymByVa } = opts;
   const va = String(vaNummer ?? "").trim();
   if (!va) return { row: null, reason: "Geen VA-nummer voor laatste FightPassport-uitslag." };
+
   const latest = latestResultGymByVa.get(va);
   const resultGym = String(latest?.sportschool ?? "").trim();
   if (!resultGym) return { row: null, reason: "Geen sportschool in laatste FightPassport-uitslag." };
-  const exactResultMatch = findExactNameOrAliasFallback(sportscholen, resultGym, aliasMaps);
-  const match = exactResultMatch.row ? exactResultMatch : findGymMatch(sportscholen, resultGym, aliasMaps);
-  if (!match.row) return match;
-  if (!mmNameMatchesSchoolOrAlias(gymNaam, match.row, aliasMaps)) {
-    return { row: null, reason: `Laatste FightPassport-uitslag noemt "${resultGym}", maar de MM-naam "${gymNaam}" is geen naam/alias van die sportschool.` };
+
+  // FightPassport is de bron. De sportschoolnaam uit FightPassport is al de
+  // officiële naam en mag daarom NIET door alias/fuzzy/MM-normalisatie.
+  const exact = (sportscholen ?? []).filter(
+    (school) => String(school?.naam ?? "").trim() === resultGym
+  );
+
+  if (exact.length === 1) return { row: exact[0], reason: null };
+
+  if (exact.length > 1) {
+    return {
+      row: null,
+      reason: `FightPassport sportschool "${resultGym}" staat meerdere keren exact in sportscholen.`,
+    };
   }
-  return match;
+
+  return {
+    row: null,
+    reason: `FightPassport sportschool "${resultGym}" bestaat niet exact in sportscholen.`,
+  };
 }
 
 type SchoolFighterLink = { va_nummer: string; sportschool_id: any; actief: boolean | null; last_seen_at?: string | null };
