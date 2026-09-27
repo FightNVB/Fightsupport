@@ -723,31 +723,104 @@ function teamConsensusKey(gymNaam: string) {
 
 function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; vaNummer: string; schoolLinksByVa: Map<string, SchoolFighterLink[]>; latestResultGymByVa: Map<string, FightPassportResultGym>; aliasMaps: AliasMaps; teamConsensusByGym?: Map<string, string> }): GymMatch {
   const { sportscholen, gymNaam, vaNummer, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym } = opts;
-  const explicitLandHint = detectLandHintFromGymText(gymNaam);
-  const latestResult = findGymMatchFromLatestResult({ sportscholen, gymNaam, vaNummer, latestResultGymByVa, aliasMaps });
-  if (latestResult.row) return latestResult;
+  const mm = String(gymNaam ?? "").trim();
+  const va = String(vaNummer ?? "").trim();
+  const explicitLandHint = detectLandHintFromGymText(mm);
+
+  // 1. De matchmaker geeft de HUIDIGE sportschool door. Zoek daarom eerst
+  //    welke officiële sportscholen bij die MM-naam kunnen horen.
+  const mmCandidates = (sportscholen ?? []).filter((school) =>
+    mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)
+  );
+
+  if (mmCandidates.length === 1) {
+    return { row: mmCandidates[0], reason: null };
+  }
+
+  // 2. Alleen als de MM-naam meerdere dependances kan betekenen, gebruiken
+  //    we FightPassport als disambiguatie. FightPassport-namen zijn officiële
+  //    namen: exact vergelijken met sportscholen.naam, zonder normalisatie.
+  if (mmCandidates.length > 1 && va) {
+    const candidateIds = new Set(
+      mmCandidates.map((school) => String(school?.sportschool_id ?? "").trim()).filter(Boolean)
+    );
+    const evidenceIds = new Set<string>();
+
+    // Laatste uitslag in FightPassport.
+    const resultGym = String(latestResultGymByVa.get(va)?.sportschool ?? "").trim();
+    if (resultGym) {
+      const exactResultSchools = (sportscholen ?? []).filter(
+        (school) => String(school?.naam ?? "").trim() === resultGym
+      );
+      if (exactResultSchools.length === 1) {
+        const sid = String(exactResultSchools[0]?.sportschool_id ?? "").trim();
+        if (sid && candidateIds.has(sid)) evidenceIds.add(sid);
+      }
+    }
+
+    // Sportschooltegel/koppeling van de vechter in FightPassport.
+    const allLinks = schoolLinksByVa.get(va) ?? [];
+    const activeLinks = allLinks.filter((link) => link?.actief !== false);
+    const links = activeLinks.length > 0 ? activeLinks : allLinks;
+    for (const link of links) {
+      const sid = String(link?.sportschool_id ?? "").trim();
+      if (sid && candidateIds.has(sid)) evidenceIds.add(sid);
+    }
+
+    if (evidenceIds.size === 1) {
+      const sid = Array.from(evidenceIds)[0];
+      const resolved = mmCandidates.find(
+        (school) => String(school?.sportschool_id ?? "").trim() === sid
+      );
+      if (resolved) return { row: resolved, reason: null };
+    }
+
+    if (evidenceIds.size > 1) {
+      const names = mmCandidates
+        .filter((school) => evidenceIds.has(String(school?.sportschool_id ?? "").trim()))
+        .map((school) => String(school?.naam ?? "").trim())
+        .filter(Boolean);
+      return {
+        row: null,
+        reason: `Matchmaker-sportschool "${mm}" heeft meerdere dependances en FightPassport geeft tegenstrijdige sportschoolinformatie: ${names.join(", ")}. Handmatige controle nodig.`,
+      };
+    }
+
+    return {
+      row: null,
+      reason: `Matchmaker-sportschool "${mm}" heeft meerdere mogelijke dependances, maar FightPassport kon voor VA ${va} geen van deze dependances betrouwbaar onderscheiden. Handmatige controle nodig.`,
+    };
+  }
+
+  // 3. Geen ambigue MM-match: bestaande matching/fallbacks blijven gelden.
   if (explicitLandHint) {
-    const explicit = findGymMatch(sportscholen, gymNaam, aliasMaps);
+    const explicit = findGymMatch(sportscholen, mm, aliasMaps);
     if (explicit.row) return explicit;
   }
-  const linked = findGymMatchFromVaLinksOnly({ sportscholen, gymNaam, vaNummer, schoolLinksByVa, aliasMaps });
-  if (linked.row && isNL(linked.row?.land ?? linked.row?.country) && mmNameMatchesSchoolOrAlias(gymNaam, linked.row, aliasMaps)) return linked;
-  const key = teamConsensusKey(gymNaam);
+
+  const linked = findGymMatchFromVaLinksOnly({ sportscholen, gymNaam: mm, vaNummer: va, schoolLinksByVa, aliasMaps });
+  if (linked.row && isNL(linked.row?.land ?? linked.row?.country) && mmNameMatchesSchoolOrAlias(mm, linked.row, aliasMaps)) return linked;
+
+  const key = teamConsensusKey(mm);
   const consensusSid = key ? teamConsensusByGym?.get(key) : null;
   if (consensusSid) {
     const school = findSportschoolBySportschoolId(sportscholen, consensusSid);
-    if (school && isNL(school?.land ?? school?.country) && mmNameMatchesSchoolOrAlias(gymNaam, school, aliasMaps)) return { row: school, reason: null };
+    if (school && isNL(school?.land ?? school?.country) && mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return { row: school, reason: null };
   }
-  const general = findGymMatch(sportscholen, gymNaam, aliasMaps);
+
+  const general = findGymMatch(sportscholen, mm, aliasMaps);
   if (general.row) {
     const landDb = general.row?.land ?? general.row?.country ?? null;
     if (explicitLandHint || isNL(landDb)) return general;
   }
-  const exactFallback = findExactNameOrAliasFallback(sportscholen, gymNaam, aliasMaps);
+
+  const exactFallback = findExactNameOrAliasFallback(sportscholen, mm, aliasMaps);
   if (exactFallback.row) return exactFallback;
+
   if (general.row && isForeignNonNL(general.row?.land ?? general.row?.country)) {
-    return { row: null, reason: `Alleen een niet-exacte buitenlandse naam-match gevonden voor "${gymNaam}". Zonder landcode accepteren we buitenland alleen bij een exacte DB-naam of exacte alias.` };
+    return { row: null, reason: `Alleen een niet-exacte buitenlandse naam-match gevonden voor "${mm}". Zonder landcode accepteren we buitenland alleen bij een exacte DB-naam of exacte alias.` };
   }
+
   return general.row ? general : exactFallback;
 }
 
