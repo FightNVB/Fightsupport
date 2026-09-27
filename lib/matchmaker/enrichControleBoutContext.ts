@@ -909,12 +909,30 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
   if (!controle_run_id) throw new Error("controle_run_id ontbreekt");
   const scopedPartijNr = opts?.partij_nr != null && Number.isFinite(Number(opts.partij_nr)) ? Number(opts.partij_nr) : null;
   const scopedBoutId = unwrapUuid(opts?.bout_id);
-  let ctxQ = supabaseAdmin.from("controle_bout_context").select("partij_nr, bout_id, rood_va_mm, blauw_va_mm, rood_gym_mm, blauw_gym_mm, evenement_datum").eq("matchmaking_id", matchmaking_id).eq("controle_run_id", controle_run_id);
+  const ctxSelect = "partij_nr, bout_id, rood_va_mm, blauw_va_mm, rood_gym_mm, blauw_gym_mm, evenement_datum";
+  let ctxQ = supabaseAdmin.from("controle_bout_context").select(ctxSelect).eq("matchmaking_id", matchmaking_id).eq("controle_run_id", controle_run_id);
   if (scopedPartijNr != null) ctxQ = ctxQ.eq("partij_nr", scopedPartijNr);
   if (scopedBoutId) ctxQ = ctxQ.eq("bout_id", scopedBoutId);
-  const { data: ctxRows, error: cErr } = await ctxQ;
+  let { data: ctxRows, error: cErr } = await ctxQ;
   if (cErr) throw cErr;
-  if (!ctxRows || ctxRows.length === 0) return;
+
+  // Een rebuild kan een nieuw bout_id opleveren terwijl de caller nog het oude
+  // bout_id heeft. Nooit stil enrichment overslaan: partij_nr is binnen deze
+  // matchmaking/run de betrouwbare scope voor een losse herscrape.
+  if ((!ctxRows || ctxRows.length === 0) && scopedBoutId && scopedPartijNr != null) {
+    const retry = await supabaseAdmin
+      .from("controle_bout_context")
+      .select(ctxSelect)
+      .eq("matchmaking_id", matchmaking_id)
+      .eq("controle_run_id", controle_run_id)
+      .eq("partij_nr", scopedPartijNr);
+    if (retry.error) throw retry.error;
+    ctxRows = retry.data;
+  }
+
+  if (!ctxRows || ctxRows.length === 0) {
+    throw new Error(`Geen controle_bout_context gevonden voor enrich: matchmaking=${matchmaking_id}, run=${controle_run_id}, partij=${scopedPartijNr ?? "-"}, bout=${scopedBoutId ?? "-"}`);
+  }
   const sportscholen = await fetchAllSportscholen();
   const aliases = await fetchAllSportschoolAliases();
   const aliasNormToId = new Map<string, string>();
