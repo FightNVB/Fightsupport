@@ -751,23 +751,31 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
 
   // De MM-sportschool is het uitgangspunt. FightPassport-hints mogen alleen
   // helpen kiezen tussen DB-scholen die bij die MM-naam/alias kunnen horen.
-  const mmCandidates = (sportscholen ?? []).filter((school) => {
-    if (mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return true;
-
+  // Eerst de volledige/strikte naam gebruiken. Een letterlijke match zoals
+  // "Sportschool Bushido" mag nooit worden verbreed naar "Team Bushido".
+  const exactMmCandidates = (sportscholen ?? []).filter((school) => {
     const schoolStrict = compactStrictName(school?.naam);
-    const strictMinLen = Math.min(mmStrict.length, schoolStrict.length);
-    if (!!mmStrict && !!schoolStrict && strictMinLen >= 5 &&
-        (schoolStrict.includes(mmStrict) || mmStrict.includes(schoolStrict))) return true;
-
-    // Ook de bestaande genormaliseerde naam gebruiken voor de kandidaatset.
-    // Daardoor horen o.a. "Bushido", "Bushido Tiel" en "Sportschool Bushido"
-    // bij dezelfde basisnaam. De FightPassport-hint kiest daarna de vestiging.
-    const mmLoose = compactNorm(norm(mm));
-    const schoolLoose = compactNorm(norm(school?.naam));
-    const looseMinLen = Math.min(mmLoose.length, schoolLoose.length);
-    return !!mmLoose && !!schoolLoose && looseMinLen >= 4 &&
-      (schoolLoose.includes(mmLoose) || mmLoose.includes(schoolLoose));
+    return !!mmStrict && !!schoolStrict && schoolStrict === mmStrict;
   });
+
+  const mmCandidates = exactMmCandidates.length > 0
+    ? exactMmCandidates
+    : (sportscholen ?? []).filter((school) => {
+        if (mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return true;
+
+        const schoolStrict = compactStrictName(school?.naam);
+        const strictMinLen = Math.min(mmStrict.length, schoolStrict.length);
+        if (!!mmStrict && !!schoolStrict && strictMinLen >= 5 &&
+            (schoolStrict.includes(mmStrict) || mmStrict.includes(schoolStrict))) return true;
+
+        // Alleen als er geen exacte volledige naam bestaat mag de herkenning
+        // worden verbreed. FightPassport-hints bepalen daarna zo nodig de vestiging.
+        const mmLoose = compactNorm(norm(mm));
+        const schoolLoose = compactNorm(norm(school?.naam));
+        const looseMinLen = Math.min(mmLoose.length, schoolLoose.length);
+        return !!mmLoose && !!schoolLoose && looseMinLen >= 4 &&
+          (schoolLoose.includes(mmLoose) || mmLoose.includes(schoolLoose));
+      });
 
   if (mmCandidates.length === 1) return { row: mmCandidates[0], reason: null };
 
