@@ -753,10 +753,20 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
   // helpen kiezen tussen DB-scholen die bij die MM-naam/alias kunnen horen.
   const mmCandidates = (sportscholen ?? []).filter((school) => {
     if (mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return true;
+
     const schoolStrict = compactStrictName(school?.naam);
-    const minLen = Math.min(mmStrict.length, schoolStrict.length);
-    return !!mmStrict && !!schoolStrict && minLen >= 5 &&
-      (schoolStrict.includes(mmStrict) || mmStrict.includes(schoolStrict));
+    const strictMinLen = Math.min(mmStrict.length, schoolStrict.length);
+    if (!!mmStrict && !!schoolStrict && strictMinLen >= 5 &&
+        (schoolStrict.includes(mmStrict) || mmStrict.includes(schoolStrict))) return true;
+
+    // Ook de bestaande genormaliseerde naam gebruiken voor de kandidaatset.
+    // Daardoor horen o.a. "Bushido", "Bushido Tiel" en "Sportschool Bushido"
+    // bij dezelfde basisnaam. De FightPassport-hint kiest daarna de vestiging.
+    const mmLoose = compactNorm(norm(mm));
+    const schoolLoose = compactNorm(norm(school?.naam));
+    const looseMinLen = Math.min(mmLoose.length, schoolLoose.length);
+    return !!mmLoose && !!schoolLoose && looseMinLen >= 4 &&
+      (schoolLoose.includes(mmLoose) || mmLoose.includes(schoolLoose));
   });
 
   if (mmCandidates.length === 1) return { row: mmCandidates[0], reason: null };
