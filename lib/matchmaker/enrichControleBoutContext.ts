@@ -609,6 +609,27 @@ function looseGymNameCompatible(aRaw: string, bRaw: string) {
 }
 
 type FightPassportResultGym = { id?: number | null; va_nummer: string; datum?: string | null; sportschool: string | null; last_seen_at?: string | null };
+type CurrentFighterSchool = { va_nummer: string; sportschool: string | null; land?: string | null; checked_at?: string | null };
+
+async function fetchCurrentFighterSchoolsByVa(matchmakingId: string, controleRunId: string, vaNummers: string[]) {
+  const unique = Array.from(new Set((vaNummers ?? []).map((v) => String(v ?? "").trim()).filter(Boolean)));
+  const map = new Map<string, CurrentFighterSchool>();
+  if (unique.length === 0) return map;
+  const { data, error } = await supabaseAdmin
+    .from("controle_fighter_actueel")
+    .select("va_nummer,sportschool,land,checked_at")
+    .eq("matchmaking_id", matchmakingId)
+    .eq("controle_run_id", controleRunId)
+    .in("va_nummer", unique);
+  if (error) throw error;
+  for (const row of (data ?? []) as CurrentFighterSchool[]) {
+    const va = String(row?.va_nummer ?? "").trim();
+    const gym = String(row?.sportschool ?? "").trim();
+    if (va && gym) map.set(va, row);
+  }
+  return map;
+}
+
 
 async function fetchLatestResultGymsByVa(vaNummers: string[]) {
   const unique = Array.from(new Set((vaNummers ?? []).map((v) => String(v ?? "").trim()).filter(Boolean)));
@@ -721,15 +742,15 @@ function teamConsensusKey(gymNaam: string) {
   return compactNorm(norm(gymNaam)) || compactStrictName(gymNaam);
 }
 
-function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; vaNummer: string; schoolLinksByVa: Map<string, SchoolFighterLink[]>; latestResultGymByVa: Map<string, FightPassportResultGym>; aliasMaps: AliasMaps; teamConsensusByGym?: Map<string, string> }): GymMatch {
-  const { sportscholen, gymNaam, vaNummer, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym } = opts;
+function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; vaNummer: string; currentFighterSchoolByVa: Map<string, CurrentFighterSchool>; latestResultGymByVa: Map<string, FightPassportResultGym>; aliasMaps: AliasMaps }): GymMatch {
+  const { sportscholen, gymNaam, vaNummer, currentFighterSchoolByVa, latestResultGymByVa, aliasMaps } = opts;
   const mm = String(gymNaam ?? "").trim();
   const va = String(vaNummer ?? "").trim();
   const explicitLandHint = detectLandHintFromGymText(mm);
   const mmStrict = compactStrictName(mm);
 
-  // De MM geeft de huidige gym. Verzamel alle vestigingen die bij die basisnaam
-  // horen. Bij meerdere vestigingen beslist de PLAATS uit FightPassport.
+  // De MM-sportschool is het uitgangspunt. FightPassport-hints mogen alleen
+  // helpen kiezen tussen DB-scholen die bij die MM-naam/alias kunnen horen.
   const mmCandidates = (sportscholen ?? []).filter((school) => {
     if (mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return true;
     const schoolStrict = compactStrictName(school?.naam);
@@ -741,83 +762,64 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
   if (mmCandidates.length === 1) return { row: mmCandidates[0], reason: null };
 
   if (mmCandidates.length > 1 && va) {
-    const placeVotes = new Set<string>();
+    const hintedIds = new Set<string>();
+    const hints: string[] = [];
 
-    // FightPassport-resultaat: bij meerdere vestigingen staat de plaats achter
-    // de gymnaam. Vergelijk die plaats met sportscholen.plaats/stad.
+    // Verse hint uit de SPORTSCHOLEN-tegel van deze controlerun.
+    const currentGym = String(currentFighterSchoolByVa.get(va)?.sportschool ?? "").trim();
+    if (currentGym) hints.push(currentGym);
+
+    // Historische/aanvullende hint uit de meest recente FightPassport-uitslag.
     const resultGym = String(latestResultGymByVa.get(va)?.sportschool ?? "").trim();
-    if (resultGym) {
-      for (const candidate of mmCandidates) {
-        const place = String(candidate?.plaats ?? candidate?.stad ?? "").trim();
-        if (!place) continue;
-        const fp = normPlaats(resultGym);
-        const p = normPlaats(place);
-        if (p && fp && (fp === p || fp.endsWith(` ${p}`) || fp.includes(` ${p} `))) {
-          placeVotes.add(p);
-        }
-      }
-    }
+    if (resultGym) hints.push(resultGym);
 
-    // De FightPassport-sportschooltegel is een tweede hint. De koppeling wijst
-    // naar een sportschool; daarvan gebruiken we eveneens alleen de plaats.
-    const allLinks = schoolLinksByVa.get(va) ?? [];
-    const activeLinks = allLinks.filter((link) => link?.actief !== false);
-    const links = activeLinks.length > 0 ? activeLinks : allLinks;
-    for (const link of links) {
-      const linkedSchool = findSportschoolBySportschoolId(sportscholen, link?.sportschool_id);
-      const linkedPlace = normPlaats(linkedSchool?.plaats ?? linkedSchool?.stad ?? "");
-      if (!linkedPlace) continue;
-      if (mmCandidates.some((candidate) => normPlaats(candidate?.plaats ?? candidate?.stad ?? "") === linkedPlace)) {
-        placeVotes.add(linkedPlace);
+    for (const hint of hints) {
+      const hintStrict = compactStrictName(hint);
+      const direct = mmCandidates.filter((candidate) => {
+        const candidateStrict = compactStrictName(candidate?.naam);
+        return !!hintStrict && !!candidateStrict &&
+          (candidateStrict === hintStrict || candidateStrict.includes(hintStrict) || hintStrict.includes(candidateStrict));
+      });
+      if (direct.length === 1) {
+        const sid = String(direct[0]?.sportschool_id ?? direct[0]?.id ?? "").trim();
+        if (sid) hintedIds.add(sid);
+        continue;
       }
-    }
 
-    if (placeVotes.size === 1) {
-      const place = Array.from(placeVotes)[0];
-      const byPlace = mmCandidates.filter(
-        (candidate) => normPlaats(candidate?.plaats ?? candidate?.stad ?? "") === place
+      const byPlace = mmCandidates.filter((candidate) =>
+        hasPlaatsHint(hint, candidate?.plaats ?? candidate?.stad ?? "")
       );
-      if (byPlace.length === 1) return { row: byPlace[0], reason: null };
+      if (byPlace.length === 1) {
+        const sid = String(byPlace[0]?.sportschool_id ?? byPlace[0]?.id ?? "").trim();
+        if (sid) hintedIds.add(sid);
+      }
     }
 
-    if (placeVotes.size > 1) {
-      return {
-        row: null,
-        reason: `Matchmaker-sportschool "${mm}" heeft meerdere vestigingen en FightPassport wijst naar verschillende plaatsen: ${Array.from(placeVotes).join(", ")}. Handmatige controle nodig.`,
-      };
+    if (hintedIds.size === 1) {
+      const sid = Array.from(hintedIds)[0];
+      const selected = mmCandidates.find((candidate) =>
+        String(candidate?.sportschool_id ?? candidate?.id ?? "").trim() === sid
+      );
+      if (selected) return { row: selected, reason: null };
     }
-
-    return {
-      row: null,
-      reason: `Matchmaker-sportschool "${mm}" heeft meerdere vestigingen, maar uit FightPassport kon geen unieke plaats worden bepaald voor VA ${va}. Handmatige controle nodig.`,
-    };
+    if (hintedIds.size > 1) {
+      return { row: null, reason: `Matchmaker-sportschool "${mm}" heeft meerdere vestigingen en de FightPassport-hints spreken elkaar tegen. Handmatige controle nodig.` };
+    }
+    return { row: null, reason: `Matchmaker-sportschool "${mm}" heeft meerdere vestigingen, maar de SPORTSCHOLEN-tegel en uitslagen bepalen geen unieke vestiging voor VA ${va}. Handmatige controle nodig.` };
   }
 
-  // Geen meerdere vestigingen gevonden: bestaande algemene MM-matching blijft.
+  // Buiten de vestigingsambiguïteit blijft de oorspronkelijke naam/alias/land-logica intact.
   if (explicitLandHint) {
     const explicit = findGymMatch(sportscholen, mm, aliasMaps);
     if (explicit.row) return explicit;
   }
-
-  const linked = findGymMatchFromVaLinksOnly({ sportscholen, gymNaam: mm, vaNummer: va, schoolLinksByVa, aliasMaps });
-  if (linked.row && isNL(linked.row?.land ?? linked.row?.country) && mmNameMatchesSchoolOrAlias(mm, linked.row, aliasMaps)) return linked;
-
-  const key = teamConsensusKey(mm);
-  const consensusSid = key ? teamConsensusByGym?.get(key) : null;
-  if (consensusSid) {
-    const school = findSportschoolBySportschoolId(sportscholen, consensusSid);
-    if (school && isNL(school?.land ?? school?.country) && mmNameMatchesSchoolOrAlias(mm, school, aliasMaps)) return { row: school, reason: null };
-  }
-
   const general = findGymMatch(sportscholen, mm, aliasMaps);
   if (general.row) {
     const landDb = general.row?.land ?? general.row?.country ?? null;
     if (explicitLandHint || isNL(landDb)) return general;
   }
-
   const exactFallback = findExactNameOrAliasFallback(sportscholen, mm, aliasMaps);
   if (exactFallback.row) return exactFallback;
-
   if (general.row && isForeignNonNL(general.row?.land ?? general.row?.country)) {
     return { row: null, reason: `Alleen een niet-exacte buitenlandse naam-match gevonden voor "${mm}". Zonder landcode accepteren we buitenland alleen bij een exacte DB-naam of exacte alias.` };
   }
@@ -1024,33 +1026,8 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
   }
   const aliasMaps: AliasMaps = { aliasNormToId, aliasCompactToId, aliasRows };
   const ctxVaNummers = (ctxRows ?? []).flatMap((row: any) => [String(row?.rood_va_mm ?? "").trim(), String(row?.blauw_va_mm ?? "").trim()]).filter(Boolean);
-  const schoolLinksByVa = await fetchSchoolFighterLinksByVa(ctxVaNummers);
+  const currentFighterSchoolByVa = await fetchCurrentFighterSchoolsByVa(matchmaking_id, controle_run_id, ctxVaNummers);
   const latestResultGymByVa = await fetchLatestResultGymsByVa(ctxVaNummers);
-  const teamConsensusVotes = new Map<string, Map<string, number>>();
-  for (const row of ctxRows ?? []) {
-    const sides = [
-      { gym: String((row as any)?.rood_gym_mm ?? "").trim(), va: String((row as any)?.rood_va_mm ?? "").trim() },
-      { gym: String((row as any)?.blauw_gym_mm ?? "").trim(), va: String((row as any)?.blauw_va_mm ?? "").trim() },
-    ];
-    for (const side of sides) {
-      if (!side.gym || !side.va) continue;
-      const reliable = findGymMatchFromVaLinksOnly({ sportscholen, gymNaam: side.gym, vaNummer: side.va, schoolLinksByVa, aliasMaps });
-      const reliableName = String(reliable.row?.naam ?? "");
-      const sid = reliable.row && looseGymNameCompatible(side.gym, reliableName) ? String(reliable.row?.sportschool_id ?? "").trim() : "";
-      const key = teamConsensusKey(side.gym);
-      if (!sid || !key) continue;
-      const votes = teamConsensusVotes.get(key) ?? new Map<string, number>();
-      votes.set(sid, (votes.get(sid) ?? 0) + 1);
-      teamConsensusVotes.set(key, votes);
-    }
-  }
-  const teamConsensusByGym = new Map<string, string>();
-  for (const [key, votes] of teamConsensusVotes.entries()) {
-    if (votes.size === 1) {
-      const sid = Array.from(votes.keys())[0];
-      if (sid) teamConsensusByGym.set(key, sid);
-    }
-  }
   console.log("[enrichControleBoutContext] sportscholen loaded:", sportscholen.length);
   console.log("[enrichControleBoutContext] aliases loaded:", aliases.length);
   console.log("[enrichControleBoutContext] alias keys:", aliasNormToId.size);
@@ -1062,8 +1039,8 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
     const blauwGym = String((row as any).blauw_gym_mm ?? "").trim();
     const roodVa = String((row as any).rood_va_mm ?? "").trim();
     const blauwVa = String((row as any).blauw_va_mm ?? "").trim();
-    const roodMatch = roodGym ? findGymMatchForFighter({ sportscholen, gymNaam: roodGym, vaNummer: roodVa, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym }) : { row: null, reason: null };
-    const blauwMatch = blauwGym ? findGymMatchForFighter({ sportscholen, gymNaam: blauwGym, vaNummer: blauwVa, schoolLinksByVa, latestResultGymByVa, aliasMaps, teamConsensusByGym }) : { row: null, reason: null };
+    const roodMatch = roodGym ? findGymMatchForFighter({ sportscholen, gymNaam: roodGym, vaNummer: roodVa, currentFighterSchoolByVa, latestResultGymByVa, aliasMaps }) : { row: null, reason: null };
+    const blauwMatch = blauwGym ? findGymMatchForFighter({ sportscholen, gymNaam: blauwGym, vaNummer: blauwVa, currentFighterSchoolByVa, latestResultGymByVa, aliasMaps }) : { row: null, reason: null };
     const rood = roodMatch.row, blauw = blauwMatch.row;
     const patch: any = {};
     const mmLine = (gym: string) => gym ? `↳ [MM sportschool:] "${gym}"` : `↳ [MM sportschool:] -`;
@@ -1120,14 +1097,14 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
   const { data: tournamentRows, error: tErr } = await tCtxQ;
   if (tErr) throw tErr;
   const tournamentVaNummers = (tournamentRows ?? []).map((row: any) => String(row?.va_nummer ?? row?.fighter_id ?? "").trim()).filter(Boolean);
-  const tournamentSchoolLinksByVa = await fetchSchoolFighterLinksByVa(tournamentVaNummers);
+  const tournamentCurrentFighterSchoolByVa = await fetchCurrentFighterSchoolsByVa(matchmaking_id, controle_run_id, tournamentVaNummers);
   const tournamentLatestResultGymByVa = await fetchLatestResultGymsByVa(tournamentVaNummers);
   for (const row of tournamentRows ?? []) {
     const rowId = unwrapUuid((row as any).id) ?? String((row as any).id ?? "").trim();
     if (!rowId) continue;
     const gym = String((row as any).sportschool_mm ?? (row as any).sportschool ?? "").trim();
     const va = String((row as any).va_nummer ?? (row as any).fighter_id ?? "").trim();
-    const tournamentMatch = gym ? findGymMatchForFighter({ sportscholen, gymNaam: gym, vaNummer: va, schoolLinksByVa: tournamentSchoolLinksByVa, latestResultGymByVa: tournamentLatestResultGymByVa, aliasMaps }) : { row: null, reason: null };
+    const tournamentMatch = gym ? findGymMatchForFighter({ sportscholen, gymNaam: gym, vaNummer: va, currentFighterSchoolByVa: tournamentCurrentFighterSchoolByVa, latestResultGymByVa: tournamentLatestResultGymByVa, aliasMaps }) : { row: null, reason: null };
     let patch: any;
     if (tournamentMatch.row) {
       const found = tournamentMatch.row;
