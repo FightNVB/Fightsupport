@@ -624,7 +624,7 @@ function looseGymNameCompatible(aRaw: string, bRaw: string) {
 }
 
 type FightPassportResultGym = { id?: number | null; va_nummer: string; datum?: string | null; sportschool: string | null; last_seen_at?: string | null };
-type CurrentFighterSchool = { va_nummer: string; sportschool: string | null; land?: string | null; checked_at?: string | null };
+type CurrentFighterSchool = { va_nummer: string; sportschool: string | null; plaats?: string | null; land?: string | null; checked_at?: string | null };
 
 async function fetchCurrentFighterSchoolsByVa(matchmakingId: string, controleRunId: string, vaNummers: string[]) {
   const unique = Array.from(new Set((vaNummers ?? []).map((v) => String(v ?? "").trim()).filter(Boolean)));
@@ -632,7 +632,7 @@ async function fetchCurrentFighterSchoolsByVa(matchmakingId: string, controleRun
   if (unique.length === 0) return map;
   const { data, error } = await supabaseAdmin
     .from("controle_fighter_actueel")
-    .select("va_nummer,sportschool,land,checked_at")
+    .select("va_nummer,sportschool,plaats,land,checked_at")
     .eq("matchmaking_id", matchmakingId)
     .eq("controle_run_id", controleRunId)
     .in("va_nummer", unique);
@@ -799,8 +799,29 @@ function findGymMatchForFighter(opts: { sportscholen: any[]; gymNaam: string; va
     const hints: string[] = [];
 
     // Verse hint uit de SPORTSCHOLEN-tegel van deze controlerun.
-    const currentGym = String(currentFighterSchoolByVa.get(va)?.sportschool ?? "").trim();
-    if (currentGym) hints.push(currentGym);
+    // Naam + plaats + land horen bij dezelfde (onderste/actuele) tegelregel.
+    const currentSchool = currentFighterSchoolByVa.get(va);
+    const currentGym = String(currentSchool?.sportschool ?? "").trim();
+    const currentPlace = String(currentSchool?.plaats ?? "").trim();
+    const currentLand = String(currentSchool?.land ?? "").trim();
+    if (currentGym) {
+      const currentCandidates = mmCandidates.filter((candidate) => {
+        const candidateStrict = compactStrictName(candidate?.naam);
+        const gymStrict = compactStrictName(currentGym);
+        if (!candidateStrict || !gymStrict || candidateStrict !== gymStrict) return false;
+        if (currentPlace && normPlaats(candidate?.plaats ?? candidate?.stad ?? "") !== normPlaats(currentPlace)) return false;
+        if (currentLand && countryIdentity(candidate?.land ?? candidate?.country) !== countryIdentity(currentLand)) return false;
+        return true;
+      });
+      if (currentCandidates.length === 1) {
+        const sid = String(currentCandidates[0]?.sportschool_id ?? currentCandidates[0]?.id ?? "").trim();
+        if (sid) hintedIds.add(sid);
+      } else {
+        // Backwards compatible voor oude rijen zonder plaats: de naam blijft
+        // een hint, maar mag bij meerdere vestigingen nooit zelf beslissen.
+        hints.push(currentGym);
+      }
+    }
 
     // Historische/aanvullende hint uit de meest recente FightPassport-uitslag.
     const resultGym = String(latestResultGymByVa.get(va)?.sportschool ?? "").trim();
