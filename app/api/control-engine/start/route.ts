@@ -1,6 +1,6 @@
+import { runFightPassportNodeScript } from "@/lib/control-engine/runFightPassportNodeScript";
 // app/api/control-engine/admin/start/route.ts
 import { NextResponse } from "next/server";
-import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
@@ -194,64 +194,6 @@ async function createControleRun(args: {
   await markOtherRunsNotLatest(args.matchmaking_id, data.id);
 
   return data;
-}
-
-function runNodeScript(
-  scriptPath: string,
-  args: string[],
-  envExtra?: Record<string, string>,
-  logPrefix?: string
-): Promise<{ stdout: string; stderr: string; ms: number }> {
-  return new Promise((resolve, reject) => {
-    const t0 = Date.now();
-
-    const proc = spawn("node", [scriptPath, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      cwd: path.dirname(scriptPath),
-      windowsHide: true,
-      env: { ...process.env, ...envExtra },
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (d) => {
-      const s = d.toString();
-      stdout += s;
-      process.stdout.write(logPrefix ? `[${logPrefix}] ${s}` : s);
-    });
-
-    proc.stderr.on("data", (d) => {
-      const s = d.toString();
-      stderr += s;
-      process.stderr.write(logPrefix ? `[${logPrefix}] ${s}` : s);
-    });
-
-    proc.on("error", (err) => {
-      const ms = Date.now() - t0;
-      reject(
-        new Error(
-          `Script spawn error: ${
-            err?.message ?? err
-          }\n(ms=${ms})\n\nSTDERR:\n${stderr}\n\nSTDOUT:\n${stdout}`
-        )
-      );
-    });
-
-    proc.on("close", (code) => {
-      const ms = Date.now() - t0;
-      if (code === 0) {
-        resolve({ stdout, stderr, ms });
-      } else {
-        reject(
-          new Error(
-            `Script failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\n\nSTDERR:\n${stderr}\n\nSTDOUT:\n${stdout}`
-          )
-        );
-      }
-    });
-  });
 }
 
 function uniqueBy<T>(arr: T[], getKey: (row: T) => string): T[] {
@@ -452,7 +394,7 @@ export async function POST(req: Request) {
       });
 
       try {
-        const res = await runNodeScript(
+        const res = await runFightPassportNodeScript(
           fpBundlePath,
           [matchmaking_id!, controle_run_id!, ...va_nummers],
           {
