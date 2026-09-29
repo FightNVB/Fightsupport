@@ -344,6 +344,7 @@ async function saveResult({
   startverbod_actief,
   keurmerk_ok,
   sportschool,
+  plaats,
   land,
   keurmerk_schild_gevonden,
   error_message = null,
@@ -380,6 +381,7 @@ async function saveResult({
         startverbod_actief,
         keurmerk_ok,
         sportschool: sportschool ?? null,
+        plaats: plaats ?? null,
         land: land ?? null,
         keurmerk_schild_gevonden:
           typeof keurmerk_schild_gevonden === "boolean"
@@ -408,6 +410,7 @@ async function saveError(va, message) {
     startverbod_actief: null,
     keurmerk_ok: null,
     sportschool: null,
+    plaats: null,
     land: null,
     keurmerk_schild_gevonden: null,
     error_message: message,
@@ -444,6 +447,7 @@ async function scrapeOne(page, va, signal = null) {
     startverbod_actief: summary.startverbod_actief,
     keurmerk_ok,
     sportschool: school.sportschool,
+    plaats: school.plaats,
     land: school.land,
     keurmerk_schild_gevonden: school.keurmerk_schild_gevonden,
     error_message: null,
@@ -455,6 +459,7 @@ async function scrapeOne(page, va, signal = null) {
     keurmerk_ok,
     land: school.land,
     sportschool: school.sportschool,
+    plaats: school.plaats,
     schild: school.keurmerk_schild_gevonden,
   };
 }
