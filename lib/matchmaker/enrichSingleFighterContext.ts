@@ -245,7 +245,7 @@ function defaultLandHintForMatching(hint: LandHint | null): LandHint {
 }
 
 function landLabelForMatch(landDb: any, hint: LandHint | null) {
-  return landDb ?? landHintToLabel(defaultLandHintForMatching(hint));
+  return landDb ?? landHintToLabel(hint);
 }
 
 
@@ -588,7 +588,7 @@ function findGymMatch(sportscholen: AnyRow[], gymNaam: string, aliasMaps?: Alias
 
   const list = sportscholen ?? [];
   const explicitLandHint = detectLandHintFromGymText(gRaw);
-  const landHint = defaultLandHintForMatching(explicitLandHint);
+  const landHint = explicitLandHint;
   const knownPlaces = extractKnownPlaces(list);
 
   const rawStrict = normStrictName(gRaw);
@@ -760,7 +760,7 @@ function buildKeurmerkPatchForGym(opts: {
   const found = match.row;
 
   if (!found) {
-    patch.sportschool_match_land = landHintToLabel(defaultLandHintForMatching(hint));
+    patch.sportschool_match_land = landHintToLabel(hint);
     patch.keurmerk_einddatum = null;
 
     if (isForeignHint(hint)) {
@@ -776,7 +776,7 @@ function buildKeurmerkPatchForGym(opts: {
     patch.keurmerk_status = "geen_match";
     patch.keurmerk_reden = gymValue
       ? `${mmLine(gymValue)}
-Geen landcode/landnaam gevonden, dus behandeld als Nederlandse sportschool. Geen betrouwbare match in sportscholen. ${match.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim()
+Geen betrouwbare match in sportscholen. Land is niet afgeleid omdat geen landcode/landnaam is opgegeven. ${match.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim()
       : `${mmLine("")}
 Geen sportschool opgegeven.`.trim();
     return patch;
