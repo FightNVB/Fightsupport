@@ -14,6 +14,7 @@
 // UNIQUE (matchmaking_id, controle_run_id, va_nummer, datum, evenement, tegenstander)
 
 import { loginFightPassport, ensureLoggedIn } from "../utils/loginFightPassport.js";
+import { openFighterPageVerified, hardCloseFightPassportPage } from "../utils/fightPassportFighterNavigation.js";
 import supabase from "../utils/supabaseClient.js";
 import fs from "fs";
 import path from "path";
@@ -1174,10 +1175,10 @@ async function runDopingWriter(vaList, workers = 5) {
       let status = "skip";
 
       try {
-        page = await openTabToFighterVerified(browser, ctx, cookies, va, {
+        page = await openFighterPageVerified(browser, null, cookies, va, {
           maxAttempts: Number(process.env.TAB_ATTEMPTS ?? "5"),
-          softWaitMs: Number(process.env.SOFT_WAIT_MS ?? "2500"),
-          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "1200"),
+          softWaitMs: Math.min(200, Math.max(0, Number(process.env.SOFT_WAIT_MS ?? "200"))),
+          betweenAttemptsMs: Number(process.env.BETWEEN_ATTEMPTS_MS ?? "350"),
           workerLabel: `[${label}]`,
         });
 
@@ -1223,7 +1224,7 @@ async function runDopingWriter(vaList, workers = 5) {
         try {
           if (page) {
             await closeAnyModal(page).catch(() => {});
-            await hardClosePage(page).catch(() => {});
+            await hardCloseFightPassportPage(page).catch(() => {});
           }
         } catch {}
       }
