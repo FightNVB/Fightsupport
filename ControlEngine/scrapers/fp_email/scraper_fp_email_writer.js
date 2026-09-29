@@ -90,8 +90,8 @@ async function closeDetails(page) {
 async function runOne(browser, masterPage, cookiesRef, refreshMaster, va) {
   const email=await getMijnNvbEmail(va);
   const page=await openFighterPageVerified(browser,null,cookiesRef.value,va,{
-    maxAttempts:Number(process.env.TAB_ATTEMPTS??"5"), softWaitMs:Number(process.env.SOFT_WAIT_MS??"2500"), betweenAttemptsMs:Number(process.env.BETWEEN_ATTEMPTS_MS??"1200"),
-    freshRetryOnLogin:true, onLoginPage:async()=>{cookiesRef.value=await refreshMaster(`LOGIN_PAGE VA ${va}`);}
+    maxAttempts:Number(process.env.TAB_ATTEMPTS??"5"), softWaitMs:Math.min(200,Math.max(0,Number(process.env.SOFT_WAIT_MS??"200"))), betweenAttemptsMs:Number(process.env.BETWEEN_ATTEMPTS_MS??"350"),
+    workerLabel:`[email-writer VA ${va}]`
   });
   if(!page)throw new Error(`Fightpassport-vechter VA ${va} kon niet worden geopend`);
   try {
