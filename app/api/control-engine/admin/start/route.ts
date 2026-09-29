@@ -1,9 +1,9 @@
+import { runFightPassportNodeScript } from "@/lib/control-engine/runFightPassportNodeScript";
 // app/api/control-engine/admin/start/route.ts
 // ADMINCONTROLE: eigen full scraper + eigen Admin libs/rules.
 // Oude runs/context/resultaten blijven historie. Dispensatie_requests worden nooit verwijderd.
 
 import { NextResponse } from "next/server";
-import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -65,43 +65,6 @@ function resolveScriptPath(file: string): string {
   const found = candidates.find((candidate) => fs.existsSync(candidate));
   if (!found) throw new Error(`Admin scraper niet gevonden: ${file}\n- ${candidates.join("\n- ")}`);
   return found;
-}
-
-function runNodeScript(
-  scriptPath: string,
-  args: string[],
-  envExtra: Record<string, string>,
-  logPrefix: string
-): Promise<{ stdout: string; stderr: string; ms: number }> {
-  return new Promise((resolve, reject) => {
-    const startedAt = Date.now();
-    const child = spawn(process.execPath, [scriptPath, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      cwd: path.dirname(scriptPath),
-      windowsHide: true,
-      env: { ...process.env, ...envExtra },
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (data) => {
-      const text = data.toString();
-      stdout += text;
-      process.stdout.write(`[${logPrefix}] ${text}`);
-    });
-    child.stderr?.on("data", (data) => {
-      const text = data.toString();
-      stderr += text;
-      process.stderr.write(`[${logPrefix}] ${text}`);
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      const ms = Date.now() - startedAt;
-      if (code === 0) return resolve({ stdout, stderr, ms });
-      reject(new Error(`Script failed: ${scriptPath} (exit code ${code})\n(ms=${ms})\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`));
-    });
-  });
 }
 
 async function updateRunProgress(controleRunId: string, patch: Record<string, unknown>) {
@@ -198,7 +161,7 @@ async function runAdminFullScrape(args: {
       const minVa = numeric.length ? Math.min(...numeric) : 1;
       const maxVa = numeric.length ? Math.max(...numeric) : minVa;
 
-      return runNodeScript(
+      return runFightPassportNodeScript(
         scraperPath,
         ["1", "1"],
         {
