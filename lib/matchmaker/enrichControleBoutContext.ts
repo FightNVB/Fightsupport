@@ -236,12 +236,14 @@ function isForeignHint(hint: LandHint | null) {
   return !!hint && hint !== "NL";
 }
 
-function defaultLandHintForMatching(hint: LandHint | null): LandHint {
-  return hint ?? "NL";
+function defaultLandHintForMatching(hint: LandHint | null): LandHint | null {
+  // Ontbrekend land is onbekend, niet automatisch Nederland.
+  // Land mag alleen helpen bij disambiguatie wanneer het expliciet is opgegeven.
+  return hint;
 }
 
 function landLabelForMatch(landDb: any, hint: LandHint | null) {
-  return landDb ?? landHintToLabel(defaultLandHintForMatching(hint));
+  return landDb ?? landHintToLabel(hint);
 }
 
 function landMatchesHint(landValue: any, hint: LandHint | null) {
@@ -457,16 +459,29 @@ function findExactNameOrAliasFallback(sportscholen: any[], gymNaam: string, alia
       add(findSportschoolBySportschoolId(sportscholen, alias?.sportschool_id));
     }
   }
-  const nl = candidates.filter((row) => isNL(row?.land ?? row?.country));
-  if (nl.length === 1) return { row: nl[0], reason: null };
-  if (nl.length > 1) return { row: null, reason: "Meerdere exacte Nederlandse sportschoolmatches — maak alias specifieker." };
-  const foreign = candidates.filter((row) => isForeignNonNL(row?.land ?? row?.country));
-  if (foreign.length === 1) return { row: foreign[0], reason: null };
-  if (foreign.length > 1) {
-    const inferred = sameForeignCountryExactMatch(candidates, gymNaam);
-    if (inferred) return inferred;
-    return { row: null, reason: "Meerdere exacte buitenlandse sportschoolmatches uit verschillende landen — voeg landcode of plaats toe." };
+  // Een unieke exacte naam/alias wint altijd, ongeacht land.
+  if (candidates.length === 1) return { row: candidates[0], reason: null };
+
+  if (candidates.length > 1) {
+    const explicitLandHint = detectLandHintFromGymText(raw);
+    if (explicitLandHint) {
+      const byLand = candidates.filter((row) =>
+        landMatchesHint(row?.land ?? row?.country, explicitLandHint)
+      );
+      if (byLand.length === 1) return { row: byLand[0], reason: null };
+    }
+
+    const byPlace = candidates.filter((row) =>
+      hasPlaatsHint(raw, row?.plaats ?? row?.stad ?? "")
+    );
+    if (byPlace.length === 1) return { row: byPlace[0], reason: null };
+
+    return {
+      row: null,
+      reason: "Meerdere exacte sportschoolmatches — gebruik plaats/land of FightPassport-hints om de vestiging te bepalen.",
+    };
   }
+
   return { row: null, reason: "Geen exacte naam- of aliasmatch gevonden." };
 }
 
@@ -849,7 +864,7 @@ function findGymMatch(sportscholen: any[], gymNaam: string, aliasMaps?: AliasMap
   if (!gRaw) return { row: null, reason: "Lege/ongeldige sportschoolnaam." };
   const list = sportscholen ?? [];
   const explicitLandHint = detectLandHintFromGymText(gRaw);
-  const landHint = defaultLandHintForMatching(explicitLandHint);
+  const landHint = explicitLandHint;
   const knownPlaces = extractKnownPlaces(list);
   const rawStrict = normStrictName(gRaw);
   const rawCompactStrict = compactStrictName(gRaw);
@@ -977,7 +992,7 @@ function buildKeurmerkPatchForGym(opts: { gym: string; evenement_datum?: string 
       return patch;
     }
     patch[valueKey] = null;
-    patch[reasonKey] = gymValue ? `${mmLine(gymValue)}\nGeen landcode/landnaam gevonden, dus behandeld als Nederlandse sportschool. Geen betrouwbare match in sportscholen. ${match.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim() : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
+    patch[reasonKey] = gymValue ? `${mmLine(gymValue)}\nGeen betrouwbare match in sportscholen. Land is niet afgeleid omdat geen landcode/landnaam is opgegeven. ${match.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim() : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
     return patch;
   }
   const landDb = found?.land ?? found?.country ?? null;
@@ -1069,7 +1084,7 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
         patch.keurmerk_reden_rood = buildForeignKeurmerkReason({ gym: roodGym, land: landHintToLabel(roodHint) });
       } else {
         patch.keurmerk_rood = null;
-        patch.keurmerk_reden_rood = roodGym ? `${mmLine(roodGym)}\nGeen landcode/landnaam gevonden, dus behandeld als Nederlandse sportschool. Geen betrouwbare match in sportscholen. ${roodMatch.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim() : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
+        patch.keurmerk_reden_rood = roodGym ? `${mmLine(roodGym)}\nGeen betrouwbare match in sportscholen. Land is niet afgeleid omdat geen landcode/landnaam is opgegeven. ${roodMatch.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim() : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
       }
     } else {
       const landDb = rood?.land ?? rood?.country ?? null;
@@ -1091,7 +1106,7 @@ export async function enrichControleBoutContext(matchmaking_id: string, controle
         patch.keurmerk_reden_blauw = buildForeignKeurmerkReason({ gym: blauwGym, land: landHintToLabel(blauwHint) });
       } else {
         patch.keurmerk_blauw = null;
-        patch.keurmerk_reden_blauw = blauwGym ? `${mmLine(blauwGym)}\nGeen landcode/landnaam gevonden, dus behandeld als Nederlandse sportschool. Geen betrouwbare match in sportscholen. ${blauwMatch.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim() : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
+        patch.keurmerk_reden_blauw = blauwGym ? `${mmLine(blauwGym)}\nGeen betrouwbare match in sportscholen. Land is niet afgeleid omdat geen landcode/landnaam is opgegeven. ${blauwMatch.reason ?? "Maak alias aan als deze sportschool Nederlands is."}`.trim() : `${mmLine("")}\nGeen sportschool opgegeven.`.trim();
       }
     } else {
       const landDb = blauw?.land ?? blauw?.country ?? null;
