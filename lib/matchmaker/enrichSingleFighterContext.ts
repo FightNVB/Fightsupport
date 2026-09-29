@@ -238,10 +238,10 @@ function isForeignHint(hint: LandHint | null) {
   return !!hint && hint !== "NL";
 }
 
-function defaultLandHintForMatching(hint: LandHint | null): LandHint {
-  // Geen landcode/landnaam betekent: eerst behandelen als Nederlandse sportschool.
-  // Alleen expliciete buitenlandse hint (bv. (BE), België, Duitsland) maakt hem buitenland.
-  return hint ?? "NL";
+function defaultLandHintForMatching(hint: LandHint | null): LandHint | null {
+  // Ontbrekend land is onbekend, niet automatisch Nederland.
+  // Land mag alleen helpen bij disambiguatie wanneer het expliciet is opgegeven.
+  return hint;
 }
 
 function landLabelForMatch(landDb: any, hint: LandHint | null) {
