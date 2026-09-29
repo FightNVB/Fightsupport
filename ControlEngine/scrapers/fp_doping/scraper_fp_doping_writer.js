@@ -1107,7 +1107,10 @@ async function doDopingWriter(page, va) {
    RUN (zelfde master + worker pool als fp_bundle)
 ------------------------------------------------------- */
 async function runDopingWriter(vaList, workers = 5) {
-  const { browser, page: masterPage } = await loginFightPassport();
+  const { browser, page: masterPage } = await loginFightPassport({
+    freshSession: true,
+    saveCookiesToDisk: false,
+  });
 
   let cookies = [];
   try {
@@ -1126,7 +1129,11 @@ async function runDopingWriter(vaList, workers = 5) {
 
     masterRefreshPromise = (async () => {
       console.log(`[doping-writer] 🔁 master ensureLoggedIn(force) start ${reason ? `(${reason})` : ""}`);
-      await ensureLoggedIn(masterPage, { force: true });
+      await ensureLoggedIn(masterPage, {
+        force: true,
+        saveCookiesToDisk: false,
+        useStoredCookies: false,
+      });
       try { cookies = await masterPage.cookies(); } catch {}
       console.log("[doping-writer] ✅ master refreshed (cookies updated)");
       return cookies;
