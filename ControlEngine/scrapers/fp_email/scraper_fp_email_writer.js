@@ -111,8 +111,18 @@ const vaList=process.argv.slice(2).map(normalizeVa).filter(Boolean);
 if(!vaList.length){console.error("Geen geldige VA-nummers meegegeven.");process.exit(1);}
 let browser,masterPage;
 try {
-  ({browser,page:masterPage}=await loginFightPassport({freshSession:true,saveCookiesToDisk:false}));
-  const cookiesRef={value:await masterPage.cookies().catch(()=>[])};
+  // Exact dezelfde start als fp_total/admin: schone master-login, daarna cookies uit die masterbrowser.
+  ({ browser, page: masterPage } = await loginFightPassport({
+    freshSession: true,
+    saveCookiesToDisk: false,
+  }));
+  let cookies = [];
+  try {
+    cookies = await masterPage.cookies();
+  } catch {}
+  const cookiesRef = { value: cookies };
+
+  console.log("[email-writer] ✅ Schone master-sessie gestart; zelfde start als fp_total/admin");
   let refreshPromise=null;
   async function refreshMaster(reason=""){
     if(refreshPromise){try{await refreshPromise}catch{}return cookiesRef.value;}
