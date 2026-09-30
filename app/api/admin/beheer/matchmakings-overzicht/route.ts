@@ -62,6 +62,7 @@ export async function GET(req: Request) {
       rows: matchmakings ?? [],
     });
   } catch (e: any) {
+    if (e instanceof Response) return e;
     console.error("[matchmakings-overzicht] unexpected:", e);
     return NextResponse.json(
       { ok: false, error: e?.message ?? "Onverwachte fout" },
