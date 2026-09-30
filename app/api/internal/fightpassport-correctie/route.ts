@@ -17,9 +17,11 @@ async function authorize(req:Request){
  const token=(req.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim();
  if(!token)return null;
  const hash=crypto.createHash("sha256").update(token).digest("hex");
- const {data}=await supabaseAdmin.schema("nvb_platform").from("service_api_tokens")
+ const {data,error}=await supabaseAdmin.schema("nvb_platform").from("service_api_tokens")
   .select("id,permissions").eq("token_hash",hash).eq("active",true).maybeSingle();
- if(!data||!Array.isArray(data.permissions)||!data.permissions.includes("fightpassport:writer"))return null;
+ if(error){console.error("[fightpassport-correctie] service-token databasefout",error.message);throw new Error("Service-token kon niet worden gecontroleerd.");}
+ if(!data){console.error("[fightpassport-correctie] service-token niet gevonden");return null;}
+ if(!Array.isArray(data.permissions)||!data.permissions.includes("fightpassport:writer")){console.error("[fightpassport-correctie] writer-permissie ontbreekt");return null;}
  await supabaseAdmin.schema("nvb_platform").from("service_api_tokens")
   .update({last_used_at:new Date().toISOString()}).eq("id",data.id);
  return data;
