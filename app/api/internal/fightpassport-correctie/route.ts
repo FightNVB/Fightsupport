@@ -32,10 +32,10 @@ function runNodeScript(scriptPath:string,args:string[],envExtra?:Record<string,s
   const t0=Date.now();
   const proc=spawn("node",[scriptPath,...args],{stdio:["ignore","pipe","pipe"],shell:false,cwd:path.dirname(scriptPath),windowsHide:true,env:{...process.env,...envExtra}});
   let stdout=""; let stderr="";
-  proc.stdout.on("data",(d)=>{const s=d.toString();stdout+=s;process.stdout.write(logPrefix?\`[\${logPrefix}] \${s}\`:s);});
-  proc.stderr.on("data",(d)=>{const s=d.toString();stderr+=s;process.stderr.write(logPrefix?\`[\${logPrefix}] \${s}\`:s);});
-  proc.on("error",(err)=>{const ms=Date.now()-t0;reject(new Error(\`Robot spawn error: \${err?.message??err}\\n(ms=\${ms})\\n\\nSTDERR:\\n\${stderr}\\n\\nSTDOUT:\\n\${stdout}\`));});
-  proc.on("close",(code)=>{const ms=Date.now()-t0;if(code===0)resolve({stdout,stderr,ms});else reject(new Error(\`Robot failed: \${scriptPath} (exit code \${code})\\n(ms=\${ms})\\n\\nSTDERR:\\n\${stderr}\\n\\nSTDOUT:\\n\${stdout}\`));});
+  proc.stdout.on("data",(d)=>{const s=d.toString();stdout+=s;process.stdout.write(logPrefix?`[${logPrefix}] ${s}`:s);});
+  proc.stderr.on("data",(d)=>{const s=d.toString();stderr+=s;process.stderr.write(logPrefix?`[${logPrefix}] ${s}`:s);});
+  proc.on("error",(err)=>{const ms=Date.now()-t0;reject(new Error(`Robot spawn error: ${err?.message??err}\\n(ms=${ms})\\n\\nSTDERR:\\n${stderr}\\n\\nSTDOUT:\\n${stdout}`));});
+  proc.on("close",(code)=>{const ms=Date.now()-t0;if(code===0)resolve({stdout,stderr,ms});else reject(new Error(`Robot failed: ${scriptPath} (exit code ${code})\\n(ms=${ms})\\n\\nSTDERR:\\n${stderr}\\n\\nSTDOUT:\\n${stdout}`));});
  });
 }
 
