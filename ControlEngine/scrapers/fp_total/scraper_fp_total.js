@@ -1750,13 +1750,44 @@ async function scrapeResults(page, va, signal = null) {
   };
 }
 
+function stableSnapshotValue(value) {
+  if (Array.isArray(value)) return value.map(stableSnapshotValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, stableSnapshotValue(value[key])])
+    );
+  }
+  return value ?? null;
+}
+
+function snapshotSignature(rows, ignoredKeys = []) {
+  const ignored = new Set(["id", "created_at", "updated_at", "last_seen_at", ...ignoredKeys]);
+  const normalized = (rows || []).map((row) =>
+    stableSnapshotValue(
+      Object.fromEntries(Object.entries(row).filter(([key]) => !ignored.has(key)))
+    )
+  );
+  return JSON.stringify(normalized.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+}
+
 async function saveChildSnapshot(table, va, rows, mapper) {
   const now = new Date().toISOString();
-  await supabase.from(table).delete().eq("va_nummer", String(va));
-  if (!rows.length) return;
   const payload = rows.map((r) => mapper(r, now));
+  const { data: existing, error: readError } = await supabase
+    .from(table)
+    .select("*")
+    .eq("va_nummer", String(va));
+  if (readError) throw readError;
+
+  if (snapshotSignature(existing) === snapshotSignature(payload)) return false;
+
+  const { error: deleteError } = await supabase.from(table).delete().eq("va_nummer", String(va));
+  if (deleteError) throw deleteError;
+  if (!payload.length) return true;
+
   const { error } = await supabase.from(table).insert(payload);
   if (error) throw error;
+  return true;
 }
 
 async function saveFighter(all) {
@@ -1818,11 +1849,8 @@ async function saveFighter(all) {
 }
 
 async function saveResultsSnapshot(va, results) {
-  // Alleen aanroepen nadat de UITSLAGEN-stap aantoonbaar succesvol is.
-  // Een tijdelijke fout of mislukte download mag bestaande uitslagen nooit wissen.
-  //
-  // FightPassport kan dezelfde uitslagregel dubbel in één Excelbestand bevatten.
-  // Dedupliceer daarom exact op dezelfde velden als fightpassport_results_dedupe_idx.
+  // Alleen schrijven wanneer de inhoud werkelijk is gewijzigd.
+  // Zo blijft de data actueel zonder bij iedere controle alle uitslagen te verwijderen en opnieuw in te voegen.
   const uniqueResults = [
     ...new Map(
       (results || []).map((r) => {
@@ -1835,24 +1863,32 @@ async function saveResultsSnapshot(va, results) {
           r.klasse || "",
           r.uitslag || "",
         ].join("||");
-
         return [key, r];
       })
     ).values(),
   ];
 
-  await supabase
+  const { data: existing, error: readError } = await supabase
+    .from("fightpassport_results")
+    .select("*")
+    .eq("va_nummer", String(va));
+  if (readError) throw readError;
+
+  if (snapshotSignature(existing) === snapshotSignature(uniqueResults)) return false;
+
+  const { error: deleteError } = await supabase
     .from("fightpassport_results")
     .delete()
     .eq("va_nummer", String(va));
+  if (deleteError) throw deleteError;
 
   if (uniqueResults.length) {
     const { error: re } = await supabase
       .from("fightpassport_results")
       .insert(uniqueResults);
-
     if (re) throw re;
   }
+  return true;
 }
 
 async function scrapeOne(page, va, openFreshPage, signal = null) {
