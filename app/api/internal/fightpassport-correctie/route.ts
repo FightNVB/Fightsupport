@@ -61,6 +61,7 @@ export async function POST(req:Request){
 
   console.log("[fightpassport-correctie] ontvangen",{type,va});
   const result=await runNodeScript(emailWriter(),[va],{
+   PUPPETEER_EXECUTABLE_PATH:process.env.PUPPETEER_EXECUTABLE_PATH??"",
    HEADLESS:process.env.HEADLESS??"false",
    PUPPETEER_HEADLESS:process.env.PUPPETEER_HEADLESS??process.env.HEADLESS??"false",
    TAB_ATTEMPTS:process.env.TAB_ATTEMPTS??"5",
