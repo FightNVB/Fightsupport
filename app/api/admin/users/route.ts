@@ -382,6 +382,9 @@ export async function GET(req: Request) {
       .select(
         "id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at",
       )
+      // Supabase Auth is gedeeld met FightSystem/Mijn NVB. Gebruikersbeheer
+      // van FightSupport mag daarom uitsluitend FightSupport-profielen tonen.
+      .in("role", KNOWN_ROLES)
       .order("email", { ascending: true });
 
     if (error) return jsonError(error.message, 500);
