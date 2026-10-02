@@ -377,14 +377,33 @@ export async function GET(req: Request) {
   await requireAdmin(req);
 
   try {
+    // Supabase Auth en user_profiles bevatten ook accounts die niet bij
+    // FightSupport horen. public.users is de applicatiegrens van FightSupport:
+    // alleen ids die daar bestaan mogen in dit gebruikersbeheer verschijnen.
+    const { data: fightSupportUsers, error: fightSupportUsersError } =
+      await supabaseAdmin.from("users").select("id,auth_id");
+
+    if (fightSupportUsersError)
+      return jsonError(fightSupportUsersError.message, 500);
+
+    const fightSupportIds = Array.from(
+      new Set(
+        (fightSupportUsers ?? [])
+          .flatMap((u: any) => [u.id, u.auth_id])
+          .filter(Boolean),
+      ),
+    );
+
+    if (fightSupportIds.length === 0) {
+      return NextResponse.json({ users: [] });
+    }
+
     const { data, error } = await supabaseAdmin
       .from("user_profiles")
       .select(
         "id,email,full_name,role,active_role,bondteam,active_sportschool_id,meekijk_sportschool_id,created_at",
       )
-      // Supabase Auth is gedeeld met FightSystem/Mijn NVB. Gebruikersbeheer
-      // van FightSupport mag daarom uitsluitend FightSupport-profielen tonen.
-      .in("role", KNOWN_ROLES)
+      .in("id", fightSupportIds)
       .order("email", { ascending: true });
 
     if (error) return jsonError(error.message, 500);
