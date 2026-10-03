@@ -179,6 +179,7 @@ function boutFingerprint(opts: {
 type ExistingBoutIndexRow = {
   id: number | string;
   bout_uid: string | null;
+  partij_nr: number | null;
   va_rood: string | null;
   va_blauw: string | null;
   discipline: string | null;
@@ -195,7 +196,7 @@ async function fetchExistingBoutIndex(matchmaking_id: string) {
   const { data, error } = await supabaseAdmin
     .from("matchmaking_bouts_raw")
     .select(
-      "id,bout_uid,va_rood,va_blauw,discipline,klasse,is_toernooi,toernooi_code,verwijderd"
+      "id,bout_uid,partij_nr,va_rood,va_blauw,discipline,klasse,is_toernooi,toernooi_code,verwijderd"
     )
     .eq("matchmaking_id", matchmaking_id);
 
@@ -267,18 +268,25 @@ function findStableExistingBout(opts: {
     if ((row as any)?.is_toernooi === true || normalizeToernooiCode((row as any)?.toernooi_code)) return false;
     if (!sameOptionalText((row as any)?.discipline, opts.discipline)) return false;
     if (!sameOptionalText((row as any)?.klasse, opts.klasse)) return false;
-    const vas = existingVaSet(row);
-    return incomingVas.some((va) => vas.has(va));
+    return true;
   });
 
+  // Een herupload is een vervanging van dezelfde matchmaking. Partijnummer is
+  // daarom de stabiele identiteit, ook wanneer een VA-nummer is gecorrigeerd.
   if (incomingPartijNr != null) {
-    const sameNr = active.filter((row) => stablePartijNr((row as any)?.partij_nr) === incomingPartijNr);
+    const sameNr = active.filter(
+      (row) => stablePartijNr((row as any)?.partij_nr) === incomingPartijNr
+    );
     if (sameNr.length === 1) return sameNr[0];
   }
 
-  // Fallback voor hernummerde matchmakings: alleen gebruiken als de aanwezige VA
-  // binnen discipline/klasse exact één actieve kandidaat oplevert.
-  return active.length === 1 ? active[0] : null;
+  // Alleen bij een hernummerde matchmaking vallen we terug op VA-herkenning.
+  // Er moet exact één kandidaat zijn; anders maken we geen willekeurige koppeling.
+  const byVa = active.filter((row) => {
+    const vas = existingVaSet(row);
+    return incomingVas.some((va) => vas.has(va));
+  });
+  return byVa.length === 1 ? byVa[0] : null;
 }
 
 const ALLOWED_BONDTEAMS = new Set([
