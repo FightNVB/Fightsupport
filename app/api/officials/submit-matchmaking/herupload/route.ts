@@ -62,6 +62,12 @@ function normUpper(v: any): string {
   return String(v ?? "").trim().toUpperCase();
 }
 
+function sameOptionalText(a: any, b: any): boolean {
+  const aa = normUpper(a);
+  const bb = normUpper(b);
+  return !aa || !bb || aa === bb;
+}
+
 function canonVaPair(vaR: string | null, vaB: string | null): string | null {
   if (!vaR || !vaB) return null;
   const a = String(vaR).trim();
