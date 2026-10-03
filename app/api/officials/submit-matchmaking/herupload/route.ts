@@ -179,6 +179,7 @@ function boutFingerprint(opts: {
 type ExistingBoutIndexRow = {
   id: number | string;
   bout_uid: string | null;
+  partij_nr: number | null;
   va_rood: string | null;
   va_blauw: string | null;
   discipline: string | null;
@@ -195,7 +196,7 @@ async function fetchExistingBoutIndex(matchmaking_id: string) {
   const { data, error } = await supabaseAdmin
     .from("matchmaking_bouts_raw")
     .select(
-      "id,bout_uid,va_rood,va_blauw,discipline,klasse,is_toernooi,toernooi_code,verwijderd"
+      "id,bout_uid,partij_nr,va_rood,va_blauw,discipline,klasse,is_toernooi,toernooi_code,verwijderd"
     )
     .eq("matchmaking_id", matchmaking_id);
 
@@ -858,8 +859,43 @@ const existingStage =
         laatste_bewerking_op: now,
       };
 
+      // Bij een herupload is partijnummer de primaire stabiele identiteit.
+      // Zo blijft dezelfde partij/bout_uid behouden als een VA-nummer is gecorrigeerd.
+      const incomingPartijNr = Number((b as any)?.partij_nr);
+      if (isHerupload && Number.isInteger(incomingPartijNr) && incomingPartijNr > 0) {
+        const sameNr = existingBouts.filter((row) => {
+          if ((row as any)?.verwijderd === true) return false;
+          if (touchedExistingIds.has(String((row as any)?.id))) return false;
+          if ((row as any)?.is_toernooi === true || normalizeToernooiCode((row as any)?.toernooi_code)) return false;
+          return Number((row as any)?.partij_nr) === incomingPartijNr;
+        });
+
+        if (sameNr.length === 1) {
+          const existing = sameNr[0];
+          const existingId = (existing as any).id;
+          const existingBoutUid = String((existing as any).bout_uid ?? "").trim();
+
+          touchedExistingIds.add(String(existingId));
+          reused++;
+          updated++;
+
+          updates.push({
+            id: existingId,
+            values: {
+              ...baseValues,
+              bout_uid: existingBoutUid || insertBoutUid,
+            },
+          });
+          continue;
+        }
+
+        if (sameNr.length > 1) ambiguous++;
+      }
+
       if (fp) {
-        const list = existingIndex.get(fp) ?? [];
+        const list = (existingIndex.get(fp) ?? []).filter(
+          (row) => !touchedExistingIds.has(String((row as any)?.id))
+        );
         if (list.length === 1) {
           const existing = list[0];
           const existingId = (existing as any).id;
