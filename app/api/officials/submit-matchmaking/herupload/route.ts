@@ -867,6 +867,8 @@ const existingStage =
           if ((row as any)?.verwijderd === true) return false;
           if (touchedExistingIds.has(String((row as any)?.id))) return false;
           if ((row as any)?.is_toernooi === true || normalizeToernooiCode((row as any)?.toernooi_code)) return false;
+          if (!sameOptionalText((row as any)?.discipline, discipline)) return false;
+          if (!sameOptionalText((row as any)?.klasse, klasse)) return false;
           return Number((row as any)?.partij_nr) === incomingPartijNr;
         });
 
