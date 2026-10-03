@@ -21,6 +21,7 @@ import {
 
 import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
+import { authedDownload } from "@/lib/api/authedDownload";
 import { evaluateWeighInBout } from "@/lib/weegstation/weighInRulesEngine";
 
 const NVB_ORANGE = "#ff4d00";
@@ -3049,11 +3050,31 @@ export default function WeegstationDetailPage() {
             className="mt-5 rounded-[16px] p-4 text-white"
             style={darkPanelStyle()}
           >
-            <div
-              className="mb-3 text-sm font-black uppercase tracking-[0.06em]"
-              style={{ color: NVB_ORANGE }}
-            >
-              📋 Alle gewogen partijen
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div
+                className="text-sm font-black uppercase tracking-[0.06em]"
+                style={{ color: NVB_ORANGE }}
+              >
+                📋 Alle gewogen partijen
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  authedDownload(
+                    `/api/officials/weegstation/export?matchmaking_id=${encodeURIComponent(matchmakingId)}`,
+                    "FightSupport_Weegstation.xlsx",
+                  )
+                }
+                className="inline-flex h-9 items-center justify-center px-4 text-xs font-black uppercase tracking-[0.04em] text-white"
+                style={{
+                  borderRadius: 4,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "linear-gradient(180deg, #ff5b17 0%, #e84600 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22)",
+                }}
+              >
+                Excel downloaden
+              </button>
             </div>
 
             <div className="overflow-x-auto">
