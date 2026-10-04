@@ -671,21 +671,24 @@ function fallbackAdultKbMtKlasseFromNulmeting(ctx: any, hoek: "rood" | "blauw"):
 }
 
 function getAdultKbMtBaseKlasse(ctx: any, hoek: "rood" | "blauw", rows: UitslagRow[]): Klasse {
-  // Uitslagen zijn leidend. Nulmeting is alleen fallback als er geen
-  // bruikbare volwassen KICKBOKSEN/MUAY THAI uitslagen zijn.
+  // 1. Echte volwassen KICKBOKSEN/MUAY THAI-uitslagen zijn leidend.
   const historyKlasse = hoogsteKlasseUitUitslagen(rows);
   if (historyKlasse) return historyKlasse;
 
-  const jeugdStats = getJeugdExperienceStats(rows);
+  // 2. Geen bruikbare volwassen historie:
+  // gebruik de volwassen klasse uit nulmeting/FightPassport als fallback.
+  // Dit geldt óók wanneer er alleen jeugdresultaten zijn. Een vastgelegde
+  // nulmeting C/B/A mag dan niet worden overschreven door de standaard N-start.
+  const nulmetingKlasse = fallbackAdultKbMtKlasseFromNulmeting(ctx, hoek);
+  if (nulmetingKlasse) return nulmetingKlasse;
 
-  // Zelfde uitgangspunt als matchEngine en fighterRules:
-  // alleen jeugdpartijen geven bij de overgang naar senioren niet automatisch
-  // een volwassen C/B/A-klasse. Zonder aantoonbare hoofdcontact-doorstroom
-  // start de reguliere volwassen controle daarom in N.
+  // 3. Alleen jeugdverleden zonder bruikbare volwassen fallback
+  // promoveert niet automatisch naar een hogere volwassen klasse.
+  const jeugdStats = getJeugdExperienceStats(rows);
   if (jeugdStats.total > 0) return "N";
 
-  const nulmetingKlasse = fallbackAdultKbMtKlasseFromNulmeting(ctx, hoek);
-  return nulmetingKlasse ?? "N";
+  // 4. Geen historie en geen bruikbare nulmeting: start volwassen controle in N.
+  return "N";
 }
 
 async function fetchUitslagenByVa(opts: {
