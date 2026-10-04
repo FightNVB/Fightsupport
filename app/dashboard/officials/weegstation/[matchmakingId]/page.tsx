@@ -1192,7 +1192,7 @@ type FighterComplianceBadges = {
   keurmerkLabel: string;
 };
 
-type ComplianceIssueKind = "licentie" | "keurmerk" | "startverbod";
+type ComplianceIssueKind = "licentie" | "keurmerk" | "startverbod" | "dispensatie" | "verbod";
 
 type ComplianceIssue = {
   id: string;
@@ -1200,6 +1200,11 @@ type ComplianceIssue = {
   partij_nr: number | null;
   hoek: "rood" | "blauw" | null;
   kind: ComplianceIssueKind;
+  rule: string;
+  rule_code: string;
+  boodschap: string;
+  resultaat: string;
+  review_status: string;
 };
 
 function normalizeCorner(v: unknown): "rood" | "blauw" | null {
@@ -1274,6 +1279,11 @@ function getControleIssueKind(row: any): ComplianceIssueKind | null {
   }
   if (text.includes("keurmerk")) return "keurmerk";
   if (text.includes("licentie")) return "licentie";
+
+  const resultaat = normalizeSearchText(row?.resultaat);
+  const originalResultaat = normalizeSearchText(row?.original_resultaat);
+  if (resultaat.includes("verbod") || originalResultaat.includes("verbod")) return "verbod";
+  if (resultaat.includes("dispensatie") || originalResultaat.includes("dispensatie")) return "dispensatie";
 
   return null;
 }
@@ -1498,6 +1508,11 @@ export default function WeegstationDetailPage() {
               : Number(result.partij_nr),
           hoek: normalizeCorner(result?.hoek),
           kind,
+          rule: String(result?.rule ?? ""),
+          rule_code: String(result?.rule_code ?? ""),
+          boodschap: String(result?.boodschap ?? ""),
+          resultaat: String(result?.resultaat ?? ""),
+          review_status: String(result?.review_status ?? result?.actie_status ?? ""),
         };
       })
       .filter((issue: ComplianceIssue | null): issue is ComplianceIssue => !!issue);
@@ -1934,6 +1949,17 @@ export default function WeegstationDetailPage() {
     selectedRow && selectedFighter
       ? getFighterComplianceBadges(selectedRow, selectedFighter.corner)
       : null;
+
+  const selectedRuleIssues =
+    selectedRow && selectedFighter
+      ? ((((selectedRow as any)._open_compliance_issues ?? []) as ComplianceIssue[])
+          .filter((issue) => issue.kind === "dispensatie" || issue.kind === "verbod")
+          .filter(
+            (issue) =>
+              !issue.hoek ||
+              issue.hoek === (selectedFighter.corner === "red" ? "rood" : "blauw"),
+          ))
+      : [];
 
   async function saveSelected() {
     if (!selectedRow || !selectedDraft) return;
@@ -2655,6 +2681,41 @@ export default function WeegstationDetailPage() {
                             label={selectedComplianceBadges.keurmerkLabel}
                             ok={selectedComplianceBadges.keurmerkOk}
                           />
+                        </div>
+                      )}
+
+                      {selectedRuleIssues.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {selectedRuleIssues.map((issue) => (
+                            <div
+                              key={issue.id || `${issue.rule_code}-${issue.boodschap}`}
+                              className="rounded-[6px] border px-3 py-2"
+                              style={{
+                                background:
+                                  issue.kind === "verbod"
+                                    ? "rgba(220,38,38,0.12)"
+                                    : "rgba(245,158,11,0.14)",
+                                borderColor:
+                                  issue.kind === "verbod"
+                                    ? "rgba(220,38,38,0.55)"
+                                    : "rgba(217,119,6,0.55)",
+                              }}
+                            >
+                              <div
+                                className="text-xs font-black uppercase tracking-[0.04em]"
+                                style={{
+                                  color: issue.kind === "verbod" ? "#991b1b" : "#92400e",
+                                }}
+                              >
+                                {issue.kind === "verbod"
+                                  ? "⛔ VERBOD — regelcontrole"
+                                  : "⚠ DISPENSATIE NIET TOEGEKEND — regelcontrole"}
+                              </div>
+                              <div className="mt-1 text-sm font-bold text-zinc-900">
+                                {issue.boodschap || issue.rule || issue.rule_code}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
 
