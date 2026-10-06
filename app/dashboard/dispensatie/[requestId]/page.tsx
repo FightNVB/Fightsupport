@@ -231,6 +231,7 @@ export default function DispensatieDetailPage() {
   const [uploading, setUploading] = useState(false);
 
   const isSuperadmin = myRole === "superadmin";
+  const canVote = isSuperadmin || myRole === "dispensatie_admin";
 
   async function getUserRole() {
     try {
@@ -488,6 +489,8 @@ export default function DispensatieDetailPage() {
   async function vote(v: "approve" | "reject") {
     try {
       setErr(null);
+      if (!canVote)
+        throw new Error("Alleen dispensatiebeheer of superadmin kan stemmen.");
       await callApi("/api/dispensatie/vote", {
         request_id: requestId,
         vote: v,
@@ -859,14 +862,16 @@ export default function DispensatieDetailPage() {
               <button
                 type="button"
                 onClick={() => vote("approve")}
-                className="border border-green-400 bg-green-700 px-4 py-2 text-sm font-black uppercase text-white"
+                disabled={!canVote}
+                className="border border-green-400 bg-green-700 px-4 py-2 text-sm font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Stem akkoord
               </button>
               <button
                 type="button"
                 onClick={() => vote("reject")}
-                className="border border-red-400 bg-red-800 px-4 py-2 text-sm font-black uppercase text-white"
+                disabled={!canVote}
+                className="border border-red-400 bg-red-800 px-4 py-2 text-sm font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Stem afkeur
               </button>
