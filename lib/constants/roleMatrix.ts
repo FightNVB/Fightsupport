@@ -24,7 +24,7 @@ export type Action =
 export const ROLE_MATRIX: Record<Action, RoleName[]> = {
   wegen: ["official", "hoofdofficial", "admin", "dispensatie_admin"],
   minpunten: ["hoofdofficial", "admin", "dispensatie_admin"],
-  dispensatie_geven: ["hoofdofficial", "admin", "dispensatie_admin"],
+  dispensatie_geven: ["hoofdofficial", "dispensatie_admin"],
   partij_nummer_wijzigen: ["matchmaker", "hoofdofficial", "admin", "dispensatie_admin"],
   uitslagen_invoeren: ["official", "hoofdofficial", "admin", "dispensatie_admin"],
   export_download: ["hoofdofficial", "admin", "dispensatie_admin"],
