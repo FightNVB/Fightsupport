@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   try {
     const { user } = await requireUserFromAuthHeader(req);
 
-    const ok = await hasAnyRoleFromReq(req, ["dispensatie_admin", "admin", "superadmin"]);
+    const ok = await hasAnyRoleFromReq(req, ["dispensatie_admin", "superadmin"]);
     if (!ok) return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
 
     const body = await req.json();
