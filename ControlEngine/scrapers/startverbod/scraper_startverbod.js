@@ -524,21 +524,8 @@ async function saveMatchErrors(runId, errors) {
   if (error) throw error;
 }
 
-async function saveSnapshot(runId, matchedRows, hasMatchErrors) {
+async function applyAtomicSnapshot(runId, matchedRows, hasMatchErrors) {
   const now = new Date().toISOString();
-
-  // Alleen wanneer iedere Excelregel veilig gekoppeld is, mag de vorige actuele
-  // rapportset worden afgesloten. Anders zouden niet-gekoppelde actieve verboden
-  // ten onrechte uit de actuele lijst verdwijnen.
-  if (!hasMatchErrors) {
-    const { error } = await supabase
-      .from("startverbod")
-      .update({ is_actueel: false, laatst_gezien_op: now })
-      .eq("is_actueel", true);
-
-    if (error) throw error;
-  }
-
   const payload = matchedRows.map((row) => ({
     bron_sleutel: sourceKey(row),
     va_nummer: String(row.va_nummer),
@@ -547,11 +534,7 @@ async function saveSnapshot(runId, matchedRows, hasMatchErrors) {
     soort: row.soort,
     ingang: row.ingang,
     einde: row.einde,
-    is_actueel: true,
     koppel_methode: row.koppel_methode,
-    eerste_gezien_op: now,
-    laatst_gezien_op: now,
-    laatste_run_id: runId,
     raw_json: row.raw_json,
     reden: row.reden ?? null,
     opmerkingen: row.opmerkingen ?? null,
@@ -561,64 +544,28 @@ async function saveSnapshot(runId, matchedRows, hasMatchErrors) {
     gewijzigd_door: row.gewijzigd_door ?? null,
     naam_fp: row.naam_fp ?? row.naam ?? null,
     verified_in_fightpassport: row.verified_in_fightpassport ?? false,
-    verified_at: row.verified_at ?? null,
+    verified_at: row.verified_at ?? now,
     verification_method: row.verification_method ?? null,
   }));
-
-  // PostgreSQL kan dezelfde conflict-sleutel niet tweemaal binnen één
-  // upsert bijwerken. Alleen volledig identieke bron_sleutels samenvoegen.
-  // Verschillende namen of VA-nummers blijven afzonderlijke records.
-  const uniquePayload = [
-    ...new Map(payload.map((row) => [row.bron_sleutel, row])).values(),
-  ];
-
+  const uniquePayload = [...new Map(payload.map((row) => [row.bron_sleutel, row])).values()];
   if (uniquePayload.length !== payload.length) {
-    console.warn("[startverbod] identieke dubbele rapportregels verwijderd vóór upsert", {
-      ontvangen: payload.length,
-      uniek: uniquePayload.length,
-      verwijderd: payload.length - uniquePayload.length,
+    console.warn("[startverbod] identieke dubbele rapportregels samengevoegd", {
+      ontvangen: payload.length, uniek: uniquePayload.length,
     });
   }
-
-  const { error } = await supabase
-    .from("startverbod")
-    .upsert(uniquePayload, {
-      onConflict: "bron_sleutel",
-      ignoreDuplicates: false,
-    });
-
+  const started = Date.now();
+  const { error } = await supabase.rpc("apply_startverbod_snapshot", {
+    p_run_id: runId,
+    p_rows: uniquePayload,
+    p_complete: !hasMatchErrors,
+  });
+  console.log("[startverbod] atomaire databaseverwerking", {
+    duur_ms: Date.now() - started,
+    records: uniquePayload.length,
+    volledig: !hasMatchErrors,
+    geslaagd: !error,
+  });
   if (error) throw error;
-}
-
-async function syncOperationalStartverbodStatus(matchedRows) {
-  const activeVaNumbers = [...new Set(matchedRows.map((row) => String(row.va_nummer)))];
-  const now = new Date().toISOString();
-
-  // Alleen na een volledig foutloze officiële rapportset mag de operationele
-  // status opnieuw worden opgebouwd. Historische dossierregels spelen hierin
-  // bewust geen enkele rol.
-  const { error: clearError } = await supabase
-    .from("fightpassport_fighters")
-    .update({
-      heeft_startverbod: false,
-      heeft_startverbod_actuele_sync: false,
-      startverbod_actuele_sync_at: now,
-      startverbod_status_source: "actuele_excel_sync",
-    })
-    .not("va_nummer", "is", null);
-  if (clearError) throw clearError;
-
-  if (!activeVaNumbers.length) return;
-  const { error: activateError } = await supabase
-    .from("fightpassport_fighters")
-    .update({
-      heeft_startverbod: true,
-      heeft_startverbod_actuele_sync: true,
-      startverbod_actuele_sync_at: now,
-      startverbod_status_source: "actuele_excel_sync",
-    })
-    .in("va_nummer", activeVaNumbers);
-  if (activateError) throw activateError;
 }
 
 export async function scraperStartverbod() {
@@ -856,10 +803,7 @@ export async function scraperStartverbod() {
     );
 
     await saveMatchErrors(runId, errors);
-    await saveSnapshot(runId, matched, errors.length > 0);
-    if (errors.length === 0) {
-      await syncOperationalStartverbodStatus(matched);
-    }
+    await applyAtomicSnapshot(runId, matched, errors.length > 0);
 
     await finishRun(runId, {
       status: errors.length ? "completed_with_errors" : "success",
