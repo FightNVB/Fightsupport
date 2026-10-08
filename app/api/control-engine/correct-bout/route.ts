@@ -664,6 +664,28 @@ export async function POST(req: Request) {
       patch.blauw_gewicht = normalizeWeight(body.new_blauw_gewicht);
     }
 
+    // Geboortedatum voor boksen wordt uitsluitend als handmatige MM-bron opgeslagen.
+    const manualDobPatch: Record<string, string | null> = {};
+    const effectiveDiscipline = String(patch.discipline ?? existingBout.discipline ?? "").trim().toUpperCase();
+    for (const side of ["rood", "blauw"] as const) {
+      const inputKey = `new_${side}_geboortedatum_mm`;
+      if (!hasOwn(body, inputKey)) continue;
+      if (effectiveDiscipline !== "BOKSEN") throw new Error("Handmatige geboortedatum is alleen toegestaan bij BOKSEN.");
+      const input = String(body[inputKey] ?? "").trim();
+      const normalized = /^\\d{8}$/.test(input)
+        ? `${input.slice(4, 8)}-${input.slice(2, 4)}-${input.slice(0, 2)}`
+        : /^\\d{2}[-/]\\d{2}[-/]\\d{4}$/.test(input)
+          ? `${input.slice(6, 10)}-${input.slice(3, 5)}-${input.slice(0, 2)}`
+          : input;
+      if (normalized && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(normalized) ||
+          Number.isNaN(Date.parse(normalized)) || normalized > new Date().toISOString().slice(0, 10))) {
+        throw new Error("Ongeldige geboortedatum.");
+      }
+      const rawKey = `${side}_geboortedatum`;
+      patch[rawKey] = normalized || null;
+      manualDobPatch[`${side}_geboortedatum_mm`] = normalized || null;
+    }
+
     const newVaRood = hasNewVaRood ? (patch.va_rood ?? null) : oldVaRood;
     const newVaBlauw = hasNewVaBlauw ? (patch.va_blauw ?? null) : oldVaBlauw;
 
@@ -756,6 +778,8 @@ export async function POST(req: Request) {
       const finalCtxPatch: Record<string, any> = {
         updated_at: new Date().toISOString(),
       };
+
+      Object.assign(finalCtxPatch, manualDobPatch);
 
       if (hasNewVaRood) {
         finalCtxPatch.rood_va_mm = newVaRood;
@@ -874,6 +898,25 @@ export async function POST(req: Request) {
     }
     if (ctxFinal && hasNewVaBlauw && normalizeVa(ctxFinal.blauw_va_mm) !== normalizeVa(newVaBlauw)) {
       throw new Error("VA blauw is niet correct doorgezet naar controle_bout_context.");
+    }
+
+    if (Object.keys(manualDobPatch).length) {
+      const { data: persisted, error: dobReadError } = await supabase
+        .from("matchmaking_bouts_raw")
+        .select("rood_geboortedatum,blauw_geboortedatum")
+        .eq("id", existingBout.id).single();
+      if (dobReadError) throw dobReadError;
+      if (!ctxFinal) throw new Error("Geen controlecontext gevonden om geboortedatum te bevestigen.");
+      for (const side of ["rood", "blauw"] as const) {
+        const contextKey: "rood_geboortedatum_mm" | "blauw_geboortedatum_mm" = `${side}_geboortedatum_mm`;
+        if (!(contextKey in manualDobPatch)) continue;
+        const rawKey: "rood_geboortedatum" | "blauw_geboortedatum" = `${side}_geboortedatum`;
+        const expected = manualDobPatch[contextKey];
+        if (String(persisted?.[rawKey] ?? "").slice(0, 10) !== String(expected ?? "") ||
+            String(ctxFinal[contextKey] ?? "").slice(0, 10) !== String(expected ?? "")) {
+          throw new Error(`Geboortedatum ${side} niet correct opgeslagen in raw en controlecontext.`);
+        }
+      }
     }
 
     const ctxRows = ctxFinal ? [ctxFinal] : [];
