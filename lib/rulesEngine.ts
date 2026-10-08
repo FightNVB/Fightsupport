@@ -2453,6 +2453,23 @@ export async function rulesEngine(opts: {
           : isJeugdBoksen
             ? "Jeugdbokspartij: leeftijdsklasse, gewichtsklasse en ervaring vereisen NVB-controle."
             : "Bokspartij: gewichtsklasse en ervaring vereisen NVB-controle.";
+      // De door de matchmaker opgegeven bovengrens is ook bij boksen bindend.
+      const maxGewicht = parseWeightKg(ctx?.max_gewicht);
+      if (maxGewicht != null && maxGewicht > 0) {
+        for (const hoek of ["rood", "blauw"] as const) {
+          const gewicht = parseWeightKg(ctx?.[`${hoek}_gewicht_mm`] ?? ctx?.[`${hoek}_gewicht_fp`] ?? ctx?.[`${hoek}_gewicht`]);
+          if (gewicht != null && gewicht > maxGewicht) {
+            pushHitTournamentAware({
+              partij_nr, bout_id, hoek,
+              rule: "Boksen - maximumgewicht overschreden",
+              rule_code: "BOKSEN_MAX_GEWICHT",
+              resultaat: "DISPENSATIE",
+              severity: "warning",
+              boodschap: `${hoek === "rood" ? "Rood" : "Blauw"}: ${gewicht.toFixed(1)} kg overschrijdt het opgegeven maximum van ${maxGewicht.toFixed(1)} kg. Alleen NVB-dispensatiebeheer kan een uitzondering toekennen.`,
+            }, ctx);
+          }
+        }
+      }
       pushHitTournamentAware({
         partij_nr, bout_id,
         rule: "Boksen - reglementaire beoordeling",
