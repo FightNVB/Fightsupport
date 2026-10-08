@@ -3671,7 +3671,7 @@ export default function PartijDetailPage() {
           <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-2 sm:p-4">
             <div
               key={editMountKey}
-              className="my-auto max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl border-2 border-zinc-400 bg-white p-4 shadow-xl"
+              className="my-auto max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] w-full max-w-4xl overflow-y-auto overscroll-contain rounded-xl border-2 border-zinc-400 bg-white p-3 sm:p-4 shadow-xl"
             >
               <div className="flex items-center justify-between">
                 <div className="font-extrabold text-zinc-900">
@@ -3686,7 +3686,7 @@ export default function PartijDetailPage() {
                 </button>
               </div>
 
-              <div className="mt-3 space-y-3">
+              <div className="mt-3 grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <div className="text-xs text-zinc-600 mb-1">VA nummer</div>
                   <input
@@ -3798,7 +3798,7 @@ export default function PartijDetailPage() {
                     <input type="date" defaultValue={editDraftRef.current.geboortedatum} onChange={(e) => { editDraftRef.current.geboortedatum = e.target.value; }} className="mt-1 block w-full px-3 py-2 border border-zinc-400 rounded text-zinc-900" />
                   </label>
                 ) : null}
-                <div className="pt-2 flex flex-wrap items-center gap-2 justify-end">
+                <div className="pt-2 flex flex-wrap items-center gap-2 justify-end sm:col-span-2 lg:col-span-3">
                   <button
                     type="button"
                     onClick={closeEdit}
