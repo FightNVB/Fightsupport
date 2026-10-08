@@ -1642,6 +1642,31 @@ async function runTournamentRules(opts: {
     const skipLicentieEnKeurmerk = isPureBoksenZonderLicentieKeurmerk(ctx);
 
     if (!hasRood && !hasBlauw) continue;
+    // Boksen valt buiten de KB/MT/MMA-regels, maar mag nooit stilzwijgend GOED zijn.
+    // NVB-dispensaties worden uitsluitend door de bevoegde dispensatiebeheerder beoordeeld.
+    if (isExactBoksenText(ctx?.discipline) && hasRood && hasBlauw) {
+      const roodLeeftijd = ageOnEventFromCtx(ctx, "rood");
+      const blauwLeeftijd = ageOnEventFromCtx(ctx, "blauw");
+      const leeftijdOntbreekt = roodLeeftijd == null || blauwLeeftijd == null;
+      const isJeugdBoksen = !leeftijdOntbreekt && (roodLeeftijd! < 18 || blauwLeeftijd! < 18);
+      const teJong = !leeftijdOntbreekt && (roodLeeftijd! < 12 || blauwLeeftijd! < 12);
+      const reden = leeftijdOntbreekt
+        ? "Geboortedatum of wedstrijddatum ontbreekt: boksleeftijd kan niet worden vastgesteld."
+        : teJong
+          ? "Minimaal een bokser is jonger dan 12 jaar op de wedstrijddatum; handmatige beoordeling vereist."
+          : isJeugdBoksen
+            ? "Jeugdbokspartij: leeftijdsklasse, gewichtsklasse en ervaring vereisen NVB-controle."
+            : "Bokspartij: gewichtsklasse en ervaring vereisen NVB-controle.";
+      pushHitTournamentAware({
+        partij_nr, bout_id,
+        rule: "Boksen - reglementaire beoordeling",
+        rule_code: "BOKSEN_NVB_CONTROLE",
+        resultaat: teJong ? "VERBOD" : "ACTIE",
+        severity: teJong ? "error" : "warning",
+        boodschap: reden + " Alleen NVB-dispensatiebeheer mag uitzonderingen goedkeuren.",
+      }, ctx);
+    }
+
 
     if (!skipLicentieEnKeurmerk && hasRood && !vaRood) {
       pushTournamentUniquePersonHit(ctx, "rood", {
