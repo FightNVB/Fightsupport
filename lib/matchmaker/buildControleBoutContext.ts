@@ -907,9 +907,9 @@ if (scopedPartijNr != null) {
     const recBClass = buildClassAwareRecord(uitslagenB, currentClass);
 
     const roodGeboortedatum =
-      fr?.geboortedatum ?? mr?.fp_geboortedatum ?? mr?.geboortedatum ?? null;
+      fr?.geboortedatum ?? mr?.fp_geboortedatum ?? partij?.rood_geboortedatum ?? mr?.geboortedatum_input ?? mr?.geboortedatum ?? null;
     const blauwGeboortedatum =
-      fb?.geboortedatum ?? mb?.fp_geboortedatum ?? mb?.geboortedatum ?? null;
+      fb?.geboortedatum ?? mb?.fp_geboortedatum ?? partij?.blauw_geboortedatum ?? mb?.geboortedatum_input ?? mb?.geboortedatum ?? null;
 
     const rood_leeftijd_event =
       roodGeboortedatum && evenement_datum
@@ -1004,7 +1004,7 @@ if (scopedPartijNr != null) {
         normGender(mr?.fp_geslacht) ??
         normGender(mr?.geslacht) ??
         normGender(partij?.rood_geslacht),
-      rood_geboortedatum_mm: toIsoDateOnly(mr?.geboortedatum_input),
+      rood_geboortedatum_mm: toIsoDateOnly(partij?.rood_geboortedatum ?? mr?.geboortedatum_input),
       rood_leeftijd_event,
 
       // fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
@@ -1020,7 +1020,7 @@ if (scopedPartijNr != null) {
         normGender(mb?.fp_geslacht) ??
         normGender(mb?.geslacht) ??
         normGender(partij?.blauw_geslacht),
-      blauw_geboortedatum_mm: toIsoDateOnly(mb?.geboortedatum_input),
+      blauw_geboortedatum_mm: toIsoDateOnly(partij?.blauw_geboortedatum ?? mb?.geboortedatum_input),
       blauw_leeftijd_event,
 
       rood_mma_current_klasse,
