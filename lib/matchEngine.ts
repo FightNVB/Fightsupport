@@ -1682,19 +1682,19 @@ async function runTournamentRules(opts: {
         for (const hoek of ["rood", "blauw"] as const) {
           const gewicht = parseWeightKg(ctx?.[`${hoek}_gewicht_mm`] ?? ctx?.[`${hoek}_gewicht_fp`] ?? ctx?.[`${hoek}_gewicht`]);
           if (gewicht != null && gewicht > maxGewicht) {
-            pushHitTournamentAware({
+            pushTournamentUniquePairHit(ctx, {
               partij_nr, bout_id, hoek,
               rule: "Boksen - maximumgewicht overschreden",
               rule_code: "BOKSEN_MAX_GEWICHT",
               resultaat: "DISPENSATIE",
               severity: "warning",
               boodschap: `${hoek === "rood" ? "Rood" : "Blauw"}: ${gewicht.toFixed(1)} kg overschrijdt het opgegeven maximum van ${maxGewicht.toFixed(1)} kg. Alleen NVB-dispensatiebeheer kan een uitzondering toekennen.`,
-            }, ctx);
+            });
           }
         }
       }
       if (leeftijdsklassenVerschillen) {
-        pushHitTournamentAware({
+        pushTournamentUniquePairHit(ctx, {
           partij_nr, bout_id,
           rule: "Boksen - verschillende leeftijdsklassen",
           rule_code: "BOKSEN_LEEFTIJDSKLASSE",
@@ -1703,7 +1703,7 @@ async function runTournamentRules(opts: {
           boodschap: teGrootVerschil
             ? `Rood ${catR}, blauw ${catB}: leeftijdsverschil ${verschilMaanden!.toFixed(1)} maanden, boven de 24 maanden van NBB addendum 1. VERBOD.`
             : `Rood ${catR}, blauw ${catB}: prestatiepartij tussen leeftijdsklassen vereist een expliciete NVB-beoordeling.`,
-        }, ctx);
+        });
       }
       // Boksvaardigheidsklasse volgens NBB art. 25: gewonnen partijen,
       // inclusief fullcontact kickboksen en MMA; geen KB-promotielogica.
@@ -1731,31 +1731,31 @@ async function runTournamentRules(opts: {
       const boksR = boksStats("rood");
       const boksB = boksStats("blauw");
       if (!boksR.hasEvidence || !boksB.hasEvidence) {
-        pushHitTournamentAware({
+        pushTournamentUniquePairHit(ctx, {
           partij_nr, bout_id,
           rule: "Boksen - ervaring ontbreekt",
           rule_code: "BOKSEN_ERVARING_ONBEKEND",
           resultaat: "ACTIE", severity: "warning",
           boodschap: "Niet voor beide boksers zijn betrouwbare uitslagen of winsttotalen beschikbaar. Ervaring handmatig controleren.",
-        }, ctx);
+        });
       } else if (boksR.klasse !== boksB.klasse) {
-        pushHitTournamentAware({
+        pushTournamentUniquePairHit(ctx, {
           partij_nr, bout_id,
           rule: "Boksen - verschillende vaardigheidsklassen",
           rule_code: "BOKSEN_VAARDIGHEIDSKLASSE",
           resultaat: "DISPENSATIE", severity: "warning",
           boodschap: `Rood: ${boksR.wins} overwinningen (indicatie ${boksR.klasse}); blauw: ${boksB.wins} overwinningen (indicatie ${boksB.klasse}). Controleer officiële indeling en eventuele NVB-uitzondering; automatische telling is niet leidend bij toegekende herindeling.`,
-        }, ctx);
+        });
       }
       if (teJong || leeftijdOntbreekt) {
-        pushHitTournamentAware({
+        pushTournamentUniquePairHit(ctx, {
           partij_nr, bout_id,
           rule: "Boksen - leeftijdsgegevens",
           rule_code: "BOKSEN_LEEFTIJD_BASIS",
           resultaat: teJong ? "VERBOD" : "ACTIE",
           severity: teJong ? "error" : "warning",
           boodschap: reden,
-        }, ctx);
+        });
       }
     }
 
