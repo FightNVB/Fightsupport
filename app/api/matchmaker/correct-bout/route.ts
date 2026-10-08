@@ -149,7 +149,7 @@ async function updateBoutRaw(
         const { data: saved, error: readError } = await supabase.from("matchmaking_bouts_raw").select("rood_geboortedatum,blauw_geboortedatum").eq("id", bout.id).single();
         if (readError) throw readError;
         for (const side of ["rood", "blauw"] as const) {
-          const key = `${side}_geboortedatum`;
+          const key: "rood_geboortedatum" | "blauw_geboortedatum" = `${side}_geboortedatum`;
           if (key in patch && saved?.[key] !== patch[key]) throw new Error(`Opslaan van ${key} is niet bevestigd.`);
         }
       }
