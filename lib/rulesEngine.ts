@@ -2470,6 +2470,30 @@ export async function rulesEngine(opts: {
           }
         }
       }
+      // Leeftijdsgrens voor boksen: volwassen tegenover minderjarig is verboden.
+      if (!leeftijdOntbreekt && ((roodLeeftijd! < 18) !== (blauwLeeftijd! < 18))) {
+        pushHitTournamentAware({
+          partij_nr, bout_id,
+          rule: "Boksen - jeugd tegen volwassene",
+          rule_code: "BOKSEN_JEUGD_VOLWASSENE",
+          resultaat: "VERBOD",
+          severity: "error",
+          boodschap: `Rood ${roodLeeftijd} jaar, blauw ${blauwLeeftijd} jaar: jeugd tegen volwassene is verboden.`,
+        }, ctx);
+      }
+      // Leeftijdsverschil op basis van volledige geboortedatums, niet afgeronde jaren.
+      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
+      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
+      if (isJeugdBoksen && dobR && dobB && Math.abs(dobR.diff(dobB, "month", true)) > 24) {
+        pushHitTournamentAware({
+          partij_nr, bout_id,
+          rule: "Boksen - leeftijdsverschil jeugd",
+          rule_code: "BOKSEN_LEEFTIJD_VERSCHIL",
+          resultaat: "DISPENSATIE",
+          severity: "warning",
+          boodschap: "Leeftijdsverschil groter dan 24 maanden. Uitsluitend NVB-dispensatiebeheer kan een uitzondering beoordelen.",
+        }, ctx);
+      }
       pushHitTournamentAware({
         partij_nr, bout_id,
         rule: "Boksen - reglementaire beoordeling",
