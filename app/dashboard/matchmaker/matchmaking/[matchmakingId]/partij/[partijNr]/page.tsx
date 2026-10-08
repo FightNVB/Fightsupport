@@ -1547,6 +1547,7 @@ export default function PartijDetailPage() {
   const [editGym, setEditGym] = useState("");
   const [editBoutDiscipline, setEditBoutDiscipline] = useState("");
   const [editBoutKlasse, setEditBoutKlasse] = useState("");
+  const [editIsBoksen, setEditIsBoksen] = useState(false);
   const [editGewicht, setEditGewicht] = useState("");
   const [editGeslacht, setEditGeslacht] = useState("");
   const [editMaxGewicht, setEditMaxGewicht] = useState("");
@@ -1559,6 +1560,7 @@ export default function PartijDetailPage() {
     gewicht: string;
     geslacht: string;
     max_gewicht: string;
+    geboortedatum: string;
   }>({
     va: "",
     naam: "",
@@ -1568,6 +1570,7 @@ export default function PartijDetailPage() {
     gewicht: "",
     geslacht: "",
     max_gewicht: "",
+    geboortedatum: "",
   });
   const [editMountKey, setEditMountKey] = useState(0);
   const [editSaving, setEditSaving] = useState(false);
@@ -1626,6 +1629,7 @@ export default function PartijDetailPage() {
     ).trim();
     setEditBoutDiscipline(d);
     setEditBoutKlasse(k);
+    setEditIsBoksen(d.toLowerCase() === "boksen" || k.toLowerCase() === "boksen");
     setEditGeslacht(g);
     setEditMaxGewicht(maxG);
 
@@ -1638,6 +1642,7 @@ export default function PartijDetailPage() {
       gewicht,
       geslacht: g,
       max_gewicht: maxG,
+      geboortedatum: String(ctx?.[`${side}_geboortedatum_mm`] ?? "").slice(0,10),
     };
     setEditMountKey((x) => x + 1);
     setEditOpen(side);
@@ -1646,6 +1651,7 @@ export default function PartijDetailPage() {
   function closeEdit() {
     setEditBoutDiscipline("");
     setEditBoutKlasse("");
+    setEditIsBoksen(false);
     setEditGewicht("");
     setEditGeslacht("");
     setEditMaxGewicht("");
@@ -1658,6 +1664,7 @@ export default function PartijDetailPage() {
       gewicht: "",
       geslacht: "",
       max_gewicht: "",
+      geboortedatum: "",
     };
     setEditOpen(null);
   }
@@ -2963,6 +2970,8 @@ export default function PartijDetailPage() {
       payload.new_geslacht = geslacht;
       payload.new_max_gewicht = maxGewicht;
 
+      if (editIsBoksen) payload[`new_${editOpen}_geboortedatum_mm`] = editDraftRef.current.geboortedatum;
+
       if (editOpen === "rood") {
         payload.new_va_rood = va;
         payload.new_rood_naam = naam;
@@ -3784,6 +3793,11 @@ export default function PartijDetailPage() {
                   />
                 </div>
 
+                {editIsBoksen ? (
+                  <label className="block text-xs text-zinc-700">Geboortedatum ({editOpen === "rood" ? "rood" : "blauw"})
+                    <input type="date" defaultValue={editDraftRef.current.geboortedatum} onChange={(e) => { editDraftRef.current.geboortedatum = e.target.value; }} className="mt-1 block w-full px-3 py-2 border border-zinc-400 rounded text-zinc-900" />
+                  </label>
+                ) : null}
                 <div className="pt-2 flex flex-wrap items-center gap-2 justify-end">
                   <button
                     type="button"
