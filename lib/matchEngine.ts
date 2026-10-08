@@ -1723,7 +1723,7 @@ async function runTournamentRules(opts: {
         const scrapeWins = ctx?.[`${hoek}_gewonnen_scrape`];
         const scraped = scrapeWins == null || String(scrapeWins).trim() === "" ? null : Number(scrapeWins);
         // Een hoger totaal uit de centrale nulmeting kan oudere partijen bevatten.
-        const knownWins = Number.isFinite(scraped) ? Math.max(wins, scraped) : wins;
+        const knownWins = scraped !== null && Number.isFinite(scraped) ? Math.max(wins, scraped) : wins;
         const hasEvidence = rows.length > 0 || Number.isFinite(scraped);
         const klasse = knownWins >= 12 ? "A" : knownWins >= 6 ? "B" : knownWins >= 3 ? "C" : "N";
         return { wins: knownWins, total, klasse, hasEvidence };
