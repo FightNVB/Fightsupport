@@ -114,7 +114,7 @@ async function updateBoutRaw(
     if (discipline !== "boksen") throw new Error("Geboortedatum handmatig wijzigen mag alleen bij boksen.");
     const inputDate = s(body[key]);
     const date = /^\d{8}$/.test(inputDate) ? `${inputDate.slice(4, 8)}-${inputDate.slice(2, 4)}-${inputDate.slice(0, 2)}` : /^\d{2}[-/]\d{2}[-/]\d{4}$/.test(inputDate) ? `${inputDate.slice(6, 10)}-${inputDate.slice(3, 5)}-${inputDate.slice(0, 2)}` : inputDate;
-    if (date && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || date > new Date().toISOString().slice(0, 10))) throw new Error("Ongeldige geboortedatum.");
+    if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || date > new Date().toISOString().slice(0, 10))) throw new Error("Ongeldige geboortedatum.");
     setBoutField(patch, bout, [`${side}_geboortedatum`], date || null);
   }
 
@@ -274,9 +274,9 @@ export async function POST(req: Request) {
       const inputKey = `new_${side}_geboortedatum_mm`;
       if (!hasOwn(body, inputKey)) continue;
       const rawValue = s(body[inputKey]);
-      const normalized = /^\\d{8}$/.test(rawValue)
+      const normalized = /^\d{8}$/.test(rawValue)
         ? `${rawValue.slice(4, 8)}-${rawValue.slice(2, 4)}-${rawValue.slice(0, 2)}`
-        : /^\\d{2}[-/]\\d{2}[-/]\\d{4}$/.test(rawValue)
+        : /^\d{2}[-/]\d{2}[-/]\d{4}$/.test(rawValue)
           ? `${rawValue.slice(6, 10)}-${rawValue.slice(3, 5)}-${rawValue.slice(0, 2)}`
           : rawValue;
       dobContextPatch[`${side}_geboortedatum_mm`] = normalized || null;
@@ -298,9 +298,9 @@ export async function POST(req: Request) {
       const inputKey = `new_${side}_geboortedatum_mm`;
       if (!hasOwn(body, inputKey)) continue;
       const rawValue = s(body[inputKey]);
-      const expected = /^\\d{8}$/.test(rawValue)
+      const expected = /^\d{8}$/.test(rawValue)
         ? `${rawValue.slice(4, 8)}-${rawValue.slice(2, 4)}-${rawValue.slice(0, 2)}`
-        : /^\\d{2}[-/]\\d{2}[-/]\\d{4}$/.test(rawValue)
+        : /^\d{2}[-/]\d{2}[-/]\d{4}$/.test(rawValue)
           ? `${rawValue.slice(6, 10)}-${rawValue.slice(3, 5)}-${rawValue.slice(0, 2)}`
           : rawValue;
       const contextKey = `${side}_geboortedatum_mm`;
