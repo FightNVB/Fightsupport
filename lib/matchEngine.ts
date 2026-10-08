@@ -1647,16 +1647,35 @@ async function runTournamentRules(opts: {
     if (isExactBoksenText(ctx?.discipline) && hasRood && hasBlauw) {
       const roodLeeftijd = ageOnEventFromCtx(ctx, "rood");
       const blauwLeeftijd = ageOnEventFromCtx(ctx, "blauw");
-      const leeftijdOntbreekt = roodLeeftijd == null || blauwLeeftijd == null;
-      const isJeugdBoksen = !leeftijdOntbreekt && (roodLeeftijd! < 18 || blauwLeeftijd! < 18);
-      const teJong = !leeftijdOntbreekt && (roodLeeftijd! < 12 || blauwLeeftijd! < 12);
+      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
+      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
+      const eventDate = parseEventDateFromCtx(ctx);
+      const leeftijdOntbreekt = !dobR || !dobB || !eventDate;
+      // NBB artikel 24.2: het geboortejaar bepaalt de leeftijdscategorie.
+      const jaarR = !leeftijdOntbreekt ? eventDate!.year() - dobR!.year() : null;
+      const jaarB = !leeftijdOntbreekt ? eventDate!.year() - dobB!.year() : null;
+      const boksCategorie = (jaar: number | null): string | null => {
+        if (jaar == null) return null;
+        if (jaar < 12) return "onder minimumleeftijd";
+        if (jaar <= 12) return "Cadetten";
+        if (jaar <= 14) return "Scholieren";
+        if (jaar <= 16) return "Junioren";
+        if (jaar <= 18) return "Jeugd";
+        if (jaar <= 39) return "Elite";
+        return "Veteranen";
+      };
+      const catR = boksCategorie(jaarR);
+      const catB = boksCategorie(jaarB);
+      const isJeugdBoksen = jaarR != null && jaarB != null && (jaarR < 19 || jaarB < 19);
+      const teJong = jaarR != null && jaarB != null && (roodLeeftijd! < 12 || blauwLeeftijd! < 12);
+      const verschilMaanden = dobR && dobB ? Math.abs(dobR.diff(dobB, "month", true)) : null;
+      const leeftijdsklassenVerschillen = catR != null && catB != null && catR !== catB;
+      const teGrootVerschil = leeftijdsklassenVerschillen && verschilMaanden != null && verschilMaanden > 24;
       const reden = leeftijdOntbreekt
         ? "Geboortedatum of wedstrijddatum ontbreekt: boksleeftijd kan niet worden vastgesteld."
         : teJong
-          ? "Minimaal een bokser is jonger dan 12 jaar op de wedstrijddatum; handmatige beoordeling vereist."
-          : isJeugdBoksen
-            ? "Jeugdbokspartij: leeftijdsklasse, gewichtsklasse en ervaring vereisen NVB-controle."
-            : "Bokspartij: gewichtsklasse en ervaring vereisen NVB-controle.";
+          ? "Minimaal een bokser is jonger dan 12 jaar op de wedstrijddatum."
+          : `Boksen: rood ${jaarR} jaar (${catR}), blauw ${jaarB} jaar (${catB}); controleer vaardigheidsklasse en ervaring.`;
       // De door de matchmaker opgegeven bovengrens is ook bij boksen bindend.
       const maxGewicht = parseWeightKg(ctx?.max_gewicht);
       if (maxGewicht != null && maxGewicht > 0) {
@@ -1674,29 +1693,16 @@ async function runTournamentRules(opts: {
           }
         }
       }
-      // Afwijkende leeftijdsklassen vereisen reglementaire NVB-beoordeling.
-      // Boksen kent prestatiepartijen; jeugd/volwassen is daarom niet
-      // zonder toetsing van de specifieke boksbepalingen een absoluut verbod.
-      if (!leeftijdOntbreekt && ((roodLeeftijd! < 18) !== (blauwLeeftijd! < 18))) {
+      if (leeftijdsklassenVerschillen) {
         pushHitTournamentAware({
           partij_nr, bout_id,
           rule: "Boksen - verschillende leeftijdsklassen",
-          rule_code: "BOKSEN_LEEFTIJDSKLASSE_REVIEW",
-          resultaat: "ACTIE",
-          severity: "warning",
-          boodschap: `Rood ${roodLeeftijd} jaar, blauw ${blauwLeeftijd} jaar: verschillende leeftijdsklassen. NVB-beoordeling vereist; niet automatisch goedgekeurd.`,
-        }, ctx);
-      }
-      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
-      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
-      if (isJeugdBoksen && dobR && dobB && Math.abs(dobR.diff(dobB, "month", true)) > 24) {
-        pushHitTournamentAware({
-          partij_nr, bout_id,
-          rule: "Boksen - leeftijdsverschil prestatiepartij",
-          rule_code: "BOKSEN_LEEFTIJD_VERSCHIL",
-          resultaat: "ACTIE",
-          severity: "warning",
-          boodschap: "Leeftijdsverschil groter dan 24 maanden: toets de leeftijdsklassen en eventuele NVB-uitzonderingsbeslissing.",
+          rule_code: "BOKSEN_LEEFTIJDSKLASSE",
+          resultaat: teGrootVerschil ? "VERBOD" : "DISPENSATIE",
+          severity: teGrootVerschil ? "error" : "warning",
+          boodschap: teGrootVerschil
+            ? `Rood ${catR}, blauw ${catB}: leeftijdsverschil ${verschilMaanden!.toFixed(1)} maanden, boven de 24 maanden van NBB addendum 1. VERBOD.`
+            : `Rood ${catR}, blauw ${catB}: prestatiepartij tussen leeftijdsklassen vereist een expliciete NVB-beoordeling.`,
         }, ctx);
       }
       pushHitTournamentAware({
