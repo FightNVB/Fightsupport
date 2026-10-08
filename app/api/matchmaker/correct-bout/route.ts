@@ -267,6 +267,21 @@ export async function POST(req: Request) {
     const boutId = uuid(ctx?.bout_id) ?? uuid(bout.bout_uid) ?? uuid(bout.bout_id);
     await enrichControleBoutContext(matchmakingId, runId, { partij_nr: partijNr, bout_id: boutId });
     ctx = await context(matchmakingId, runId, partijNr);
+    for (const side of ["rood", "blauw"] as const) {
+      const inputKey = `new_${side}_geboortedatum_mm`;
+      if (!hasOwn(body, inputKey)) continue;
+      const rawValue = s(body[inputKey]);
+      const expected = /^\\d{8}$/.test(rawValue)
+        ? `${rawValue.slice(4, 8)}-${rawValue.slice(2, 4)}-${rawValue.slice(0, 2)}`
+        : /^\\d{2}[-/]\\d{2}[-/]\\d{4}$/.test(rawValue)
+          ? `${rawValue.slice(6, 10)}-${rawValue.slice(3, 5)}-${rawValue.slice(0, 2)}`
+          : rawValue;
+      const contextKey = `${side}_geboortedatum_mm`;
+      const actual = String(ctx?.[contextKey] ?? "").slice(0, 10);
+      if (actual !== expected) {
+        throw new Error(`Geboortedatum ${side} is niet overgenomen in controle_bout_context (verwacht ${expected || "leeg"}, gevonden ${actual || "leeg"}).`);
+      }
+    }
     await rulesEngine({ matchmaking_id: matchmakingId, controle_run_id: runId, ctxRows: ctx ? [ctx] : [], scoped_partij_nr: partijNr, scoped_bout_id: uuid(ctx?.bout_id) ?? boutId });
 
     return NextResponse.json({
