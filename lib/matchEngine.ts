@@ -1747,14 +1747,16 @@ async function runTournamentRules(opts: {
           boodschap: `Rood: ${boksR.wins} overwinningen (indicatie ${boksR.klasse}); blauw: ${boksB.wins} overwinningen (indicatie ${boksB.klasse}). Controleer officiële indeling en eventuele NVB-uitzondering; automatische telling is niet leidend bij toegekende herindeling.`,
         }, ctx);
       }
-      pushHitTournamentAware({
-        partij_nr, bout_id,
-        rule: "Boksen - reglementaire beoordeling",
-        rule_code: "BOKSEN_NVB_CONTROLE",
-        resultaat: teJong ? "VERBOD" : "ACTIE",
-        severity: teJong ? "error" : "warning",
-        boodschap: reden + " Alleen NVB-dispensatiebeheer mag uitzonderingen goedkeuren.",
-      }, ctx);
+      if (teJong || leeftijdOntbreekt) {
+        pushHitTournamentAware({
+          partij_nr, bout_id,
+          rule: "Boksen - leeftijdsgegevens",
+          rule_code: "BOKSEN_LEEFTIJD_BASIS",
+          resultaat: teJong ? "VERBOD" : "ACTIE",
+          severity: teJong ? "error" : "warning",
+          boodschap: reden,
+        }, ctx);
+      }
     }
 
 
@@ -1971,7 +1973,7 @@ async function runTournamentRules(opts: {
 
     const ageR = ageOnEventFromCtx(ctx, "rood");
     const ageB = ageOnEventFromCtx(ctx, "blauw");
-    if (hasRood && hasBlauw && typeof ageR === "number" && typeof ageB === "number") {
+    if (hasRood && hasBlauw && !isExactBoksenText(ctx?.discipline) && typeof ageR === "number" && typeof ageB === "number") {
       const mix = (ageR < 18 && ageB >= 18) || (ageB < 18 && ageR >= 18);
       if (mix) {
         pushTournamentUniquePairHit(
@@ -1992,7 +1994,7 @@ async function runTournamentRules(opts: {
     }
 
     const jeugd = isJeugdFromCtx(ctx);
-    if (hasRood && hasBlauw && jeugd) {
+    if (hasRood && hasBlauw && jeugd && !isExactBoksenText(ctx?.discipline)) {
       const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
       const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
       const lv = leeftijdsVerschilJeugd(dobR, dobB);
@@ -3277,7 +3279,7 @@ export async function matchEngine(opts: {
       }
     }
 
-    if (hasRood && hasBlauw && jeugd) {
+    if (hasRood && hasBlauw && jeugd && !isExactBoksenText(ctx?.discipline)) {
       if (mmaJeugd) {
         const ageR = ageOnEventFromCtx(ctx, "rood");
         const ageB = ageOnEventFromCtx(ctx, "blauw");
@@ -3327,7 +3329,7 @@ export async function matchEngine(opts: {
       }
     }
 
-    if (hasRood && hasBlauw && jeugd) {
+    if (hasRood && hasBlauw && jeugd && !isExactBoksenText(ctx?.discipline)) {
       const countDemo = (rows2: any[]) =>
         (rows2 ?? []).reduce((acc, r) => {
           const s = String((r as any)?.uitslag ?? "").toLowerCase();
