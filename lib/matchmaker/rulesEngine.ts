@@ -193,6 +193,7 @@ function isMmaBout(ctx: any): boolean {
   const km = String(ctx?.klasse_mm ?? "").toUpperCase();
   const mmaToken = km === "P" || km === "PRO" || km === "AMA" || km === "AMATEUR";
 
+  if (isExactBoksenText(ctx?.discipline)) return false;
   return d.includes("MMA") || sd.includes("MMA") || km.includes("MMA") || mmaToken;
 }
 
@@ -208,10 +209,10 @@ function isExactBoksenText(v: any): boolean {
 }
 
 function isPureBoksenZonderLicentieKeurmerk(ctx: any): boolean {
-  // Bewust extreem strikt: alleen exact discipline=Boksen én klasse=Boksen.
-  // Alleen dán zijn Fightpaspoort/VA-nummer, licentie en keurmerk niet van toepassing.
+  // Alleen exact discipline=Boksen; klasse (ook Amateur) is niet bepalend.
+  // Voor deze discipline geldt de bestaande uitzondering voor NVB-licentie/keurmerk.
   // Kickboksen, thaiboksen, jeugd boksen, dames boksen, K1-boksen, enz. vallen hier NIET onder.
-  return isExactBoksenText(ctx?.discipline) && isExactBoksenText(ctx?.klasse_mm ?? ctx?.klasse);
+  return isExactBoksenText(ctx?.discipline);
 }
 
 function isKickboksMuayThai(ctx: any): boolean {
