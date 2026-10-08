@@ -672,12 +672,12 @@ export async function POST(req: Request) {
       if (!hasOwn(body, inputKey)) continue;
       if (effectiveDiscipline !== "BOKSEN") throw new Error("Handmatige geboortedatum is alleen toegestaan bij BOKSEN.");
       const input = String(body[inputKey] ?? "").trim();
-      const normalized = /^\\d{8}$/.test(input)
+      const normalized = /^\d{8}$/.test(input)
         ? `${input.slice(4, 8)}-${input.slice(2, 4)}-${input.slice(0, 2)}`
-        : /^\\d{2}[-/]\\d{2}[-/]\\d{4}$/.test(input)
+        : /^\d{2}[-/]\d{2}[-/]\d{4}$/.test(input)
           ? `${input.slice(6, 10)}-${input.slice(3, 5)}-${input.slice(0, 2)}`
           : input;
-      if (normalized && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(normalized) ||
+      if (normalized && (!/^\d{4}-\d{2}-\d{2}$/.test(normalized) ||
           Number.isNaN(Date.parse(normalized)) || normalized > new Date().toISOString().slice(0, 10))) {
         throw new Error("Ongeldige geboortedatum.");
       }
