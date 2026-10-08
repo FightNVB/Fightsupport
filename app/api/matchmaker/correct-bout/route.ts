@@ -107,6 +107,17 @@ async function updateBoutRaw(
   setBoutField(patch, bout, ["blauw_gym", "blauw_gym_mm", "blauw_sportschool"], hasOwn(body, "new_blauw_gym") ? body.new_blauw_gym : undefined);
   setBoutField(patch, bout, ["blauw_gewicht", "blauw_gewicht_mm"], hasOwn(body, "new_blauw_gewicht") ? body.new_blauw_gewicht : undefined);
 
+  for (const side of ["rood", "blauw"] as const) {
+    const key = `new_${side}_geboortedatum_mm`;
+    if (!hasOwn(body, key)) continue;
+    const discipline = s(body.new_discipline ?? bout.discipline).toLowerCase();
+    const klasse = s(body.new_klasse_mm ?? bout.klasse_mm ?? bout.klasse).toLowerCase();
+    if (discipline !== "boksen" && klasse !== "boksen") throw new Error("Geboortedatum handmatig wijzigen mag alleen bij boksen.");
+    const date = s(body[key]);
+    if (date && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || date > new Date().toISOString().slice(0, 10))) throw new Error("Ongeldige geboortedatum.");
+    setBoutField(patch, bout, [`${side}_geboortedatum_mm`], date || null);
+  }
+
   setBoutField(patch, bout, ["discipline"], hasOwn(body, "new_discipline") ? body.new_discipline : undefined);
   setBoutField(patch, bout, ["klasse_mm", "klasse"], hasOwn(body, "new_klasse_mm") ? body.new_klasse_mm : hasOwn(body, "new_klasse") ? body.new_klasse : undefined);
   setBoutField(patch, bout, ["geslacht"], hasOwn(body, "new_geslacht") ? body.new_geslacht : undefined);
