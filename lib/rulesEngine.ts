@@ -2429,6 +2429,16 @@ export async function rulesEngine(opts: {
     vaList,
   });
 
+  // Gewicht parser voor reguliere partijen; de toernooiparser heeft een eigen scope.
+  function parseNormalWeightKg(v: any): number | null {
+    if (v == null) return null;
+    const raw = String(v).trim().replace(",", ".");
+    const m = raw.match(/-?\d+(?:\.\d+)?/);
+    if (!m) return null;
+    const n = Number(m[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+
   for (const ctx of normalRows) {
     const partij_nr = asInt(ctx?.partij_nr);
     const bout_id = unwrapUuid(ctx?.bout_id);
@@ -2473,10 +2483,10 @@ export async function rulesEngine(opts: {
           ? "Minimaal een bokser is jonger dan 12 jaar op de wedstrijddatum."
           : `Boksen: rood ${jaarR} jaar (${catR}), blauw ${jaarB} jaar (${catB}); controleer vaardigheidsklasse en ervaring.`;
       // De door de matchmaker opgegeven bovengrens is ook bij boksen bindend.
-      const maxGewicht = parseWeightKg(ctx?.max_gewicht);
+      const maxGewicht = parseNormalWeightKg(ctx?.max_gewicht);
       if (maxGewicht != null && maxGewicht > 0) {
         for (const hoek of ["rood", "blauw"] as const) {
-          const gewicht = parseWeightKg(ctx?.[`${hoek}_gewicht_mm`] ?? ctx?.[`${hoek}_gewicht_fp`] ?? ctx?.[`${hoek}_gewicht`]);
+          const gewicht = parseNormalWeightKg(ctx?.[`${hoek}_gewicht_mm`] ?? ctx?.[`${hoek}_gewicht_fp`] ?? ctx?.[`${hoek}_gewicht`]);
           if (gewicht != null && gewicht > maxGewicht) {
             pushHitTournamentAware({
               partij_nr, bout_id, hoek,
