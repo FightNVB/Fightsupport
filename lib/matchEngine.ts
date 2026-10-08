@@ -1683,7 +1683,7 @@ async function runTournamentRules(opts: {
           const gewicht = parseWeightKg(ctx?.[`${hoek}_gewicht_mm`] ?? ctx?.[`${hoek}_gewicht_fp`] ?? ctx?.[`${hoek}_gewicht`]);
           if (gewicht != null && gewicht > maxGewicht) {
             pushTournamentUniquePairHit(ctx, {
-              partij_nr, bout_id, hoek,
+              partij_nr: null, bout_id, hoek,
               rule: "Boksen - maximumgewicht overschreden",
               rule_code: "BOKSEN_MAX_GEWICHT",
               resultaat: "DISPENSATIE",
@@ -1695,7 +1695,7 @@ async function runTournamentRules(opts: {
       }
       if (leeftijdsklassenVerschillen) {
         pushTournamentUniquePairHit(ctx, {
-          partij_nr, bout_id,
+          partij_nr: null, bout_id,
           rule: "Boksen - verschillende leeftijdsklassen",
           rule_code: "BOKSEN_LEEFTIJDSKLASSE",
           resultaat: teGrootVerschil ? "VERBOD" : "DISPENSATIE",
@@ -1732,7 +1732,7 @@ async function runTournamentRules(opts: {
       const boksB = boksStats("blauw");
       if (!boksR.hasEvidence || !boksB.hasEvidence) {
         pushTournamentUniquePairHit(ctx, {
-          partij_nr, bout_id,
+          partij_nr: null, bout_id,
           rule: "Boksen - ervaring ontbreekt",
           rule_code: "BOKSEN_ERVARING_ONBEKEND",
           resultaat: "ACTIE", severity: "warning",
@@ -1740,7 +1740,7 @@ async function runTournamentRules(opts: {
         });
       } else if (boksR.klasse !== boksB.klasse) {
         pushTournamentUniquePairHit(ctx, {
-          partij_nr, bout_id,
+          partij_nr: null, bout_id,
           rule: "Boksen - verschillende vaardigheidsklassen",
           rule_code: "BOKSEN_VAARDIGHEIDSKLASSE",
           resultaat: "DISPENSATIE", severity: "warning",
@@ -1749,7 +1749,7 @@ async function runTournamentRules(opts: {
       }
       if (teJong || leeftijdOntbreekt) {
         pushTournamentUniquePairHit(ctx, {
-          partij_nr, bout_id,
+          partij_nr: null, bout_id,
           rule: "Boksen - leeftijdsgegevens",
           rule_code: "BOKSEN_LEEFTIJD_BASIS",
           resultaat: teJong ? "VERBOD" : "ACTIE",
