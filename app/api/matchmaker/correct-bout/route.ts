@@ -112,7 +112,8 @@ async function updateBoutRaw(
     if (!hasOwn(body, key)) continue;
     const discipline = s(body.new_discipline ?? bout.discipline).toLowerCase();
     if (discipline !== "boksen") throw new Error("Geboortedatum handmatig wijzigen mag alleen bij boksen.");
-    const date = s(body[key]);
+    const inputDate = s(body[key]);
+    const date = /^\d{8}$/.test(inputDate) ? `${inputDate.slice(4, 8)}-${inputDate.slice(2, 4)}-${inputDate.slice(0, 2)}` : /^\d{2}[-/]\d{2}[-/]\d{4}$/.test(inputDate) ? `${inputDate.slice(6, 10)}-${inputDate.slice(3, 5)}-${inputDate.slice(0, 2)}` : inputDate;
     if (date && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || date > new Date().toISOString().slice(0, 10))) throw new Error("Ongeldige geboortedatum.");
     setBoutField(patch, bout, [`${side}_geboortedatum`], date || null);
   }
@@ -143,13 +144,24 @@ async function updateBoutRaw(
       .update(currentPatch)
       .eq("id", bout.id);
 
-    if (!error) return;
+    if (!error) {
+      if ("rood_geboortedatum" in patch || "blauw_geboortedatum" in patch) {
+        const { data: saved, error: readError } = await supabase.from("matchmaking_bouts_raw").select("rood_geboortedatum,blauw_geboortedatum").eq("id", bout.id).single();
+        if (readError) throw readError;
+        for (const side of ["rood", "blauw"] as const) {
+          const key = `${side}_geboortedatum`;
+          if (key in patch && saved?.[key] !== patch[key]) throw new Error(`Opslaan van ${key} is niet bevestigd.`);
+        }
+      }
+      return;
+    }
 
     if (isMissingColumn(error)) {
       const message = String(error?.message ?? "");
       const match = message.match(/column ['"]?([^'"]+)['"]?/i);
       const missing = match?.[1];
       if (missing && Object.prototype.hasOwnProperty.call(currentPatch, missing)) {
+        if (missing === "rood_geboortedatum" || missing === "blauw_geboortedatum") throw new Error(`Geboortedatum kan niet worden opgeslagen: kolom ${missing} ontbreekt.`);
         delete currentPatch[missing];
         continue;
       }
