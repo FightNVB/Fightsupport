@@ -2470,28 +2470,29 @@ export async function rulesEngine(opts: {
           }
         }
       }
-      // Leeftijdsgrens voor boksen: volwassen tegenover minderjarig is verboden.
+      // Afwijkende leeftijdsklassen vereisen reglementaire NVB-beoordeling.
+      // Boksen kent prestatiepartijen; jeugd/volwassen is daarom niet
+      // zonder toetsing van de specifieke boksbepalingen een absoluut verbod.
       if (!leeftijdOntbreekt && ((roodLeeftijd! < 18) !== (blauwLeeftijd! < 18))) {
         pushHitTournamentAware({
           partij_nr, bout_id,
-          rule: "Boksen - jeugd tegen volwassene",
-          rule_code: "BOKSEN_JEUGD_VOLWASSENE",
-          resultaat: "VERBOD",
-          severity: "error",
-          boodschap: `Rood ${roodLeeftijd} jaar, blauw ${blauwLeeftijd} jaar: jeugd tegen volwassene is verboden.`,
+          rule: "Boksen - verschillende leeftijdsklassen",
+          rule_code: "BOKSEN_LEEFTIJDSKLASSE_REVIEW",
+          resultaat: "ACTIE",
+          severity: "warning",
+          boodschap: `Rood ${roodLeeftijd} jaar, blauw ${blauwLeeftijd} jaar: verschillende leeftijdsklassen. NVB-beoordeling vereist; niet automatisch goedgekeurd.`,
         }, ctx);
       }
-      // Leeftijdsverschil op basis van volledige geboortedatums, niet afgeronde jaren.
       const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
       const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
       if (isJeugdBoksen && dobR && dobB && Math.abs(dobR.diff(dobB, "month", true)) > 24) {
         pushHitTournamentAware({
           partij_nr, bout_id,
-          rule: "Boksen - leeftijdsverschil jeugd",
+          rule: "Boksen - leeftijdsverschil prestatiepartij",
           rule_code: "BOKSEN_LEEFTIJD_VERSCHIL",
-          resultaat: "DISPENSATIE",
+          resultaat: "ACTIE",
           severity: "warning",
-          boodschap: "Leeftijdsverschil groter dan 24 maanden. Uitsluitend NVB-dispensatiebeheer kan een uitzondering beoordelen.",
+          boodschap: "Leeftijdsverschil groter dan 24 maanden: toets de leeftijdsklassen en eventuele NVB-uitzonderingsbeslissing.",
         }, ctx);
       }
       pushHitTournamentAware({
