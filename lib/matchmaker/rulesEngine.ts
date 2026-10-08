@@ -147,8 +147,8 @@ function ageOnReferenceDate(dob: dayjs.Dayjs | null, ref: dayjs.Dayjs | null): n
 function ageOnEventFromCtx(ctx: any, hoek: "rood" | "blauw"): number | null {
   const dob =
     hoek === "rood"
-      ? parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum)
-      : parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
+      ? parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm ?? ctx?.rood_geboortedatum)
+      : parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm ?? ctx?.blauw_geboortedatum);
 
   const eventDate = parseEventDateFromCtx(ctx);
   return ageOnReferenceDate(dob, eventDate);
@@ -1464,8 +1464,8 @@ function getTournamentPairKey(ctx: any, ruleCode: string): string | null {
 function formatJeugdDifferenceMessage(ctx: any): string | null {
   const naamR = getFighterDisplayName(ctx, "rood");
   const naamB = getFighterDisplayName(ctx, "blauw");
-  const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
-  const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
+  const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm ?? ctx?.rood_geboortedatum);
+  const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm ?? ctx?.blauw_geboortedatum);
   if (!dobR || !dobB) return `${naamR} - leeftijdsverschil niet controleerbaar - ${naamB}`;
 
   let oudereNaam = naamR;
@@ -1975,8 +1975,8 @@ async function runTournamentRules(opts: {
 
     const jeugd = isJeugdFromCtx(ctx);
     if (hasRood && hasBlauw && jeugd && !isExactBoksenText(ctx?.discipline)) {
-      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
-      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
+      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm ?? ctx?.rood_geboortedatum);
+      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm ?? ctx?.blauw_geboortedatum);
       const lv = leeftijdsVerschilJeugd(dobR, dobB);
 
       if (lv.type === "DISPENSATIE" || lv.type === "VERBOD") {
@@ -2407,8 +2407,8 @@ export async function rulesEngine(opts: {
     if (isExactBoksenText(ctx?.discipline) && hasRood && hasBlauw) {
       const roodLeeftijd = ageOnEventFromCtx(ctx, "rood");
       const blauwLeeftijd = ageOnEventFromCtx(ctx, "blauw");
-      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum);
-      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum);
+      const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm ?? ctx?.rood_geboortedatum);
+      const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm ?? ctx?.blauw_geboortedatum);
       const eventDate = parseEventDateFromCtx(ctx);
       const leeftijdOntbreekt = !dobR || !dobB || !eventDate;
       // NBB artikel 24.2: het geboortejaar bepaalt de leeftijdscategorie.
@@ -3131,8 +3131,8 @@ export async function rulesEngine(opts: {
           });
         }
       } else {
-        const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp);
-        const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp);
+        const dobR = parseIsoDateOnly(ctx?.rood_geboortedatum_fp ?? ctx?.rood_geboortedatum_mm);
+        const dobB = parseIsoDateOnly(ctx?.blauw_geboortedatum_fp ?? ctx?.blauw_geboortedatum_mm);
         const lv = leeftijdsVerschilJeugd(dobR, dobB);
 
         if (lv.type === "DISPENSATIE") {
