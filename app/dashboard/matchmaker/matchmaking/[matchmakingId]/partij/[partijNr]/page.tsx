@@ -1629,7 +1629,7 @@ export default function PartijDetailPage() {
     ).trim();
     setEditBoutDiscipline(d);
     setEditBoutKlasse(k);
-    setEditIsBoksen(d.toLowerCase() === "boksen" || k.toLowerCase() === "boksen");
+    setEditIsBoksen(d.toLowerCase() === "boksen");
     setEditGeslacht(g);
     setEditMaxGewicht(maxG);
 
