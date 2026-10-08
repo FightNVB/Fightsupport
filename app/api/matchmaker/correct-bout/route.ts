@@ -267,6 +267,33 @@ export async function POST(req: Request) {
     const boutId = uuid(ctx?.bout_id) ?? uuid(bout.bout_uid) ?? uuid(bout.bout_id);
     await enrichControleBoutContext(matchmakingId, runId, { partij_nr: partijNr, bout_id: boutId });
     ctx = await context(matchmakingId, runId, partijNr);
+    // Handmatige boksen-DOB blijft in de matchmakingbron en in de actieve controlecontext.
+    // FightPassport wordt nooit overschreven.
+    const dobContextPatch: Record<string, string | null> = {};
+    for (const side of ["rood", "blauw"] as const) {
+      const inputKey = `new_${side}_geboortedatum_mm`;
+      if (!hasOwn(body, inputKey)) continue;
+      const rawValue = s(body[inputKey]);
+      const normalized = /^\\d{8}$/.test(rawValue)
+        ? `${rawValue.slice(4, 8)}-${rawValue.slice(2, 4)}-${rawValue.slice(0, 2)}`
+        : /^\\d{2}[-/]\\d{2}[-/]\\d{4}$/.test(rawValue)
+          ? `${rawValue.slice(6, 10)}-${rawValue.slice(3, 5)}-${rawValue.slice(0, 2)}`
+          : rawValue;
+      dobContextPatch[`${side}_geboortedatum_mm`] = normalized || null;
+    }
+    if (Object.keys(dobContextPatch).length) {
+      if (!ctx) throw new Error("Controlecontext ontbreekt na opnieuw opbouwen; geboortedatum kan niet worden bevestigd.");
+      const { data: updated, error: updateError } = await supabase
+        .from("controle_bout_context")
+        .update(dobContextPatch)
+        .eq("matchmaking_id", matchmakingId)
+        .eq("controle_run_id", runId)
+        .eq("partij_nr", partijNr)
+        .select("rood_geboortedatum_mm,blauw_geboortedatum_mm");
+      if (updateError) throw updateError;
+      if (!updated?.length) throw new Error("Controlecontext is niet bijgewerkt (geen rijen gewijzigd).");
+      ctx = await context(matchmakingId, runId, partijNr);
+    }
     for (const side of ["rood", "blauw"] as const) {
       const inputKey = `new_${side}_geboortedatum_mm`;
       if (!hasOwn(body, inputKey)) continue;
