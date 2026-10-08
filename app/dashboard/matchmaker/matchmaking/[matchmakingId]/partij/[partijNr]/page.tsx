@@ -3668,10 +3668,10 @@ export default function PartijDetailPage() {
         </div>
 
         {editOpen ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-2 sm:p-4">
             <div
               key={editMountKey}
-              className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border-2 border-zinc-400 bg-white p-4 shadow-xl"
+              className="my-auto max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl border-2 border-zinc-400 bg-white p-4 shadow-xl"
             >
               <div className="flex items-center justify-between">
                 <div className="font-extrabold text-zinc-900">
