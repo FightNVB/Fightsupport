@@ -111,11 +111,10 @@ async function updateBoutRaw(
     const key = `new_${side}_geboortedatum_mm`;
     if (!hasOwn(body, key)) continue;
     const discipline = s(body.new_discipline ?? bout.discipline).toLowerCase();
-    const klasse = s(body.new_klasse_mm ?? bout.klasse_mm ?? bout.klasse).toLowerCase();
-    if (discipline !== "boksen" && klasse !== "boksen") throw new Error("Geboortedatum handmatig wijzigen mag alleen bij boksen.");
+    if (discipline !== "boksen") throw new Error("Geboortedatum handmatig wijzigen mag alleen bij boksen.");
     const date = s(body[key]);
     if (date && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || date > new Date().toISOString().slice(0, 10))) throw new Error("Ongeldige geboortedatum.");
-    setBoutField(patch, bout, [`${side}_geboortedatum_mm`], date || null);
+    setBoutField(patch, bout, [`${side}_geboortedatum`], date || null);
   }
 
   setBoutField(patch, bout, ["discipline"], hasOwn(body, "new_discipline") ? body.new_discipline : undefined);
