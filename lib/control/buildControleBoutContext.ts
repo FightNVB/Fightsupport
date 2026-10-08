@@ -911,6 +911,7 @@ if (scopedPartijNr != null) {
 
       // Total/fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
       rood_naam_fp: toNullableStr(fr?.naam),
+      rood_geboortedatum_mm: toIsoDateOnly(partij?.rood_geboortedatum),
       rood_geboortedatum_fp: fr?.geboortedatum
         ? toIsoDateOnly(fr.geboortedatum)
         : null,
@@ -919,6 +920,7 @@ if (scopedPartijNr != null) {
 
       // Total/fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
       blauw_naam_fp: toNullableStr(fb?.naam),
+      blauw_geboortedatum_mm: toIsoDateOnly(partij?.blauw_geboortedatum),
       blauw_geboortedatum_fp: fb?.geboortedatum
         ? toIsoDateOnly(fb.geboortedatum)
         : null,
