@@ -1705,6 +1705,48 @@ async function runTournamentRules(opts: {
             : `Rood ${catR}, blauw ${catB}: prestatiepartij tussen leeftijdsklassen vereist een expliciete NVB-beoordeling.`,
         }, ctx);
       }
+      // Boksvaardigheidsklasse volgens NBB art. 25: gewonnen partijen,
+      // inclusief fullcontact kickboksen en MMA; geen KB-promotielogica.
+      const boksStats = (hoek: "rood" | "blauw") => {
+        const va = String(ctx?.[`${hoek}_va_mm`] ?? ctx?.[`va_${hoek}`] ?? "").trim();
+        const rows = va ? (uitslagenByVa.get(va) ?? []) : [];
+        let wins = 0;
+        let total = 0;
+        for (const r of rows) {
+          const discipline = String(r?.discipline ?? "").toLowerCase();
+          if (!/(boksen|kickboksen|kickboxing|mma)/.test(discipline)) continue;
+          const outcome = parseOutcome(r?.uitslag);
+          if (outcome === "DEMO") continue;
+          total++;
+          if (outcome === "WIN") wins++;
+        }
+        const scrapeWins = ctx?.[`${hoek}_gewonnen_scrape`];
+        const scraped = scrapeWins == null || String(scrapeWins).trim() === "" ? null : Number(scrapeWins);
+        // Een hoger totaal uit de centrale nulmeting kan oudere partijen bevatten.
+        const knownWins = Number.isFinite(scraped) ? Math.max(wins, scraped) : wins;
+        const hasEvidence = rows.length > 0 || Number.isFinite(scraped);
+        const klasse = knownWins >= 12 ? "A" : knownWins >= 6 ? "B" : knownWins >= 3 ? "C" : "N";
+        return { wins: knownWins, total, klasse, hasEvidence };
+      };
+      const boksR = boksStats("rood");
+      const boksB = boksStats("blauw");
+      if (!boksR.hasEvidence || !boksB.hasEvidence) {
+        pushHitTournamentAware({
+          partij_nr, bout_id,
+          rule: "Boksen - ervaring ontbreekt",
+          rule_code: "BOKSEN_ERVARING_ONBEKEND",
+          resultaat: "ACTIE", severity: "warning",
+          boodschap: "Niet voor beide boksers zijn betrouwbare uitslagen of winsttotalen beschikbaar. Ervaring handmatig controleren.",
+        }, ctx);
+      } else if (boksR.klasse !== boksB.klasse) {
+        pushHitTournamentAware({
+          partij_nr, bout_id,
+          rule: "Boksen - verschillende vaardigheidsklassen",
+          rule_code: "BOKSEN_VAARDIGHEIDSKLASSE",
+          resultaat: "DISPENSATIE", severity: "warning",
+          boodschap: `Rood: ${boksR.wins} overwinningen (indicatie ${boksR.klasse}); blauw: ${boksB.wins} overwinningen (indicatie ${boksB.klasse}). Controleer officiële indeling en eventuele NVB-uitzondering; automatische telling is niet leidend bij toegekende herindeling.`,
+        }, ctx);
+      }
       pushHitTournamentAware({
         partij_nr, bout_id,
         rule: "Boksen - reglementaire beoordeling",
