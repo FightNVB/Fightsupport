@@ -2163,13 +2163,13 @@ export async function scraperFightcrewAll(options = {}) {
   const tabsRaw = Number(
     process.env.FP_SPORTSCHOLEN_WORKERS ??
     process.env.WORKERS ??
-    "10"
+    "3"
   );
 
   const tabCount =
     Number.isFinite(tabsRaw) && tabsRaw > 0
       ? Math.min(20, Math.max(1, Math.floor(tabsRaw)))
-      : 10;
+      : 3;
 
   const baseSchoolList = EXPLICIT_SCHOOL_KEY_SET.size > 0
     ? (schools ?? []).filter((sportschool) =>
@@ -2177,12 +2177,17 @@ export async function scraperFightcrewAll(options = {}) {
       )
     : (schools ?? []);
 
+  const validSchoolList = baseSchoolList.filter((sportschool) => !!normalizeSportschoolKey(sportschool?.sportschool_id));
+  if (validSchoolList.length !== baseSchoolList.length) {
+    console.warn(`[sportscholen] ${baseSchoolList.length - validSchoolList.length} sportscholen zonder geldige sportschool_id overgeslagen.`);
+  }
+
   const schoolList = failedOnly
-    ? baseSchoolList.filter((sportschool) => {
+    ? validSchoolList.filter((sportschool) => {
         const status = String(sportschool?.team_sync_status ?? "").trim().toLowerCase();
         return status === "fout" || status === "mislukt";
       })
-    : baseSchoolList;
+    : validSchoolList;
 
   if (failedOnly) {
     console.log("🔁 Alleen mislukte sportscholen opnieuw verwerken", {
@@ -2719,7 +2724,7 @@ export async function scraperFightcrewAll(options = {}) {
     failed: failedCount,
     fighterLinks: fighterLinksCount,
     tabCount,
-    status: "completed",
+    status: failed > 0 ? "completed_with_errors" : "completed",
     finishedAt: new Date().toISOString(),
   });
 
