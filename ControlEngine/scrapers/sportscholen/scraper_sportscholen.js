@@ -2151,14 +2151,8 @@ async function loadAllSportscholen() {
 export async function scraperFightcrewAll(options = {}) {
   const failedOnly = options?.failedOnly === true;
 
-  const { data: schools, error } = await supabase
-    .from("sportscholen")
-    .select(
-      "sportschool_id, naam, plaats, land, team_sync_status, team_sync_error"
-    )
-    .order("sportschool_id", { ascending: true });
-
-  if (error) throw error;
+  // Supabase retourneert standaard maximaal 1000 rijen; gebruik de bestaande gepagineerde loader.
+  const schools = await loadAllSportscholen();
 
   const tabsRaw = Number(
     process.env.FP_SPORTSCHOLEN_WORKERS ??
@@ -2724,7 +2718,8 @@ export async function scraperFightcrewAll(options = {}) {
     failed: failedCount,
     fighterLinks: fighterLinksCount,
     tabCount,
-    status: failed > 0 ? "completed_with_errors" : "completed",
+    status: "completed",
+    errorMessage: failed > 0 ? `${failed} sportscholen mislukt; zie error_count en individuele team_sync_error.` : null,
     finishedAt: new Date().toISOString(),
   });
 
