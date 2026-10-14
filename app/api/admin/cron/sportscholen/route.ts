@@ -36,7 +36,7 @@ function findScraperPath() {
       "ControlEngine",
       "scrapers",
       "sportscholen",
-      "scraper_sportscholen.js",
+      "scraper_sportscholen_cron.js",
     ),
     path.join(
       process.cwd(),
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const child = spawn(process.execPath, [scraperPath, "run-all"], {
+    const child = spawn(process.execPath, [scraperPath], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -138,7 +138,7 @@ export async function POST(req: Request) {
       ok: true,
       started: true,
       pid: child.pid,
-      mode: "run-all",
+      mode: "prepare-then-3x10",
       message: "De sportscholenscraper is gestart.",
     });
   } catch (error: any) {
