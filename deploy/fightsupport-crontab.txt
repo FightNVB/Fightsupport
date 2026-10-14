@@ -9,5 +9,5 @@
 # Total AutoCheck: iedere dag om 21:00 starten/hervatten
 0 21 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/start >> /var/log/fightsupport-total-cron.log 2>&1
 
-# Teams: iedere woensdag om 13:00
-0 13 * * 3 cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/fightpassport-sync/start-team >> /var/log/fightsupport-team-cron.log 2>&1
+# Teams: uitgeschakeld; sportscholencron verzorgt de dagelijkse Fightcrew-verwerking.
+# De oude Teams-scraper blijft beschikbaar voor handmatig gebruik.
