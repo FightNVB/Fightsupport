@@ -723,7 +723,7 @@ if (scopedPartijNr != null) {
     else boxingBirthByName.set(key, entry.geboortedatum);
   }
   const boxingBirthdate = (name: unknown, va: unknown, discipline: unknown): string | null => {
-    if (String(discipline ?? "").trim().toLowerCase() !== "boksen" || String(va ?? "").trim()) return null;
+    if (!["boksen", "r/boksen"].includes(String(discipline ?? "").trim().toLowerCase().replace(/\s*\/\s*/g, "/")) || String(va ?? "").trim()) return null;
     const key = normalizeBoxingName(name);
     return ambiguousBoxingNames.has(key) ? null : boxingBirthByName.get(key) ?? null;
   };
