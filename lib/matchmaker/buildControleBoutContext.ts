@@ -750,7 +750,7 @@ if (scopedPartijNr != null) {
     else boxingBirthByName.set(key, entry.geboortedatum);
   }
   const boxingBirthdate = (name: unknown, va: unknown, discipline: unknown): string | null => {
-    if (String(discipline ?? "").trim().toLowerCase() !== "boksen" || String(va ?? "").trim()) return null;
+    if (!["boksen", "r/boksen"].includes(String(discipline ?? "").trim().toLowerCase().replace(/\s*\/\s*/g, "/")) || String(va ?? "").trim()) return null;
     const key = normalizeBoxingName(name);
     return ambiguousBoxingNames.has(key) ? null : boxingBirthByName.get(key) ?? null;
   };
@@ -1025,7 +1025,7 @@ if (scopedPartijNr != null) {
         normGender(mr?.fp_geslacht) ??
         normGender(mr?.geslacht) ??
         normGender(partij?.rood_geslacht),
-      rood_geboortedatum_mm: toIsoDateOnly(partij?.rood_geboortedatum ?? mr?.geboortedatum_input),
+      rood_geboortedatum_mm: toIsoDateOnly(roodGeboortedatum),
       rood_leeftijd_event,
 
       // fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
@@ -1041,7 +1041,7 @@ if (scopedPartijNr != null) {
         normGender(mb?.fp_geslacht) ??
         normGender(mb?.geslacht) ??
         normGender(partij?.blauw_geslacht),
-      blauw_geboortedatum_mm: toIsoDateOnly(partij?.blauw_geboortedatum ?? mb?.geboortedatum_input),
+      blauw_geboortedatum_mm: toIsoDateOnly(blauwGeboortedatum),
       blauw_leeftijd_event,
 
       rood_mma_current_klasse,
