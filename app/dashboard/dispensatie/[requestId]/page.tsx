@@ -521,6 +521,21 @@ export default function DispensatieDetailPage() {
     }
   }
 
+  async function revokeDecision() {
+    try {
+      setErr(null);
+      if (!isSuperadmin) throw new Error("Geen rechten om dit definitieve besluit in te trekken.");
+      const reason = decideReason.trim();
+      if (!reason) throw new Error("Reden voor intrekken is verplicht.");
+      if (!window.confirm("Definitief dispensatiebesluit intrekken? De aanvraag wordt opnieuw pending.")) return;
+      await callApi("/api/dispensatie/decide", { request_id: requestId, decision: "revoke", reason });
+      setDecideReason("");
+      await loadAll();
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    }
+  }
+
   async function uploadPdf(file: File) {
     try {
       setErr(null);
@@ -912,6 +927,9 @@ export default function DispensatieDetailPage() {
                 >
                   Definitief afkeur
                 </SilverButton>
+                {reqRow?.decision && isSuperadmin ? (
+                  <SilverButton onClick={revokeDecision}>Besluit intrekken</SilverButton>
+                ) : null}
                 <SilverButton onClick={loadAll}>Refresh</SilverButton>
               </div>
 
