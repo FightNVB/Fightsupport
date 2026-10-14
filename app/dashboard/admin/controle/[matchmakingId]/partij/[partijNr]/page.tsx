@@ -3384,6 +3384,7 @@ export default function PartijDetailPage() {
                                 </button>
                               ) : (
                                 <span className="text-xs text-zinc-400">—</span>
+                              )
                               )}
                             </td>
                           </tr>
