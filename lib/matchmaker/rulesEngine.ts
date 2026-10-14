@@ -2720,7 +2720,7 @@ export async function rulesEngine(opts: {
       const ageR = ageOnEventFromCtx(ctx, "rood");
       const ageB = ageOnEventFromCtx(ctx, "blauw");
 
-      if (hasRood && hasBlauw && typeof ageR === "number" && typeof ageB === "number") {
+      if (hasRood && hasBlauw && !isExactBoksenText(ctx?.discipline) && typeof ageR === "number" && typeof ageB === "number") {
         const mix = (ageR < 18 && ageB >= 18) || (ageB < 18 && ageR >= 18);
         if (mix) {
           pushHit({
