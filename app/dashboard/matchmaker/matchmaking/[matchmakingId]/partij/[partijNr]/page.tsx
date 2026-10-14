@@ -11,6 +11,7 @@ type AnyRow = Record<string, any>;
 
 async function withBoxingBirthdates(row: AnyRow | null, matchmakingId: string, runId: string, partijNr: number): Promise<AnyRow | null> {
   if (!row || !["boksen", "r boksen"].includes(String(row.discipline ?? "").trim().toLowerCase().replace(/[_\/-]+/g, " ").replace(/\s+/g, " "))) return row;
+  try {
   const response = await authedFetch("/api/controle/boxing-birthdates", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -25,6 +26,9 @@ async function withBoxingBirthdates(row: AnyRow | null, matchmakingId: string, r
     }
   }
   return enriched;
+  } catch {
+    return row;
+  }
 }
 
 
