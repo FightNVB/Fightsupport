@@ -734,6 +734,27 @@ if (scopedPartijNr != null) {
 
   const partijNrByBoutUid = buildPartijNrSequence(bouts);
 
+  // Alleen boksen zonder VA: aanvullende geboortedatums uit de afzonderlijke uploadreferentie.
+  const { data: boxingBirthRows, error: boxingBirthError } = await supabaseAdmin
+    .from("boksen_upload_geboortedata").select("naam,geboortedatum");
+  if (boxingBirthError) throw boxingBirthError;
+  const normalizeBoxingName = (value: unknown) =>
+    String(value ?? "").normalize("NFKC").toLocaleLowerCase("nl-NL")
+      .replace(/[^\\p{L}\\p{N}]+/gu, " ").trim().replace(/\\s+/g, " ");
+  const boxingBirthByName = new Map<string, string>();
+  const ambiguousBoxingNames = new Set<string>();
+  for (const entry of boxingBirthRows ?? []) {
+    const key = normalizeBoxingName(entry.naam);
+    if (!key) continue;
+    if (boxingBirthByName.has(key) && boxingBirthByName.get(key) !== entry.geboortedatum) ambiguousBoxingNames.add(key);
+    else boxingBirthByName.set(key, entry.geboortedatum);
+  }
+  const boxingBirthdate = (name: unknown, va: unknown, discipline: unknown): string | null => {
+    if (String(discipline ?? "").trim().toLowerCase() !== "boksen" || String(va ?? "").trim()) return null;
+    const key = normalizeBoxingName(name);
+    return ambiguousBoxingNames.has(key) ? null : boxingBirthByName.get(key) ?? null;
+  };
+
   const rowsToInsert: any[] = [];
   const uitslagenToInsert: any[] = [];
   const duplicatePartijNrs = new Map<number, string[]>();
@@ -907,9 +928,9 @@ if (scopedPartijNr != null) {
     const recBClass = buildClassAwareRecord(uitslagenB, currentClass);
 
     const roodGeboortedatum =
-      fr?.geboortedatum ?? mr?.fp_geboortedatum ?? partij?.rood_geboortedatum ?? mr?.geboortedatum_input ?? mr?.geboortedatum ?? null;
+      fr?.geboortedatum ?? mr?.fp_geboortedatum ?? partij?.rood_geboortedatum ?? mr?.geboortedatum_input ?? mr?.geboortedatum ?? boxingBirthdate(partij?.rood_naam, vaR, partij?.discipline) ?? null;
     const blauwGeboortedatum =
-      fb?.geboortedatum ?? mb?.fp_geboortedatum ?? partij?.blauw_geboortedatum ?? mb?.geboortedatum_input ?? mb?.geboortedatum ?? null;
+      fb?.geboortedatum ?? mb?.fp_geboortedatum ?? partij?.blauw_geboortedatum ?? mb?.geboortedatum_input ?? mb?.geboortedatum ?? boxingBirthdate(partij?.blauw_naam, vaB, partij?.discipline) ?? null;
 
     const rood_leeftijd_event =
       roodGeboortedatum && evenement_datum
