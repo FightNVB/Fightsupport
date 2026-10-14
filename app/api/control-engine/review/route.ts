@@ -11,7 +11,7 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
-type Decision = "approve" | "reject";
+type Decision = "approve" | "reject" | "revoke";
 
 function nowIso() {
   return new Date().toISOString();
@@ -140,8 +140,8 @@ export async function POST(req: Request) {
     const decision = String(body?.decision ?? "").trim() as Decision;
     const note = String(body?.note ?? "").trim() || null;
 
-    if (decision !== "approve" && decision !== "reject") {
-      return NextResponse.json({ error: "Ongeldige decision (gebruik approve/reject)" }, { status: 400 });
+    if (decision !== "approve" && decision !== "reject" && decision !== "revoke") {
+      return NextResponse.json({ error: "Ongeldige decision (gebruik approve/reject/revoke)" }, { status: 400 });
     }
 
     const resolved = await resolveControleResultaatRow(body);
@@ -168,6 +168,44 @@ export async function POST(req: Request) {
       roleKey === "hoofd official".replace(/\s+/g, "");
 
     const isVerbod = isVerbodMelding(hay);
+
+    if (decision === "revoke") {
+      if (huidig !== "ok" || String(row?.review_status ?? "").toLowerCase() !== "goedgekeurd") {
+        return NextResponse.json({ error: "Deze regel heeft geen actieve handmatige goedkeuring." }, { status: 400 });
+      }
+      const original = normalizeResultaat(row?.original_resultaat);
+      if (!row?.original_resultaat || original === "ok") {
+        return NextResponse.json({ error: "Oorspronkelijke status ontbreekt; intrekken vereist handmatige controle." }, { status: 409 });
+      }
+      const mmId = String(row?.matchmaking_id ?? body?.matchmaking_id ?? "").trim();
+      if (mmId) await assertCanAccessMatchmaking({ matchmaking_id: mmId, userId, role });
+      const isOriginalDisp = original === "dispensatie";
+      const isOriginalVerbod = isVerbod;
+      if (isOriginalVerbod && !isSuperadmin) {
+        return NextResponse.json({ error: "Alleen superadmin mag een verbodgoedkeuring intrekken." }, { status: 403 });
+      }
+      if (isOriginalDisp && !isSuperadmin) {
+        return NextResponse.json({ error: "Alleen superadmin mag een dispensatiegoedkeuring via deze route intrekken." }, { status: 403 });
+      }
+      if (!(isSuperadmin || isAdmin || isHoofdofficial || isMatchmaker || isOfficial)) {
+        return NextResponse.json({ error: "Geen rechten." }, { status: 403 });
+      }
+      if ((isMatchmaker || isOfficial) && !(original === "actie" || original === "info")) {
+        return NextResponse.json({ error: "Geen rechten voor deze regel." }, { status: 403 });
+      }
+      const update = {
+        resultaat: original,
+        review_status: "open",
+        reviewed_by: userId,
+        reviewed_at: nowIso(),
+        review_note: `Goedkeuring ingetrokken: ${cleanText(note) ?? "geen toelichting"}; vorige reden: ${cleanText(row?.review_note) ?? "-"}`,
+      };
+      const { data, error } = await supabase.from("controle_resultaten")
+        .update(update).eq("id", row.id).eq("review_status", "goedgekeurd").select("id").maybeSingle();
+      if (error) throw error;
+      if (!data) return NextResponse.json({ error: "Goedkeuring is inmiddels gewijzigd." }, { status: 409 });
+      return NextResponse.json({ ok: true, row: { ...row, ...update } });
+    }
 
     if (huidig === "ok") {
       return NextResponse.json({ error: "Deze melding is al OK/goedgekeurd." }, { status: 400 });
