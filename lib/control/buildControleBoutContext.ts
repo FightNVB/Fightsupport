@@ -707,6 +707,27 @@ if (scopedPartijNr != null) {
 
   const partijNrByBoutUid = buildPartijNrSequence(bouts);
 
+  // Alleen boksen zonder VA: aanvullende geboortedatums uit de afzonderlijke uploadreferentie.
+  const { data: boxingBirthRows, error: boxingBirthError } = await supabaseAdmin
+    .from("boksen_upload_geboortedata").select("naam,geboortedatum");
+  if (boxingBirthError) throw boxingBirthError;
+  const normalizeBoxingName = (value: unknown) =>
+    String(value ?? "").normalize("NFKC").toLocaleLowerCase("nl-NL")
+      .replace(/[^\\p{L}\\p{N}]+/gu, " ").trim().replace(/\\s+/g, " ");
+  const boxingBirthByName = new Map<string, string>();
+  const ambiguousBoxingNames = new Set<string>();
+  for (const entry of boxingBirthRows ?? []) {
+    const key = normalizeBoxingName(entry.naam);
+    if (!key) continue;
+    if (boxingBirthByName.has(key) && boxingBirthByName.get(key) !== entry.geboortedatum) ambiguousBoxingNames.add(key);
+    else boxingBirthByName.set(key, entry.geboortedatum);
+  }
+  const boxingBirthdate = (name: unknown, va: unknown, discipline: unknown): string | null => {
+    if (String(discipline ?? "").trim().toLowerCase() !== "boksen" || String(va ?? "").trim()) return null;
+    const key = normalizeBoxingName(name);
+    return ambiguousBoxingNames.has(key) ? null : boxingBirthByName.get(key) ?? null;
+  };
+
   const rowsToInsert: any[] = [];
   const uitslagenToInsert: any[] = [];
   const duplicatePartijNrs = new Map<number, string[]>();
@@ -849,9 +870,9 @@ if (scopedPartijNr != null) {
     const recBClass = buildClassAwareRecord(uitslagenB, currentClass);
 
     const roodGeboortedatum =
-      fr?.geboortedatum ?? partij?.rood_geboortedatum ?? null;
+      fr?.geboortedatum ?? partij?.rood_geboortedatum ?? boxingBirthdate(partij?.rood_naam, vaR, partij?.discipline) ?? null;
     const blauwGeboortedatum =
-      fb?.geboortedatum ?? partij?.blauw_geboortedatum ?? null;
+      fb?.geboortedatum ?? partij?.blauw_geboortedatum ?? boxingBirthdate(partij?.blauw_naam, vaB, partij?.discipline) ?? null;
 
     const rood_leeftijd_event =
       roodGeboortedatum && evenement_datum
@@ -911,7 +932,7 @@ if (scopedPartijNr != null) {
 
       // Total/fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
       rood_naam_fp: toNullableStr(fr?.naam),
-      rood_geboortedatum_mm: toIsoDateOnly(partij?.rood_geboortedatum),
+      rood_geboortedatum_mm: toIsoDateOnly(roodGeboortedatum),
       rood_geboortedatum_fp: fr?.geboortedatum
         ? toIsoDateOnly(fr.geboortedatum)
         : null,
@@ -920,7 +941,7 @@ if (scopedPartijNr != null) {
 
       // Total/fightpassport_fighters is de waarheid. MM-data blijft apart in *_mm.
       blauw_naam_fp: toNullableStr(fb?.naam),
-      blauw_geboortedatum_mm: toIsoDateOnly(partij?.blauw_geboortedatum),
+      blauw_geboortedatum_mm: toIsoDateOnly(blauwGeboortedatum),
       blauw_geboortedatum_fp: fb?.geboortedatum
         ? toIsoDateOnly(fb.geboortedatum)
         : null,
