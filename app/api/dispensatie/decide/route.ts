@@ -23,10 +23,43 @@ export async function POST(req: Request) {
     const reason = String(body.reason ?? "").trim();
 
     if (!request_id) return NextResponse.json({ error: "request_id ontbreekt." }, { status: 400 });
-    if (!["approved", "rejected"].includes(decision)) {
-      return NextResponse.json({ error: "decision moet approved of rejected zijn." }, { status: 400 });
+    if (!["approved", "rejected", "revoke"].includes(decision)) {
+      return NextResponse.json({ error: "decision moet approved, rejected of revoke zijn." }, { status: 400 });
     }
     if (!reason) return NextResponse.json({ error: "Reden is verplicht." }, { status: 400 });
+
+    if (decision === "revoke") {
+      const { data: current, error: currentErr } = await supabaseAdmin
+        .from("dispensatie_requests")
+        .select("id,status,decision,decision_reason,matchmaking_id,controle_run_id,bout_id,partij_nr,rule_code")
+        .eq("id", request_id).single();
+      if (currentErr || !current) return NextResponse.json({ error: "Dispensatie niet gevonden." }, { status: 404 });
+      if (current.status !== "closed" || !["approved", "rejected"].includes(String(current.decision))) {
+        return NextResponse.json({ error: "Geen definitief besluit om in te trekken." }, { status: 409 });
+      }
+      const { error: resetErr } = await supabaseAdmin.from("dispensatie_requests")
+        .update({ status: "pending", decision: null, decision_reason: null, decided_by: null, decided_at: null, updated_at: new Date().toISOString() })
+        .eq("id", request_id).eq("status", "closed");
+      if (resetErr) throw resetErr;
+      let q = supabaseAdmin.from("controle_resultaten").select("id,original_resultaat,review_note")
+        .eq("matchmaking_id", current.matchmaking_id).eq("rule_code", current.rule_code)
+        .order("created_at", { ascending: false });
+      if (current.bout_id) q = q.eq("bout_id", current.bout_id);
+      else if (current.partij_nr != null) q = q.eq("partij_nr", current.partij_nr);
+      if (current.controle_run_id) q = q.eq("controle_run_id", current.controle_run_id);
+      const { data: rows, error: findErr } = await q.limit(10);
+      if (findErr) throw findErr;
+      for (const row of rows ?? []) {
+        if (String(row.original_resultaat ?? "").toLowerCase() !== "dispensatie") continue;
+        const { error: updErr } = await supabaseAdmin.from("controle_resultaten").update({
+          resultaat: "dispensatie", review_status: "open", reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+          review_note: `Besluit ingetrokken: ${reason}. Eerder: ${row.review_note ?? current.decision_reason ?? "-"}`,
+        }).eq("id", row.id);
+        if (updErr) throw updErr;
+      }
+      return NextResponse.json({ ok: true, revoked: true });
+    }
 
     // request ophalen (voor matchmaking_id / controle_run_id)
     const { data: reqRow, error: rErr } = await supabaseAdmin
