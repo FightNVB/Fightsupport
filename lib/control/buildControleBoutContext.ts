@@ -870,9 +870,9 @@ if (scopedPartijNr != null) {
     const recBClass = buildClassAwareRecord(uitslagenB, currentClass);
 
     const roodGeboortedatum =
-      fr?.geboortedatum ?? partij?.rood_geboortedatum ?? boxingBirthdate(partij?.rood_naam, vaR, partij?.discipline) ?? null;
+      fr?.geboortedatum ?? boxingBirthdate(partij?.rood_naam, vaR, partij?.discipline) ?? partij?.rood_geboortedatum ?? null;
     const blauwGeboortedatum =
-      fb?.geboortedatum ?? partij?.blauw_geboortedatum ?? boxingBirthdate(partij?.blauw_naam, vaB, partij?.discipline) ?? null;
+      fb?.geboortedatum ?? boxingBirthdate(partij?.blauw_naam, vaB, partij?.discipline) ?? partij?.blauw_geboortedatum ?? null;
 
     const rood_leeftijd_event =
       roodGeboortedatum && evenement_datum
