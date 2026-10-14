@@ -9,6 +9,25 @@ import { authedFetch } from "@/lib/api/authedFetch";
 
 type AnyRow = Record<string, any>;
 
+async function withBoxingBirthdates(row: AnyRow | null, matchmakingId: string, runId: string, partijNr: number): Promise<AnyRow | null> {
+  if (!row || !["boksen", "r boksen"].includes(String(row.discipline ?? "").trim().toLowerCase().replace(/[_\/-]+/g, " ").replace(/\s+/g, " "))) return row;
+  const response = await authedFetch("/api/controle/boxing-birthdates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ matchmaking_id: matchmakingId, controle_run_id: runId, partij_nr: partijNr }),
+  });
+  if (!response.ok) return row;
+  const dates = await response.json() as { rood?: string | null; blauw?: string | null };
+  const enriched = { ...row };
+  for (const side of ["rood", "blauw"] as const) {
+    if (!String(row[`${side}_va_mm`] ?? "").trim() && !row[`${side}_geboortedatum_fp`] && dates[side]) {
+      enriched[`${side}_geboortedatum_mm`] = dates[side];
+    }
+  }
+  return enriched;
+}
+
+
 type ControleRun = {
   id: string;
   matchmaking_id: string;
@@ -2085,7 +2104,7 @@ export default function PartijDetailPage() {
 
         if (ctxErr) throw ctxErr;
 
-        const row = (ctxRows?.[0] ?? null) as AnyRow | null;
+        const row = await withBoxingBirthdates((ctxRows?.[0] ?? null) as AnyRow | null, matchmakingId, String(latestRun.id), partijNr);
         setCtx(row);
 
         const { data: dispReqRows, error: dispReqErr } = await supabase
