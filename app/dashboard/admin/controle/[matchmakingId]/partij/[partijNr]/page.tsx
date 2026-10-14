@@ -1909,6 +1909,34 @@ export default function PartijDetailPage() {
     }
   }
 
+  async function revokeSingle(resultaatId: string) {
+    if (!resultaatId || approving) return;
+    if (!window.confirm("Deze goedkeuring intrekken en de oorspronkelijke rulesEngine-status herstellen?")) return;
+    setApproving(true);
+    setError(null);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) throw new Error("Niet ingelogd.");
+      const response = await authedFetch("/api/control-engine/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          controle_resultaat_id: resultaatId,
+          decision: "revoke",
+          note: String(getNoteFor(resultaatId) ?? "").trim(),
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error ?? "Intrekken mislukt");
+      await reloadRegels();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setApproving(false);
+    }
+  }
+
   async function rejectSingle(resultaatId: string) {
     if (!resultaatId) return;
     if (!run?.id || !partijNr) return;
@@ -3344,6 +3372,16 @@ export default function PartijDetailPage() {
                                     Afkeuren
                                   </button>
                                 </div>
+                              ) : (
+                                String(r.review_status ?? "").toLowerCase() === "goedgekeurd" && r.original_resultaat && normResultaat(r.original_resultaat) !== "ok" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => revokeSingle(r.id)}
+                                  disabled={approving}
+                                  className="px-3 py-1 text-xs rounded bg-[#2a2a2e] text-white font-semibold hover:opacity-90 disabled:opacity-50"
+                                >
+                                  Goedkeuring intrekken
+                                </button>
                               ) : (
                                 <span className="text-xs text-zinc-400">—</span>
                               )}
