@@ -205,7 +205,8 @@ function isExactBoksenText(v: any): boolean {
     .replace(/[_\/-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .toUpperCase() === "BOKSEN";
+    .toUpperCase()
+    .replace(/^R BOKSEN$/, "BOKSEN") === "BOKSEN";
 }
 
 function isPureBoksenZonderLicentieKeurmerk(ctx: any): boolean {
