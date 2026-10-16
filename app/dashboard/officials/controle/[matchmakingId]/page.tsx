@@ -328,15 +328,17 @@ function normalizeDisciplineForRule(v: any): string {
 
 function isExactBoksen(ctx: AnyRow | null | undefined): boolean {
   if (!ctx) return false;
-  return (
-    normalizeDisciplineForRule(
-      ctx?.discipline ??
-        ctx?.discipline_mm ??
-        ctx?.discipline_fp ??
-        ctx?.wedstrijd_discipline ??
-        ctx?.bout_discipline,
-    ) === "boksen"
+  const discipline = normalizeDisciplineForRule(
+    ctx?.discipline ??
+      ctx?.discipline_mm ??
+      ctx?.discipline_fp ??
+      ctx?.wedstrijd_discipline ??
+      ctx?.bout_discipline,
   );
+  // Oude matchmakings hebben soms geen discipline maar wel klasse_mm=BOKSEN.
+  // Kickboksen blijft uitgesloten van deze uitzondering.
+  return discipline === "boksen" ||
+    (!discipline && normalizeDisciplineForRule(ctx?.klasse_mm ?? ctx?.klasse) === "boksen");
 }
 
 function isBoksenNoVaInfoRow(r: Partial<ResRow> | null | undefined): boolean {
@@ -2601,9 +2603,10 @@ function buildToernooiDeelnemers(
         sideResultaten.some((res) => isVerbodRow(res)) ||
         (Number.isFinite(partijNr) ? !!verbodByPartij[partijNr] : false);
 
-      const sideHeeftGeenLicentie =
+      const sideHeeftGeenLicentie = !isExactBoksen(row) && (
         sideResultaten.some((res) => isOpenLicentieMeldingRow(res)) ||
-        isMissingLicentie(row, side);
+        isMissingLicentie(row, side)
+      );
 
       const sideHeeftDispensatie = sideResultaten.some(
         (res) => normResultaatRow(res) === "dispensatie",
@@ -3865,7 +3868,7 @@ export default function ControleMatchmakingPage() {
           );
         if (licentieGoedgekeurd) approvedLicentieMap[pn] = true;
         const mistLicentie =
-          !licentieGoedgekeurd &&
+          !isExactBoksen(ctx) && !licentieGoedgekeurd &&
           (hasOpenLicentieMelding(rr) ||
             isMissingLicentie(ctx, "rood") ||
             isMissingLicentie(ctx, "blauw"));
@@ -4030,7 +4033,7 @@ export default function ControleMatchmakingPage() {
       const pn = Number(r.partij_nr);
       if (!Number.isFinite(pn)) continue;
 
-      if (approvedLicentieByPartij[pn]) continue;
+      if (approvedLicentieByPartij[pn] || isExactBoksen(r)) continue;
 
       const rr = resultatenByPartij[pn] ?? [];
       if (
