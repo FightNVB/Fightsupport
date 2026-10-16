@@ -899,6 +899,18 @@ export async function GET(req: Request) {
     });
   }
 
+  // Alleen voor deze bevestigde RFP-matchmaking geldt de fallback Kickboksen.
+  const isRfpMatchmaking = matchmaking_id === "6850d153-80bf-447a-b6f2-05f206de2512";
+  const disciplineVoorExcel = (bout: any): string => {
+    const explicit = String(bout.discipline ?? "").trim();
+    if (explicit) return explicit;
+    const context = leeftijdPerPartij.get(Number(bout.partij_nr))?.discipline;
+    if (context) return context;
+    const klasse = String(bout.klasse ?? "").trim().toUpperCase();
+    if (klasse === "BOKSEN") return "Boksen";
+    return isRfpMatchmaking ? "Kickboksen" : "";
+  };
+
   const templatePath = path.join(
     process.cwd(),
     "public",
@@ -943,7 +955,7 @@ export async function GET(req: Request) {
     const decision = rawRowDecision(b, decisions);
     const titelpartij = isTitelpartij(b);
     const rondes = getRondeTijden({
-      discipline: b.discipline || leeftijdPerPartij.get(Number(b.partij_nr))?.discipline || "",
+      discipline: disciplineVoorExcel(b),
       klasse: b.klasse,
       rood_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.rood ?? getLeeftijdVoorRondetijd(b, "rood"),
       blauw_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.blauw ?? getLeeftijdVoorRondetijd(b, "blauw"),
@@ -952,7 +964,7 @@ export async function GET(req: Request) {
 
     setLineupCellValues(ws, rowNumber++, {
       partij_nr: b.partij_nr ?? "",
-      discipline: b.discipline || leeftijdPerPartij.get(Number(b.partij_nr))?.discipline || "",
+      discipline: disciplineVoorExcel(b),
       klasse: b.klasse,
       rood_naam: b.rood_naam,
       rood_gym: b.rood_gym,
@@ -979,7 +991,7 @@ export async function GET(req: Request) {
       const decision = rawRowDecision(b, decisions);
       const titelpartij = isTitelpartij(b);
       const rondes = getRondeTijden({
-        discipline: b.discipline,
+        discipline: disciplineVoorExcel(b),
         klasse: b.klasse,
         rood_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.rood ?? getLeeftijdVoorRondetijd(b, "rood"),
         blauw_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.blauw ?? getLeeftijdVoorRondetijd(b, "blauw"),
@@ -1004,7 +1016,7 @@ export async function GET(req: Request) {
 
         setLineupCellValues(ws, rowNumber++, {
           partij_nr: toernooiCode,
-          discipline: b.discipline || leeftijdPerPartij.get(Number(b.partij_nr))?.discipline || "",
+          discipline: disciplineVoorExcel(b),
           klasse: b.klasse,
           rood_naam: fighter.naam,
           rood_gym: fighter.gym,
