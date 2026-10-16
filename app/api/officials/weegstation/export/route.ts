@@ -88,8 +88,10 @@ export async function GET(req: NextRequest) {
       { header: "Klasse", key: "klasse", width: 14 },
       { header: "Rood", key: "rood", width: 28 },
       { header: "Sportschool rood", key: "roodGym", width: 26 },
+      { header: "VA rood", key: "roodVa", width: 12 },
       { header: "Blauw", key: "blauw", width: 28 },
       { header: "Sportschool blauw", key: "blauwGym", width: 26 },
+      { header: "VA blauw", key: "blauwVa", width: 12 },
       { header: "Max", key: "max", width: 12 },
       { header: "R.gew.", key: "roodGewogen", width: 12 },
       { header: "B.gew.", key: "blauwGewogen", width: 12 },
@@ -129,8 +131,10 @@ export async function GET(req: NextRequest) {
         klasse: safe(source.klasse_mm),
         rood: safe(source.rood_naam),
         roodGym: safe(source.rood_gym),
+        roodVa: safe(source.rood_va),
         blauw: safe(source.blauw_naam),
         blauwGym: safe(source.blauw_gym),
+        blauwVa: safe(source.blauw_va),
         max: weight(source.max_gewicht),
         roodGewogen: weight(source.rood_gewogen_gewicht),
         blauwGewogen: weight(source.blauw_gewogen_gewicht),
@@ -148,18 +152,18 @@ export async function GET(req: NextRequest) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: even ? "FFF0F0F0" : "FFFFFFFF" } };
         cell.alignment = {
           vertical: "middle",
-          horizontal: [1, 3, 8, 9, 10, 11, 13, 14].includes(col) ? "center" : "left",
+          horizontal: [1, 3, 6, 9, 10, 11, 12, 13, 15, 16].includes(col) ? "center" : "left",
           wrapText: true,
         };
         cell.border = { bottom: { style: "hair", color: { argb: "FFD0D0D0" } } };
       });
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
-      for (const col of [8, 9, 10, 11]) row.getCell(col).numFmt = "0.0";
+      for (const col of [10, 11, 12, 13]) row.getCell(col).numFmt = "0.0";
       if (minRood > 0 || minBlauw > 0) {
-        row.getCell(13).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFC22A19" } };
+        row.getCell(15).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFC22A19" } };
       }
       if (source.dispensatie_verleend) {
-        row.getCell(14).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF187B41" } };
+        row.getCell(16).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF187B41" } };
       }
       row.height = 30;
     }
