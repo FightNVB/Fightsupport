@@ -184,10 +184,12 @@ function isExactBoksenText(v: any): boolean {
 }
 
 function isPureBoksenZonderLicentieKeurmerk(ctx: any): boolean {
-  // Alleen exact discipline=Boksen; klasse (ook Amateur) is niet bepalend.
-  // Voor deze discipline geldt de bestaande uitzondering voor NVB-licentie/keurmerk.
-  // Kickboksen, thaiboksen, jeugd boksen, dames boksen, K1-boksen, enz. vallen hier NIET onder.
-  return isExactBoksenText(ctx?.discipline);
+  // Bij oudere uploads ontbreekt discipline vaak; klasse_mm=BOKSEN
+  // is dan de expliciete aanduiding voor bokspartijen.
+  // Nooit op een gedeeltelijke match ("kickboksen") filteren.
+  const discipline = String(ctx?.discipline ?? "").trim();
+  return isExactBoksenText(discipline) ||
+    (!discipline && (isExactBoksenText(ctx?.klasse_mm) || isExactBoksenText(ctx?.klasse)));
 }
 
 function isKickboksMuayThai(ctx: any): boolean {
