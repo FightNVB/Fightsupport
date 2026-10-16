@@ -2984,6 +2984,10 @@ export default function ControleMatchmakingPage() {
     await authedDownload(`/api/rapport/official-excel?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "official.xlsx");
   }
 
+  async function openJuryExcel() {
+    await authedDownload(`/api/rapport/lineup?matchmaking_id=${encodeURIComponent(matchmakingId)}`, "jury-lineup.xlsx");
+  }
+
   function syncOrderedRowsFromRows(nextRows: AnyRow[]) {
     const sorted = [...nextRows].sort(
       (a, b) => Number(a.partij_nr ?? 0) - Number(b.partij_nr ?? 0),
@@ -4437,6 +4441,14 @@ export default function ControleMatchmakingPage() {
                         ? "Niet tijdens lineup bouwen."
                         : "Open het controlerapport."
                     }
+                  />
+                  <DarkActionButton
+                    label={headerBusy === "jury-excel" ? "Bezig..." : "Jury Excel (rondetijden + minpunten)"}
+                    tone="silver"
+                    icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
+                    onClick={() => withHeaderBusy("jury-excel", async () => openJuryExcel())}
+                    disabled={lineupMode || !!headerBusy}
+                    title="Download de jury-line-up met rondetijden en minpunten."
                   />
                   <DarkActionButton
                     label={headerBusy === "official" ? "Bezig..." : "Official info"}
