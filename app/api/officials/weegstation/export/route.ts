@@ -224,17 +224,39 @@ export async function GET(req: NextRequest) {
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
       for (const col of [6, 9]) row.getCell(col).numFmt = "0";
       for (const col of [10, 11, 12, 13]) row.getCell(col).numFmt = "0.0";
-      // Alleen boven de toegestane +0,3 kg marge rood kleuren.
-      // Open zwaargewicht (95+) heeft geen bovengrens.
-      const gewichtNotatie = safe(source.max_gewicht_notatie).trim();
+      // Dynamische Excel-opmaak: reageert ook als de official offline
+      // een gewicht wijzigt. 95+ heeft een minimum, geen maximum.
+      const gewichtNotatie = safe(source.max_gewicht_notatie);
+      const klasseNotatie = safe(source.klasse_mm);
       const isOpen95Plus = /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(gewichtNotatie) ||
-        /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(safe(source.max_gewicht_type));
-      const maxToegestaan = weight(source.max_gewicht);
-      if (!isOpen95Plus && typeof maxToegestaan === "number") {
-        for (const [col, gewogen] of [[11, weight(source.rood_gewogen_gewicht)], [12, weight(source.blauw_gewogen_gewicht)]] as const) {
-          if (typeof gewogen === "number" && gewogen > maxToegestaan + 0.3 + 0.00001) {
-            row.getCell(col).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFCC2028" } };
-          }
+        /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(klasseNotatie) ||
+        /^(open|heavy_open|above|plus)$/i.test(safe(source.max_gewicht_type)) && num(source.max_gewicht) === 95;
+      for (const col of ["K", "L"] as const) {
+        const cellAddress = `${col}${row.number}`;
+        const formula = isOpen95Plus
+          ? `AND(ISNUMBER(${cellAddress}),${cellAddress}<95)`
+          : `AND(ISNUMBER(${cellAddress}),ISNUMBER(J${row.number}),${cellAddress}>J${row.number}+0.3+0.000001)`;
+        ws.addConditionalFormatting({
+          ref: cellAddress,
+          rules: [{
+            type: "expression",
+            formulae: [formula],
+            priority: 1,
+            style: {
+              font: { name: "Calibri", size: 11, bold: true, color: { argb: "FFCC2028" } },
+              fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFFFE0E0" } },
+            },
+          }],
+        });
+        // De huidige exportwaarden ook meteen zichtbaar markeren,
+        // ongeacht of Excel de voorwaardelijke opmaak al berekend heeft.
+        const gewogen = num(col === "K" ? source.rood_gewogen_gewicht : source.blauw_gewogen_gewicht);
+        const max = num(source.max_gewicht);
+        const afwijkend = gewogen != null && (isOpen95Plus
+          ? gewogen < 95
+          : max != null && gewogen > max + 0.3 + 0.000001);
+        if (afwijkend) {
+          row.getCell(col).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFCC2028" } };
         }
       }
       if (minRood > 0 || minBlauw > 0) {
