@@ -224,6 +224,19 @@ export async function GET(req: NextRequest) {
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
       for (const col of [6, 9]) row.getCell(col).numFmt = "0";
       for (const col of [10, 11, 12, 13]) row.getCell(col).numFmt = "0.0";
+      // Alleen boven de toegestane +0,3 kg marge rood kleuren.
+      // Open zwaargewicht (95+) heeft geen bovengrens.
+      const gewichtNotatie = safe(source.max_gewicht_notatie).trim();
+      const isOpen95Plus = /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(gewichtNotatie) ||
+        /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(safe(source.max_gewicht_type));
+      const maxToegestaan = weight(source.max_gewicht);
+      if (!isOpen95Plus && typeof maxToegestaan === "number") {
+        for (const [col, gewogen] of [[11, weight(source.rood_gewogen_gewicht)], [12, weight(source.blauw_gewogen_gewicht)]] as const) {
+          if (typeof gewogen === "number" && gewogen > maxToegestaan + 0.3 + 0.00001) {
+            row.getCell(col).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFCC2028" } };
+          }
+        }
+      }
       if (minRood > 0 || minBlauw > 0) {
         // Eén Minpunt-kolom, maar elke hoek krijgt zijn eigen tekstkleur.
         const parts: Array<{ text: string; font: { name: string; size: number; bold: boolean; color: { argb: string } } }> = [];
