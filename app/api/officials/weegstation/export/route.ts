@@ -179,7 +179,7 @@ export async function GET(req: NextRequest) {
         blauw: safe(source.blauw_naam),
         blauwGym: safe(source.blauw_gym),
         blauwVa: excelVa(source.blauw_va),
-        max: weight(source.max_gewicht),
+        max: safe(source.max_gewicht_notatie) || (safe(source.max_gewicht_type).toLowerCase() === "open" && num(source.max_gewicht) === 95 ? "95+" : weight(source.max_gewicht)),
         roodGewogen: weight(source.rood_gewogen_gewicht),
         blauwGewogen: weight(source.blauw_gewogen_gewicht),
         verschil: difference(source.rood_gewogen_gewicht, source.blauw_gewogen_gewicht),
@@ -223,19 +223,21 @@ export async function GET(req: NextRequest) {
       }
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
       for (const col of [6, 9]) row.getCell(col).numFmt = "0";
-      for (const col of [10, 11, 12, 13]) row.getCell(col).numFmt = "0.0";
+      for (const col of [11, 12, 13]) row.getCell(col).numFmt = "0.0";
       // Dynamische Excel-opmaak: reageert ook als de official offline
       // een gewicht wijzigt. 95+ heeft een minimum, geen maximum.
       const gewichtNotatie = safe(source.max_gewicht_notatie);
       const klasseNotatie = safe(source.klasse_mm);
       const isOpen95Plus = /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(gewichtNotatie) ||
         /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(klasseNotatie) ||
-        /^(open|heavy_open|above|plus)$/i.test(safe(source.max_gewicht_type)) && num(source.max_gewicht) === 95;
+        (/^(open|heavy_open|above|plus)$/i.test(safe(source.max_gewicht_type)) && num(source.max_gewicht) === 95);
+      // De notatie in de bron is leidend: -95 = maximaal 95, 95+ = minimaal 95.
+      row.getCell(10).value = isOpen95Plus ? "95+" : gewichtNotatie || (num(source.max_gewicht) != null ? `-${num(source.max_gewicht)}` : "");
       for (const col of ["K", "L"] as const) {
         const cellAddress = `${col}${row.number}`;
         const formula = isOpen95Plus
           ? `AND(ISNUMBER(${cellAddress}),${cellAddress}<95)`
-          : `AND(ISNUMBER(${cellAddress}),ISNUMBER(J${row.number}),${cellAddress}>J${row.number}+0.3+0.000001)`;
+          : `AND(ISNUMBER(${cellAddress}),ISNUMBER(IFERROR(VALUE(SUBSTITUTE(J${row.number},"-","")),0)),${cellAddress}>IFERROR(VALUE(SUBSTITUTE(J${row.number},"-","")),0)+0.3+0.000001)`;
         ws.addConditionalFormatting({
           ref: cellAddress,
           rules: [{
