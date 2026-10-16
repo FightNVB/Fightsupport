@@ -79,75 +79,100 @@ export async function GET(req: NextRequest) {
     wb.creator = "FightSupport";
     wb.created = new Date();
 
+    // Zelfde horizontale opbouw als de Jury Excel, uitgebreid met weeggegevens.
     const ws = wb.addWorksheet("Weegstation");
-    ws.views = [{ state: "frozen", ySplit: 1, showGridLines: true }];
-    ws.autoFilter = "A1:K1";
-    ws.columns = [
-      { header: "Nr", key: "nr", width: 8 },
+    ws.views = [{ state: "frozen", ySplit: 1, xSplit: 1, showGridLines: false }];
+    const columns: Array<{ header: string; key: string; width: number }> = [
+      { header: "Nr", key: "nr", width: 7 },
       { header: "Discipline", key: "discipline", width: 18 },
-      { header: "Klasse", key: "klasse", width: 16 },
-      { header: "Rood", key: "rood", width: 30 },
-      { header: "Blauw", key: "blauw", width: 30 },
-      { header: "Max", key: "max", width: 12 },
-      { header: "R.gew.", key: "roodGewogen", width: 12 },
-      { header: "B.gew.", key: "blauwGewogen", width: 12 },
-      { header: "Verschil", key: "verschil", width: 12 },
-      { header: "Status", key: "status", width: 22 },
-      { header: "Minpunt", key: "minpunt", width: 16 },
+      { header: "Klasse", key: "klasse", width: 13 },
+      { header: "Rood", key: "rood", width: 27 },
+      { header: "Sportschool rood", key: "roodGym", width: 25 },
+      { header: "VA rood", key: "roodVa", width: 12 },
+      { header: "VS", key: "vs", width: 6 },
+      { header: "Blauw", key: "blauw", width: 27 },
+      { header: "Sportschool blauw", key: "blauwGym", width: 25 },
+      { header: "VA blauw", key: "blauwVa", width: 12 },
+      { header: "Max kg", key: "max", width: 12 },
+      { header: "Rood kg", key: "roodGewogen", width: 12 },
+      { header: "Blauw kg", key: "blauwGewogen", width: 12 },
+      { header: "Verschil kg", key: "verschil", width: 13 },
+      { header: "Minpunt rood", key: "minpuntRood", width: 15 },
+      { header: "Minpunt blauw", key: "minpuntBlauw", width: 15 },
+      { header: "Dispensatie", key: "dispensatie", width: 22 },
+      { header: "Reden dispensatie", key: "dispensatieReden", width: 38 },
+      { header: "Status", key: "status", width: 23 },
+      { header: "Opmerking", key: "opmerking", width: 38 },
     ];
+    ws.columns = columns;
+    ws.autoFilter = { from: "A1", to: "T1" };
 
     const header = ws.getRow(1);
-    header.height = 28;
+    header.height = 30;
     header.eachCell((cell) => {
       cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF30343B" } };
-      cell.alignment = { vertical: "middle", horizontal: "center" };
-      cell.border = {
-        top: { style: "thin", color: { argb: "FF777777" } },
-        left: { style: "thin", color: { argb: "FF777777" } },
-        bottom: { style: "thin", color: { argb: "FF777777" } },
-        right: { style: "thin", color: { argb: "FF777777" } },
-      };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      cell.border = { bottom: { style: "medium", color: { argb: "FFFF4D00" } } };
     });
 
     for (const source of rows as any[]) {
+      const minRood = Number(source.gewicht_strafpunt_rood ?? 0);
+      const minBlauw = Number(source.gewicht_strafpunt_blauw ?? 0);
+      const reden = safe(source.dispensatie_reason);
+      const dispStatus = source.dispensatie_verleend
+        ? "VERLEEND"
+        : source.dispensatie_nodig
+          ? "NODIG / NIET VERLEEND"
+          : reden.toUpperCase() === "AFGEKEURD"
+            ? "AFGEKEURD"
+            : "Geen";
       const row = ws.addRow({
         nr: source.partij_nr ?? "",
-        discipline: safe(source.discipline),
+        discipline: safe(source.discipline, String(source.klasse_mm ?? "").trim().toUpperCase() === "BOKSEN" ? "Boksen" : ""),
         klasse: safe(source.klasse_mm),
         rood: safe(source.rood_naam),
+        roodGym: safe(source.rood_gym),
+        roodVa: safe(source.rood_va),
+        vs: "VS",
         blauw: safe(source.blauw_naam),
+        blauwGym: safe(source.blauw_gym),
+        blauwVa: safe(source.blauw_va),
         max: weight(source.max_gewicht),
         roodGewogen: weight(source.rood_gewogen_gewicht),
         blauwGewogen: weight(source.blauw_gewogen_gewicht),
         verschil: difference(source.rood_gewogen_gewicht, source.blauw_gewogen_gewicht),
+        minpuntRood: minRood > 0 ? -minRood : 0,
+        minpuntBlauw: minBlauw > 0 ? -minBlauw : 0,
+        dispensatie: dispStatus,
+        dispensatieReden: reden,
         status: safe(source.eindstatus || source.praktijk_status || source.reglement_status, "-"),
-        minpunt: penalty(source),
+        opmerking: safe(source.weging_notitie),
       });
 
       const even = row.number % 2 === 0;
-      row.eachCell((cell, col) => {
-        cell.font = { name: "Calibri", size: 11, color: { argb: "FF111111" }, bold: col === 1 };
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: even ? "FFF2F2F2" : "FFFFFFFF" },
-        };
+      row.eachCell({ includeEmpty: true }, (cell, col) => {
+        cell.font = { name: "Calibri", size: 11, color: { argb: "FF222222" }, bold: col === 1 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: even ? "FFF0F0F0" : "FFFFFFFF" } };
         cell.alignment = {
           vertical: "middle",
-          horizontal: [1, 6, 7, 8, 9, 11].includes(col) ? "center" : "left",
+          horizontal: [1, 3, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17].includes(col) ? "center" : "left",
           wrapText: true,
         };
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFD0D0D0" } },
-          left: { style: "thin", color: { argb: "FFD0D0D0" } },
-          bottom: { style: "thin", color: { argb: "FFD0D0D0" } },
-          right: { style: "thin", color: { argb: "FFD0D0D0" } },
-        };
+        cell.border = { bottom: { style: "hair", color: { argb: "FFD0D0D0" } } };
       });
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
-      for (const col of [6, 7, 8, 9]) row.getCell(col).numFmt = "0.0";
-      row.height = 24;
+      for (const col of [11, 12, 13, 14]) row.getCell(col).numFmt = "0.0";
+      for (const col of [15, 16]) {
+        row.getCell(col).numFmt = "0";
+        if (Number(row.getCell(col).value) < 0) {
+          row.getCell(col).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFC22A19" } };
+        }
+      }
+      if (source.dispensatie_verleend) {
+        row.getCell(17).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF187B41" } };
+      }
+      row.height = 30;
     }
 
     const first = (rows as any[])[0] ?? {};
