@@ -476,7 +476,7 @@ function parseWeightClass(
   };
 }
 
-const WEIGHT_UPPER_TOLERANCE = 0.2;
+const WEIGHT_UPPER_TOLERANCE = 0.3;
 const YOUTH_LOWER_OFFSET = 2.0;
 const ADULT_LOWER_OFFSET = 3.0;
 
@@ -496,7 +496,7 @@ function getWeightRangeForUi(
   }
 
   // J en J+ zijn jeugd. Alle andere klassen/codes (N, R, A, C, B enz.)
-  // vallen voor de weegmarge onder volwassenen: max - 3 kg t/m max + 0.2 kg.
+  // vallen voor de weegmarge onder volwassenen: max - 3 kg t/m max + 0.3 kg.
   const isJeugd = isYouthClassCode(leeftijdType) || isYouthClassCode(klasse);
   const lowerOffset = isJeugd ? YOUTH_LOWER_OFFSET : ADULT_LOWER_OFFSET;
 
@@ -3204,9 +3204,13 @@ export default function WeegstationDetailPage() {
                     const draft = getDraft(row.id);
                     const liveRood = toNum(draft.rood);
                     const liveBlauw = toNum(draft.blauw);
-                    const maxGewicht = toNum(row.max_gewicht);
-                    const roodBovenMax = maxGewicht !== null && liveRood !== null && liveRood > maxGewicht;
-                    const blauwBovenMax = maxGewicht !== null && liveBlauw !== null && liveBlauw > maxGewicht;
+                    const gewichtsklasse = parseWeightClass(
+                      row.klasse_mm,
+                      row.max_gewicht_notatie ?? row.max_gewicht,
+                    );
+                    const maxGewicht = gewichtsklasse.kind === "max" ? gewichtsklasse.max : null;
+                    const roodBovenMax = maxGewicht !== null && liveRood !== null && liveRood > maxGewicht + WEIGHT_UPPER_TOLERANCE + 0.00001;
+                    const blauwBovenMax = maxGewicht !== null && liveBlauw !== null && liveBlauw > maxGewicht + WEIGHT_UPPER_TOLERANCE + 0.00001;
                     const evalResult = getLiveEval(row, draft, rows, drafts);
                     const chip = statusChipFromRowOrEval(
                       row,
@@ -3271,7 +3275,7 @@ export default function WeegstationDetailPage() {
                           </div>
                         </td>
                         <td className="px-2 py-2 font-bold text-white/88">
-                          {fmtCompact(row.max_gewicht)}
+                          {gewichtsklasse.kind === "heavy" ? `${gewichtsklasse.threshold}+` : fmtCompact(row.max_gewicht)}
                         </td>
                         <td className={`px-2 py-2 font-bold ${roodBovenMax ? "text-red-400" : "text-white/92"}`} title={roodBovenMax ? "Gewicht boven het maximum" : undefined}>
                           {fmtCompact(liveRood)}
