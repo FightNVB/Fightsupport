@@ -92,15 +92,15 @@ export async function GET(req: NextRequest) {
     const isRfp = rows.some((row: any) => /(^|\\b)rfp(\\b|$)/i.test(safe(row.evenement_naam)));
 
     const contextIds = [...new Set(rows.map((row: any) => safe(row.bout_context_id)).filter(Boolean))];
-    const licentiePerContext = new Map<string, { rood: unknown; blauw: unknown }>();
+    const licentiePerContext = new Map<string, { rood: unknown; blauw: unknown; keurmerkRood: unknown; keurmerkBlauw: unknown }>();
     if (contextIds.length) {
       const { data: contexts, error: contextError } = await supabaseAdmin
         .from("controle_bout_context")
-        .select("id,rood_licentie,blauw_licentie")
+        .select("id,rood_licentie,blauw_licentie,keurmerk_rood,keurmerk_blauw")
         .in("id", contextIds);
       if (contextError) throw contextError;
       for (const ctx of contexts ?? []) {
-        licentiePerContext.set(ctx.id, { rood: ctx.rood_licentie, blauw: ctx.blauw_licentie });
+        licentiePerContext.set(ctx.id, { rood: ctx.rood_licentie, blauw: ctx.blauw_licentie, keurmerkRood: ctx.keurmerk_rood, keurmerkBlauw: ctx.keurmerk_blauw });
       }
     }
     const { data: licentieMeldingen, error: meldingenError } = await supabaseAdmin
@@ -200,19 +200,18 @@ export async function GET(req: NextRequest) {
           Number(m.partij_nr) === Number(source.partij_nr) &&
           /licent/i.test([m.rule_code, m.rule, m.boodschap].join(" "))
         );
-        const hasMelding = (naam: unknown) => meldingen.some((m: any) =>
+        const hasMelding = (naam: unknown, type: "licent" | "keurmerk") => meldingen.some((m: any) =>
+          [m.rule_code, m.rule, m.boodschap].some((value: unknown) => safe(value).toLowerCase().includes(type)) &&
           safe(naam).length > 0 && safe(m.boodschap).toLowerCase().includes(safe(naam).toLowerCase())
         );
-        if (ontbrekendeLicentie(ctx?.rood) || hasMelding(source.rood_naam)) {
-          for (const col of [4, 5, 6]) {
-            row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE0E0" } };
-          }
-        }
-        if (ontbrekendeLicentie(ctx?.blauw) || hasMelding(source.blauw_naam)) {
-          for (const col of [7, 8, 9]) {
-            row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE0E0" } };
-          }
-        }
+        const mark = (col: number) => {
+          row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE0E0" } };
+        };
+        // Naam = licentie; sportschool = keurmerk. VA blijft neutraal.
+        if (ontbrekendeLicentie(ctx?.rood) || hasMelding(source.rood_naam, "licent")) mark(4);
+        if (ontbrekendeLicentie(ctx?.blauw) || hasMelding(source.blauw_naam, "licent")) mark(7);
+        if (ctx?.keurmerkRood === false || hasMelding(source.rood_gym, "keurmerk")) mark(5);
+        if (ctx?.keurmerkBlauw === false || hasMelding(source.blauw_gym, "keurmerk")) mark(8);
       }
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
       for (const col of [6, 9]) row.getCell(col).numFmt = "0";
