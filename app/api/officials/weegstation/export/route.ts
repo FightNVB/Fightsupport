@@ -91,6 +91,26 @@ export async function GET(req: NextRequest) {
     const rows = data ?? [];
     const isRfp = rows.some((row: any) => /(^|\\b)rfp(\\b|$)/i.test(safe(row.evenement_naam)));
 
+    const contextIds = [...new Set(rows.map((row: any) => safe(row.bout_context_id)).filter(Boolean))];
+    const licentiePerContext = new Map<string, { rood: unknown; blauw: unknown }>();
+    if (contextIds.length) {
+      const { data: contexts, error: contextError } = await supabaseAdmin
+        .from("controle_bout_context")
+        .select("id,rood_licentie,blauw_licentie")
+        .in("id", contextIds);
+      if (contextError) throw contextError;
+      for (const ctx of contexts ?? []) {
+        licentiePerContext.set(ctx.id, { rood: ctx.rood_licentie, blauw: ctx.blauw_licentie });
+      }
+    }
+    const { data: licentieMeldingen, error: meldingenError } = await supabaseAdmin
+      .from("controle_resultaten")
+      .select("partij_nr,rule_code,rule,boodschap")
+      .eq("matchmaking_id", matchmakingId);
+    if (meldingenError) throw meldingenError;
+    const ontbrekendeLicentie = (value: unknown): boolean =>
+      ["nee", "false", "0", "ongeldig", "verlopen"].includes(safe(value).toLowerCase());
+
     const wb = new ExcelJS.Workbook();
     wb.creator = "FightSupport";
     wb.created = new Date();
@@ -173,6 +193,27 @@ export async function GET(req: NextRequest) {
         };
         cell.border = { bottom: { style: "hair", color: { argb: "FFD0D0D0" } } };
       });
+      const discipline = exportDiscipline(source, isRfp).trim().toLowerCase();
+      if (discipline !== "boksen") {
+        const ctx = licentiePerContext.get(safe(source.bout_context_id));
+        const meldingen = (licentieMeldingen ?? []).filter((m: any) =>
+          Number(m.partij_nr) === Number(source.partij_nr) &&
+          /licent/i.test([m.rule_code, m.rule, m.boodschap].join(" "))
+        );
+        const hasMelding = (naam: unknown) => meldingen.some((m: any) =>
+          safe(naam).length > 0 && safe(m.boodschap).toLowerCase().includes(safe(naam).toLowerCase())
+        );
+        if (ontbrekendeLicentie(ctx?.rood) || hasMelding(source.rood_naam)) {
+          for (const col of [4, 5, 6]) {
+            row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE0E0" } };
+          }
+        }
+        if (ontbrekendeLicentie(ctx?.blauw) || hasMelding(source.blauw_naam)) {
+          for (const col of [7, 8, 9]) {
+            row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE0E0" } };
+          }
+        }
+      }
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
       for (const col of [6, 9]) row.getCell(col).numFmt = "0";
       for (const col of [10, 11, 12, 13]) row.getCell(col).numFmt = "0.0";
