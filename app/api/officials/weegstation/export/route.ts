@@ -150,6 +150,14 @@ export async function GET(req: NextRequest) {
       cell.border = { bottom: { style: "medium", color: { argb: "FFFF4D00" } } };
     });
 
+    // Hoekkleuren in de kopregel: inclusief de afzonderlijke weeggewichten.
+    for (const col of [4, 5, 6, 11]) {
+      header.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFB4232D" } };
+    }
+    for (const col of [7, 8, 9, 12]) {
+      header.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1766A3" } };
+    }
+
     for (const source of rows as any[]) {
       const minRood = Number(source.gewicht_strafpunt_rood ?? 0);
       const minBlauw = Number(source.gewicht_strafpunt_blauw ?? 0);
@@ -217,7 +225,21 @@ export async function GET(req: NextRequest) {
       for (const col of [6, 9]) row.getCell(col).numFmt = "0";
       for (const col of [10, 11, 12, 13]) row.getCell(col).numFmt = "0.0";
       if (minRood > 0 || minBlauw > 0) {
-        row.getCell(15).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFC22A19" } };
+        // Eén Minpunt-kolom, maar elke hoek krijgt zijn eigen tekstkleur.
+        const parts: Array<{ text: string; font: { name: string; size: number; bold: boolean; color: { argb: string } } }> = [];
+        if (minRood > 0) parts.push({
+          text: `Rood -${minRood}`,
+          font: { name: "Calibri", size: 11, bold: true, color: { argb: "FFB4232D" } },
+        });
+        if (minRood > 0 && minBlauw > 0) parts.push({
+          text: " | ",
+          font: { name: "Calibri", size: 11, bold: false, color: { argb: "FF666666" } },
+        });
+        if (minBlauw > 0) parts.push({
+          text: `Blauw -${minBlauw}`,
+          font: { name: "Calibri", size: 11, bold: true, color: { argb: "FF1766A3" } },
+        });
+        row.getCell(15).value = { richText: parts };
       }
       if (source.dispensatie_verleend) {
         row.getCell(16).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF187B41" } };
