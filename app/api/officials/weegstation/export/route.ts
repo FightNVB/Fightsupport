@@ -40,7 +40,7 @@ function excelVa(v: unknown): number | string {
   const value = safe(v);
   if (!value) return "";
   const parsed = Number(value);
-  return /^\\d+$/.test(value) && Number.isSafeInteger(parsed) ? parsed : value;
+  return /^\d+$/.test(value) && Number.isSafeInteger(parsed) ? parsed : value;
 }
 
 function exportDiscipline(source: any, rfp: boolean): string {
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
 
     if (error) throw error;
     const rows = data ?? [];
-    const isRfp = rows.some((row: any) => /(^|\\b)rfp(\\b|$)/i.test(safe(row.evenement_naam)));
+    const isRfp = rows.some((row: any) => /(^|\b)rfp(\b|$)/i.test(safe(row.evenement_naam)));
 
     const contextIds = [...new Set(rows.map((row: any) => safe(row.bout_context_id)).filter(Boolean))];
     const licentiePerContext = new Map<string, { rood: unknown; blauw: unknown; keurmerkRood: unknown; keurmerkBlauw: unknown }>();
@@ -132,10 +132,8 @@ export async function GET(req: NextRequest) {
       { header: "R.gew.", key: "roodGewogen", width: 12 },
       { header: "B.gew.", key: "blauwGewogen", width: 12 },
       { header: "Verschil", key: "verschil", width: 13 },
-      { header: "Status", key: "status", width: 24 },
       { header: "Minpunt", key: "minpunt", width: 23 },
       { header: "Dispensatie", key: "dispensatie", width: 23 },
-      { header: "Reden dispensatie", key: "dispensatieReden", width: 36 },
       { header: "Opmerking", key: "opmerking", width: 36 },
     ];
     ws.columns = columns;
@@ -179,14 +177,12 @@ export async function GET(req: NextRequest) {
         blauw: safe(source.blauw_naam),
         blauwGym: safe(source.blauw_gym),
         blauwVa: excelVa(source.blauw_va),
-        max: safe(source.max_gewicht_notatie) || (safe(source.max_gewicht_type).toLowerCase() === "open" && num(source.max_gewicht) === 95 ? "95+" : weight(source.max_gewicht)),
+        max: weight(source.max_gewicht),
         roodGewogen: weight(source.rood_gewogen_gewicht),
         blauwGewogen: weight(source.blauw_gewogen_gewicht),
         verschil: difference(source.rood_gewogen_gewicht, source.blauw_gewogen_gewicht),
         minpunt: [minRood > 0 ? `Rood -${minRood}` : "", minBlauw > 0 ? `Blauw -${minBlauw}` : ""].filter(Boolean).join(" | ") || "Nee",
         dispensatie: dispStatus,
-        dispensatieReden: reden,
-        status: safe(source.eindstatus || source.praktijk_status || source.reglement_status, "-"),
         opmerking: safe(source.weging_notitie),
       });
 
@@ -196,7 +192,7 @@ export async function GET(req: NextRequest) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: even ? "FFF0F0F0" : "FFFFFFFF" } };
         cell.alignment = {
           vertical: "middle",
-          horizontal: [1, 3, 6, 9, 10, 11, 12, 13, 15, 16].includes(col) ? "center" : "left",
+          horizontal: [1, 3, 6, 9, 10, 11, 12, 13, 14, 15].includes(col) ? "center" : "left",
           wrapText: true,
         };
         cell.border = { bottom: { style: "hair", color: { argb: "FFD0D0D0" } } };
@@ -231,13 +227,14 @@ export async function GET(req: NextRequest) {
       const isOpen95Plus = /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(gewichtNotatie) ||
         /(?:^|\D)95(?:[.,]0+)?\s*\+(?:\D|$)|\+\s*95(?:[.,]0+)?/i.test(klasseNotatie) ||
         (/^(open|heavy_open|above|plus)$/i.test(safe(source.max_gewicht_type)) && num(source.max_gewicht) === 95);
-      // De notatie in de bron is leidend: -95 = maximaal 95, 95+ = minimaal 95.
-      row.getCell(10).value = isOpen95Plus ? "95+" : gewichtNotatie || (num(source.max_gewicht) != null ? `-${num(source.max_gewicht)}` : "");
+      // Max blijft een echt getal; Excel toont de klasse via het nummerformaat.
+      // 95+ is een open minimum, -95 een bovengrens.
+      row.getCell(10).numFmt = isOpen95Plus ? '0.0"+"' : '"-"0.0';
       for (const col of ["K", "L"] as const) {
         const cellAddress = `${col}${row.number}`;
         const formula = isOpen95Plus
           ? `AND(ISNUMBER(${cellAddress}),${cellAddress}<95)`
-          : `AND(ISNUMBER(${cellAddress}),ISNUMBER(IFERROR(VALUE(SUBSTITUTE(J${row.number},"-","")),0)),${cellAddress}>IFERROR(VALUE(SUBSTITUTE(J${row.number},"-","")),0)+0.3+0.000001)`;
+          : `AND(ISNUMBER(${cellAddress}),ISNUMBER(J${row.number}),${cellAddress}>J${row.number}+0.3+0.000001)`;
         ws.addConditionalFormatting({
           ref: cellAddress,
           rules: [{
@@ -276,10 +273,10 @@ export async function GET(req: NextRequest) {
           text: `Blauw -${minBlauw}`,
           font: { name: "Calibri", size: 11, bold: true, color: { argb: "FF1766A3" } },
         });
-        row.getCell(15).value = { richText: parts };
+        row.getCell(14).value = { richText: parts };
       }
       if (source.dispensatie_verleend) {
-        row.getCell(16).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF187B41" } };
+        row.getCell(15).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF187B41" } };
       }
       row.height = 30;
     }
