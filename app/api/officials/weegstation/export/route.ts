@@ -36,6 +36,21 @@ function penalty(row: any) {
   return "Nee";
 }
 
+function excelVa(v: unknown): number | string {
+  const value = safe(v);
+  if (!value) return "";
+  const parsed = Number(value);
+  return /^\\d+$/.test(value) && Number.isSafeInteger(parsed) ? parsed : value;
+}
+
+function exportDiscipline(source: any, rfp: boolean): string {
+  const explicit = safe(source.discipline);
+  if (explicit) return explicit;
+  if (safe(source.klasse_mm).toUpperCase() === "BOKSEN") return "Boksen";
+  // RFP: bevestigd dat alle overige partijen Kickboksen zijn.
+  return rfp ? "Kickboksen" : "";
+}
+
 function cleanFilename(v: unknown) {
   return safe(v, "weegstation")
     .replace(/[^a-zA-Z0-9 _-]+/g, "")
@@ -74,6 +89,7 @@ export async function GET(req: NextRequest) {
 
     if (error) throw error;
     const rows = data ?? [];
+    const isRfp = rows.some((row: any) => /(^|\\b)rfp(\\b|$)/i.test(safe(row.evenement_naam)));
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "FightSupport";
@@ -127,14 +143,14 @@ export async function GET(req: NextRequest) {
             : "Geen";
       const row = ws.addRow({
         nr: source.partij_nr ?? "",
-        discipline: safe(source.discipline, String(source.klasse_mm ?? "").trim().toUpperCase() === "BOKSEN" ? "Boksen" : ""),
+        discipline: exportDiscipline(source, isRfp),
         klasse: safe(source.klasse_mm),
         rood: safe(source.rood_naam),
         roodGym: safe(source.rood_gym),
-        roodVa: safe(source.rood_va),
+        roodVa: excelVa(source.rood_va),
         blauw: safe(source.blauw_naam),
         blauwGym: safe(source.blauw_gym),
-        blauwVa: safe(source.blauw_va),
+        blauwVa: excelVa(source.blauw_va),
         max: weight(source.max_gewicht),
         roodGewogen: weight(source.rood_gewogen_gewicht),
         blauwGewogen: weight(source.blauw_gewogen_gewicht),
@@ -158,6 +174,7 @@ export async function GET(req: NextRequest) {
         cell.border = { bottom: { style: "hair", color: { argb: "FFD0D0D0" } } };
       });
       row.getCell(1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFF4D00" } };
+      for (const col of [6, 9]) row.getCell(col).numFmt = "0";
       for (const col of [10, 11, 12, 13]) row.getCell(col).numFmt = "0.0";
       if (minRood > 0 || minBlauw > 0) {
         row.getCell(15).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFC22A19" } };
