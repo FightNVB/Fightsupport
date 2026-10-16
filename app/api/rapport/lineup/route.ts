@@ -879,6 +879,25 @@ export async function GET(req: Request) {
     );
   }
 
+  // De ruwe matchmaking mist vaak leeftijden; gebruik de gevalideerde
+  // evenementleeftijden uit de controlecontext voor de rondetijden.
+  const { data: leeftijdContext, error: leeftijdError } = await supabase
+    .from("controle_bout_context")
+    .select("partij_nr,rood_leeftijd_event,blauw_leeftijd_event")
+    .eq("matchmaking_id", matchmaking_id);
+  if (leeftijdError) {
+    return NextResponse.json({ error: "Leeftijden voor rondetijden konden niet worden geladen." }, { status: 500 });
+  }
+  const leeftijdPerPartij = new Map<number, { rood: number | null; blauw: number | null }>();
+  for (const context of leeftijdContext ?? []) {
+    const partijNr = Number(context.partij_nr);
+    if (!Number.isFinite(partijNr)) continue;
+    leeftijdPerPartij.set(partijNr, {
+      rood: context.rood_leeftijd_event == null ? null : Number(context.rood_leeftijd_event),
+      blauw: context.blauw_leeftijd_event == null ? null : Number(context.blauw_leeftijd_event),
+    });
+  }
+
   const templatePath = path.join(
     process.cwd(),
     "public",
@@ -925,8 +944,8 @@ export async function GET(req: Request) {
     const rondes = getRondeTijden({
       discipline: b.discipline,
       klasse: b.klasse,
-      rood_leeftijd: getLeeftijdVoorRondetijd(b, "rood"),
-      blauw_leeftijd: getLeeftijdVoorRondetijd(b, "blauw"),
+      rood_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.rood ?? getLeeftijdVoorRondetijd(b, "rood"),
+      blauw_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.blauw ?? getLeeftijdVoorRondetijd(b, "blauw"),
       titelpartij,
     });
 
@@ -961,8 +980,8 @@ export async function GET(req: Request) {
       const rondes = getRondeTijden({
         discipline: b.discipline,
         klasse: b.klasse,
-        rood_leeftijd: getLeeftijdVoorRondetijd(b, "rood"),
-        blauw_leeftijd: getLeeftijdVoorRondetijd(b, "blauw"),
+        rood_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.rood ?? getLeeftijdVoorRondetijd(b, "rood"),
+        blauw_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.blauw ?? getLeeftijdVoorRondetijd(b, "blauw"),
         titelpartij,
       });
 
