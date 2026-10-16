@@ -883,18 +883,19 @@ export async function GET(req: Request) {
   // evenementleeftijden uit de controlecontext voor de rondetijden.
   const { data: leeftijdContext, error: leeftijdError } = await supabase
     .from("controle_bout_context")
-    .select("partij_nr,rood_leeftijd_event,blauw_leeftijd_event")
+    .select("partij_nr,discipline,klasse_mm,rood_leeftijd_event,blauw_leeftijd_event")
     .eq("matchmaking_id", matchmaking_id);
   if (leeftijdError) {
     return NextResponse.json({ error: "Leeftijden voor rondetijden konden niet worden geladen." }, { status: 500 });
   }
-  const leeftijdPerPartij = new Map<number, { rood: number | null; blauw: number | null }>();
+  const leeftijdPerPartij = new Map<number, { rood: number | null; blauw: number | null; discipline: string }>();
   for (const context of leeftijdContext ?? []) {
     const partijNr = Number(context.partij_nr);
     if (!Number.isFinite(partijNr)) continue;
     leeftijdPerPartij.set(partijNr, {
       rood: context.rood_leeftijd_event == null ? null : Number(context.rood_leeftijd_event),
       blauw: context.blauw_leeftijd_event == null ? null : Number(context.blauw_leeftijd_event),
+      discipline: String(context.discipline || (String(context.klasse_mm ?? "").trim().toUpperCase() === "BOKSEN" ? "Boksen" : "")).trim(),
     });
   }
 
@@ -942,7 +943,7 @@ export async function GET(req: Request) {
     const decision = rawRowDecision(b, decisions);
     const titelpartij = isTitelpartij(b);
     const rondes = getRondeTijden({
-      discipline: b.discipline,
+      discipline: b.discipline || leeftijdPerPartij.get(Number(b.partij_nr))?.discipline || "",
       klasse: b.klasse,
       rood_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.rood ?? getLeeftijdVoorRondetijd(b, "rood"),
       blauw_leeftijd: leeftijdPerPartij.get(Number(b.partij_nr))?.blauw ?? getLeeftijdVoorRondetijd(b, "blauw"),
@@ -951,7 +952,7 @@ export async function GET(req: Request) {
 
     setLineupCellValues(ws, rowNumber++, {
       partij_nr: b.partij_nr ?? "",
-      discipline: b.discipline,
+      discipline: b.discipline || leeftijdPerPartij.get(Number(b.partij_nr))?.discipline || "",
       klasse: b.klasse,
       rood_naam: b.rood_naam,
       rood_gym: b.rood_gym,
@@ -1003,7 +1004,7 @@ export async function GET(req: Request) {
 
         setLineupCellValues(ws, rowNumber++, {
           partij_nr: toernooiCode,
-          discipline: b.discipline,
+          discipline: b.discipline || leeftijdPerPartij.get(Number(b.partij_nr))?.discipline || "",
           klasse: b.klasse,
           rood_naam: fighter.naam,
           rood_gym: fighter.gym,
