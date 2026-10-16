@@ -44,7 +44,7 @@ export type WeighEvalResult = {
 
 const YOUTH_LOWER_OFFSET = 2.0;
 const ADULT_LOWER_OFFSET = 3.0;
-const UPPER_TOLERANCE = 0.2;
+const UPPER_TOLERANCE = 0.3;
 const HEAVY_OPEN_MIN = 95.0;
 
 const MMA_LIMITS: Array<{
@@ -198,7 +198,7 @@ function inferLeeftijdType(
   klasse: string | null | undefined,
 ): "jeugd" | "volwassene" {
   // J en J+ zijn jeugd. Alle andere klassen/codes (N, R, A, C, B, A enz.)
-  // vallen voor de weegmarge onder volwassenen: max - 3 kg t/m max + 0.2 kg.
+  // vallen voor de weegmarge onder volwassenen: max - 3 kg t/m max + 0.3 kg.
   if (isYouthClassCode(leeftijdType) || isYouthClassCode(klasse))
     return "jeugd";
   return "volwassene";
