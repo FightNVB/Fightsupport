@@ -90,6 +90,32 @@ export default function MatchmakingPublicationMenu({ matchmakingId, disabled = f
     catch { setError("Kopiëren mislukt. Open de link en kopieer hem vanuit de adresbalk."); }
   }
 
+  function printQrPoster() {
+    if (!publicUrl) return;
+    const qrSrc = `${window.location.origin}/api/public/qr-code?url=${encodeURIComponent(publicUrl)}`;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setError("Pop-up geblokkeerd. Sta pop-ups toe om de QR-poster af te drukken.");
+      return;
+    }
+    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] || char
+    );
+    printWindow.document.write(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>NVB openbare line-up QR-code</title>
+      <style>@page{size:A4;margin:14mm}body{font-family:Arial,Helvetica,sans-serif;color:#202020;margin:0;text-align:center}
+      .poster{min-height:255mm;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid #ff4d00;box-sizing:border-box;padding:20mm 12mm}
+      h1{font-size:42px;margin:0 0 14px;letter-spacing:1px}h2{font-size:26px;margin:0 0 34px}
+      img{width:110mm;height:110mm;object-fit:contain;image-rendering:pixelated}
+      p{font-size:18px;margin:26px 0 10px}small{font-size:11px;overflow-wrap:anywhere;max-width:100%}
+      @media print{.poster{break-inside:avoid}}</style></head><body>
+      <div class="poster"><h1>NVB</h1><h2>BEKIJK DE ACTUELE LINE-UP</h2>
+      <img id="qr" alt="QR-code openbare line-up" src="${escapeHtml(qrSrc)}">
+      <p>Scan deze QR-code met je telefoon</p><small>${escapeHtml(publicUrl)}</small></div>
+      <script>const qr=document.getElementById('qr');qr.onload=()=>{setTimeout(()=>window.print(),200)};qr.onerror=()=>{document.body.insertAdjacentHTML('beforeend','<p>QR-code kon niet worden geladen. Probeer opnieuw.</p>')};</script>
+      </body></html>`);
+    printWindow.document.close();
+  }
+
   const itemClass = "flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-white hover:bg-white/10 disabled:opacity-40";
   return (
     <div ref={menuRef} className="relative inline-block text-left">
@@ -111,6 +137,9 @@ export default function MatchmakingPublicationMenu({ matchmakingId, disabled = f
           </button>
           <button className={itemClass} disabled={!publicUrl} onClick={() => setQrOpen(v => !v)}>
             <QrCode size={15} /> {qrOpen ? "QR-code verbergen" : "QR-code tonen"}
+          </button>
+          <button className={itemClass} disabled={!publicUrl} onClick={printQrPoster}>
+            <QrCode size={15} /> QR-code afdrukken (A4)
           </button>
           {qrOpen && publicUrl && (
             <div className="mx-2 my-2 rounded bg-white p-3 text-center">
