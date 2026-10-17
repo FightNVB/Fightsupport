@@ -29,6 +29,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 import { authedDownload } from "@/lib/api/authedDownload";
 
+import MatchmakingPublicationMenu from "@/components/MatchmakingPublicationMenu";
 import NvbDarkButton from "@/components/NvbDarkButton";
 import NvbLightButton from "@/components/NvbLightButton";
 
@@ -4409,6 +4410,7 @@ export default function ControleMatchmakingPage() {
                   <span className="mr-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/55">
                     Rapportage
                   </span>
+                  <MatchmakingPublicationMenu matchmakingId={matchmakingId} disabled={!!headerBusy} />
                   <DarkActionButton
                     label={
                       headerBusy === "eindcontrole"
