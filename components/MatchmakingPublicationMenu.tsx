@@ -92,7 +92,7 @@ export default function MatchmakingPublicationMenu({ matchmakingId, disabled = f
           {qrOpen && publicUrl && (
             <div className="mx-2 my-2 rounded bg-white p-3 text-center">
               <img alt="QR-code voor openbare matchmaking" width={200} height={200} className="mx-auto"
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicUrl)}`} />
+                src={`/api/public/qr-code?url=${encodeURIComponent(publicUrl)}`} />
               <p className="mt-2 break-all text-[10px] text-zinc-700">{publicUrl}</p>
             </div>
           )}
