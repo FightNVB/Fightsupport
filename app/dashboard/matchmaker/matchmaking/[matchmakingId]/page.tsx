@@ -30,6 +30,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { authedFetch } from "@/lib/api/authedFetch";
 import { authedDownload } from "@/lib/api/authedDownload";
 
+import MatchmakingPublicationMenu from "@/components/MatchmakingPublicationMenu";
 import NvbDarkButton from "@/components/NvbDarkButton";
 import NvbLightButton from "@/components/NvbLightButton";
 
@@ -4393,24 +4394,7 @@ export default function ControleMatchmakingPage() {
                       }
                     />
 
-                    <DarkActionButton
-                      label={
-                        headerBusy === "public-publish_live"
-                          ? "Bezig..."
-                          : publication?.is_enabled
-                            ? "Update line-up"
-                            : "Publiceer line-up"
-                      }
-                      tone="green"
-                      icon={<Globe2 className="h-3.5 w-3.5" />}
-                      onClick={() => manageShareLink("publish_live")}
-                      disabled={lineupMode || !!headerBusy || rows.length === 0}
-                      title={
-                        publication?.is_enabled
-                          ? "Werk de bestaande openbare line-up bij met de huidige matchmaking."
-                          : "Publiceer de line-up en maak de openbare link actief."
-                      }
-                    />
+                    <MatchmakingPublicationMenu matchmakingId={matchmakingId} disabled={lineupMode || !!headerBusy || rows.length === 0} />
 
 
                   </div>
@@ -4470,37 +4454,6 @@ export default function ControleMatchmakingPage() {
                               ? "Niet tijdens lineup bouwen."
                               : "Open het Matchmaker eindrapport."
                           }
-                        />
-                      </div>
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="mb-2 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-100/60">
-                        Publicatie
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {publication?.is_enabled && publication?.public_token ? (
-                          <DarkActionButton
-                            label="Open line-up"
-                            tone="green"
-                            icon={<Globe2 className="h-3.5 w-3.5" />}
-                            onClick={() => openPublishedPage(publication.public_token)}
-                            disabled={lineupMode || !!headerBusy}
-                            title="Open de huidige openbare line-up zonder opnieuw te publiceren."
-                          />
-                        ) : null}
-
-                        <DarkActionButton
-                          label={headerBusy === "public-offline" ? "Bezig..." : "Offline"}
-                          tone="silver"
-                          icon={<Unlink className="h-3.5 w-3.5" />}
-                          onClick={() => manageShareLink("offline")}
-                          disabled={
-                            lineupMode ||
-                            !!headerBusy ||
-                            publication?.is_enabled !== true
-                          }
-                          title="Zet de line-up- en snapshotlink offline."
                         />
                       </div>
                     </div>
