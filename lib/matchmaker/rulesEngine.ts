@@ -284,9 +284,13 @@ function splitTokens(v: any): string[] {
     .filter((x) => x !== "el" && x !== "al" && x !== "de" && x !== "van");
 }
 
+function stripAgeSuffixFromFighterName(value: any): string {
+  return String(value ?? "").trim().replace(/\s+\d{1,2}\s*(?:jr\.?|jaar|years?\s*old|yo)\s*$/i, "").trim();
+}
+
 function nameSimilar(aRaw: any, bRaw: any): boolean {
-  const aTokens = splitTokens(aRaw);
-  const bTokens = splitTokens(bRaw);
+  const aTokens = splitTokens(stripAgeSuffixFromFighterName(aRaw));
+  const bTokens = splitTokens(stripAgeSuffixFromFighterName(bRaw));
 
   if (!aTokens.length || !bTokens.length) return true;
 
