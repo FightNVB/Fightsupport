@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Globe2, QrCode, Copy, ExternalLink } from "lucide-react";
 import { authedFetch } from "@/lib/api/authedFetch";
 
@@ -15,6 +15,7 @@ export default function MatchmakingPublicationMenu({ matchmakingId, disabled = f
   matchmakingId: string;
   disabled?: boolean;
 }) {
+  const menuRef = useRef<HTMLDivElement>(null);
   const [publication, setPublication] = useState<Publication | null>(null);
   const [open, setOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
@@ -34,6 +35,28 @@ export default function MatchmakingPublicationMenu({ matchmakingId, disabled = f
       .catch(e => { if (!cancelled) setError(String(e?.message ?? e)); });
     return () => { cancelled = true; };
   }, [matchmakingId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false);
+        setQrOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        setQrOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   const urlFor = (token: string | null | undefined) =>
     token ? `${window.location.origin}/openbare-matchmaking/${encodeURIComponent(token)}` : "";
@@ -69,8 +92,8 @@ export default function MatchmakingPublicationMenu({ matchmakingId, disabled = f
 
   const itemClass = "flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-white hover:bg-white/10 disabled:opacity-40";
   return (
-    <div className="relative inline-block text-left">
-      <button type="button" onClick={() => setOpen(v => !v)} disabled={disabled || busy}
+    <div ref={menuRef} className="relative inline-block text-left">
+      <button type="button" onClick={() => { setOpen(v => !v); setQrOpen(false); }} disabled={disabled || busy}
         aria-expanded={open} className="inline-flex items-center gap-2 rounded border border-orange-500/50 bg-orange-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">
         <Globe2 size={15} /> Publiceren <ChevronDown size={14} />
       </button>
