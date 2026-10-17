@@ -19,7 +19,7 @@ function s(value: unknown) {
 async function requireAllowedUser(req: NextRequest) {
   const user = await requireUserFromAuthHeader(req);
   const role = s(user.role).toLowerCase();
-  if (!role.includes("matchmaker") && !role.includes("admin") && !role.includes("superadmin")) {
+  if (!role.includes("matchmaker") && !role.includes("admin") && !role.includes("superadmin") && !role.includes("official") && !role.includes("hoofdofficial")) {
     throw new Error("FORBIDDEN");
   }
   return user;
