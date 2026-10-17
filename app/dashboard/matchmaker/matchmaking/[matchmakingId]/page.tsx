@@ -4107,7 +4107,7 @@ export default function ControleMatchmakingPage() {
 
       if (s === "verbod") verbod++;
       else if (s === "ok") ok++;
-      if (geenInfoByPartij[pn]) geen++;
+      if (geenInfoByPartij[pn] && !isGeenTegenstander(r)) geen++;
 
       if (verbodByPartij[pn] && s !== "verbod") verbod++;
       if (hasAfkeurByPartij[pn]) afk++;
@@ -4165,7 +4165,7 @@ export default function ControleMatchmakingPage() {
 
       if (s === "verbod") verbod++;
       else if (s === "ok") ok++;
-      if (geenInfoByPartij[pn]) geen++;
+      if (geenInfoByPartij[pn] && !isGeenTegenstander(r)) geen++;
 
       if (verbodByPartij[pn] && s !== "verbod") verbod++;
       if (hasAfkeurByPartij[pn]) afk++;
@@ -4215,7 +4215,7 @@ export default function ControleMatchmakingPage() {
       if (filter === "geen_licentie") return !!missingLicentieByPartij[pn];
       if (filter === "afgekeurd") return !!hasAfkeurByPartij[pn];
       if (filter === "actie") return !!hasActieByPartij[pn];
-      if (filter === "geen_info") return !!geenInfoByPartij[pn];
+      if (filter === "geen_info") return !!geenInfoByPartij[pn] && !isGeenTegenstander(r);
       if (filter !== "all") {
         const s = statusByPartij[pn] ?? "geen_info";
         if (s !== filter) return false;
