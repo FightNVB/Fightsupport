@@ -2053,10 +2053,10 @@ function isToernooiRowText(s: string): boolean {
 
 function tryParseTwoProgramVaSheet(sheet: SheetLike, sheetName: string | null): ParsedBout[] | null {
   const header = sheet.getRow(1);
-  if (!/^nr\\.?$/i.test(cellTextLike(header.getCell(1)).trim()) ||
-      !/va\\s*nr\\.?/i.test(cellTextLike(header.getCell(2))) ||
+  if (!/^nr\.?$/i.test(cellTextLike(header.getCell(1)).trim()) ||
+      !/va\s*nr\.?/i.test(cellTextLike(header.getCell(2))) ||
       !/^name$/i.test(cellTextLike(header.getCell(3)).trim()) ||
-      !/va\\s*nr\\.?/i.test(cellTextLike(header.getCell(8))) ||
+      !/va\s*nr\.?/i.test(cellTextLike(header.getCell(8))) ||
       !/^name$/i.test(cellTextLike(header.getCell(9)).trim())) return null;
   const bouts: ParsedBout[] = [];
   let program = "jeugd";
@@ -2064,8 +2064,8 @@ function tryParseTwoProgramVaSheet(sheet: SheetLike, sheetName: string | null): 
     const row = sheet.getRow(r);
     const texts = Array.from({ length: 14 }, (_, i) => cellTextLike(row.getCell(i + 1)));
     const joined = texts.join(" ");
-    if (/volwassen\\s*programma|volwassenprogramma/i.test(joined)) { program = "volwassen"; continue; }
-    if (/pauze|\\bbreak\\b/i.test(joined)) continue;
+    if (/volwassen\s*programma|volwassenprogramma/i.test(joined)) { program = "volwassen"; continue; }
+    if (/pauze|\bbreak\b/i.test(joined)) continue;
     const nr = Number(texts[0]);
     if (!Number.isInteger(nr) || nr < 1 || !texts[2]) continue;
     const bout = makeEmptyBout();
@@ -2081,7 +2081,7 @@ function tryParseTwoProgramVaSheet(sheet: SheetLike, sheetName: string | null): 
     bout.record_blauw_w = Number.isFinite(Number(texts[10])) ? Number(texts[10]) : 0;
     bout.klasse = texts[12] || null;
     const style = texts.slice(12, 14).join(" ").toLowerCase();
-    bout.discipline = /\\b(amateur|amatuer|pro)\\b/i.test(style) ? "MMA" : "Kickboksen";
+    bout.discipline = /\b(amateur|amatuer|pro)\b/i.test(style) ? "MMA" : "Kickboksen";
     const weightMeta = parseAgreedWeightMeta(row.getCell(14).value ?? texts[13]);
     applyAgreedWeightMeta(bout, "max", weightMeta);
     normalizeOpenOpponentCorner(bout);
