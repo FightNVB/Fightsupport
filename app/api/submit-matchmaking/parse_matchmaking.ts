@@ -2050,6 +2050,44 @@ function isToernooiRowText(s: string): boolean {
   return t.includes("toernooi");
 }
 
+
+function tryParseTwoProgramVaSheet(sheet: SheetLike, sheetName: string | null): ParsedBout[] | null {
+  const header = sheet.getRow(1);
+  if (!/^nr\\.?$/i.test(cellTextLike(header.getCell(1)).trim()) ||
+      !/va\\s*nr\\.?/i.test(cellTextLike(header.getCell(2))) ||
+      !/^name$/i.test(cellTextLike(header.getCell(3)).trim()) ||
+      !/va\\s*nr\\.?/i.test(cellTextLike(header.getCell(8))) ||
+      !/^name$/i.test(cellTextLike(header.getCell(9)).trim())) return null;
+  const bouts: ParsedBout[] = [];
+  let program = "jeugd";
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const row = sheet.getRow(r);
+    const texts = Array.from({ length: 14 }, (_, i) => cellTextLike(row.getCell(i + 1)));
+    const joined = texts.join(" ");
+    if (/volwassen\\s*programma|volwassenprogramma/i.test(joined)) { program = "volwassen"; continue; }
+    if (/pauze|\\bbreak\\b/i.test(joined)) continue;
+    const nr = Number(texts[0]);
+    if (!Number.isInteger(nr) || nr < 1 || !texts[2]) continue;
+    const bout = makeEmptyBout();
+    bout.partij_nr = bouts.length + 1; // Uniek, ook als het tweede programma opnieuw bij 1 begint.
+    bout.extra = { sheet_name: sheetName, programma: program, origineel_partij_nr: nr, excel_rij: r };
+    bout.rood_naam = texts[2];
+    bout.va_rood = extractVA(texts[1]);
+    bout.rood_gym = texts[5] || null;
+    bout.blauw_naam = texts[8] || null;
+    bout.va_blauw = extractVA(texts[7]);
+    bout.blauw_gym = texts[11] || null;
+    bout.klasse = texts[12] || null;
+    const style = texts.slice(12, 14).join(" ").toLowerCase();
+    bout.discipline = /\\b(amateur|amatuer|pro)\\b/i.test(style) ? "MMA" : "Kickboksen";
+    const weightMeta = parseAgreedWeightMeta(row.getCell(14).value ?? texts[13]);
+    applyAgreedWeightMeta(bout, "max", weightMeta);
+    normalizeOpenOpponentCorner(bout);
+    bouts.push(bout);
+  }
+  return bouts.length ? bouts : null;
+}
+
 export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[]> {
   try {
     const templ = await tryParseAdminTemplate(fileBuffer);
@@ -2104,6 +2142,9 @@ export async function parseExcelToBouts(fileBuffer: Buffer): Promise<ParsedBout[
   }
 
   if (!sheet || sheet.rowCount === 0) return [];
+
+  const twoProgram = tryParseTwoProgramVaSheet(sheet, selectedSheetName);
+  if (twoProgram) return twoProgram;
 
   const vaOnly = tryParseVaOnlyPairs(sheet);
   if (vaOnly) {
