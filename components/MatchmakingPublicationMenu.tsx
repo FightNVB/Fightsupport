@@ -104,11 +104,11 @@ export default function MatchmakingPublicationMenu({ matchmakingId, disabled = f
     printWindow.document.write(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>NVB openbare line-up QR-code</title>
       <style>@page{size:A4;margin:14mm}body{font-family:Arial,Helvetica,sans-serif;color:#202020;margin:0;text-align:center}
       .poster{min-height:255mm;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid #ff4d00;box-sizing:border-box;padding:20mm 12mm}
-      h1{font-size:42px;margin:0 0 14px;letter-spacing:1px}h2{font-size:26px;margin:0 0 34px}
+      .hero{width:100%;height:65mm;object-fit:cover;object-position:center 53%;margin-bottom:16mm}h2{font-size:26px;margin:0 0 25px}
       img{width:110mm;height:110mm;object-fit:contain;image-rendering:pixelated}
       p{font-size:18px;margin:26px 0 10px}small{font-size:11px;overflow-wrap:anywhere;max-width:100%}
       @media print{.poster{break-inside:avoid}}</style></head><body>
-      <div class="poster"><h1>NVB</h1><h2>BEKIJK DE ACTUELE LINE-UP</h2>
+      <div class="poster"><img class="hero" src="/branding/fightsupport/matchmaking.png" alt="Boksring"><h2>BEKIJK DE ACTUELE LINE-UP</h2>
       <img id="qr" alt="QR-code openbare line-up" src="${escapeHtml(qrSrc)}">
       <p>Scan deze QR-code met je telefoon</p><small>${escapeHtml(publicUrl)}</small></div>
       <script>const qr=document.getElementById('qr');qr.onload=()=>{setTimeout(()=>window.print(),200)};qr.onerror=()=>{document.body.insertAdjacentHTML('beforeend','<p>QR-code kon niet worden geladen. Probeer opnieuw.</p>')};</script>
