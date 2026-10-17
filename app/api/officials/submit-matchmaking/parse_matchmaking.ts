@@ -2074,9 +2074,11 @@ function tryParseTwoProgramVaSheet(sheet: SheetLike, sheetName: string | null): 
     bout.rood_naam = texts[2];
     bout.va_rood = extractVA(texts[1]);
     bout.rood_gym = texts[5] || null;
+    bout.record_rood_w = Number.isFinite(Number(texts[4])) ? Number(texts[4]) : 0;
     bout.blauw_naam = texts[8] || null;
     bout.va_blauw = extractVA(texts[7]);
     bout.blauw_gym = texts[11] || null;
+    bout.record_blauw_w = Number.isFinite(Number(texts[10])) ? Number(texts[10]) : 0;
     bout.klasse = texts[12] || null;
     const style = texts.slice(12, 14).join(" ").toLowerCase();
     bout.discipline = /\\b(amateur|amatuer|pro)\\b/i.test(style) ? "MMA" : "Kickboksen";
