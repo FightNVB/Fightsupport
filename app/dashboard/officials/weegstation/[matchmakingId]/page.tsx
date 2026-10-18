@@ -1408,7 +1408,7 @@ export default function WeegstationDetailPage() {
 
   const isHoofdofficialOrSuperadmin = useMemo(
     () =>
-      roleNames.includes("hoofdofficial") || roleNames.includes("superadmin"),
+      roleNames.includes("official") || roleNames.includes("hoofdofficial") || roleNames.includes("superadmin"),
     [roleNames],
   );
 
