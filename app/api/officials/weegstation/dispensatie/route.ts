@@ -11,7 +11,7 @@ function canDecideDispensation(ctx: {
   if (ctx.isHoofdofficialLike) return true;
 
   const names = (ctx.roleNames ?? []).map((x) => String(x).trim().toLowerCase());
-  return names.includes("hoofdofficial") || names.includes("superadmin");
+  return names.includes("official") || names.includes("hoofdofficial") || names.includes("superadmin");
 }
 
 export async function POST(req: Request) {
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            "Alleen hoofdofficial of superadmin mag gewicht-dispensaties behandelen.",
+            "Alleen officials of superadmin mogen gewicht-dispensaties behandelen.",
         },
         { status: 403 }
       );
