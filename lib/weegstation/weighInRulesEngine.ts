@@ -746,14 +746,14 @@ export function evaluateWeighInBout(
     return {
       leeftijdType,
       diff,
-      reglementStatus: "AFKEUR",
-      praktijkStatus: "AFKEUR",
-      eindStatus: "AFKEUR",
-      dispensatieNodig: false,
-      dispensatieMogelijk: false,
+      reglementStatus: "AFWIJKING_DIFF",
+      praktijkStatus: "DISPENSATIE_NODIG",
+      eindStatus: input.dispensatie_verleend ? "GOEDGEKEURD_MET_DISPENSATIE" : "DISPENSATIE_NODIG",
+      dispensatieNodig: true,
+      dispensatieMogelijk: true,
       messages: [
         ...messages,
-        "MMA: verschil groter dan 4.0 kg, partij kan niet doorgaan.",
+        "MMA: verschil groter dan 4.0 kg; official moet gewicht-dispensatie beoordelen.",
       ],
       effectiveMaxGewicht: effectiveMaxInfo.value,
       minToelaatbaarGewicht,
@@ -769,16 +769,14 @@ export function evaluateWeighInBout(
       teZwaarBlauw,
       hasAnyOffWeight,
       canProceedWithPenalty: false,
-      adminSanctieNodig: true,
-      adminSanctieReason: "MMA-gewichtsverschil te groot.",
+      adminSanctieNodig: false,
+      adminSanctieReason: null,
       isHeavyweightOpen,
       isMma,
     };
   }
 
   const okMax = leeftijdType === "jeugd" ? 2.5 : 3.5;
-  const dispMax = leeftijdType === "jeugd" ? 3.9 : 6.9;
-  const rejectFrom = leeftijdType === "jeugd" ? 4.0 : 7.0;
 
   if (isHeavyweightOpen) {
     return {
@@ -814,40 +812,6 @@ export function evaluateWeighInBout(
       canProceedWithPenalty: hasAnyOffWeight,
       adminSanctieNodig: false,
       adminSanctieReason: null,
-      isHeavyweightOpen,
-      isMma,
-    };
-  }
-
-  if (diff >= rejectFrom) {
-    const adminSanctieReason =
-      "Partij kan niet doorgaan: gewichtsverschil te groot. Admin moet administratieve sanctie beoordelen.";
-
-    return {
-      leeftijdType,
-      diff,
-      reglementStatus: "AFKEUR",
-      praktijkStatus: "AFKEUR",
-      eindStatus: "AFKEUR",
-      dispensatieNodig: false,
-      dispensatieMogelijk: false,
-      messages: [...messages, adminSanctieReason],
-      effectiveMaxGewicht: effectiveMaxInfo.value,
-      minToelaatbaarGewicht,
-      maxToelaatbaarGewicht,
-      maxSource: effectiveMaxInfo.source,
-      withinRangeRood,
-      withinRangeBlauw,
-      nietOpGewichtRood,
-      nietOpGewichtBlauw,
-      teLichtRood,
-      teLichtBlauw,
-      teZwaarRood,
-      teZwaarBlauw,
-      hasAnyOffWeight,
-      canProceedWithPenalty: false,
-      adminSanctieNodig: true,
-      adminSanctieReason,
       isHeavyweightOpen,
       isMma,
     };
@@ -892,7 +856,7 @@ export function evaluateWeighInBout(
     };
   }
 
-  if (diff <= dispMax) {
+  if (diff > okMax) {
     return {
       leeftijdType,
       diff,
@@ -905,7 +869,7 @@ export function evaluateWeighInBout(
       dispensatieMogelijk: true,
       messages: [
         ...messages,
-        `Gewichtsverschil vraagt dispensatie (${okMax.toFixed(1)} t/m ${dispMax.toFixed(1)} kg).`,
+        `Gewichtsverschil boven normale marge (${okMax.toFixed(1)} kg); official beoordeelt zonder automatische dispensatie-bovengrens.`,
         ...(hasAnyOffWeight
           ? ["Niet-op-gewicht kan daarnaast ook een minpunt opleveren."]
           : []),
