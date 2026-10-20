@@ -1902,7 +1902,7 @@ async function saveFighter(all) {
     berekende_klasse: classification.berekende_klasse,
     mma_level: classification.mma_level,
     primary_discipline: classification.primary_discipline,
-    raw_summary: all.summary, raw_details: d,
+    raw_summary: all.summary, raw_details: { ...d, sportscholen_actueel: Array.isArray(all.gyms) ? all.gyms : [] },
     last_seen_at: now, last_scraped_at: now, updated_at: now,
   };
   const { error } = await supabase.from("fightpassport_fighters").upsert(payload, { onConflict: "va_nummer" });
