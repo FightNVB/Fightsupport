@@ -1008,7 +1008,7 @@ async function readDetailsModal(page) {
     const inputs = [...visibleModal.querySelectorAll("input, select, textarea")];
 
     const byClass = (cls) => {
-      const el = visibleModal.querySelector(cls);
+      const el = visibleModal.querySelector(cls) || document.querySelector(cls);
       if (!el) return null;
       if (el.tagName === "SELECT") return el.options?.[el.selectedIndex]?.textContent?.trim() || el.value || null;
       return String(el.value ?? "").trim() || null;
@@ -2016,7 +2016,7 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
     while (Date.now() - detailsWaitStartedAt < 10000) {
       throwIfAborted(signal, va);
       lastScraped = await readDetailsModal(p).catch(() => null);
-      if (detailsScrapeSucceeded(lastScraped)) return lastScraped;
+      if (detailsScrapeSucceeded(lastScraped)) {\n        // De nulmeting wordt soms later gevuld dan de overige DETAILS-velden.\n        // Wacht kort op het echte gewichtveld voordat we de snapshot afronden.\n        if (!lastScraped?.nulmeting?.gewicht) {\n          await p.waitForFunction(() => {\n            const field = document.querySelector("input.dfva_nulmeting_gewicht");\n            return !!field && String(field.value || "").trim() !== "";\n          }, { timeout: 1800 }).catch(() => {});\n          const refreshed = await readDetailsModal(p).catch(() => null);\n          if (refreshed && detailsScrapeSucceeded(refreshed)) lastScraped = refreshed;\n        }\n        return lastScraped;\n      }
       await sleep(100);
     }
 
