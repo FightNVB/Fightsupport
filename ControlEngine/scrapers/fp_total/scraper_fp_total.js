@@ -1217,7 +1217,14 @@ async function readCurrentSportschool(page, va, signal = null) {
     };
 
     const candidates = [];
-    for (const table of [...document.querySelectorAll("table")].filter(visible)) {
+    const isSchoolTable = (table) => {
+      const header = [...table.querySelectorAll("thead th, tr:first-child th, tr:first-child td")]
+        .map((cell) => clean(cell.textContent).toLowerCase()).join(" | ");
+      return /organisatie|sportschool/.test(header) &&
+        /plaats|stad/.test(header) && /land/.test(header) &&
+        !/evenement|uitslag|tegenstander/.test(header);
+    };
+    for (const table of [...document.querySelectorAll("table")].filter((table) => visible(table) && isSchoolTable(table))) {
       const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
         .filter((row) => !row.classList.contains("filler"));
 
@@ -1229,7 +1236,10 @@ async function readCurrentSportschool(page, va, signal = null) {
         const plaats = clean(cells[2]?.textContent);
         const land = clean(cells[cells.length - 2]?.textContent);
 
-        if (!sportschool || !land) continue;
+        if (!sportschool || !land || !plaats) continue;
+        if (/^(evenement|uitslag|sportschool|organisatie|naam|datum|tegenstander)$/i.test(sportschool)) continue;
+        if (/^(uitslag|evenement|plaats|stad)$/i.test(plaats)) continue;
+        if (/^(sportschool|organisatie|land|uitslag)$/i.test(land)) continue;
         if (/^organisatie\s*naam$/i.test(sportschool)) continue;
         if (/^land$/i.test(land)) continue;
 
@@ -1253,6 +1263,7 @@ async function readCurrentSportschool(page, va, signal = null) {
     await sleep(350);
   }
 
+  if (!state?.ok) throw new Error(`SPORTSCHOLEN-tabel niet geldig geladen voor VA ${va}`);
   return state;
 }
 
