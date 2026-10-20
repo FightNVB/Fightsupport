@@ -2113,7 +2113,8 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
   } catch (error) {
     const message = error?.message ?? String(error);
     if (message === "LOGIN_PAGE" || message === "SCRAPE_ABORTED") throw error;
-    console.log(`[fp-total] ⚠️ VA ${va} SPORTSCHOLEN niet gelezen: ${message}`);
+    console.log(`[fp-total] ⚠️ VA ${va} SPORTSCHOLEN niet gelezen; VA gaat achteraan: ${message}`);
+    throw new Error(`SPORTSCHOLEN niet volledig gelezen voor VA ${va}: ${message}`);
   }
 
   // Alles van deze VA zit nu in geheugen/downloadbestand. Sluit de URL/tab meteen;
