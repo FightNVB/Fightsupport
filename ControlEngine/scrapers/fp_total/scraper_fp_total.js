@@ -1191,6 +1191,80 @@ async function scrapeTileTable(page, va, title) {
   return rows;
 }
 
+async function readCurrentSportschool(page, va, signal = null) {
+  throwIfAborted(signal, va);
+  const opened = await clickTile(page, va, "SPORTSCHOLEN");
+  if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
+
+  await sleep(400);
+  throwIfAborted(signal, va);
+
+  const state = await page.evaluate(() => {
+    const clean = (value) => String(value || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const visible = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      return r.width > 200 && r.height > 30 && st.display !== "none" && st.visibility !== "hidden";
+    };
+
+    const candidates = [];
+    for (const table of [...document.querySelectorAll("table")].filter(visible)) {
+      const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
+        .filter((row) => !row.classList.contains("filler"));
+
+      for (const row of rows) {
+        const cells = [...row.querySelectorAll("td")];
+        if (cells.length < 4) continue;
+
+        const sportschool = clean(cells[1]?.textContent);
+        const plaats = clean(cells[2]?.textContent);
+        const land = clean(cells[cells.length - 2]?.textContent);
+
+        if (!sportschool || !land) continue;
+        if (/^organisatie\s*naam$/i.test(sportschool)) continue;
+        if (/^land$/i.test(land)) continue;
+
+        candidates.push({
+          sportschool,
+          plaats,
+          land,
+          keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(
+            String(row.innerHTML || "")
+          ),
+        });
+      }
+    }
+
+    return candidates.length
+      ? { ok: true, ...candidates[candidates.length - 1] }
+      : { ok: false };
+  }).catch(() => ({ ok: false }));
+
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(100);
+
+  if (!state?.ok) {
+    throw new Error(`Sportschooltabel niet compleet voor VA ${va}`);
+  }
+  return state;
+}
+
+function calculateKeurmerkOk(land, shield) {
+  const normalizedLand = String(land ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  if (normalizedLand !== "nederland") return true;
+  return shield === true;
+}
+
 function val(obj, names) {
   for (const [k, v] of Object.entries(obj || {})) {
     const nk = String(k).toLowerCase().replace(/\s+/g, " ").trim();
@@ -2013,6 +2087,20 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
       results = [];
       resultsDownload = null;
     }
+  }
+
+  // SPORTSCHOLEN: exact dezelfde tegeluitlezing als de Admin-scraper.
+  // Een mislukte uitlezing mag geen bestaande actuele sportschool overschrijven.
+  try {
+    throwIfAborted(signal, va);
+    await closeAnyModal(currentPage).catch(() => {});
+    const currentSchool = await readCurrentSportschool(currentPage, va, signal);
+    gyms.push(currentSchool);
+    console.log(`[fp-total] 🏫 VA ${va} SPORTSCHOLEN: ${currentSchool.sportschool} | ${currentSchool.land}`);
+  } catch (error) {
+    const message = error?.message ?? String(error);
+    if (message === "LOGIN_PAGE" || message === "SCRAPE_ABORTED") throw error;
+    console.log(`[fp-total] ⚠️ VA ${va} SPORTSCHOLEN niet gelezen: ${message}`);
   }
 
   // Alles van deze VA zit nu in geheugen/downloadbestand. Sluit de URL/tab meteen;
