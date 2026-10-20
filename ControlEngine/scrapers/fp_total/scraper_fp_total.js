@@ -1210,75 +1210,59 @@ async function readCurrentSportschool(page, va, signal = null) {
   const opened = await clickTile(page, va, "SPORTSCHOLEN");
   if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
 
-  // FightPassport vult de SPORTSCHOLEN-tabel asynchroon.
-  // Wacht kort op echte tabelinhoud; maximaal 2 seconden, zonder vaste vertraging.
-  const deadline = Date.now() + 2000;
-  let state = { ok: false };
+  // FightPassport laadt de tabel asynchroon. De laatste (onderste) rij is
+  // de actuele sportschool, ook wanneer de vechter nog op oude Excel-lijsten staat.
+  // Gebruik kolomkoppen in plaats van vaste celposities: sommige tabellen hebben
+  // een extra, niet-benoemde kolom achter 'Land' (bijv. 'Gym').
+  const deadline = Date.now() + 8000;
+  let state = { ok: false, reason: "nog geen geldige sportschoolrij" };
   while (Date.now() < deadline) {
     throwIfAborted(signal, va);
     if (await isLoginPage(page)) throw new Error("LOGIN_PAGE");
     state = await page.evaluate(() => {
-    const clean = (value) => String(value || "")
-      .replace(/\u00a0/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const visible = (el) => {
-      if (!el) return false;
-      const r = el.getBoundingClientRect();
-      const st = getComputedStyle(el);
-      return r.width > 200 && r.height > 30 && st.display !== "none" && st.visibility !== "hidden";
-    };
-
-    const candidates = [];
-    const isSchoolTable = (table) => {
-      const header = [...table.querySelectorAll("thead th, tr:first-child th, tr:first-child td")]
-        .map((cell) => clean(cell.textContent).toLowerCase()).join(" | ");
-      return /organisatie|sportschool/.test(header) &&
-        /plaats|stad/.test(header) && /land/.test(header) &&
-        !/evenement|uitslag|tegenstander/.test(header);
-    };
-    for (const table of [...document.querySelectorAll("table")].filter((table) => visible(table) && isSchoolTable(table))) {
-      const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
-        .filter((row) => !row.classList.contains("filler"));
-
-      for (const row of rows) {
-        const cells = [...row.querySelectorAll("td")];
-        if (cells.length < 4) continue;
-
-        const sportschool = clean(cells[1]?.textContent);
-        const plaats = clean(cells[2]?.textContent);
-        const land = clean(cells[cells.length - 2]?.textContent);
-
-        if (!sportschool || !land || !plaats) continue;
-        if (/^(evenement|uitslag|sportschool|organisatie|naam|datum|tegenstander)$/i.test(sportschool)) continue;
-        if (/^(uitslag|evenement|plaats|stad)$/i.test(plaats)) continue;
-        if (/^(sportschool|organisatie|land|uitslag)$/i.test(land)) continue;
-        if (/^organisatie\s*naam$/i.test(sportschool)) continue;
-        if (/^land$/i.test(land)) continue;
-
-        candidates.push({
-          sportschool,
-          plaats,
-          land,
-          keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(
-            String(row.innerHTML || "")
-          ),
-        });
+      const clean = (value) => String(value ?? "")
+        .replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+      const visible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 200 && rect.height > 30 &&
+          style.display !== "none" && style.visibility !== "hidden";
+      };
+      const candidates = [];
+      for (const table of document.querySelectorAll("table")) {
+        if (!visible(table)) continue;
+        const headerRow = table.querySelector("thead tr") || table.querySelector("tr");
+        if (!headerRow) continue;
+        const headers = [...headerRow.children].map(cell => clean(cell.textContent).toLowerCase());
+        const nameIndex = headers.findIndex(h => /organisatie\s*naam|sportschool/.test(h));
+        const placeIndex = headers.findIndex(h => /^(plaats|stad)$/.test(h));
+        const countryIndex = headers.findIndex(h => /^land$/.test(h));
+        if (nameIndex < 0 || placeIndex < 0 || countryIndex < 0) continue;
+        for (const row of table.querySelectorAll("tr")) {
+          if (row === headerRow || row.classList.contains("filler")) continue;
+          const cells = [...row.querySelectorAll("td")];
+          if (cells.length <= Math.max(nameIndex, placeIndex, countryIndex)) continue;
+          const sportschool = clean(cells[nameIndex]?.textContent);
+          const plaats = clean(cells[placeIndex]?.textContent);
+          const land = clean(cells[countryIndex]?.textContent);
+          if (!sportschool || !plaats || !land) continue;
+          if (/^(organisatie\s*naam|sportschool|naam)$/i.test(sportschool) ||
+              /^(plaats|stad)$/i.test(plaats) || /^land$/i.test(land)) continue;
+          candidates.push({
+            sportschool, plaats, land,
+            keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || ""))
+          });
+        }
       }
-    }
-
-    return candidates.length
-      ? { ok: true, ...candidates[candidates.length - 1] }
-      : { ok: false };
-  }).catch(() => ({ ok: false }));
-
-    if (state?.ok) break;
+      return candidates.length
+        ? { ok: true, ...candidates[candidates.length - 1] }
+        : { ok: false, reason: "geen zichtbare tabel met geldige kolommen en rijen" };
+    }).catch(error => ({ ok: false, reason: String(error?.message || error) }));
+    if (state?.ok && state.sportschool && state.plaats && state.land) return state;
     await sleep(350);
   }
-
-  if (!state?.ok) throw new Error(`SPORTSCHOLEN-tabel niet geldig geladen voor VA ${va}`);
-  return state;
+  throw new Error(`SPORTSCHOLEN-tabel niet geldig geladen voor VA ${va}: ${state?.reason || "timeout"}`);
 }
 
 function calculateKeurmerkOk(land, shield) {
