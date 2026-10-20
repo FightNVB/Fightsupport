@@ -2016,7 +2016,18 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
     while (Date.now() - detailsWaitStartedAt < 10000) {
       throwIfAborted(signal, va);
       lastScraped = await readDetailsModal(p).catch(() => null);
-      if (detailsScrapeSucceeded(lastScraped)) {\n        // De nulmeting wordt soms later gevuld dan de overige DETAILS-velden.\n        // Wacht kort op het echte gewichtveld voordat we de snapshot afronden.\n        if (!lastScraped?.nulmeting?.gewicht) {\n          await p.waitForFunction(() => {\n            const field = document.querySelector("input.dfva_nulmeting_gewicht");\n            return !!field && String(field.value || "").trim() !== "";\n          }, { timeout: 1800 }).catch(() => {});\n          const refreshed = await readDetailsModal(p).catch(() => null);\n          if (refreshed && detailsScrapeSucceeded(refreshed)) lastScraped = refreshed;\n        }\n        return lastScraped;\n      }
+      if (detailsScrapeSucceeded(lastScraped)) {
+        // DETAILS kan al klaar zijn voordat het nulmetinggewicht is ingevuld.
+        if (!lastScraped?.nulmeting?.gewicht) {
+          await p.waitForFunction(() => {
+            const field = document.querySelector("input.dfva_nulmeting_gewicht");
+            return !!field && String(field.value || "").trim() !== "";
+          }, { timeout: 1800 }).catch(() => {});
+          const refreshed = await readDetailsModal(p).catch(() => null);
+          if (refreshed && detailsScrapeSucceeded(refreshed)) lastScraped = refreshed;
+        }
+        return lastScraped;
+      }
       await sleep(100);
     }
 
