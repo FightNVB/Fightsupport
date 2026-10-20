@@ -342,8 +342,22 @@ async function hardClosePage(page) {
     await client.detach().catch(() => {});
   } catch {}
 
+  // Sluit alleen de eigen Puppeteer-tab; geen beforeunload-dialoog die blijft hangen.
   try {
-    await page.close({ runBeforeUnload: true }).catch(() => {});
+    if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+  } catch {}
+
+  // Als Chromium de gewone close niet uitvoerde: sluit exact dit target via CDP.
+  try {
+    if (!page.isClosed()) {
+      const targetId = page.target()?._targetId;
+      const browser = page.browser();
+      if (targetId && browser?.target()?.createCDPSession) {
+        const session = await browser.target().createCDPSession();
+        try { await session.send("Target.closeTarget", { targetId }); }
+        finally { await session.detach().catch(() => {}); }
+      }
+    }
   } catch {}
 }
 
