@@ -1196,10 +1196,14 @@ async function readCurrentSportschool(page, va, signal = null) {
   const opened = await clickTile(page, va, "SPORTSCHOLEN");
   if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
 
-  await sleep(400);
-  throwIfAborted(signal, va);
-
-  const state = await page.evaluate(() => {
+  // FightPassport vult de SPORTSCHOLEN-tabel asynchroon.
+  // Wacht op echte tabelinhoud in plaats van na 400 ms al af te breken.
+  const deadline = Date.now() + 12000;
+  let state = { ok: false };
+  while (Date.now() < deadline) {
+    throwIfAborted(signal, va);
+    if (await isLoginPage(page)) throw new Error("LOGIN_PAGE");
+    state = await page.evaluate(() => {
     const clean = (value) => String(value || "")
       .replace(/\u00a0/g, " ")
       .replace(/\s+/g, " ")
@@ -1245,12 +1249,10 @@ async function readCurrentSportschool(page, va, signal = null) {
       : { ok: false };
   }).catch(() => ({ ok: false }));
 
-  await page.keyboard.press("Escape").catch(() => {});
-  await sleep(100);
-
-  if (!state?.ok) {
-    throw new Error(`Sportschooltabel niet compleet voor VA ${va}`);
+    if (state?.ok) break;
+    await sleep(350);
   }
+
   return state;
 }
 
