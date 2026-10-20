@@ -2129,6 +2129,11 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
     }
   }
 
+  // NVB Enhance: eigen opgaven en officiële gewichten blijven ongemoeid.
+  const { error: enhanceError } = await supabase.schema("nvb_platform")
+    .rpc("enhance_fighter_weight", { p_va: Number(va) });
+  if (enhanceError) console.log(`[fp-total] VA ${va} NVB gewicht enhance: ${enhanceError.message}`);
+
   return {
     exists: true,
     licensed,
