@@ -1197,8 +1197,8 @@ async function readCurrentSportschool(page, va, signal = null) {
   if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
 
   // FightPassport vult de SPORTSCHOLEN-tabel asynchroon.
-  // Wacht op echte tabelinhoud in plaats van na 400 ms al af te breken.
-  const deadline = Date.now() + 12000;
+  // Wacht kort op echte tabelinhoud; maximaal 2 seconden, zonder vaste vertraging.
+  const deadline = Date.now() + 2000;
   let state = { ok: false };
   while (Date.now() < deadline) {
     throwIfAborted(signal, va);
