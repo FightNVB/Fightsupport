@@ -1508,6 +1508,18 @@ export async function buildToernooiContext(
     });
   }
 
+  const startverbodenByVa = new Map<string, any[]>();
+  if (vaList.length) {
+    const { data: rows, error } = await supabaseAdmin
+      .from("startverbod")
+      .select("va_nummer,ingang,einde,is_actueel")
+      .in("va_nummer", vaList);
+    if (error) throw error;
+    for (const [va, entries] of groupByVa(rows ?? []).entries()) {
+      startverbodenByVa.set(va, entries);
+    }
+  }
+
   // Ook toernooideelnemers gebruiken de actuele live-status voor
   // licentie/startverbod. De matchmaker-sportschool blijft leidend.
   const liveFighterByVa = new Map<string, any>();
@@ -1731,13 +1743,16 @@ export async function buildToernooiContext(
         typeof live?.licentie_ok === "boolean"
           ? (live.licentie_ok ? "Ja" : "Nee")
           : (typeof fr?.licentie_actief === "boolean" ? (fr.licentie_actief ? "Ja" : "Nee") : row?.licentie ?? null),
-      heeft_startverbod:
+      heeft_startverbod: startverbodOnEventDate(
+        va ? startverbodenByVa.get(va) ?? [] : [],
+        evenement_datum,
         typeof live?.startverbod_actief === "boolean"
           ? live.startverbod_actief
           : toNullableBool(fr?.heeft_startverbod) ??
             toNullableBool(fr?.startverbod_actief) ??
             toNullableBool(row?.heeft_startverbod) ??
-            null,
+            null
+      ),
 
       nulmeting_totaal: fr?.nulmeting_totaal ?? row?.nulmeting_totaal ?? null,
       nulmeting_klasse: fr?.nulmeting_klasse ?? row?.nulmeting_klasse ?? null,
