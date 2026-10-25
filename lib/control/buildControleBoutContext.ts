@@ -2,6 +2,7 @@ import dayjs from "dayjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildClassAwareRecord, totalsToFlat } from "@/lib/recordCalculator";
 import crypto from "crypto";
+import { startverbodOnEventDate } from "./startverbodEventDate";
 
 function toIsoDateOnly(d: any): string | null {
   if (!d) return null;
@@ -628,6 +629,18 @@ if (scopedPartijNr != null) {
     });
   }
 
+  const startverbodenByVa = new Map<string, any[]>();
+  if (vaList.length) {
+    const { data: rows, error } = await supabaseAdmin
+      .from("startverbod")
+      .select("va_nummer,ingang,einde,is_actueel")
+      .in("va_nummer", vaList);
+    if (error) throw error;
+    for (const [va, entries] of groupByVa(rows ?? []).entries()) {
+      startverbodenByVa.set(va, entries);
+    }
+  }
+
   // Uitslagenhistorie komt rechtstreeks uit de centrale Total-snapshot.
   const uitslagenByVa = new Map<string, any[]>();
   if (vaList.length > 0) {
@@ -973,23 +986,29 @@ if (scopedPartijNr != null) {
         typeof liveR?.licentie_ok === "boolean"
           ? (liveR.licentie_ok ? "Ja" : "Nee")
           : (typeof fr?.licentie_actief === "boolean" ? (fr.licentie_actief ? "Ja" : "Nee") : null),
-      rood_heeft_startverbod:
+      rood_heeft_startverbod: startverbodOnEventDate(
+        vaR ? startverbodenByVa.get(vaR) ?? [] : [],
+        evenement_datum,
         typeof liveR?.startverbod_actief === "boolean"
           ? liveR.startverbod_actief
           : toNullableBool(fr?.heeft_startverbod) ??
             toNullableBool(fr?.startverbod_actief) ??
-            null,
+            null
+      ),
 
       blauw_licentie:
         typeof liveB?.licentie_ok === "boolean"
           ? (liveB.licentie_ok ? "Ja" : "Nee")
           : (typeof fb?.licentie_actief === "boolean" ? (fb.licentie_actief ? "Ja" : "Nee") : null),
-      blauw_heeft_startverbod:
+      blauw_heeft_startverbod: startverbodOnEventDate(
+        vaB ? startverbodenByVa.get(vaB) ?? [] : [],
+        evenement_datum,
         typeof liveB?.startverbod_actief === "boolean"
           ? liveB.startverbod_actief
           : toNullableBool(fb?.heeft_startverbod) ??
             toNullableBool(fb?.startverbod_actief) ??
-            null,
+            null
+      ),
 
       rood_nulmeting_totaal: fr?.nulmeting_totaal ?? null,
       rood_nulmeting_opmerking: fr?.nulmeting_opmerking ?? null,
