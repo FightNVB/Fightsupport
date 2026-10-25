@@ -904,7 +904,23 @@ export function runMatchmakerFighterRules(
     add("MATCHMAKER_LICENTIE_ONBEKEND", "ACTIE", "De licentiestatus kon niet uit de fighterdatabase worden bepaald. Controleer de licentie handmatig.", "warning", "Licentiestatus onbekend");
   }
 
-  const startverbod = boolish(ctx.fp_startverbod ?? ctx.heeft_startverbod ?? ctx.startverbod ?? ctx.extra?.raw_scrape?.heeft_startverbod);
+  // Een startverbod loopt tot en met de einddatum; vergelijk met de evenementdatum.
+  // Gebruik de actuele status alleen als er geen gedateerde startverbodgegevens zijn.
+  const startverbodRows = [
+    ...(Array.isArray(ctx.startverboden) ? ctx.startverboden : []),
+    ...(Array.isArray(ctx.extra?.startverboden) ? ctx.extra.startverboden : []),
+  ];
+  const eventDateIso = eventDate?.format("YYYY-MM-DD") ?? null;
+  const datedStartverbod = startverbodRows.length > 0 && eventDateIso
+    ? startverbodRows.some((row: AnyRow) => {
+        if (row?.is_actueel === false) return false;
+        const ingang = row?.ingang ? String(row.ingang).slice(0, 10) : null;
+        const einde = row?.einde ? String(row.einde).slice(0, 10) : null;
+        return !!ingang && ingang <= eventDateIso && (!einde || eventDateIso <= einde);
+      })
+    : null;
+  const startverbod = datedStartverbod ??
+    boolish(ctx.fp_startverbod ?? ctx.heeft_startverbod ?? ctx.startverbod ?? ctx.extra?.raw_scrape?.heeft_startverbod);
   if (startverbod === true) {
     add("MATCHMAKER_STARTVERBOD", "VERBOD", "Deze vechter heeft volgens Fightpaspoort een startverbod en mag niet deelnemen.", "error", "Startverbod");
   } else if (va && fpNaam && startverbod === null) {
