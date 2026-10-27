@@ -1251,7 +1251,7 @@ async function readCurrentSportschool(page, va, signal = null) {
         const sportschool = clean(cells[1]?.textContent);
         const plaats = clean(cells[2]?.textContent);
         const land = clean(cells[3]?.textContent);
-        if (!sportschool || !land) continue;
+        if (!sportschool || !land || /^organisatie\s*naam$/i.test(sportschool) || /^land$/i.test(land) || /^plaats$/i.test(plaats)) continue;
         const rect = row.getBoundingClientRect();
         const style = getComputedStyle(row);
         if (style.display === "none" || style.visibility === "hidden" ||
