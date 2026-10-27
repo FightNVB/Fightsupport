@@ -1210,7 +1210,7 @@ async function readCurrentSportschool(page, va, signal = null) {
   const opened = await clickTile(page, va, "SPORTSCHOLEN");
   if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
 
-  // Lees de eerste echte sportschoolrij, ook zonder keurmerkschild.
+  // Lees alle geldige sportschoolrijen; de onderste is de huidige sportschool.
   // FightPassport kan de eerste tr direct als gegevensrij tonen (zonder thead).
   const deadline = Date.now() + 8000;
   try {
@@ -1245,7 +1245,7 @@ async function readCurrentSportschool(page, va, signal = null) {
         });
       }
       return candidates.length
-        ? { ok: true, ...candidates[0] }
+        ? { ok: true, schools: candidates.map((school, index) => ({ ...school, is_huidig: index === candidates.length - 1 })) }
         : {
             ok: false,
             reason: "geen zichtbare tr.flexlist_row met vijf td's",
@@ -1253,7 +1253,7 @@ async function readCurrentSportschool(page, va, signal = null) {
             sampleCellCounts: rows.slice(0, 3).map(row => row.querySelectorAll("td").length)
           };
     }).catch(error => ({ ok: false, reason: String(error?.message || error) }));
-    if (state?.ok && state.sportschool && state.land) return state;
+    if (state?.ok && Array.isArray(state.schools) && state.schools.length) return state.schools;
     await sleep(350);
   }
   throw new Error(`SPORTSCHOLEN-tabel niet geldig geladen voor VA ${va}: ${state?.reason || "timeout"}; rows=${state?.rowsFound ?? "?"}; cells=${JSON.stringify(state?.sampleCellCounts ?? [])}`);
@@ -2115,9 +2115,10 @@ async function scrapeOne(page, va, openFreshPage, signal = null) {
   try {
     throwIfAborted(signal, va);
     await closeAnyModal(currentPage).catch(() => {});
-    const currentSchool = await readCurrentSportschool(currentPage, va, signal);
-    gyms.push(currentSchool);
-    console.log(`[fp-total] 🏫 VA ${va} SPORTSCHOLEN: ${currentSchool.sportschool} | ${currentSchool.land}`);
+    const schools = await readCurrentSportschool(currentPage, va, signal);
+    gyms.push(...schools);
+    const currentSchool = schools[schools.length - 1];
+    console.log(`[fp-total] 🏫 VA ${va} SPORTSCHOLEN: ${schools.length} regels, huidig: ${currentSchool.sportschool} | ${currentSchool.land}`);
   } catch (error) {
     const message = error?.message ?? String(error);
     if (message === "LOGIN_PAGE" || message === "SCRAPE_ABORTED") throw error;
