@@ -1231,9 +1231,11 @@ async function readCurrentSportschool(page, va, signal = null) {
       const candidates = [];
       for (const table of document.querySelectorAll("table")) {
         if (!visible(table)) continue;
-        const headerRow = table.querySelector("thead tr") || table.querySelector("tr");
+        const headerRow = [...table.querySelectorAll("tr")].find(row =>
+          /organisatie\s*naam/i.test(clean(row.textContent)) && /plaats/i.test(clean(row.textContent)) && /land/i.test(clean(row.textContent))
+        ) || table.querySelector("thead tr") || table.querySelector("tr");
         if (!headerRow) continue;
-        const headers = [...headerRow.children].map(cell => clean(cell.textContent).toLowerCase());
+        const headers = [...headerRow.querySelectorAll("th, td")].map(cell => clean(cell.textContent).toLowerCase());
         const nameIndex = headers.findIndex(h => /organisatie\s*naam|sportschool/.test(h));
         const placeIndex = headers.findIndex(h => /^(plaats|stad)$/.test(h));
         const countryIndex = headers.findIndex(h => /^land$/.test(h));
@@ -1248,7 +1250,7 @@ async function readCurrentSportschool(page, va, signal = null) {
           if (!hasHeaders && cells.length < 4) continue;
           const sportschool = clean(cells[hasHeaders ? nameIndex : 1]?.textContent);
           const plaats = clean(cells[hasHeaders ? placeIndex : 2]?.textContent);
-          const land = clean(cells[hasHeaders ? countryIndex : cells.length - 2]?.textContent);
+          const land = clean(cells[hasHeaders ? countryIndex : 3]?.textContent);
           if (!sportschool || !land) continue;
           if (/^(organisatie\s*naam|sportschool|naam)$/i.test(sportschool) ||
               /^(plaats|stad)$/i.test(plaats) || /^land$/i.test(land)) continue;
