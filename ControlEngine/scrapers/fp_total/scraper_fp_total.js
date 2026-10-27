@@ -1210,10 +1210,8 @@ async function readCurrentSportschool(page, va, signal = null) {
   const opened = await clickTile(page, va, "SPORTSCHOLEN");
   if (!opened) throw new Error(`SPORTSCHOLEN-tegel niet gevonden voor VA ${va}`);
 
-  // FightPassport laadt de tabel asynchroon. De laatste (onderste) rij is
-  // de actuele sportschool, ook wanneer de vechter nog op oude Excel-lijsten staat.
-  // Gebruik kolomkoppen in plaats van vaste celposities: sommige tabellen hebben
-  // een extra, niet-benoemde kolom achter 'Land' (bijv. 'Gym').
+  // Lees de eerste echte sportschoolrij, ook zonder keurmerkschild.
+  // FightPassport kan de eerste tr direct als gegevensrij tonen (zonder thead).
   const deadline = Date.now() + 8000;
   try {
   let state = { ok: false, reason: "nog geen geldige sportschoolrij" };
@@ -1243,7 +1241,8 @@ async function readCurrentSportschool(page, va, signal = null) {
         // De Admin-scraper leest daarom ook de vaste flexlist-kolommen.
         const hasHeaders = nameIndex >= 0 && placeIndex >= 0 && countryIndex >= 0;
         for (const row of table.querySelectorAll("tr")) {
-          if (row === headerRow || row.classList.contains("filler")) continue;
+          // Sla de eerste tr alleen over wanneer het werkelijk een kopregel is.
+          if ((row === headerRow && (row.closest("thead") || hasHeaders)) || row.classList.contains("filler")) continue;
           const cells = [...row.querySelectorAll("td")];
           if (hasHeaders && cells.length <= Math.max(nameIndex, placeIndex, countryIndex)) continue;
           if (!hasHeaders && cells.length < 4) continue;
@@ -1260,7 +1259,7 @@ async function readCurrentSportschool(page, va, signal = null) {
         }
       }
       return candidates.length
-        ? { ok: true, ...candidates[candidates.length - 1] }
+        ? { ok: true, ...candidates[0] }
         : { ok: false, reason: "geen zichtbare tabel met geldige kolommen en rijen" };
     }).catch(error => ({ ok: false, reason: String(error?.message || error) }));
     if (state?.ok && state.sportschool && state.land) return state;
