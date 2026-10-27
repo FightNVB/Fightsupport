@@ -1246,6 +1246,11 @@ export async function scraperFightcrew(sportschoolKey) {
     throw new Error("sportschoolKey ontbreekt");
   }
 
+  // Vechters worden uitsluitend via de Total Scraper gekoppeld.
+  // Voorkom dat een oude Excel-import opnieuw onjuiste Fightcrew-relaties schrijft.
+  console.log("[fightcrew] Legacy Excel-teamscrape overgeslagen; Total Scraper is leidend:", key);
+  return [];
+
   const { data: sportschool, error } = await supabase
     .from("sportscholen")
     .select("*")
