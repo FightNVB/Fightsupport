@@ -1220,7 +1220,7 @@ async function readCurrentSportschool(page, va, signal = null) {
     if (await isLoginPage(page)) throw new Error("LOGIN_PAGE");
     state = await page.evaluate(() => {
       const clean = (value) => String(value ?? "")
-        .replace(/\\u00a0/g, " ").replace(/\\s+/g, " ").trim();
+        .replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
       // FightPassport gebruikt tr.flexlist_row met vijf td's. De naam staat
       // in td[1], plaats in td[2], land in td[3], type in td[4].
       // Niet op zichtbaarheid van de hele tabel filteren: het geopende
