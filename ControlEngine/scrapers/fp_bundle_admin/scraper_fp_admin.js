@@ -1157,7 +1157,7 @@ async function readCurrentSportschool(page, va, signal = null) {
       const sportschool = clean(cells[1]?.textContent);
       const plaats = clean(cells[2]?.textContent);
       const land = clean(cells[3]?.textContent);
-      if (!sportschool || !land || /^organisatie\\s*naam$/i.test(sportschool) || /^land$/i.test(land)) continue;
+      if (!sportschool || !land || /^organisatie\s*naam$/i.test(sportschool) || /^land$/i.test(land) || /^plaats$/i.test(plaats)) continue;
       candidates.push({
         sportschool, plaats, land,
         keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || "")),
