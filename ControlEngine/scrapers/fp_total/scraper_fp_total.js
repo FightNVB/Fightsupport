@@ -1215,6 +1215,7 @@ async function readCurrentSportschool(page, va, signal = null) {
   // Gebruik kolomkoppen in plaats van vaste celposities: sommige tabellen hebben
   // een extra, niet-benoemde kolom achter 'Land' (bijv. 'Gym').
   const deadline = Date.now() + 8000;
+  try {
   let state = { ok: false, reason: "nog geen geldige sportschoolrij" };
   while (Date.now() < deadline) {
     throwIfAborted(signal, va);
@@ -1238,15 +1239,18 @@ async function readCurrentSportschool(page, va, signal = null) {
         const nameIndex = headers.findIndex(h => /organisatie\s*naam|sportschool/.test(h));
         const placeIndex = headers.findIndex(h => /^(plaats|stad)$/.test(h));
         const countryIndex = headers.findIndex(h => /^land$/.test(h));
-        if (nameIndex < 0 || placeIndex < 0 || countryIndex < 0) continue;
+        // FightPassport gebruikt niet op alle schermen een echte thead.
+        // De Admin-scraper leest daarom ook de vaste flexlist-kolommen.
+        const hasHeaders = nameIndex >= 0 && placeIndex >= 0 && countryIndex >= 0;
         for (const row of table.querySelectorAll("tr")) {
           if (row === headerRow || row.classList.contains("filler")) continue;
           const cells = [...row.querySelectorAll("td")];
-          if (cells.length <= Math.max(nameIndex, placeIndex, countryIndex)) continue;
-          const sportschool = clean(cells[nameIndex]?.textContent);
-          const plaats = clean(cells[placeIndex]?.textContent);
-          const land = clean(cells[countryIndex]?.textContent);
-          if (!sportschool || !plaats || !land) continue;
+          if (hasHeaders && cells.length <= Math.max(nameIndex, placeIndex, countryIndex)) continue;
+          if (!hasHeaders && cells.length < 4) continue;
+          const sportschool = clean(cells[hasHeaders ? nameIndex : 1]?.textContent);
+          const plaats = clean(cells[hasHeaders ? placeIndex : 2]?.textContent);
+          const land = clean(cells[hasHeaders ? countryIndex : cells.length - 2]?.textContent);
+          if (!sportschool || !land) continue;
           if (/^(organisatie\s*naam|sportschool|naam)$/i.test(sportschool) ||
               /^(plaats|stad)$/i.test(plaats) || /^land$/i.test(land)) continue;
           candidates.push({
@@ -1259,10 +1263,15 @@ async function readCurrentSportschool(page, va, signal = null) {
         ? { ok: true, ...candidates[candidates.length - 1] }
         : { ok: false, reason: "geen zichtbare tabel met geldige kolommen en rijen" };
     }).catch(error => ({ ok: false, reason: String(error?.message || error) }));
-    if (state?.ok && state.sportschool && state.plaats && state.land) return state;
+    if (state?.ok && state.sportschool && state.land) return state;
     await sleep(350);
   }
   throw new Error(`SPORTSCHOLEN-tabel niet geldig geladen voor VA ${va}: ${state?.reason || "timeout"}`);
+  } finally {
+    // Ook bij een mislukte uitlezing de tegel sluiten voor de volgende stap.
+    await page.keyboard.press("Escape").catch(() => {});
+    await sleep(100);
+  }
 }
 
 function calculateKeurmerkOk(land, shield) {
