@@ -1145,8 +1145,8 @@ async function readCurrentSportschool(page, va, signal = null) {
     };
     const dialogs = [...document.querySelectorAll('[role="dialog"], .ui-dialog, .modal')]
       .filter(visible)
-      .filter(el => clean(el.querySelector(".ui-dialog-title, .modal-title, .title")?.textContent).toUpperCase() === "SPORTSCHOLEN");
-    const scopes = [tile, ...dialogs].filter(Boolean);
+      .filter(el => /^SPORTSCHOLEN(?:\\s+GEKOPPELD\\s+AAN)?\\b/i.test(clean(el.querySelector(".ui-dialog-title, .modal-title, .title, h1, h2, h3")?.textContent)));
+    const scopes = [...dialogs, tile].filter(Boolean);
     const rows = [...new Set(scopes.flatMap(scope => [...scope.querySelectorAll("tr.flexlist_row")]))];
     const candidates = [];
     for (const row of rows) {
