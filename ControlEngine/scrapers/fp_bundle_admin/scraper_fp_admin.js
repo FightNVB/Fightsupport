@@ -1125,51 +1125,48 @@ async function readCurrentSportschool(page, va, signal = null) {
   await sleep(400);
   throwIfAborted(signal, va);
 
-  const state = await page.evaluate(() => {
+  const state = await page.evaluate((requestedVa) => {
     const clean = (value) => String(value || "")
       .replace(/\u00a0/g, " ")
       .replace(/\s+/g, " ")
       .trim();
 
+    // Alleen rijen binnen de SPORTSCHOLEN-tegel van de gevraagde VA
+    // of het expliciet getitelde, zichtbare SPORTSCHOLEN-dialoogvenster.
+    const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+    const header = [...(tab?.querySelectorAll(".tileHeader") || [])]
+      .find(el => clean(el.textContent).toUpperCase() === "SPORTSCHOLEN");
+    const tile = header?.closest(".tile");
     const visible = (el) => {
       if (!el) return false;
       const r = el.getBoundingClientRect();
       const st = getComputedStyle(el);
-      return r.width > 200 && r.height > 30 && st.display !== "none" && st.visibility !== "hidden";
+      return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
     };
-
+    const dialogs = [...document.querySelectorAll('[role="dialog"], .ui-dialog, .modal')]
+      .filter(visible)
+      .filter(el => clean(el.querySelector(".ui-dialog-title, .modal-title, .title")?.textContent).toUpperCase() === "SPORTSCHOLEN");
+    const scopes = [tile, ...dialogs].filter(Boolean);
+    const rows = [...new Set(scopes.flatMap(scope => [...scope.querySelectorAll("tr.flexlist_row")]))];
     const candidates = [];
-    for (const table of [...document.querySelectorAll("table")].filter(visible)) {
-      const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
-        .filter((row) => !row.classList.contains("filler"));
-
-      for (const row of rows) {
-        const cells = [...row.querySelectorAll("td")];
-        if (cells.length < 4) continue;
-
-        const sportschool = clean(cells[1]?.textContent);
-        const plaats = clean(cells[2]?.textContent);
-        const land = clean(cells[cells.length - 2]?.textContent);
-
-        if (!sportschool || !land) continue;
-        if (/^organisatie\s*naam$/i.test(sportschool)) continue;
-        if (/^land$/i.test(land)) continue;
-
-        candidates.push({
-          sportschool,
-          plaats,
-          land,
-          keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(
-            String(row.innerHTML || "")
-          ),
-        });
-      }
+    for (const row of rows) {
+      if (row.classList.contains("filler") || !visible(row)) continue;
+      const cells = [...row.children].filter(cell => cell.tagName === "TD");
+      if (cells.length < 5) continue;
+      const sportschool = clean(cells[1]?.textContent);
+      const plaats = clean(cells[2]?.textContent);
+      const land = clean(cells[3]?.textContent);
+      if (!sportschool || !land || /^organisatie\\s*naam$/i.test(sportschool) || /^land$/i.test(land)) continue;
+      candidates.push({
+        sportschool, plaats, land,
+        keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || "")),
+      });
     }
 
     return candidates.length
       ? { ok: true, ...candidates[candidates.length - 1] }
       : { ok: false };
-  }).catch(() => ({ ok: false }));
+  }, String(va)).catch(() => ({ ok: false }));
 
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(100);
