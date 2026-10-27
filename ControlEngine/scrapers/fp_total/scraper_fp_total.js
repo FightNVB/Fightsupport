@@ -1218,14 +1218,31 @@ async function readCurrentSportschool(page, va, signal = null) {
   while (Date.now() < deadline) {
     throwIfAborted(signal, va);
     if (await isLoginPage(page)) throw new Error("LOGIN_PAGE");
-    state = await page.evaluate(() => {
+    state = await page.evaluate((requestedVa) => {
       const clean = (value) => String(value ?? "")
         .replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
       // FightPassport gebruikt tr.flexlist_row met vijf td's. De naam staat
       // in td[1], plaats in td[2], land in td[3], type in td[4].
       // Niet op zichtbaarheid van de hele tabel filteren: het geopende
       // dialoogvenster kan de tabel in een scrollcontainer tonen.
-      const rows = [...document.querySelectorAll("tr.flexlist_row")];
+      // Lees uitsluitend de SPORTSCHOLEN-tegel van deze VA of een
+      // zichtbaar dialoogvenster dat expliciet SPORTSCHOLEN heet.
+      const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
+      const header = [...(tab?.querySelectorAll(".tileHeader") || [])]
+        .find(el => clean(el.textContent).toUpperCase() === "SPORTSCHOLEN");
+      const tile = header?.closest(".tile");
+      const visible = el => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 &&
+          style.display !== "none" && style.visibility !== "hidden";
+      };
+      const dialogs = [...document.querySelectorAll('[role="dialog"], .ui-dialog, .modal')]
+        .filter(visible)
+        .filter(el => clean(el.querySelector(".ui-dialog-title, .modal-title, .title")?.textContent).toUpperCase() === "SPORTSCHOLEN");
+      const scopes = [tile, ...dialogs].filter(Boolean);
+      const rows = [...new Set(scopes.flatMap(scope => [...scope.querySelectorAll("tr.flexlist_row")]))];
       const candidates = [];
       for (const row of rows) {
         if (row.classList.contains("filler")) continue;
@@ -1252,7 +1269,7 @@ async function readCurrentSportschool(page, va, signal = null) {
             rowsFound: rows.length,
             sampleCellCounts: rows.slice(0, 3).map(row => row.querySelectorAll("td").length)
           };
-    }).catch(error => ({ ok: false, reason: String(error?.message || error) }));
+    }, String(va)).catch(error => ({ ok: false, reason: String(error?.message || error) }));
     if (state?.ok && Array.isArray(state.schools) && state.schools.length) return state.schools;
     await sleep(350);
   }
