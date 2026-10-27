@@ -1926,14 +1926,9 @@ async function scrapeSportschoolWithPage(page, browser, sportschool) {
     // 1) DETAILS -> alle keurmerkregels -> exact sluiten via #sluit_inr_detail.
     const keurmerkResult = await scrapeKeurmerkDetails(page, sportschool);
 
-    // 2) Daarna VECHTERS op dezelfde organisation-page.
-    await waitForOrganisationPage(page, key, sportschool);
-    await openVechtersTile(page, key, sportschool);
-
-    downloadedExcelFile = await downloadVechtersExcel(page, browser, key);
-
-    const fighters = await parseVechtersExcel(downloadedExcelFile, sportschool);
-    const vaList = await saveSportschoolFighterLinks(key, fighters);
+    // Geen VECHTERS-rapport of Excel meer: de Total Scraper is leidend
+    // voor actuele sportscholen en de Fightcrew.
+    const vaList = [];
 
     await updateSportschoolSyncStatus(key, "klaar");
 
@@ -1941,7 +1936,7 @@ async function scrapeSportschoolWithPage(page, browser, sportschool) {
       sportschool: sportschool.naam,
       sportschool_id: Number(key),
       keurmerk_periodes: keurmerkResult?.aantal ?? 0,
-      aantal_vechters: vaList.length,
+      fightcrew_sync: "overgeslagen; Total Scraper is leidend",
     });
 
     return {
