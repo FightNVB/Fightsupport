@@ -1220,54 +1220,43 @@ async function readCurrentSportschool(page, va, signal = null) {
     if (await isLoginPage(page)) throw new Error("LOGIN_PAGE");
     state = await page.evaluate(() => {
       const clean = (value) => String(value ?? "")
-        .replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-      const visible = (el) => {
-        if (!el) return false;
-        const rect = el.getBoundingClientRect();
-        const style = getComputedStyle(el);
-        return rect.width > 200 && rect.height > 30 &&
-          style.display !== "none" && style.visibility !== "hidden";
-      };
+        .replace(/\\u00a0/g, " ").replace(/\\s+/g, " ").trim();
+      // FightPassport gebruikt tr.flexlist_row met vijf td's. De naam staat
+      // in td[1], plaats in td[2], land in td[3], type in td[4].
+      // Niet op zichtbaarheid van de hele tabel filteren: het geopende
+      // dialoogvenster kan de tabel in een scrollcontainer tonen.
+      const rows = [...document.querySelectorAll("tr.flexlist_row")];
       const candidates = [];
-      for (const table of document.querySelectorAll("table")) {
-        if (!visible(table)) continue;
-        const headerRow = [...table.querySelectorAll("tr")].find(row =>
-          /organisatie\s*naam/i.test(clean(row.textContent)) && /plaats/i.test(clean(row.textContent)) && /land/i.test(clean(row.textContent))
-        ) || table.querySelector("thead tr") || table.querySelector("tr");
-        if (!headerRow) continue;
-        const headers = [...headerRow.querySelectorAll("th, td")].map(cell => clean(cell.textContent).toLowerCase());
-        const nameIndex = headers.findIndex(h => /organisatie\s*naam|sportschool/.test(h));
-        const placeIndex = headers.findIndex(h => /^(plaats|stad)$/.test(h));
-        const countryIndex = headers.findIndex(h => /^land$/.test(h));
-        // FightPassport gebruikt niet op alle schermen een echte thead.
-        // De Admin-scraper leest daarom ook de vaste flexlist-kolommen.
-        const hasHeaders = nameIndex >= 0 && placeIndex >= 0 && countryIndex >= 0;
-        for (const row of table.querySelectorAll("tr")) {
-          // Sla de eerste tr alleen over wanneer het werkelijk een kopregel is.
-          if ((row === headerRow && (row.closest("thead") || hasHeaders)) || row.classList.contains("filler")) continue;
-          const cells = [...row.querySelectorAll("td")];
-          if (hasHeaders && cells.length <= Math.max(nameIndex, placeIndex, countryIndex)) continue;
-          if (!hasHeaders && cells.length < 4) continue;
-          const sportschool = clean(cells[hasHeaders ? nameIndex : 1]?.textContent);
-          const plaats = clean(cells[hasHeaders ? placeIndex : 2]?.textContent);
-          const land = clean(cells[hasHeaders ? countryIndex : 3]?.textContent);
-          if (!sportschool || !land) continue;
-          if (/^(organisatie\s*naam|sportschool|naam)$/i.test(sportschool) ||
-              /^(plaats|stad)$/i.test(plaats) || /^land$/i.test(land)) continue;
-          candidates.push({
-            sportschool, plaats, land,
-            keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || ""))
-          });
-        }
+      for (const row of rows) {
+        if (row.classList.contains("filler")) continue;
+        const cells = [...row.children].filter(cell => cell.tagName === "TD");
+        if (cells.length < 5) continue;
+        const sportschool = clean(cells[1]?.textContent);
+        const plaats = clean(cells[2]?.textContent);
+        const land = clean(cells[3]?.textContent);
+        if (!sportschool || !land) continue;
+        const rect = row.getBoundingClientRect();
+        const style = getComputedStyle(row);
+        if (style.display === "none" || style.visibility === "hidden" ||
+            rect.width === 0 || rect.height === 0) continue;
+        candidates.push({
+          sportschool, plaats, land,
+          keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || ""))
+        });
       }
       return candidates.length
         ? { ok: true, ...candidates[0] }
-        : { ok: false, reason: "geen zichtbare tabel met geldige kolommen en rijen" };
+        : {
+            ok: false,
+            reason: "geen zichtbare tr.flexlist_row met vijf td's",
+            rowsFound: rows.length,
+            sampleCellCounts: rows.slice(0, 3).map(row => row.querySelectorAll("td").length)
+          };
     }).catch(error => ({ ok: false, reason: String(error?.message || error) }));
     if (state?.ok && state.sportschool && state.land) return state;
     await sleep(350);
   }
-  throw new Error(`SPORTSCHOLEN-tabel niet geldig geladen voor VA ${va}: ${state?.reason || "timeout"}`);
+  throw new Error(`SPORTSCHOLEN-tabel niet geldig geladen voor VA ${va}: ${state?.reason || "timeout"}; rows=${state?.rowsFound ?? "?"}; cells=${JSON.stringify(state?.sampleCellCounts ?? [])}`);
   } finally {
     // Ook bij een mislukte uitlezing de tegel sluiten voor de volgende stap.
     await page.keyboard.press("Escape").catch(() => {});
