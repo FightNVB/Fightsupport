@@ -1242,7 +1242,13 @@ async function readCurrentSportschool(page, va, signal = null) {
         return header.some(h => h.includes("organisatie naam")) &&
           header.some(h => h === "plaats") && header.some(h => h === "land");
       });
-      const rows = [...new Set(tables.flatMap(table => [...table.querySelectorAll("tr.flexlist_row, tr")]))];
+      const rows = [...new Set(tables.flatMap(table => {
+        // SYS42 kan de zichtbare gegevens in een flexlist buiten de
+        // header-table plaatsen. Neem daarom ook sibling-rijen mee,
+        // maar alleen binnen de direct bijbehorende grid-container.
+        const grid = table.closest(".flexlist, .flexlist_container, .grid, .ui-dialog-content") || table.parentElement;
+        return [...grid.querySelectorAll("tr.flexlist_row, tr")];
+      }))];
       const candidates = [];
       for (const row of rows) {
         if (row.classList.contains("filler")) continue;
