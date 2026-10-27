@@ -1133,21 +1133,22 @@ async function readCurrentSportschool(page, va, signal = null) {
 
     // Alleen rijen binnen de SPORTSCHOLEN-tegel van de gevraagde VA
     // of het expliciet getitelde, zichtbare SPORTSCHOLEN-dialoogvenster.
-    const tab = document.querySelector(`.internal_tab.va_vechter_${requestedVa}`);
-    const header = [...(tab?.querySelectorAll(".tileHeader") || [])]
-      .find(el => clean(el.textContent).toUpperCase() === "SPORTSCHOLEN");
-    const tile = header?.closest(".tile");
-    const visible = (el) => {
+        const visible = el => {
       if (!el) return false;
-      const r = el.getBoundingClientRect();
-      const st = getComputedStyle(el);
-      return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
     };
-    const dialogs = [...document.querySelectorAll('[role="dialog"], .ui-dialog, .modal')]
-      .filter(visible)
-      .filter(el => /^SPORTSCHOLEN(?:\\s+GEKOPPELD\\s+AAN)?\\b/i.test(clean(el.querySelector(".ui-dialog-title, .modal-title, .title, h1, h2, h3")?.textContent)));
-    const scopes = [...dialogs, tile].filter(Boolean);
-    const rows = [...new Set(scopes.flatMap(scope => [...scope.querySelectorAll("tr.flexlist_row")]))];
+    // SYS42 toont een eigen venster 'Sportscholen gekoppeld aan', niet altijd
+    // een HTML-dialog. Identificeer de tabel daarom aan de unieke kolomkoppen.
+    const tables = [...document.querySelectorAll("table")].filter(table => {
+      if (!visible(table)) return false;
+      const header = [...table.querySelectorAll("th, thead td, tr:first-child td")]
+        .map(cell => clean(cell.textContent).toLowerCase());
+      return header.some(h => h.includes("organisatie naam")) &&
+        header.some(h => h === "plaats") && header.some(h => h === "land");
+    });
+    const rows = [...new Set(tables.flatMap(table => [...table.querySelectorAll("tr.flexlist_row, tr")]))];
     const candidates = [];
     for (const row of rows) {
       if (row.classList.contains("filler") || !visible(row)) continue;
