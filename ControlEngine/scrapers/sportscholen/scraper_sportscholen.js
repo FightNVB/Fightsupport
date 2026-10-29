@@ -18,6 +18,7 @@ import path from "path";
 import crypto from "crypto";
 import { readXlsxToRows } from "../utils/excelRowsExceljs.js";
 import { fileURLToPath } from "url";
+import { spawn } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2171,12 +2172,23 @@ export async function scraperFightcrewAll(options = {}) {
     console.warn(`[sportscholen] ${baseSchoolList.length - validSchoolList.length} sportscholen zonder geldige sportschool_id overgeslagen.`);
   }
 
-  const schoolList = failedOnly
+  const filteredSchools = failedOnly
     ? validSchoolList.filter((sportschool) => {
         const status = String(sportschool?.team_sync_status ?? "").trim().toLowerCase();
         return status === "fout" || status === "mislukt";
       })
     : validSchoolList;
+
+  // Verdeel de keurmerk-detailronde deterministisch over drie aparte processen.
+  // De index is gebaseerd op de volledige, stabiel gesorteerde lijst.
+  const shardCount = Math.max(1, Number(process.env.FP_SPORTSCHOLEN_SHARD_COUNT || 1));
+  const shardIndex = Number(process.env.FP_SPORTSCHOLEN_SHARD_INDEX || 0);
+  if (!Number.isInteger(shardCount) || !Number.isInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
+    throw new Error("Ongeldige sportscholen-shardconfiguratie");
+  }
+  const schoolList = filteredSchools
+    .sort((a, b) => Number(a.sportschool_id) - Number(b.sportschool_id))
+    .filter((_, index) => index % shardCount === shardIndex);
 
   if (failedOnly) {
     console.log("🔁 Alleen mislukte sportscholen opnieuw verwerken", {
@@ -2746,7 +2758,41 @@ if (process.argv[2] === "run") {
     });
 }
 
+// De normale run-all ingang start drie processen met elk acht tabs.
+async function runThreeKeurmerkShards() {
+  const count = 3;
+  const workers = 8;
+  console.log(`[sportscholen] Keurmerk-details: ${count} processen × ${workers} workers`);
+  const statuses = await Promise.all(Array.from({ length: count }, (_, index) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [__filename, "run-shard"], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        FP_SPORTSCHOLEN_SHARD_COUNT: String(count),
+        FP_SPORTSCHOLEN_SHARD_INDEX: String(index),
+        FP_SPORTSCHOLEN_WORKERS: String(workers),
+      },
+      stdio: "inherit",
+    });
+    child.once("error", (error) => {
+      console.error(`[sportscholen] Shard ${index + 1} startfout:`, error);
+      resolve(false);
+    });
+    child.once("close", (code) => resolve(code === 0));
+  })));
+  if (statuses.some((ok) => !ok)) throw new Error("Een of meer keurmerk-detailprocessen zijn mislukt");
+}
+
 if (process.argv[2] === "run-all") {
+  runThreeKeurmerkShards()
+    .then(() => process.exit(0))
+    .catch((e) => {
+      console.error(e?.stack ?? e);
+      process.exit(1);
+    });
+}
+
+if (process.argv[2] === "run-shard") {
   scraperFightcrewAll()
     .then(() => process.exit(0))
     .catch((e) => {
