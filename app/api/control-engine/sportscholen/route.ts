@@ -120,70 +120,12 @@ function splitRoundRobin<T>(items: T[], parts: number): T[][] {
 
 export async function POST() {
   try {
-    const preparePath = resolveScriptPath(
-      "scrapers", "sportscholen", "scraper_sportscholen_prepare.js"
-      );
-    const workerPath = resolveScriptPath(
-      "scrapers", "sportscholen", "scraper_sportscholen.js"
-      );
-
-    console.log("🏫 fase 1/2: volledige sportscholenlijst downloaden");
-    await runNodeScript(preparePath, ["run"], {}, "sportscholen-prepare");
-
-    const keys = await loadAllSportschoolKeys();
-    if (!keys.length) throw new Error("Geen sportschool-keys gevonden.");
-
-    const chunks = splitRoundRobin(keys, 3).filter((chunk) => chunk.length > 0);
-
-    console.log("🏫 fase 2/2: 3x10 DETAILS + VECHTERS", {
-      sportscholen: keys.length,
-      processen: chunks.length,
-      workers_per_proces: 10,
-    });
-
-    const results = await Promise.all(
-        chunks.map((chunk, index) =>
-          runNodeScript(
-            workerPath,
-            ["run-all"],
-            {
-              FP_SPORTSCHOLEN_KEYS: chunk.join(","),
-              FP_SPORTSCHOLEN_WORKERS: "10",
-              WORKERS: "10",
-              STAGGER_MS:
-                process.env.FP_SPORTSCHOLEN_STAGGER_MS ??
-                process.env.STAGGER_MS ??
-                "2500",
-              TAB_ATTEMPTS: process.env.TAB_ATTEMPTS ?? "3",
-              SOFT_WAIT_MS: process.env.SOFT_WAIT_MS ?? "1500",
-              BETWEEN_ATTEMPTS_MS:
-                process.env.BETWEEN_ATTEMPTS_MS ?? "700",
-              FP_SPORTSCHOLEN_WORKER_DRIFT_MAX_MS:
-                process.env.FP_SPORTSCHOLEN_WORKER_DRIFT_MAX_MS ?? "250",
-              FP_SPORTSCHOLEN_LOGIN_RETRIES:
-                process.env.FP_SPORTSCHOLEN_LOGIN_RETRIES ?? "1",
-              FP_SPORTSCHOLEN_TRANSIENT_RETRIES:
-                process.env.FP_SPORTSCHOLEN_TRANSIENT_RETRIES ?? "1",
-              FP_SPORTSCHOLEN_DOWNLOAD_START_TIMEOUT_MS:
-                process.env.FP_SPORTSCHOLEN_DOWNLOAD_START_TIMEOUT_MS ?? "6000",
-            },
-            `sportscholen-${index + 1}/${chunks.length}`
-          )
-        )
-      );
-
-    return NextResponse.json({
-      ok: true,
-      sportscholen: keys.length,
-      processen: chunks.length,
-      workers_per_proces: 10,
-      ms: results.reduce((max, r) => Math.max(max, r.ms), 0),
-    });
+    const preparePath = resolveScriptPath("scrapers", "sportscholen", "scraper_sportscholen_prepare.js");
+    console.log("🏫 Alleen centrale SPORTSCHOLEN-Excel downloaden en verwerken");
+    const result = await runNodeScript(preparePath, ["run"], {}, "sportscholen-prepare");
+    return NextResponse.json({ok:true,mode:"sportscholen-excel-only",ms:result.ms});
   } catch (err: any) {
     console.error("❌ sportscholen API fout:", err);
-    return NextResponse.json(
-      { ok: false, error: err?.message ?? "Onbekende fout" },
-      { status: 500 }
-    );
+    return NextResponse.json({ok:false,error:err?.message ?? "Onbekende fout"},{status:500});
   }
 }
