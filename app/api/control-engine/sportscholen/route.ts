@@ -121,9 +121,11 @@ function splitRoundRobin<T>(items: T[], parts: number): T[][] {
 export async function POST() {
   try {
     const preparePath = resolveScriptPath("scrapers", "sportscholen", "scraper_sportscholen_prepare.js");
-    console.log("🏫 Alleen centrale SPORTSCHOLEN-Excel downloaden en verwerken");
+    console.log("🏫 Centrale SPORTSCHOLEN-Excel en alle keurmerk DETAILS verwerken");
     const result = await runNodeScript(preparePath, ["run"], {}, "sportscholen-prepare");
-    return NextResponse.json({ok:true,mode:"sportscholen-excel-only",ms:result.ms});
+    const detailPath = resolveScriptPath("scrapers", "sportscholen", "scraper_sportscholen.js");
+    const details = await runNodeScript(detailPath, ["run-all"], {}, "sportscholen-keurmerk-details");
+    return NextResponse.json({ok:true,mode:"sportscholen-excel-and-keurmerk-details",ms:result.ms+details.ms});
   } catch (err: any) {
     console.error("❌ sportscholen API fout:", err);
     return NextResponse.json({ok:false,error:err?.message ?? "Onbekende fout"},{status:500});
