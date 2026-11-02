@@ -2704,6 +2704,34 @@ async function main() {
       .eq("id", run.id);
   }
 
+  // NVB-spoedaanvragen hebben voorrang boven het uitdelen van nieuwe Total-VA's.
+  // De aparte refresh-worker verwerkt deze aanvragen; reeds gestarte VA's ronden af.
+  // Cache de controle per proces om 10 gelijktijdige databasequeries te voorkomen.
+  let priorityCheckedAt = 0;
+  let priorityActive = false;
+  let priorityCheckPromise = null;
+  async function hasNvbPriorityWork() {
+    if (Date.now() - priorityCheckedAt < 2000) return priorityActive;
+    if (!priorityCheckPromise) {
+      priorityCheckPromise = (async () => {
+        const { data, error } = await supabase
+          .from("fightpassport_refresh_queue")
+          .select("id")
+          .eq("requested_role", "nvb_platform")
+          .in("status", ["pending", "processing"])
+          .limit(1);
+        if (error) {
+          console.warn("[fp-total] NVB-prioriteit niet controleerbaar:", error.message);
+          return false;
+        }
+        priorityActive = Boolean(data?.length);
+        priorityCheckedAt = Date.now();
+        return priorityActive;
+      })().finally(() => { priorityCheckPromise = null; });
+    }
+    return priorityCheckPromise;
+  }
+
   async function workerLoop(workerIdx) {
     // Spread worker startup across all Total processes, not just within this process.
     const processOffset = Math.max(0, Number(process.env.FP_TOTAL_PROCESS_START_DELAY_MS || 0));
@@ -2714,6 +2742,12 @@ async function main() {
     // Geen incognito/browsercontext per worker; alle tabs delen dezelfde masterbrowser + sessiecookies.
 
     while (!stopRequested) {
+      // Geef de dedicated NVB-refresh-worker ruimte vóór een nieuwe reguliere VA.
+      // Een mislukte prioriteitsquery blokkeert de Total-run niet permanent.
+      if (!IS_RETRY_RUN && await hasNvbPriorityWork()) {
+        await sleep(1500);
+        continue;
+      }
       // Tijdelijk geen werk zichtbaar? Wacht zolang een andere worker nog bezig
       // is; die kan door login/browserherstel een VA achteraan toevoegen.
       if (idx >= vaList.length) {
