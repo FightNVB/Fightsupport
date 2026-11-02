@@ -2705,7 +2705,9 @@ async function main() {
   }
 
   async function workerLoop(workerIdx) {
-    const workerStartDelay = workerIdx * STAGGER;
+    // Spread worker startup across all Total processes, not just within this process.
+    const processOffset = Math.max(0, Number(process.env.FP_TOTAL_PROCESS_START_DELAY_MS || 0));
+    const workerStartDelay = workerIdx * STAGGER + processOffset;
     if (workerStartDelay > 0) await sleep(workerStartDelay);
 
     // Historisch-model: worker = alleen async taakverdeler.
