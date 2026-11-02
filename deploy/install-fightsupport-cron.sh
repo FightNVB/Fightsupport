@@ -26,7 +26,7 @@ cat >> "$TMP_FILE" <<'CRON'
 # Total AutoCheck: iedere dag om 21:00 starten/hervatten
 0 21 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/start >> /var/log/fightsupport-total-cron.log 2>&1
 
-# Teams: uitgeschakeld; sportscholencron verzorgt Fightcrew-verwerking.
+# Teams: uitgeschakeld; Total-scraper verwerkt de actuele Fightcrew-koppeling vanuit de onderste sportschoolregistratie.
 CRON
 
 crontab "$TMP_FILE"
