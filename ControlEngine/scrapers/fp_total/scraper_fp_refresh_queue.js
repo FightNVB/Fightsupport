@@ -142,16 +142,26 @@ function releaseLock() {
 }
 
 async function claimNext() {
-  const { data: rows, error } = await supabase
+  // NVB/FightSystem uploads first; preserve FIFO within each priority class.
+  const priority = await supabase
     .from(QUEUE_TABLE)
     .select("id,va_nummer,created_at")
     .eq("status", "pending")
+    .eq("requested_role", "nvb_platform")
     .order("created_at", { ascending: true })
     .limit(1);
-
-  if (error) throw error;
-
-  const row = rows?.[0];
+  if (priority.error) throw priority.error;
+  let row = priority.data?.[0];
+  if (!row) {
+    const normal = await supabase
+      .from(QUEUE_TABLE)
+      .select("id,va_nummer,created_at")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true })
+      .limit(1);
+    if (normal.error) throw normal.error;
+    row = normal.data?.[0];
+  }
   if (!row?.id) return null;
 
   const va = cleanVa(row.va_nummer);
