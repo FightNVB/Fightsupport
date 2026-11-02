@@ -26,8 +26,7 @@ cat >> "$TMP_FILE" <<'CRON'
 # Total AutoCheck: iedere dag om 21:00 starten/hervatten
 0 21 * * * cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/cron/fightpassport-total/start >> /var/log/fightsupport-total-cron.log 2>&1
 
-# Teams: iedere woensdag om 13:00
-0 13 * * 3 cd /root/Fightsupport && CRON_SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2-) && curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://fightsupport.nl/api/admin/fightpassport-sync/start-team >> /var/log/fightsupport-team-cron.log 2>&1
+# Teams: uitgeschakeld; sportscholencron verzorgt Fightcrew-verwerking.
 CRON
 
 crontab "$TMP_FILE"
@@ -35,5 +34,5 @@ echo "FightSupport cron bijgewerkt:"
 echo "  - Startverboden ma-vr 19:00"
 echo "  - Sportscholen dagelijks 12:00 en 20:00"
 echo "  - Total dagelijks 21:00 starten/hervatten"
-echo "  - Teams woensdag 13:00"
+echo "  - Teams uitgeschakeld (verwerkt via sportscholen)"
 echo "  - Geen Total stop-job"
