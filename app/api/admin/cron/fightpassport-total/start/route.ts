@@ -13,7 +13,7 @@ const START_VA = Number(process.env.FP_TOTAL_START_VA || 775);
 const FALLBACK_END_VA = Number(process.env.FP_TOTAL_END_VA || 33108);
 const END_BUFFER = Number(process.env.FP_TOTAL_END_BUFFER || 100);
 const WORKERS_PER_PROCESS = 10;
-const REQUESTED_PROCESSES = Math.max(1, Math.min(6, Number(process.env.FP_TOTAL_PROCESSES || 6)));
+const REQUESTED_PROCESSES = Math.max(1, Math.min(6, Number(process.env.FP_TOTAL_PROCESSES || 3)));
 
 function isCronAllowed(req: Request) {
   const secret = process.env.CRON_SECRET;
