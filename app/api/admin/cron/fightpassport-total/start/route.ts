@@ -13,7 +13,7 @@ const START_VA = Number(process.env.FP_TOTAL_START_VA || 775);
 const FALLBACK_END_VA = Number(process.env.FP_TOTAL_END_VA || 33108);
 const END_BUFFER = Number(process.env.FP_TOTAL_END_BUFFER || 100);
 const WORKERS_PER_PROCESS = 10;
-const REQUESTED_PROCESSES = 3;
+const REQUESTED_PROCESSES = Math.max(1, Math.min(6, Number(process.env.FP_TOTAL_PROCESSES || 6)));
 
 function isCronAllowed(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -177,7 +177,7 @@ export async function POST(req: Request) {
     if (pausedRuns.length > 0) {
       resumed = true;
 
-      // Nieuwe 3x10 full-runs bewaren batch_id/batch_part in meta. Als zo'n batch
+      // Nieuwe parallelle full-runs bewaren batch_id/batch_part in meta. Als zo'n batch
       // is gepauzeerd, hervatten we alleen de nog open delen met hun eigen run-id.
       const newestPaused = pausedRuns[0] as any;
       const newestMeta = (newestPaused.meta ?? {}) as any;
@@ -253,7 +253,9 @@ export async function POST(req: Request) {
           FP_TOTAL_BATCH_PARTS: String(parts.length),
           FP_TOTAL_BATCH_START_VA: String(batchStartVa),
           FP_TOTAL_BATCH_END_VA: String(batchEndVa),
-          STAGGER_MS: process.env.STAGGER_MS ?? "2500",
+          // Offset every process: spread all initial worker page opens across the batch.
+          STAGGER_MS: process.env.STAGGER_MS ?? "1500",
+          FP_TOTAL_PROCESS_START_DELAY_MS: String((part.part - 1) * 250),
           TAB_ATTEMPTS: process.env.TAB_ATTEMPTS ?? "3",
           SOFT_WAIT_MS: process.env.SOFT_WAIT_MS ?? "1500",
           BETWEEN_ATTEMPTS_MS: process.env.BETWEEN_ATTEMPTS_MS ?? "700",
