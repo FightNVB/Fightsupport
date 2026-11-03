@@ -141,35 +141,11 @@ export async function POST(req: Request) {
       if (error) throw error;
     }
 
-    // 6) Event pas verwijderen nadat matchmakings weg is,
-    // en alleen als geen andere matchmaking meer naar dit event verwijst.
-    let deletedEvent = false;
-
-    if (event_id) {
-      const { count: stillReferencedCount, error: refCheckError } =
-        await supabaseAdmin
-          .from("matchmakings")
-          .select("id", { count: "exact", head: true })
-          .eq("event_id", event_id);
-
-      if (refCheckError) throw refCheckError;
-
-      if ((stillReferencedCount ?? 0) === 0) {
-        const { error } = await supabaseAdmin
-          .from("events")
-          .delete()
-          .eq("id", event_id);
-
-        if (error) throw error;
-        deletedEvent = true;
-      }
-    }
-
     return NextResponse.json({
       ok: true,
       matchmaking_id,
       event_id,
-      deleted_event: deletedEvent,
+      deleted_event: false,
       deleted_all_for_matchmaking_id: true,
     });
   } catch (e: any) {
