@@ -9,7 +9,8 @@ const __dirname = path.dirname(__filename);
 
 const QUEUE_TABLE = "fightpassport_refresh_queue";
 const TOTAL_SCRIPT = path.join(__dirname, "scraper_fp_total.js");
-const LOCK_FILE = path.join(__dirname, ".fp_refresh_queue_worker.lock");
+const QUEUE_ROLE = process.env.FP_REFRESH_QUEUE_ROLE === "admin" ? "admin" : "matchmaker";
+const LOCK_FILE = path.join(__dirname, `.fp_refresh_queue_worker_${QUEUE_ROLE}.lock`);
 const IDLE_GRACE_MS = Math.max(
   1500,
   Number(process.env.FP_REFRESH_WORKER_IDLE_GRACE_MS ?? "4000"),
@@ -142,26 +143,14 @@ function releaseLock() {
 }
 
 async function claimNext() {
-  // NVB/FightSystem uploads first; preserve FIFO within each priority class.
-  const priority = await supabase
-    .from(QUEUE_TABLE)
+  // Onafhankelijke FIFO per rol. Iedere rol heeft een eigen proces en lock.
+  const result = await supabase.from(QUEUE_TABLE)
     .select("id,va_nummer,created_at")
-    .eq("status", "pending")
-    .eq("requested_role", "nvb_platform")
-    .order("created_at", { ascending: true })
-    .limit(1);
-  if (priority.error) throw priority.error;
-  let row = priority.data?.[0];
-  if (!row) {
-    const normal = await supabase
-      .from(QUEUE_TABLE)
-      .select("id,va_nummer,created_at")
-      .eq("status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(1);
-    if (normal.error) throw normal.error;
-    row = normal.data?.[0];
-  }
+    .eq("status","pending")
+    .eq("requested_role",QUEUE_ROLE)
+    .order("created_at",{ascending:true}).limit(1);
+  if(result.error)throw result.error;
+  const row=result.data?.[0];
   if (!row?.id) return null;
 
   const va = cleanVa(row.va_nummer);
@@ -219,7 +208,8 @@ function runTotalForVa(va) {
         // De queue-worker draait Terminator zelf expliciet per VA.
         FP_SKIP_RUN_TERMINATOR: "true",
 
-        FP_MATCHMAKER_ID: "",
+        FP_REFRESH_QUEUE_ROLE: QUEUE_ROLE,
+      FP_MATCHMAKER_ID: "",
         FP_SESSION_MODE: "master",
         HEADLESS: process.env.HEADLESS ?? "false",
         PUPPETEER_HEADLESS:
