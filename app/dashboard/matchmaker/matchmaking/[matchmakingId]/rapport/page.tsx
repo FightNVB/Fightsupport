@@ -27,23 +27,23 @@ const KLASSE_MINUTEN: Record<string, number> = {
   "mma jeugd": 17,
 };
 
-function safe(v: any, fallback = "-") {
+function galaSafe(v: any, fallback = "-") {
   const s = String(v ?? "").trim();
   return s || fallback;
 }
 
-function normalizeVa(v: any) {
+function galaNormalizeVa(v: any) {
   return String(v ?? "").replace(/\D/g, "").trim();
 }
 
-function norm(v: any) {
+function galaNorm(v: any) {
   return String(v ?? "").trim().toLowerCase();
 }
 
-function formatDate(v: any) {
+function galaFormatDate(v: any) {
   if (!v) return "-";
   const d = new Date(String(v).length === 10 ? `${v}T12:00:00` : v);
-  return Number.isNaN(d.getTime()) ? safe(v) : d.toLocaleDateString("nl-NL");
+  return Number.isNaN(d.getTime()) ? galaSafe(v) : d.toLocaleDateString("nl-NL");
 }
 
 function formatDuration(mins: number) {
@@ -56,7 +56,7 @@ function formatDuration(mins: number) {
   return m ? `${h} uur ${mt} min` : `${h} uur`;
 }
 
-function ageOnEvent(row: AnyRow, side: "rood" | "blauw", eventDate: any): number | null {
+function galaAgeOnEvent(row: AnyRow, side: "rood" | "blauw", eventDate: any): number | null {
   const dob = row?.[`${side}_geboortedatum_fp`] ?? row?.[`${side}_geboortedatum_mm`] ?? row?.[`${side}_geboortedatum`];
   if (!dob || !eventDate) return null;
   const b = new Date(String(dob).length === 10 ? `${dob}T12:00:00` : dob);
@@ -67,8 +67,8 @@ function ageOnEvent(row: AnyRow, side: "rood" | "blauw", eventDate: any): number
   return years >= 0 ? years : null;
 }
 
-function normalizeClass(v: any) {
-  return norm(v)
+function galaNormalizeClass(v: any) {
+  return galaNorm(v)
     .replace(/\+/g, " plus ")
     .replace(/[._/\\-]+/g, " ")
     .replace(/\bklasse\b|\bclass\b/g, " ")
@@ -76,16 +76,16 @@ function normalizeClass(v: any) {
     .trim();
 }
 
-function hasToken(text: string, token: string) {
+function galaHasToken(text: string, token: string) {
   return new RegExp(`(^|\\s)${token}(\\s|$)`, "i").test(text);
 }
 
-function classMinutes(row: AnyRow, eventDate: any): number | null {
+function galaClassMinutes(row: AnyRow, eventDate: any): number | null {
   const rawClass = row?.klasse_mm ?? row?.klasse ?? "";
-  const k = normalizeClass(rawClass);
-  const d = normalizeClass(row?.discipline ?? row?.discipline_mm ?? "");
+  const k = galaNormalizeClass(rawClass);
+  const d = galaNormalizeClass(row?.discipline ?? row?.discipline_mm ?? "");
   const both16 = ["rood", "blauw"].every((side) => {
-    const age = ageOnEvent(row, side as "rood" | "blauw", eventDate);
+    const age = galaAgeOnEvent(row, side as "rood" | "blauw", eventDate);
     return age != null && age >= 16;
   });
 
@@ -96,67 +96,67 @@ function classMinutes(row: AnyRow, eventDate: any): number | null {
   }
   if (["boksen", "boxing", "boxen"].includes(d) || k.includes("boksen")) return KLASSE_MINUTEN.boksen;
   if (`${k} ${d}`.includes("titel")) return KLASSE_MINUTEN["a titel"];
-  if (k.includes("talent") || norm(rawClass).includes("j+")) return KLASSE_MINUTEN.talentstatus;
-  if (/16\s*17/.test(k) || /16\s*\/\s*17/.test(norm(rawClass))) return KLASSE_MINUTEN["16/17"];
-  if (hasToken(k, "j") || k.includes("jeugd") || k.includes("youth") || k.includes("junior")) return both16 ? KLASSE_MINUTEN["jeugd 16+"] : KLASSE_MINUTEN.jeugd;
-  if (hasToken(k, "r") || k.includes("recreant")) return KLASSE_MINUTEN.r;
-  if (hasToken(k, "n") || k.includes("nieuweling") || k.includes("novice")) return KLASSE_MINUTEN.n;
-  if (hasToken(k, "c")) return KLASSE_MINUTEN.c;
-  if (hasToken(k, "b")) return KLASSE_MINUTEN.b;
-  if (hasToken(k, "a")) return KLASSE_MINUTEN.a;
+  if (k.includes("talent") || galaNorm(rawClass).includes("j+")) return KLASSE_MINUTEN.talentstatus;
+  if (/16\s*17/.test(k) || /16\s*\/\s*17/.test(galaNorm(rawClass))) return KLASSE_MINUTEN["16/17"];
+  if (galaHasToken(k, "j") || k.includes("jeugd") || k.includes("youth") || k.includes("junior")) return both16 ? KLASSE_MINUTEN["jeugd 16+"] : KLASSE_MINUTEN.jeugd;
+  if (galaHasToken(k, "r") || k.includes("recreant")) return KLASSE_MINUTEN.r;
+  if (galaHasToken(k, "n") || k.includes("nieuweling") || k.includes("novice")) return KLASSE_MINUTEN.n;
+  if (galaHasToken(k, "c")) return KLASSE_MINUTEN.c;
+  if (galaHasToken(k, "b")) return KLASSE_MINUTEN.b;
+  if (galaHasToken(k, "a")) return KLASSE_MINUTEN.a;
   if (k.includes("demo")) return KLASSE_MINUTEN.demo;
   return null;
 }
 
-function parseRawJsonSafe(v: any): AnyRow | null {
+function galaParseRawJsonSafe(v: any): AnyRow | null {
   if (!v) return null;
   if (typeof v === "object") return v as AnyRow;
   try { return JSON.parse(String(v)); } catch { return null; }
 }
 
-function isToernooi(row: AnyRow) {
+function galaIsToernooi(row: AnyRow) {
   const candidates = [row?.toernooi_code,row?.toernooi_id,row?.toernooi_nummer,row?.toernooi,row?.t_nummer,row?.t_code,row?.tournament_code];
   for (const c of candidates) {
     const x = String(c ?? "").trim().toUpperCase();
     if (x && /^T\d+$/.test(x)) return true;
   }
-  const raw = parseRawJsonSafe(row?.raw_json);
+  const raw = galaParseRawJsonSafe(row?.raw_json);
   for (const c of [raw?.toernooi_code,raw?.toernooi_id,raw?.toernooi_nummer,raw?.toernooi,raw?.t_nummer,raw?.t_code,raw?.tournament_code]) {
     const x = String(c ?? "").trim().toUpperCase();
     if (x && /^T\d+$/.test(x)) return true;
   }
-  const v = norm(row?.is_toernooi);
+  const v = galaNorm(row?.is_toernooi);
   return v === "true" || v === "1" || v === "ja";
 }
 
-function tournamentCode(row: AnyRow) {
+function galaTournamentCode(row: AnyRow) {
   const direct = String(row?.toernooi_code ?? row?.toernooi_id ?? row?.toernooi_nummer ?? row?.toernooi ?? row?.t_nummer ?? row?.t_code ?? row?.tournament_code ?? "").trim().toUpperCase();
   if (direct) return direct;
-  const raw = parseRawJsonSafe(row?.raw_json);
-  return String(raw?.toernooi_code ?? "").trim().toUpperCase() || (isToernooi(row) ? "TOERNOOI" : "");
+  const raw = galaParseRawJsonSafe(row?.raw_json);
+  return String(raw?.toernooi_code ?? "").trim().toUpperCase() || (galaIsToernooi(row) ? "TOERNOOI" : "");
 }
 
-function tournamentFighterKey(row: AnyRow, side: "rood" | "blauw") {
-  const va = normalizeVa(row?.[`${side}_va_mm`] ?? row?.[side === "rood" ? "va_rood" : "va_blauw"] ?? row?.[`${side}_va`] ?? row?.[`${side}_fighter_id`]);
+function galaTournamentFighterKey(row: AnyRow, side: "rood" | "blauw") {
+  const va = galaNormalizeVa(row?.[`${side}_va_mm`] ?? row?.[side === "rood" ? "va_rood" : "va_blauw"] ?? row?.[`${side}_va`] ?? row?.[`${side}_fighter_id`]);
   if (va) return `va:${va}`;
-  const naam = norm(row?.[`${side}_naam_fp`] ?? row?.[`${side}_naam_mm`] ?? row?.[`${side}_naam`]);
-  const gym = norm(row?.[`${side}_gym_mm`] ?? row?.[`${side}_gym_fp`] ?? row?.[`${side}_gym`] ?? row?.[`${side}_sportschool`]);
+  const naam = galaNorm(row?.[`${side}_naam_fp`] ?? row?.[`${side}_naam_mm`] ?? row?.[`${side}_naam`]);
+  const gym = galaNorm(row?.[`${side}_gym_mm`] ?? row?.[`${side}_gym_fp`] ?? row?.[`${side}_gym`] ?? row?.[`${side}_sportschool`]);
   return naam || gym ? `fallback:${naam}__${gym}` : null;
 }
 
 function calcGalaMinutes(rows: AnyRow[], eventDate: any) {
   let total = 0;
   const unknown = new Set<string>();
-  const gewoneRows = rows.filter((r) => !isToernooi(r));
+  const gewoneRows = rows.filter((r) => !galaIsToernooi(r));
   for (const row of gewoneRows) {
-    const m = classMinutes(row, eventDate);
-    if (m == null) unknown.add(safe(row?.klasse_mm ?? row?.klasse, "Onbekende klasse"));
+    const m = galaClassMinutes(row, eventDate);
+    if (m == null) unknown.add(galaSafe(row?.klasse_mm ?? row?.klasse, "Onbekende klasse"));
     else total += m;
   }
 
   const groups = new Map<string, AnyRow[]>();
-  for (const row of rows.filter(isToernooi)) {
-    const code = tournamentCode(row) || "TOERNOOI";
+  for (const row of rows.filter(galaIsToernooi)) {
+    const code = galaTournamentCode(row) || "TOERNOOI";
     const arr = groups.get(code) ?? [];
     arr.push(row); groups.set(code, arr);
   }
@@ -166,16 +166,16 @@ function calcGalaMinutes(rows: AnyRow[], eventDate: any) {
     const pairingMinutes: number[] = [];
     for (const row of groupRows) {
       for (const side of ["rood","blauw"] as const) {
-        const key = tournamentFighterKey(row, side); if (key) fighters.add(key);
+        const key = galaTournamentFighterKey(row, side); if (key) fighters.add(key);
       }
-      const m = classMinutes(row, eventDate);
-      if (m == null) unknown.add(`Toernooi ${code} (${safe(row?.klasse_mm ?? row?.klasse, "klasse onbekend")})`);
+      const m = galaClassMinutes(row, eventDate);
+      if (m == null) unknown.add(`Toernooi ${code} (${galaSafe(row?.klasse_mm ?? row?.klasse, "klasse onbekend")})`);
       else { total += m; pairingMinutes.push(m); }
     }
     const expectedBouts = fighters.size >= 2 ? fighters.size - 1 : groupRows.length;
     const missingBouts = Math.max(0, expectedBouts - groupRows.length);
     if (missingBouts > 0) {
-      const fallback = pairingMinutes.length ? Math.max(...pairingMinutes) : classMinutes(groupRows[0] ?? {}, eventDate);
+      const fallback = pairingMinutes.length ? Math.max(...pairingMinutes) : galaClassMinutes(groupRows[0] ?? {}, eventDate);
       if (fallback == null) unknown.add(`Toernooi ${code} - nog te bepalen ronde`);
       else total += fallback * missingBouts;
     }
