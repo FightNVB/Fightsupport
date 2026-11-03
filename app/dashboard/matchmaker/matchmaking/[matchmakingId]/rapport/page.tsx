@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { calcGalaMinutes, formatDuration } from "@/lib/control/reportGalaDuration";
 
 type PartijStatus = "OK" | "AFKEUR" | "DISPENSATIE" | "ACTIE" | "VERBOD";
 
@@ -790,18 +791,13 @@ export default function RapportPage() {
   const [ctxRows, setCtxRows] = useState<any[]>([]);
   const [toernooiCtxRows, setToernooiCtxRows] = useState<any[]>([]);
   const [resultaten, setResultaten] = useState<ResultRow[]>([]);
-  // Toon de bestaande galaduurberekening uit de controleresultaten; bereken niet opnieuw.
-  const geschatteGaladuur = useMemo(() => {
-    const melding = resultaten.find((row) =>
-      /geschatte gala[- ]duur\s*:/i.test(String(row.boodschap ?? "")),
-    );
-    const tekst = String(melding?.boodschap ?? "");
-    const match = tekst.match(/geschatte gala[- ]duur\s*:\s*(\d+(?:[.,]\d+)?\s*uur(?:\s*\d+(?:[.,]\d+)?\s*min)?|\d+(?:[.,]\d+)?\s*min)/i);
-    return match?.[1]?.trim() || "-";
-  }, [resultaten]);
-
-
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const geschatteGaladuur = useMemo(() => {
+    if (!ctxRows.length) return "-";
+    const berekening = calcGalaMinutes(ctxRows, eventMeta?.datum);
+    return berekening.unknown ? `${formatDuration(berekening.total)} (${berekening.unknown} klasse(s) onbekend)` : formatDuration(berekening.total);
+  }, [ctxRows, eventMeta?.datum]);
+
 
   useEffect(() => {
     if (!matchmakingId) return;
