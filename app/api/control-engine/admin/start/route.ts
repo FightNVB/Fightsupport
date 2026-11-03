@@ -221,14 +221,40 @@ export async function POST(req: Request) {
     const betweenAttemptsMs = clampInt(body?.between_attempts_ms ?? 350, 350, 0, 5000);
     const scrapeTimeoutMs = clampInt(body?.scrape_timeout_ms ?? 120000, 120000, 30000, 300000);
 
-    // Alleen een eerdere Admin-run van deze matchmaking afbreken. Matchmaker/Officials blijven onafhankelijk.
-    await abortOwnActiveRuns(matchmakingId);
+    // Eén actieve volledige scrape per matchmaking; DB-only controles blokkeren niet.
+    const { data: active, error: activeError } = await supabase
+      .from("controle_runs")
+      .select("id,run_type")
+      .eq("matchmaking_id", matchmakingId)
+      .in("status", ["queued", "running"])
+      .in("run_type", ["control-engine-admin-total", "control-engine-matchmaker-total"])
+      .limit(1);
+    if (activeError) throw activeError;
+    if (active?.length) return NextResponse.json({
+      ok: true, already_running: true, matchmaking_id: matchmakingId,
+      controle_run_id: active[0].id, run_type: active[0].run_type, status: "running",
+    }, { status: 202 });
 
-    controleRunId = await createControleRun({
-      matchmakingId,
-      userId: userId ?? null,
-      role: role ?? null,
-    });
+    try {
+      controleRunId = await createControleRun({
+        matchmakingId, userId: userId ?? null, role: role ?? null,
+      });
+    } catch (insertError: any) {
+      if (insertError?.code !== "23505") throw insertError;
+      const { data: concurrent, error: concurrentError } = await supabase
+        .from("controle_runs").select("id,run_type")
+        .eq("matchmaking_id", matchmakingId)
+        .in("status", ["queued", "running"])
+        .in("run_type", ["control-engine-admin-total", "control-engine-matchmaker-total"])
+        .limit(1);
+      if (concurrentError) throw concurrentError;
+      if (!concurrent?.length) throw insertError;
+      return NextResponse.json({
+        ok: true, already_running: true, matchmaking_id: matchmakingId,
+        controle_run_id: concurrent[0].id, run_type: concurrent[0].run_type,
+        status: "running",
+      }, { status: 202 });
+    }
 
     await updateRunProgress(controleRunId, { progress: 5, current_step: "Partijen en VA-nummers verzamelen..." });
 
