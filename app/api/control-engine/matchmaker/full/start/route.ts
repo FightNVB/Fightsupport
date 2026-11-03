@@ -258,8 +258,44 @@ export async function POST(req: Request) {
       scrapeTimeoutMs: clampInt(body?.scrape_timeout_ms ?? 120000, 120000, 30000, 300000),
     };
 
-    await abortOwnRunning(matchmakingId);
-    runId = await createRun(matchmakingId, userId ?? null, role ?? null);
+    // De database staat maar één actieve controlerun per matchmaking toe,
+    // ongeacht het run_type. Een bestaande run nooit afbreken bij een tweede klik.
+    const { data: activeRuns, error: activeError } = await supabase
+      .from("controle_runs")
+      .select("id,run_type,status")
+      .eq("matchmaking_id", matchmakingId)
+      .eq("status", "running")
+      .limit(1);
+    if (activeError) throw activeError;
+    if (activeRuns?.length) {
+      return NextResponse.json({
+        ok: true,
+        already_running: true,
+        matchmaking_id: matchmakingId,
+        controle_run_id: activeRuns[0].id,
+        run_type: activeRuns[0].run_type,
+        status: "running",
+      }, { status: 202 });
+    }
+    try {
+      runId = await createRun(matchmakingId, userId ?? null, role ?? null);
+    } catch (insertError: any) {
+      if (insertError?.code !== "23505") throw insertError;
+      // Ook gelijktijdige startverzoeken mogen geen tweede scraper starten.
+      const { data: concurrent, error: concurrentError } = await supabase
+        .from("controle_runs")
+        .select("id,run_type")
+        .eq("matchmaking_id", matchmakingId)
+        .eq("status", "running")
+        .limit(1);
+      if (concurrentError) throw concurrentError;
+      if (!concurrent?.length) throw insertError;
+      return NextResponse.json({
+        ok: true, already_running: true, matchmaking_id: matchmakingId,
+        controle_run_id: concurrent[0].id, run_type: concurrent[0].run_type,
+        status: "running",
+      }, { status: 202 });
+    }
 
     const bouts = await loadBouts(matchmakingId);
     if (!bouts.length) throw new Error("Geen actieve partijen gevonden.");
