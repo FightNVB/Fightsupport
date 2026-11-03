@@ -1125,51 +1125,55 @@ async function readCurrentSportschool(page, va, signal = null) {
   await sleep(400);
   throwIfAborted(signal, va);
 
-  const state = await page.evaluate(() => {
+  const state = await page.evaluate((requestedVa) => {
     const clean = (value) => String(value || "")
       .replace(/\u00a0/g, " ")
       .replace(/\s+/g, " ")
       .trim();
 
-    const visible = (el) => {
+    // Alleen rijen binnen de SPORTSCHOLEN-tegel van de gevraagde VA
+    // of het expliciet getitelde, zichtbare SPORTSCHOLEN-dialoogvenster.
+        const visible = el => {
       if (!el) return false;
-      const r = el.getBoundingClientRect();
-      const st = getComputedStyle(el);
-      return r.width > 200 && r.height > 30 && st.display !== "none" && st.visibility !== "hidden";
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
     };
-
+    // SYS42 toont een eigen venster 'Sportscholen gekoppeld aan', niet altijd
+    // een HTML-dialog. Identificeer de tabel daarom aan de unieke kolomkoppen.
+    const tables = [...document.querySelectorAll("table")].filter(table => {
+      if (!visible(table)) return false;
+      const header = [...table.querySelectorAll("th, thead td, tr:first-child td")]
+        .map(cell => clean(cell.textContent).toLowerCase());
+      return header.some(h => h.includes("organisatie naam")) &&
+        header.some(h => h === "plaats") && header.some(h => h === "land");
+    });
+    const rows = [...new Set(tables.flatMap(table => {
+        // SYS42 kan de zichtbare gegevens in een flexlist buiten de
+        // header-table plaatsen. Neem daarom ook sibling-rijen mee,
+        // maar alleen binnen de direct bijbehorende grid-container.
+        const grid = table.closest(".flexlist, .flexlist_container, .grid, .ui-dialog-content") || table.parentElement;
+        return [...grid.querySelectorAll("tr.flexlist_row, tr")];
+      }))];
     const candidates = [];
-    for (const table of [...document.querySelectorAll("table")].filter(visible)) {
-      const rows = [...table.querySelectorAll("tr.flexlist_row, tr")]
-        .filter((row) => !row.classList.contains("filler"));
-
-      for (const row of rows) {
-        const cells = [...row.querySelectorAll("td")];
-        if (cells.length < 4) continue;
-
-        const sportschool = clean(cells[1]?.textContent);
-        const plaats = clean(cells[2]?.textContent);
-        const land = clean(cells[cells.length - 2]?.textContent);
-
-        if (!sportschool || !land) continue;
-        if (/^organisatie\s*naam$/i.test(sportschool)) continue;
-        if (/^land$/i.test(land)) continue;
-
-        candidates.push({
-          sportschool,
-          plaats,
-          land,
-          keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(
-            String(row.innerHTML || "")
-          ),
-        });
-      }
+    for (const row of rows) {
+      if (row.classList.contains("filler") || !visible(row)) continue;
+      const cells = [...row.children].filter(cell => cell.tagName === "TD");
+      if (cells.length < 5) continue;
+      const sportschool = clean(cells[1]?.textContent);
+      const plaats = clean(cells[2]?.textContent);
+      const land = clean(cells[3]?.textContent);
+      if (!sportschool || !land || /^organisatie\s*naam$/i.test(sportschool) || /^land$/i.test(land) || /^plaats$/i.test(plaats)) continue;
+      candidates.push({
+        sportschool, plaats, land,
+        keurmerk_schild_gevonden: /(?:href|xlink:href)=["'][^"']*#img_132["']/i.test(String(row.innerHTML || "")),
+      });
     }
 
     return candidates.length
       ? { ok: true, ...candidates[candidates.length - 1] }
       : { ok: false };
-  }).catch(() => ({ ok: false }));
+  }, String(va)).catch(() => ({ ok: false }));
 
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(100);
