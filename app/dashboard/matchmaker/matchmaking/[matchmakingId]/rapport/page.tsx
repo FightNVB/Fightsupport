@@ -796,7 +796,7 @@ export default function RapportPage() {
       /geschatte gala[- ]duur\s*:/i.test(String(row.boodschap ?? "")),
     );
     const tekst = String(melding?.boodschap ?? "");
-    const match = tekst.match(/geschatte gala[- ]duur\s*:\s*([^.;]+(?:[.,]\d+)?(?:\s*(?:uur|min))?)/i);
+    const match = tekst.match(/geschatte gala[- ]duur\s*:\s*(\d+(?:[.,]\d+)?\s*uur(?:\s*\d+(?:[.,]\d+)?\s*min)?|\d+(?:[.,]\d+)?\s*min)/i);
     return match?.[1]?.trim() || "-";
   }, [resultaten]);
 
