@@ -42,12 +42,13 @@ function workerPath() {
   return file;
 }
 
-function startWorker(req: Request) {
+function startWorker(req: Request, role: "admin" | "matchmaker") {
   const file = workerPath();
   const proc = spawn(process.execPath, [file], {
     stdio: ["ignore", "pipe", "pipe"], shell: false, cwd: path.dirname(file), windowsHide: true,
     env: {
       ...process.env,
+      FP_REFRESH_QUEUE_ROLE: role,
       FP_MATCHMAKER_ID: "",
       FP_SESSION_MODE: "master",
       HEADLESS: process.env.HEADLESS ?? "false",
@@ -67,17 +68,19 @@ export async function POST(req: Request) {
     if (!await authorize(req)) return NextResponse.json({ ok: false, error: "Geen toegang." }, { status: 403 });
     const body = await req.json().catch(() => ({}));
     const va = normalizeVa(body?.va);
+    const role = body?.role === "admin" ? "admin" : body?.role === "matchmaker" ? "matchmaker" : null;
+    if (!role) return NextResponse.json({ok:false,error:"Wachtrijrol admin of matchmaker ontbreekt."},{status:400});
     if (!va) return NextResponse.json({ ok: false, error: "Geldig VA-nummer ontbreekt." }, { status: 400 });
 
     const { data: active, error: activeError } = await supabaseAdmin.from(QUEUE_TABLE)
-      .select("id,status").eq("va_nummer", va).in("status", ["pending", "processing"]).limit(1).maybeSingle();
+      .select("id,status").eq("va_nummer", va).eq("requested_role",role).in("status", ["pending", "processing"]).limit(1).maybeSingle();
     if (activeError) throw activeError;
 
     let item = active;
     let alreadyQueued = Boolean(active?.id);
     if (!item) {
       const { data: inserted, error } = await supabaseAdmin.from(QUEUE_TABLE)
-        .insert({ va_nummer: va, status: "pending", requested_role: "nvb_platform" })
+        .insert({ va_nummer: va, status: "pending", requested_role: role })
         .select("id,status").single();
       if (error && String(error.code || "") !== "23505") throw error;
       if (error) {
@@ -88,7 +91,7 @@ export async function POST(req: Request) {
       } else item = inserted;
     }
 
-    const pid = startWorker(req);
+    const pid = startWorker(req,role);
     return NextResponse.json({ ok: true, queued: true, already_queued: alreadyQueued, va, queue_id: item?.id ?? null, refresh_worker_pid: pid }, { status: 202 });
   } catch (e: any) {
     console.error("[fightpassport-refresh] fout", e);
