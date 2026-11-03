@@ -264,7 +264,8 @@ export async function POST(req: Request) {
       .from("controle_runs")
       .select("id,run_type,status")
       .eq("matchmaking_id", matchmakingId)
-      .eq("status", "running")
+      .in("status", ["queued", "running"])
+      .in("run_type", ["control-engine-admin-total", "control-engine-matchmaker-total"])
       .limit(1);
     if (activeError) throw activeError;
     if (activeRuns?.length) {
@@ -286,7 +287,8 @@ export async function POST(req: Request) {
         .from("controle_runs")
         .select("id,run_type")
         .eq("matchmaking_id", matchmakingId)
-        .eq("status", "running")
+        .in("status", ["queued", "running"])
+        .in("run_type", ["control-engine-admin-total", "control-engine-matchmaker-total"])
         .limit(1);
       if (concurrentError) throw concurrentError;
       if (!concurrent?.length) throw insertError;
