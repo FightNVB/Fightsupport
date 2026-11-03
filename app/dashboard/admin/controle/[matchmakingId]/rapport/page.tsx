@@ -828,6 +828,17 @@ export default function RapportPage() {
   const [ctxRows, setCtxRows] = useState<any[]>([]);
   const [toernooiCtxRows, setToernooiCtxRows] = useState<any[]>([]);
   const [resultaten, setResultaten] = useState<ResultRow[]>([]);
+  // Toon de bestaande galaduurberekening uit de controleresultaten; bereken niet opnieuw.
+  const geschatteGaladuur = useMemo(() => {
+    const melding = resultaten.find((row) =>
+      /geschatte gala[- ]duur\s*:/i.test(String(row.boodschap ?? "")),
+    );
+    const tekst = String(melding?.boodschap ?? "");
+    const match = tekst.match(/geschatte gala[- ]duur\s*:\s*([^.;]+(?:[.,]\d+)?(?:\s*(?:uur|min))?)/i);
+    return match?.[1]?.trim() || "-";
+  }, [resultaten]);
+
+
   const [matchmakerResultaten, setMatchmakerResultaten] = useState<any[]>([]);
   const [matchmakerCtxRows, setMatchmakerCtxRows] = useState<any[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
@@ -2397,6 +2408,11 @@ export default function RapportPage() {
               <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
                 <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Promotor</div>
                 <div className="mt-1 text-lg font-black">{safe(eventMeta?.promotor)}</div>
+              </div>
+
+              <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">Geschatte galaduur</div>
+                <div className="mt-1 text-lg font-black">{geschatteGaladuur}</div>
               </div>
 
               <div className="rounded-2xl border border-black/10 bg-white/85 px-5 py-4 md:col-span-2">
