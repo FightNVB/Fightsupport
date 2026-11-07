@@ -1,3 +1,4 @@
+import {controlActor} from "@/lib/control-engine/nvbMachineActor";
 import { runFightPassportNodeScript } from "@/lib/control-engine/runFightPassportNodeScript";
 // app/api/control-engine/admin/start/route.ts
 // ADMINCONTROLE: eigen full scraper + eigen Admin libs/rules.
@@ -209,7 +210,7 @@ export async function POST(req: Request) {
     matchmakingId = String(body?.matchmaking_id ?? "").trim() || null;
     if (!matchmakingId) return NextResponse.json({ error: "matchmaking_id ontbreekt." }, { status: 400 });
 
-    const { userId, role } = await requireUserWithRole(req);
+    const { userId, role } = await controlActor(req,"admin");
     if (!isRoleAllowedForRoute(role)) {
       return NextResponse.json({ error: "Geen toegang tot admin start route." }, { status: 403 });
     }
