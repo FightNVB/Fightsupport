@@ -1,6 +1,7 @@
 // app/api/control-engine/matchmaker/full/start/route.ts
 // Volledige Matchmaker-controle voor Upload en Eindcontrole. Eigen scraper + eigen Matchmaker libs.
 
+import {controlActor} from "@/lib/control-engine/nvbMachineActor";
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
@@ -244,7 +245,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "matchmaking_id ontbreekt." }, { status: 400 });
     }
 
-    const { userId, role } = await requireUserWithRole(req);
+    const { userId, role } = await controlActor(req,"matchmaker");
     if (!roleAllowed(role)) {
       return NextResponse.json({ error: "Geen toegang tot Matchmaker-controle." }, { status: 403 });
     }
