@@ -50,5 +50,5 @@ export async function receiveControl(req:Request,action:ControlAction,start:(req
   const {error:saveError}=await platform.from('control_machine_requests').update({status:status<400?'completed':'failed',http_status:status,result,finished_at:new Date().toISOString()}).eq('id',command.request_id).eq('status','running');
   if(saveError)return response(503,'Controleresultaat niet bevestigd. Volg de bestaande voortgang.');
   return Response.json(result,{status,headers:{'Cache-Control':'no-store'}});
- }catch{return response(503,'Machineautorisatie of aanvraagregistratie niet beschikbaar.');}
+ }catch(error){console.error('[nvb-control] Machineautorisatie of aanvraagregistratie mislukt',{action,code:(error as {code?:string})?.code,message:error instanceof Error?error.message:String(error)});return response(503,'Machineautorisatie of aanvraagregistratie niet beschikbaar.');}
 }
