@@ -22,11 +22,9 @@ export async function receiveControl(req:Request,action:ControlAction,start:(req
   if(accountError)throw accountError;if(!account)return response(403,'Geen actief account.');
   const {data:grants,error:roleError}=await platform.from('account_roles').select('roles(key)').eq('account_id',account.id).eq('active',true).is('revoked_at',null);
   if(roleError)throw roleError;const roles=(grants||[]).map((g:any)=>g.roles?.key);
-  const {data:mm,error:mmError}=await db.from('matchmakings').select('id,matchmaker_id,submitted_to_admin_at,huidige_eigenaar_type,huidige_eigenaar_user_id').eq('id',command.matchmaking_id).maybeSingle();
+  const {data:mm,error:mmError}=await db.from('matchmakings').select('id,matchmaker_id,submitted_to_admin_at,huidige_eigenaar_type').eq('id',command.matchmaking_id).maybeSingle();
   if(mmError)throw mmError;
-  const nvb=roles.some(r=>['controle','nvb_admin','superadmin'].includes(r));
-  const inControle=!!mm&&(!!mm.submitted_to_admin_at||['admin','nvb'].includes(String(mm.huidige_eigenaar_type||'').toLowerCase()));
-  const allowed=!!mm&&((nvb&&inControle)||(action!=='admin'&&roles.includes('matchmaker')&&(mm.matchmaker_id===command.actor_id||mm.huidige_eigenaar_user_id===command.actor_id)));
+  const allowed=mm&&(action==='admin'?(mm.submitted_to_admin_at||String(mm.huidige_eigenaar_type||'').toLowerCase()==='admin')&&roles.some(r=>['controle','nvb_admin','superadmin'].includes(r)):roles.includes('matchmaker')&&mm.matchmaker_id===command.actor_id);
   if(!allowed)return response(403,'Geen bevoegdheid voor deze matchmaking en actie.');
   const ledger=platform.from('control_machine_requests');
   const {error:claimError}=await ledger.insert({id:command.request_id,action,matchmaking_id:command.matchmaking_id,actor_id:command.actor_id,status:'running'});
@@ -41,7 +39,7 @@ export async function receiveControl(req:Request,action:ControlAction,start:(req
   let result:any,status=502;
   try{
    const original=new Request(req.url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({matchmaking_id:command.matchmaking_id,...(action==='matchmaker-refresh'?{progress_stream:true}:{})})});
-   const r=await withMachineActor({userId:command.actor_id,role:action==='admin'||(nvb&&inControle)?'admin':'matchmaker',action},()=>start(original));
+   const r=await withMachineActor({userId:command.actor_id,role:action==='admin'?'admin':'matchmaker',action},()=>start(original));
    if(action==='matchmaker-refresh'&&r.ok&&r.body){
     const reader=r.body.getReader();let failed=false,disconnected=false,buffer='';const decoder=new TextDecoder();
     const stream=new ReadableStream({cancel(){disconnected=true;},async start(controller){try{while(true){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});let nl;while((nl=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,nl);buffer=buffer.slice(nl+1);try{if(JSON.parse(line).type==='error')failed=true;}catch{failed=true;}}if(!disconnected){try{controller.enqueue(value);}catch{disconnected=true;}}}if(!disconnected)controller.close();}catch{failed=true;if(!disconnected)controller.error(Error('Voortgang onderbroken.'));}finally{await platform.from('control_machine_requests').update({status:failed?'failed':'completed',http_status:failed?502:200,result:{ok:!failed},finished_at:new Date().toISOString()}).eq('id',command.request_id).eq('status','running');}}});
