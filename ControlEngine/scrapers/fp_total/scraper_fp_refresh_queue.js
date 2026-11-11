@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 const QUEUE_TABLE = "fightpassport_refresh_queue";
 const TOTAL_SCRIPT = path.join(__dirname, "scraper_fp_total.js");
 const QUEUE_ROLE = process.env.FP_REFRESH_QUEUE_ROLE === "admin" ? "admin" : "matchmaker";
+const QUEUE_ROLES = QUEUE_ROLE === "admin" ? ["admin", "superadmin"] : ["matchmaker"];
 const LOCK_FILE = path.join(__dirname, `.fp_refresh_queue_worker_${QUEUE_ROLE}.lock`);
 const IDLE_GRACE_MS = Math.max(
   1500,
@@ -147,7 +148,7 @@ async function claimNext() {
   const result = await supabase.from(QUEUE_TABLE)
     .select("id,va_nummer,created_at")
     .eq("status","pending")
-    .eq("requested_role",QUEUE_ROLE)
+    .in("requested_role",QUEUE_ROLES)
     .order("created_at",{ascending:true}).limit(1);
   if(result.error)throw result.error;
   const row=result.data?.[0];
