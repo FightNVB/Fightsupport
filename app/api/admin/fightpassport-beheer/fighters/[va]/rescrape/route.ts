@@ -64,7 +64,7 @@ async function latestQueueItem(
   return data ?? null;
 }
 
-function startRefreshWorker(req: Request) {
+function startRefreshWorker(req: Request, role: string) {
   const workerPath = resolveScriptPath(
     "scrapers",
     "fp_total",
@@ -82,6 +82,7 @@ function startRefreshWorker(req: Request) {
     detached: false,
     env: {
       ...process.env,
+      FP_REFRESH_QUEUE_ROLE: role === "matchmaker" ? "matchmaker" : "admin",
       FP_MATCHMAKER_ID: "",
       FP_SESSION_MODE: "master",
       HEADLESS: process.env.HEADLESS ?? "false",
@@ -228,7 +229,7 @@ export async function POST(
     // Altijd een LOSSE extra update-worker proberen te starten,
     // ook als de normale Total AutoCheck al uren draait.
     // De worker-lock voorkomt meerdere extra workers.
-    const workerPid = startRefreshWorker(req);
+    const workerPid = startRefreshWorker(req, role ?? "admin");
 
     return NextResponse.json(
       {
