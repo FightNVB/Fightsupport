@@ -1,6 +1,6 @@
 import 'server-only';
 import {createHmac,timingSafeEqual} from 'node:crypto';
-export type ControlAction='admin'|'matchmaker'|'matchmaker-refresh';
+export type ControlAction='admin'|'matchmaker'|'matchmaker-refresh'|'official-final';
 export type ControlCommand={version:1;action:ControlAction;matchmaking_id:string;actor_id:string;request_id:string;issued_at:number};
 const uuid=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 export function commandText(c:ControlCommand){return [c.version,c.action,c.matchmaking_id,c.actor_id,c.request_id,c.issued_at].join('\n');}
