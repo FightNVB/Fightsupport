@@ -532,6 +532,7 @@ export async function POST(req: Request) {
       workers,
     });
 
+    const scrapeStartedAt = Date.now();
     const scrapeResult = await runNodeScript(
       scraperPath,
       [matchmaking_id, controle_run_id, ...va_nummers],
@@ -569,6 +570,7 @@ export async function POST(req: Request) {
     const liveErrors = currentLiveRows.filter(
       (row: any) =>
         row?.error_message ||
+        !row?.checked_at || !Number.isFinite(Date.parse(row.checked_at)) || Date.parse(row.checked_at) < scrapeStartedAt - 5000 ||
         typeof row?.licentie_ok !== "boolean" ||
         typeof row?.startverbod_actief !== "boolean" ||
         typeof row?.keurmerk_ok !== "boolean",
