@@ -22,6 +22,7 @@ import path from "path";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 import { rulesEngine } from "@/lib/rulesEngine";
+import { machineActor } from "@/lib/control-engine/nvbMachineActor";
 import {
   assertCanAccessMatchmaking,
   requireUserWithRole,
@@ -402,16 +403,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const { userId, role } = await requireUserWithRole(req);
+    const machine = machineActor();
+    if (machine && machine.action !== "official-final") {
+      return NextResponse.json({error:"Onjuiste machineactie."},{status:403});
+    }
+    const { userId, role } = machine
+      ? {userId:machine.userId,role:machine.role}
+      : await requireUserWithRole(req);
 
-    if (!isRoleAllowedForRoute(role)) {
+    if (!machine && !isRoleAllowedForRoute(role)) {
       return NextResponse.json(
         { error: "Geen toegang tot officials live-check route." },
         { status: 403 },
       );
     }
 
-    await assertCanAccessMatchmaking({
+    if (!machine) await assertCanAccessMatchmaking({
       matchmaking_id,
       userId,
       role,
