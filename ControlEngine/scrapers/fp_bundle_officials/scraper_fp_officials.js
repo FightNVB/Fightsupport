@@ -353,24 +353,15 @@ async function saveResult({
 }) {
   const vaNummer = String(va);
 
-  // controle_fighter_actueel betekent letterlijk ACTUEEL:
-  // per matchmaking + VA mag er maar één rij overblijven.
-  //
-  // De bestaande database heeft nog een conflict-key mét controle_run_id.
-  // Daarom ruimen we vóór iedere save alle oudere rijen voor exact deze
-  // matchmaking + VA op. Zo werkt dit direct zonder database-migratie en
-  // stapelen oude controleruns hier nooit meer op.
+  // Bewaar oudere controleruns als historisch bewijs. Vervang uitsluitend
+  // de actuele meting binnen dezelfde run; verwijder nooit andere runs.
   const { error: deleteError } = await supabase
     .from("controle_fighter_actueel")
     .delete()
     .eq("matchmaking_id", MATCHMAKING_ID)
+    .eq("controle_run_id", CONTROLE_RUN_ID)
     .eq("va_nummer", vaNummer);
-
-  if (deleteError) {
-    throw new Error(
-      `oude controle_fighter_actueel rij verwijderen mislukt voor VA ${va}: ${deleteError.message}`,
-    );
-  }
+  if (deleteError) throw new Error(`Oude meting binnen run verwijderen mislukt voor VA ${va}: ${deleteError.message}`);
 
   const { error } = await supabase
     .from("controle_fighter_actueel")
