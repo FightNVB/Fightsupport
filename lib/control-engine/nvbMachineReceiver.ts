@@ -24,7 +24,12 @@ export async function receiveControl(req:Request,action:ControlAction,start:(req
   if(roleError)throw roleError;const roles=(grants||[]).map((g:any)=>g.roles?.key);
   const {data:mm,error:mmError}=await db.from('matchmakings').select('id,matchmaker_id,submitted_to_admin_at,huidige_eigenaar_type').eq('id',command.matchmaking_id).maybeSingle();
   if(mmError)throw mmError;
-  const allowed=mm&&(action==='admin'?(mm.submitted_to_admin_at||String(mm.huidige_eigenaar_type||'').toLowerCase()==='admin')&&roles.some(r=>['controle','nvb_admin','superadmin'].includes(r)):roles.includes('matchmaker')&&mm.matchmaker_id===command.actor_id);
+  // NVB Controle may rerun the Admin scraper on any existing matchmaking, including
+  // after it has moved to the weighstation. Ownership/status is not an admin gate.
+  // Matchmaker refresh retains its separate owner check.
+  const allowed=Boolean(mm)&&(action==='admin'
+   ? roles.some(r=>['controle','nvb_admin','superadmin'].includes(r))
+   : roles.includes('matchmaker')&&mm.matchmaker_id===command.actor_id);
   if(!allowed)return response(403,'Geen bevoegdheid voor deze matchmaking en actie.');
   const ledger=platform.from('control_machine_requests');
   const {error:claimError}=await ledger.insert({id:command.request_id,action,matchmaking_id:command.matchmaking_id,actor_id:command.actor_id,status:'running'});
