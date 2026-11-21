@@ -27,7 +27,7 @@ export async function receiveControl(req:Request,action:ControlAction,start:(req
   // NVB Controle may rerun the Admin scraper on any existing matchmaking, including
   // after it has moved to the weighstation. Ownership/status is not an admin gate.
   // Matchmaker refresh retains its separate owner check.
-  const allowed=Boolean(mm)&&(action==='admin'
+  const allowed=mm!==null&&(action==='admin'
    ? roles.some(r=>['controle','nvb_admin','superadmin'].includes(r))
    : roles.includes('matchmaker')&&mm.matchmaker_id===command.actor_id);
   if(!allowed)return response(403,'Geen bevoegdheid voor deze matchmaking en actie.');
