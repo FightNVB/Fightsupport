@@ -20,25 +20,50 @@ function norm(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-/**
- * Een handmatig besluit hoort bij de MELDING in deze matchmaking, niet bij een controle-run.
- * bout_id is stabiel voor dezelfde partij. Samen met rule_code + hoek is dit de vaste identiteit.
- * Daardoor maakt het niet uit of daarna een DB-controle, full scrape of eindcontrole draait.
- */
-function findingKey(row: any): string | null {
+function va(value: unknown): string | null {
+  const digits = norm(value).replace(/\D/g, "");
+  return /^\d{3,6}$/.test(digits) ? digits : null;
+}
+
+type BoutContext = { rood_va_mm?: unknown; blauw_va_mm?: unknown; bout_id?: unknown; controle_run_id?: unknown };
+
+function contextsByRun(rows: any[]): Map<string, Map<string, BoutContext>> {
+  const result = new Map<string, Map<string, BoutContext>>();
+  for (const row of rows) {
+    const run = norm(row?.controle_run_id);
+    const bout = norm(row?.bout_id);
+    if (!run || !bout) continue;
+    if (!result.has(run)) result.set(run, new Map());
+    result.get(run)!.set(bout, row);
+  }
+  return result;
+}
+
+/** Identity is the unordered VA pair + rule + affected fighter (not corner). */
+function findingKey(
+  row: any,
+  contexts: Map<string, Map<string, BoutContext>>,
+  matchmakingId: string,
+  pairingIdentity: CarryReviewArgs["pairingIdentity"]
+): string | null {
   const rule = norm(row?.rule_code).toUpperCase();
   if (!rule || rule === "__NO_RULES__") return null;
-
   const tournament = norm(row?.toernooi_code).toUpperCase();
   if (tournament) {
-    const fighter = norm(row?.toernooi_va_nummer || row?.fighter_id);
+    const fighter = va(row?.toernooi_va_nummer || row?.fighter_id);
     return fighter ? `TOERNOOI:${tournament}|VA:${fighter}|RULE:${rule}` : null;
   }
 
-  const bout = norm(row?.bout_id);
-  if (!bout) return null;
-  const hoek = norm(row?.hoek).toLowerCase() || "beide";
-  return `BOUT:${bout}|RULE:${rule}|HOEK:${hoek}`;
+  const ctx = contexts.get(norm(row?.controle_run_id))?.get(norm(row?.bout_id));
+  if (!ctx) return null; // Never transfer a decision without verified fighters.
+  const red = va(ctx.rood_va_mm);
+  const blue = va(ctx.blauw_va_mm);
+  const pair = pairingIdentity(matchmakingId, red, blue);
+  if (!pair) return null;
+  const corner = norm(row?.hoek).toLowerCase();
+  const affected = corner === "rood" ? red : corner === "blauw" ? blue : null;
+  if ((corner === "rood" || corner === "blauw") && !affected) return null;
+  return `PAIR:${pair}|RULE:${rule}|VA:${affected ?? "beide"}`;
 }
 
 function reviewPatch(oldRow: any): Record<string, unknown> | null {
@@ -60,7 +85,7 @@ function reviewPatch(oldRow: any): Record<string, unknown> | null {
  * Zet het LAATSTE echte handmatige besluit terug op iedere actuele, identieke melding.
  *
  * Voorbeeld: 12 actiepunten -> 1 goedgekeurd -> iedere volgende controle blijft 11 open,
- * zolang die goedgekeurde melding (zelfde bout + regel + hoek) nog steeds bestaat.
+ * zolang die goedgekeurde melding (zelfde VA-paar + regel + vechter) nog steeds bestaat.
  * Hetzelfde geldt voor afkeur.
  *
  * Een melding die niet meer uit de rules-engine komt heeft geen actuele row en wordt dus
@@ -68,7 +93,7 @@ function reviewPatch(oldRow: any): Record<string, unknown> | null {
  * Admin en Matchmaker blijven geïsoleerd doordat de caller eigen runTypes meegeeft.
  */
 export async function carryReviewDecisions(args: CarryReviewArgs): Promise<number> {
-  const { supabase, matchmakingId, runId, runTypes } = args;
+  const { supabase, matchmakingId, runId, runTypes, pairingIdentity, currentContextRows } = args;
 
   const { data: runs, error: runsError } = await supabase
     .from("controle_runs")
@@ -91,18 +116,26 @@ export async function carryReviewDecisions(args: CarryReviewArgs): Promise<numbe
     .order("created_at", { ascending: false });
   if (historyError) throw historyError;
 
+  const { data: previousContexts, error: contextError } = await supabase
+    .from("controle_bout_context")
+    .select("controle_run_id,bout_id,rood_va_mm,blauw_va_mm")
+    .eq("matchmaking_id", matchmakingId)
+    .in("controle_run_id", runIds);
+  if (contextError) throw contextError;
+  const contexts = contextsByRun([...(previousContexts ?? []), ...currentContextRows]);
+
   // Alleen echte besluiten opnemen. 'open' mag een eerder besluit NOOIT overschrijven.
   const decisions = new Map<string, any>();
   for (const row of history ?? []) {
     if (!normalizeStatus(row?.review_status)) continue;
-    const key = findingKey(row);
+    const key = findingKey(row, contexts, matchmakingId, pairingIdentity);
     if (key && !decisions.has(key)) decisions.set(key, row);
   }
   if (!decisions.size) return 0;
 
   const { data: currentRows, error: currentError } = await supabase
     .from("controle_resultaten")
-    .select("id,bout_id,partij_nr,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status")
+    .select("id,controle_run_id,bout_id,partij_nr,rule_code,hoek,toernooi_code,fighter_id,toernooi_va_nummer,review_status")
     .eq("matchmaking_id", matchmakingId)
     .eq("controle_run_id", runId);
   if (currentError) throw currentError;
